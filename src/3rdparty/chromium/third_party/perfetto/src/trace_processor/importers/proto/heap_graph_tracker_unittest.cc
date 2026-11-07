@@ -65,7 +65,7 @@ TEST(HeapGraphTrackerTest, PopulateNativeSize) {
   context.process_tracker.reset(new ProcessTracker(&context));
   context.process_tracker->GetOrCreateProcess(kPid);
 
-  HeapGraphTracker tracker(&context);
+  HeapGraphTracker tracker(context.storage.get());
 
   StringPool::Id normal_kind = context.storage->InternString("KIND_NORMAL");
 
@@ -101,7 +101,8 @@ TEST(HeapGraphTrackerTest, PopulateNativeSize) {
   tracker.AddInternedType(
       kSeqId, kTypeCleaner, context.storage->InternString("sun.misc.Cleaner"),
       kLocation, /*object_size=*/0,
-      /*reference_field_name_ids=*/{kReferent, kThunk, kNext}, /*superclass_id=*/0,
+      /*reference_field_name_ids=*/{kReferent, kThunk, kNext},
+      /*superclass_id=*/0,
       /*classloader_id=*/0, /*no_reference_fields=*/false,
       /*kind=*/normal_kind);
 
@@ -207,7 +208,7 @@ TEST(HeapGraphTrackerTest, BuildFlamegraph) {
   context.process_tracker.reset(new ProcessTracker(&context));
   context.process_tracker->GetOrCreateProcess(kPid);
 
-  HeapGraphTracker tracker(&context);
+  HeapGraphTracker tracker(context.storage.get());
 
   constexpr uint64_t kField = 1;
   constexpr uint64_t kLocation = 0;

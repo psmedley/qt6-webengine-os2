@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,14 @@
 
 #include "base/callback_forward.h"
 #include "components/autofill_assistant/browser/assistant_field_trial_util.h"
+#include "components/autofill_assistant/browser/common_dependencies.h"
 #include "components/autofill_assistant/browser/metrics.h"
 #include "components/autofill_assistant/browser/onboarding_result.h"
+#include "components/autofill_assistant/browser/platform_dependencies.h"
+#include "components/autofill_assistant/browser/public/password_change/website_login_manager.h"
 #include "components/autofill_assistant/browser/service/service_request_sender.h"
 #include "components/autofill_assistant/browser/trigger_context.h"
 #include "components/autofill_assistant/browser/trigger_scripts/trigger_script_coordinator.h"
-#include "components/autofill_assistant/browser/website_login_manager.h"
 #include "components/version_info/version_info.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
@@ -82,11 +84,12 @@ class StarterPlatformDelegate {
   // Changes whether the proactive help setting is enabled.
   virtual void SetProactiveHelpSettingEnabled(bool enabled) = 0;
 
-  // TODO(arbesser): Move this out of the platform delegate.
-  // Returns whether the MSBB seetting is enabled.
-  virtual bool GetMakeSearchesAndBrowsingBetterEnabled() const = 0;
   // Returns whether the user is logged in or not.
   virtual bool GetIsLoggedIn() = 0;
+  // Returns whether the user is restricted to any supervision.
+  virtual bool GetIsSupervisedUser() = 0;
+  // Returns whether the user is allowed for machine learning.
+  virtual bool GetIsAllowedForMachineLearning() = 0;
   // Returns whether this is a custom tab or not.
   virtual bool GetIsCustomTab() const = 0;
   // Returns whether this is running in WebLayer or not.
@@ -99,6 +102,10 @@ class StarterPlatformDelegate {
   // The starter platform delegate should only be interacted with while attached
   // as it might not be able to perform its functions while detached.
   virtual bool IsAttached() = 0;
+  // Returns the common dependencies.
+  virtual const CommonDependencies* GetCommonDependencies() const = 0;
+  // Returns the platform dependencies.
+  virtual const PlatformDependencies* GetPlatformDependencies() const = 0;
 
   virtual base::WeakPtr<StarterPlatformDelegate> GetWeakPtr() = 0;
 };

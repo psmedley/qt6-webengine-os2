@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -110,6 +110,8 @@ class ShellSurfacePresentationTimeRecorderTest : public test::ExoTestBase {
         /*flags=*/0);
     recorder_->set_fake_feedback(feedback);
 
+    // Fake damage to ensure that Commit() generates a compositor frame.
+    root_surface()->Damage(gfx::Rect(0, 0, 32, 32));
     root_surface()->Commit();
     recorder_->WaitForFramePresented();
   }

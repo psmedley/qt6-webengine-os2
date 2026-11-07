@@ -1,8 +1,8 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {isRTL} from 'chrome://resources/js/util.m.js';
+import {isRTL} from 'chrome://resources/js/util.js';
 
 /**
  * The minimum amount of pixels needed for the user to swipe for the position
@@ -83,13 +83,13 @@ export class TabSwiper {
             opacity: 1,
             maxWidth: 'var(--tabstrip-tab-width)',
             [paddingInlineEnd]: 'var(--tabstrip-tab-spacing)',
-            transform: `translateY(0)`
+            transform: `translateY(0)`,
           },
           {
             // Start of transform animation swiping up.
             offset:
                 TRANSLATE_ANIMATION_THRESHOLD_PX / SWIPE_FINISH_THRESHOLD_PX,
-            transform: `translateY(0)`
+            transform: `translateY(0)`,
           },
           {
             // Start of max-width and opacity animation swiping up.
@@ -103,7 +103,7 @@ export class TabSwiper {
             maxWidth: '0px',
             opacity: 0,
             [paddingInlineEnd]: 0,
-            transform: `translateY(-${SWIPE_FINISH_THRESHOLD_PX}px)`
+            transform: `translateY(-${SWIPE_FINISH_THRESHOLD_PX}px)`,
           },
         ],
         {

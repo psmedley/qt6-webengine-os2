@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
@@ -64,13 +65,12 @@
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host.h"
 #endif
 
-#if BUILDFLAG(IS_WIN)
-#include "ui/views/widget/desktop_aura/desktop_window_tree_host_win.h"
+#if BUILDFLAG(ENABLE_DESKTOP_AURA) && defined(USE_OZONE)
+#include "ui/views/widget/desktop_aura/desktop_window_tree_host_platform.h"
 #endif
 
-#if BUILDFLAG(ENABLE_DESKTOP_AURA) && \
-    (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS))
-#include "ui/views/widget/desktop_aura/desktop_window_tree_host_linux.h"
+#if BUILDFLAG(IS_WIN)
+#include "ui/views/widget/desktop_aura/desktop_window_tree_host_win.h"
 #endif
 
 DEFINE_UI_CLASS_PROPERTY_TYPE(views::internal::NativeWidgetPrivate*)
@@ -96,6 +96,28 @@ void SetIcon(aura::Window* window,
     window->SetProperty(key, value);
 }
 
+bool FindLayersInOrder(const std::vector<ui::Layer*>& children,
+                       const ui::Layer** first,
+                       const ui::Layer** second) {
+  for (const ui::Layer* child : children) {
+    if (child == *second) {
+      *second = nullptr;
+      return *first == nullptr;
+    }
+
+    if (child == *first)
+      *first = nullptr;
+
+    if (FindLayersInOrder(child->children(), first, second))
+      return true;
+
+    // If second is cleared without success, exit early with failure.
+    if (!*second)
+      return false;
+  }
+  return false;
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -104,9 +126,7 @@ void SetIcon(aura::Window* window,
 NativeWidgetAura::NativeWidgetAura(internal::NativeWidgetDelegate* delegate)
     : delegate_(delegate),
       window_(new aura::Window(this, aura::client::WINDOW_TYPE_UNKNOWN)),
-      ownership_(Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET),
-      destroying_(false),
-      cursor_(gfx::kNullCursor) {
+      ownership_(Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET) {
   aura::client::SetFocusChangeObserver(window_, this);
   wm::SetActivationChangeObserver(window_, this);
 }
@@ -518,9 +538,12 @@ gfx::Rect NativeWidgetAura::GetRestoredBounds() const {
 
 std::string NativeWidgetAura::GetWorkspace() const {
   int desk_index = window_->GetProperty(aura::client::kWindowWorkspaceKey);
-  return desk_index == aura::client::kWindowWorkspaceUnassignedWorkspace
-             ? std::string()
-             : base::NumberToString(desk_index);
+  if (desk_index == aura::client::kWindowWorkspaceUnassignedWorkspace ||
+      desk_index == aura::client::kWindowWorkspaceVisibleOnAllWorkspaces) {
+    return std::string();
+  }
+
+  return base::NumberToString(desk_index);
 }
 
 void NativeWidgetAura::SetBounds(const gfx::Rect& bounds) {
@@ -573,6 +596,24 @@ void NativeWidgetAura::StackAtTop() {
     window_->parent()->StackChildAtTop(window_);
 }
 
+bool NativeWidgetAura::IsStackedAbove(gfx::NativeView native_view) {
+  if (!window_)
+    return false;
+
+  // If the root windows are not shared between two native views
+  // it is likely that they are child windows of different top level windows.
+  // In that scenario, just check the top level windows.
+  if (GetNativeWindow()->GetRootWindow() != native_view->GetRootWindow()) {
+    return GetTopLevelWidget()->IsStackedAbove(
+        native_view->GetToplevelWindow());
+  }
+
+  const ui::Layer* first = native_view->layer();      // below
+  const ui::Layer* second = GetWidget()->GetLayer();  // above
+  return FindLayersInOrder(
+      GetNativeWindow()->GetRootWindow()->layer()->children(), &first, &second);
+}
+
 void NativeWidgetAura::SetShape(std::unique_ptr<Widget::ShapeRects> shape) {
   if (window_)
     window_->layer()->SetAlphaShape(std::move(shape));
@@ -597,7 +638,18 @@ void NativeWidgetAura::Close() {
 }
 
 void NativeWidgetAura::CloseNow() {
-  delete window_;
+  // We cannot use `raw_ptr::ClearAndDelete` here:
+  // In `window_` destructor, `OnWindowDestroying` will be called on this
+  // instance and `OnWindowDestroying` contains logic that still needs reference
+  // in `window_`. `ClearAndDelete` would have cleared the value in `window_`
+  // first before deleting `window_` causing problem in `OnWindowDestroying`.
+
+  if (window_)
+    delete window_;
+
+  // `window_` destructor may delete this `NativeWidgetAura` instance. Therefore
+  // we must NOT access anything through `this` after `delete window_`.
+  // Therefore, we should NOT attempt to set `window_` to `nullptr`.
 }
 
 void NativeWidgetAura::Show(ui::WindowShowState show_state,
@@ -714,9 +766,8 @@ void NativeWidgetAura::Restore() {
 }
 
 void NativeWidgetAura::SetFullscreen(bool fullscreen,
-                                     const base::TimeDelta& delay,
                                      int64_t target_display_id) {
-  // The `target_display_id` argument is unsupported in Aura.
+  // TODO(crbug.com/1034783) Support `target_display_id` on this platform.
   DCHECK_EQ(target_display_id, display::kInvalidDisplayId);
   if (!window_ || IsFullscreen() == fullscreen)
     return;  // Nothing to do.
@@ -770,7 +821,7 @@ void NativeWidgetAura::ScheduleLayout() {
     window_->ScheduleDraw();
 }
 
-void NativeWidgetAura::SetCursor(gfx::NativeCursor cursor) {
+void NativeWidgetAura::SetCursor(const ui::Cursor& cursor) {
   cursor_ = cursor;
   aura::client::CursorClient* cursor_client =
       aura::client::GetCursorClient(window_->GetRootWindow());
@@ -953,6 +1004,9 @@ void NativeWidgetAura::OnDeviceScaleFactorChanged(
 
 void NativeWidgetAura::OnWindowDestroying(aura::Window* window) {
   window_->RemoveObserver(this);
+  if (wm::TransientWindowManager::GetIfExists(window_)) {
+    wm::TransientWindowManager::GetOrCreate(window_)->RemoveObserver(this);
+  }
   delegate_->OnNativeWidgetDestroying();
 
   // If the aura::Window is destroyed, we can no longer show tooltips.
@@ -1133,11 +1187,19 @@ void NativeWidgetAura::OnTransientParentChanged(aura::Window* new_parent) {
 // NativeWidgetAura, protected:
 
 NativeWidgetAura::~NativeWidgetAura() {
-  destroying_ = true;
-  if (ownership_ == Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET)
-    delete delegate_;
-  else
+  if (ownership_ == Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET) {
+    // `drop_helper_` and `window_reorderer_` hold a pointer to `delegate_`'s
+    // root view. Reset them before deleting `delegate_` to avoid holding a
+    // briefly dangling ptr.
+    drop_helper_.reset();
+    window_reorderer_.reset();
+    //  Use `ClearAndDelete` here to stop referencing the underlying pointer and
+    //  free its memory. Compared to raw delete calls, this avoids the raw_ptr
+    //  to be temporarily dangling.
+    delegate_.ClearAndDelete();
+  } else {
     CloseNow();
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1153,8 +1215,7 @@ void NativeWidgetAura::SetInitialFocus(ui::WindowShowState show_state) {
 // Widget, public:
 
 namespace {
-#if BUILDFLAG(ENABLE_DESKTOP_AURA) && \
-    (BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS))
+#if BUILDFLAG(ENABLE_DESKTOP_AURA) && (BUILDFLAG(IS_WIN) || defined(USE_OZONE))
 void CloseWindow(aura::Window* window) {
   if (window) {
     Widget* widget = Widget::GetWidgetForNativeView(window);
@@ -1184,9 +1245,8 @@ void Widget::CloseAllSecondaryWidgets() {
   EnumThreadWindows(GetCurrentThreadId(), WindowCallbackProc, 0);
 #endif
 
-#if BUILDFLAG(ENABLE_DESKTOP_AURA) && \
-    (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS))
-  DesktopWindowTreeHostLinux::CleanUpWindowList(CloseWindow);
+#if BUILDFLAG(ENABLE_DESKTOP_AURA) && defined(USE_OZONE)
+  DesktopWindowTreeHostPlatform::CleanUpWindowList(CloseWindow);
 #endif
 }
 

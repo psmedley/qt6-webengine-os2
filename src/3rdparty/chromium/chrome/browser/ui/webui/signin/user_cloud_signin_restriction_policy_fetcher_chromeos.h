@@ -1,12 +1,14 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_SIGNIN_USER_CLOUD_SIGNIN_RESTRICTION_POLICY_FETCHER_CHROMEOS_H_
 #define CHROME_BROWSER_UI_WEBUI_SIGNIN_USER_CLOUD_SIGNIN_RESTRICTION_POLICY_FETCHER_CHROMEOS_H_
 
+#include <memory>
 #include <string>
 
+#include "base/values.h"
 #include "components/policy/core/common/cloud/user_info_fetcher.h"
 #include "google_apis/gaia/oauth2_access_token_consumer.h"
 #include "google_apis/gaia/oauth2_access_token_fetcher.h"
@@ -15,6 +17,10 @@
 
 namespace network {
 class SimpleURLLoader;
+}
+
+namespace base {
+class TimeTicks;
 }
 
 namespace ash {
@@ -60,15 +66,18 @@ class UserCloudSigninRestrictionPolicyFetcherChromeOS
   static const char
       kSecondaryGoogleAccountUsagePolicyValuePrimaryAccountSignin[];
 
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
   enum Status {
-    kSuccess = 0,
+    kUnknownError = 0,
+    kSuccess,
     kNetworkError,
     kHttpError,
     kParsingResponseError,
     kUnsupportedAccountTypeError,
     kGetTokenError,
     kGetUserInfoError,
-    kUnknownError
+    kMaxValue = kGetUserInfoError,
   };
 
   // Callback invoked when SecondaryGoogleAccountUsage policy value
@@ -108,7 +117,7 @@ class UserCloudSigninRestrictionPolicyFetcherChromeOS
   // Protected for testing.
  protected:
   // UserInfoFetcher::Delegate.
-  void OnGetUserInfoSuccess(const base::DictionaryValue* user_info) override;
+  void OnGetUserInfoSuccess(const base::Value::Dict& user_info) override;
   void OnGetUserInfoFailure(const GoogleServiceAuthError& error) override;
 
   // UserInfoFetcher::OAuth2AccessTokenConsumer.
@@ -137,6 +146,8 @@ class UserCloudSigninRestrictionPolicyFetcherChromeOS
   // `OnSecondaryGoogleAccountUsageResult` with the result from the API.
   void GetSecondaryGoogleAccountUsageInternal();
 
+  std::string GetSecureConnectApiGetAccountSigninRestrictionUrl() const;
+
   std::string email_;
   std::string hosted_domain_;
   std::string access_token_;
@@ -144,6 +155,7 @@ class UserCloudSigninRestrictionPolicyFetcherChromeOS
   std::unique_ptr<OAuth2AccessTokenFetcher> access_token_fetcher_;
   std::unique_ptr<policy::UserInfoFetcher> user_info_fetcher_;
   PolicyInfoCallback callback_;
+  base::TimeTicks policy_fetch_start_time_;
 
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   std::unique_ptr<network::SimpleURLLoader> url_loader_;

@@ -29,7 +29,9 @@
 #include <memory>
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/synchronization/lock.h"
 #include "base/task/single_thread_task_runner.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/parser_content_policy.h"
 #include "third_party/blink/renderer/core/dom/scriptable_document_parser.h"
@@ -37,7 +39,7 @@
 #include "third_party/blink/renderer/core/html/parser/html_parser_options.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_reentry_permit.h"
 #include "third_party/blink/renderer/core/html/parser/html_preload_scanner.h"
-#include "third_party/blink/renderer/core/html/parser/html_token.h"
+#include "third_party/blink/renderer/core/html/parser/html_token_producer.h"
 #include "third_party/blink/renderer/core/html/parser/html_tokenizer.h"
 #include "third_party/blink/renderer/core/html/parser/parser_synchronization_policy.h"
 #include "third_party/blink/renderer/core/html/parser/preload_request.h"
@@ -47,13 +49,17 @@
 #include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
+#include "third_party/blink/renderer/platform/wtf/sequence_bound.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_position.h"
 
 namespace blink {
 
+class AtomicHTMLToken;
+class BackgroundHTMLScanner;
 class Document;
 class DocumentFragment;
 class Element;
+class FetchBatchScope;
 class HTMLDocument;
 class HTMLParserMetrics;
 class HTMLParserScriptRunner;
@@ -77,6 +83,8 @@ size_t CORE_EXPORT GetDiscardedTokenCountForTesting();
 
 class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
                                        private HTMLParserScriptRunnerHost {
+  friend FetchBatchScope;
+
  public:
   HTMLDocumentParser(HTMLDocument&,
                      ParserSynchronizationPolicy,
@@ -102,7 +110,11 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   // Exposed so that tests can check that the parser's exited in a good state.
   bool HasPendingWorkScheduledForTesting() const;
 
-  HTMLTokenizer* Tokenizer() const { return tokenizer_.get(); }
+  bool DidPumpTokenizerForTesting() const { return did_pump_tokenizer_; }
+
+  HTMLTokenProducer* TokenProducerForTesting() { return token_producer_.get(); }
+
+  unsigned GetChunkCountForTesting() const;
 
   TextPosition GetTextPosition() const final;
   OrdinalNumber LineNumber() const final;
@@ -112,8 +124,17 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   void AppendBytes(const char* bytes, size_t length) override;
   void Flush() final;
   void SetDecoder(std::unique_ptr<TextResourceDecoder>) final;
+  void NotifyNoRemainingAsyncScripts() final;
+
+  static void ResetCachedFeaturesForTesting();
+  static void FlushPreloadScannerThreadForTesting();
 
  protected:
+  HTMLDocumentParser(HTMLDocument&,
+                     ParserSynchronizationPolicy,
+                     ParserPrefetchPolicy prefetch_policy,
+                     bool can_use_background_token_producer);
+
   void insert(const String&) final;
   void Append(const String&) override;
   void Finish() final;
@@ -121,6 +142,10 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   HTMLTreeBuilder* TreeBuilder() const { return tree_builder_.Get(); }
 
   void ForcePlaintextForTextDocument();
+
+  void SetTokenizerState(HTMLTokenizer::State state) {
+    token_producer_->SetTokenizerState(state);
+  }
 
  private:
   HTMLDocumentParser(Document&,
@@ -144,20 +169,28 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   void CheckIfBlockingStylesheetAdded();
   void DocumentElementAvailable() override;
   void CommitPreloadedData() override;
+  void FlushPendingPreloads() override;
+  BackgroundScanCallback TakeBackgroundScanCallback() override;
 
   // HTMLParserScriptRunnerHost
   void NotifyScriptLoaded() final;
   HTMLInputStream& InputStream() final { return input_; }
-  bool HasPreloadScanner() const final { return preload_scanner_.get(); }
+  bool HasPreloadScanner() const final {
+    return preload_scanner_.get() || background_scanner_;
+  }
   void AppendCurrentInputStreamToPreloadScannerAndScan() final;
 
-  NextTokenStatus CanTakeNextToken();
+  // This function may end up running script. If it does,
+  // `time_executing_script` is incremented by the amount of time it takes to
+  // execute script.
+  NextTokenStatus CanTakeNextToken(base::TimeDelta& time_executing_script);
   bool PumpTokenizer();
   void PumpTokenizerIfPossible();
-  void DeferredPumpTokenizerIfPossible();
-  void SchedulePumpTokenizer();
+  void DeferredPumpTokenizerIfPossible(bool from_finish_append,
+                                       base::TimeTicks schedule_time);
+  void SchedulePumpTokenizer(bool from_finish_append);
   void ScheduleEndIfDelayed();
-  void ConstructTreeFromHTMLToken();
+  void ConstructTreeFromToken(AtomicHTMLToken& atomic_token);
 
   void RunScriptsForPausedTreeBuilder();
   void ResumeParsingAfterPause();
@@ -183,25 +216,49 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   // Let the given HTMLPreloadScanner scan the input it has, and then preload
   // resources using the resulting PreloadRequests and |preloader_|.
   void ScanAndPreload(HTMLPreloadScanner*);
+  void ProcessPreloadData(std::unique_ptr<PendingPreloadData> preload_data);
   void FetchQueuedPreloads();
   std::string GetPreloadHistogramSuffix();
   void FinishAppend();
+  void ScanInBackground(const String& source);
 
-  HTMLToken& Token() { return *token_; }
+  // Called on the background thread by |background_scanner_|.
+  static void AddPreloadDataOnBackgroundThread(
+      CrossThreadWeakPersistent<HTMLDocumentParser> weak_parser,
+      scoped_refptr<base::SequencedTaskRunner> task_runner,
+      std::unique_ptr<PendingPreloadData> preload_data);
 
-  HTMLParserOptions options_;
+  bool HasPendingPreloads() {
+    base::AutoLock lock(pending_preload_lock_);
+    return !pending_preload_data_.empty();
+  }
+
+  void CreateTokenProducer(
+      bool can_use_background_token_producer = true,
+      HTMLTokenizer::State initial_state = HTMLTokenizer::kDataState);
+
+  // Returns true if the data should be processed (tokenizer pumped) now. If
+  // this returns false, SchedulePumpTokenizer() should be called. This is
+  // called when data is available.
+  bool ShouldPumpTokenizerNowForFinishAppend() const;
+
   HTMLInputStream input_;
+  const HTMLParserOptions options_;
   Member<HTMLParserReentryPermit> reentry_permit_ =
       MakeGarbageCollected<HTMLParserReentryPermit>();
 
-  std::unique_ptr<HTMLToken> token_;
-  std::unique_ptr<HTMLTokenizer> tokenizer_;
+  std::unique_ptr<HTMLTokenProducer> token_producer_;
   Member<HTMLParserScriptRunner> script_runner_;
   Member<HTMLTreeBuilder> tree_builder_;
 
   std::unique_ptr<HTMLPreloadScanner> preload_scanner_;
   // A scanner used only for input provided to the insert() method.
   std::unique_ptr<HTMLPreloadScanner> insertion_preload_scanner_;
+  WTF::SequenceBound<BackgroundHTMLScanner> background_script_scanner_;
+  HTMLPreloadScanner::BackgroundPtr background_scanner_;
+  using BackgroundScanFn =
+      WTF::CrossThreadRepeatingFunction<void(const KURL&, const String&)>;
+  BackgroundScanFn background_scan_fn_;
 
   scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner_;
 
@@ -214,7 +271,31 @@ class CORE_EXPORT HTMLDocumentParser : public ScriptableDocumentParser,
   // A timer for how long we are inactive after yielding
   std::unique_ptr<base::ElapsedTimer> yield_timer_;
 
+  // If ThreadedPreloadScanner is enabled, preload data will be added to this
+  // vector from a background thread. The main thread will take this preload
+  // data and send out the requests.
+  base::Lock pending_preload_lock_;
+  Vector<std::unique_ptr<PendingPreloadData>> pending_preload_data_
+      GUARDED_BY(pending_preload_lock_);
+
   ThreadScheduler* scheduler_;
+
+  // Set to true if PumpTokenizer() was called at least once.
+  bool did_pump_tokenizer_ = false;
+
+  // Handle the ref counting of nested batch fetches. Usually the batching is
+  // handled by a scope-lock for the duration of the batch (and can be nested
+  // within other batches).
+  //
+  // When the parser gets detached from the document, if it happens during a
+  // scope-locked batch operation, the scope-based batching will not be able
+  // to end the batches properly. By keeping track of how deep the request
+  // batching is, the outstanding batches can be cleared outside of the scope
+  // lock at the time that the document is detached from the parser.
+  void StartFetchBatch();
+  void EndFetchBatch();
+  void FlushFetchBatch();
+  uint32_t pending_batch_operations_ = 0u;
 };
 
 }  // namespace blink

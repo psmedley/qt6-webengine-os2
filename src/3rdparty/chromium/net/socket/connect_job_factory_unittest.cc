@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,6 @@
 #include "net/socket/ssl_connect_job.h"
 #include "net/socket/transport_connect_job.h"
 #include "net/socket/websocket_endpoint_lock_manager.h"
-#include "net/socket/websocket_transport_connect_job.h"
 #include "net/ssl/ssl_config.h"
 #include "net/test/test_with_task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
@@ -138,32 +137,6 @@ class TestTransportConnectJobFactory : public TransportConnectJob::Factory {
   std::vector<scoped_refptr<TransportSocketParams>> params_;
 };
 
-// Mock WebSocketTransportConnectJob::Factory that records the `params` used and
-// then passes on to a real factory.
-class TestWebsocketConnectJobFactory
-    : public WebSocketTransportConnectJob::Factory {
- public:
-  std::unique_ptr<WebSocketTransportConnectJob> Create(
-      RequestPriority priority,
-      const SocketTag& socket_tag,
-      const CommonConnectJobParams* common_connect_job_params,
-      const scoped_refptr<TransportSocketParams>& params,
-      ConnectJob::Delegate* delegate,
-      const NetLogWithSource* net_log) override {
-    params_.push_back(params);
-    return WebSocketTransportConnectJob::Factory::Create(
-        priority, socket_tag, common_connect_job_params, params, delegate,
-        net_log);
-  }
-
-  const std::vector<scoped_refptr<TransportSocketParams>>& params() const {
-    return params_;
-  }
-
- private:
-  std::vector<scoped_refptr<TransportSocketParams>> params_;
-};
-
 class ConnectJobFactoryTest : public TestWithTaskEnvironment {
  public:
   ConnectJobFactoryTest() {
@@ -181,14 +154,9 @@ class ConnectJobFactoryTest : public TestWithTaskEnvironment {
         std::make_unique<TestTransportConnectJobFactory>();
     transport_job_factory_ = transport_job_factory.get();
 
-    auto websocket_job_factory =
-        std::make_unique<TestWebsocketConnectJobFactory>();
-    websocket_job_factory_ = websocket_job_factory.get();
-
     factory_ = std::make_unique<ConnectJobFactory>(
         std::move(http_proxy_job_factory), std::move(socks_job_factory),
-        std::move(ssl_job_factory), std::move(transport_job_factory),
-        std::move(websocket_job_factory));
+        std::move(ssl_job_factory), std::move(transport_job_factory));
   }
 
  protected:
@@ -197,8 +165,7 @@ class ConnectJobFactoryTest : public TestWithTaskEnvironment {
     return http_proxy_job_factory_->params().size() +
            socks_job_factory_->params().size() +
            ssl_job_factory_->params().size() +
-           transport_job_factory_->params().size() +
-           websocket_job_factory_->params().size();
+           transport_job_factory_->params().size();
   }
 
   const CommonConnectJobParams common_connect_job_params_{
@@ -222,7 +189,6 @@ class ConnectJobFactoryTest : public TestWithTaskEnvironment {
   raw_ptr<TestSocksConnectJobFactory> socks_job_factory_;
   raw_ptr<TestSslConnectJobFactory> ssl_job_factory_;
   raw_ptr<TestTransportConnectJobFactory> transport_job_factory_;
-  raw_ptr<TestWebsocketConnectJobFactory> websocket_job_factory_;
 
   std::unique_ptr<ConnectJobFactory> factory_;
 };
@@ -237,7 +203,7 @@ TEST_F(ConnectJobFactoryTest, CreateConnectJob) {
       /*ssl_config_for_proxy=*/nullptr,
       /*force_tunnel=*/false, PrivacyMode::PRIVACY_MODE_DISABLED,
       OnHostResolutionCallback(), DEFAULT_PRIORITY, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
       &common_connect_job_params_, &delegate_);
   EXPECT_EQ(GetCreationCount(), 1u);
 
@@ -258,7 +224,7 @@ TEST_F(ConnectJobFactoryTest, CreateConnectJobWithoutScheme) {
       /*ssl_config_for_proxy=*/nullptr,
       /*force_tunnel=*/false, PrivacyMode::PRIVACY_MODE_DISABLED,
       OnHostResolutionCallback(), DEFAULT_PRIORITY, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
       &common_connect_job_params_, &delegate_);
   EXPECT_EQ(GetCreationCount(), 1u);
 
@@ -281,7 +247,7 @@ TEST_F(ConnectJobFactoryTest, CreateHttpsConnectJob) {
       /*ssl_config_for_proxy=*/nullptr,
       /*force_tunnel=*/false, PrivacyMode::PRIVACY_MODE_DISABLED,
       OnHostResolutionCallback(), DEFAULT_PRIORITY, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
       &common_connect_job_params_, &delegate_);
   EXPECT_EQ(GetCreationCount(), 1u);
 
@@ -310,7 +276,7 @@ TEST_F(ConnectJobFactoryTest, CreateHttpsConnectJobWithoutScheme) {
       /*ssl_config_for_proxy=*/nullptr,
       /*force_tunnel=*/false, PrivacyMode::PRIVACY_MODE_DISABLED,
       OnHostResolutionCallback(), DEFAULT_PRIORITY, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
       &common_connect_job_params_, &delegate_);
   EXPECT_EQ(GetCreationCount(), 1u);
 
@@ -336,7 +302,7 @@ TEST_F(ConnectJobFactoryTest, CreateHttpProxyConnectJob) {
       /*ssl_config_for_proxy=*/nullptr,
       /*force_tunnel=*/false, PrivacyMode::PRIVACY_MODE_DISABLED,
       OnHostResolutionCallback(), DEFAULT_PRIORITY, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
       &common_connect_job_params_, &delegate_);
   EXPECT_EQ(GetCreationCount(), 1u);
 
@@ -363,7 +329,7 @@ TEST_F(ConnectJobFactoryTest, CreateHttpProxyConnectJobWithoutScheme) {
       /*ssl_config_for_proxy=*/nullptr,
       /*force_tunnel=*/false, PrivacyMode::PRIVACY_MODE_DISABLED,
       OnHostResolutionCallback(), DEFAULT_PRIORITY, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
       &common_connect_job_params_, &delegate_);
   EXPECT_EQ(GetCreationCount(), 1u);
 
@@ -391,7 +357,7 @@ TEST_F(ConnectJobFactoryTest, CreateHttpProxyConnectJobForHttps) {
       /*ssl_config_for_proxy=*/nullptr,
       /*force_tunnel=*/false, PrivacyMode::PRIVACY_MODE_DISABLED,
       OnHostResolutionCallback(), DEFAULT_PRIORITY, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
       &common_connect_job_params_, &delegate_);
   EXPECT_EQ(GetCreationCount(), 1u);
 
@@ -426,7 +392,7 @@ TEST_F(ConnectJobFactoryTest, CreateHttpProxyConnectJobForHttpsWithoutScheme) {
       /*ssl_config_for_proxy=*/nullptr,
       /*force_tunnel=*/false, PrivacyMode::PRIVACY_MODE_DISABLED,
       OnHostResolutionCallback(), DEFAULT_PRIORITY, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
       &common_connect_job_params_, &delegate_);
   EXPECT_EQ(GetCreationCount(), 1u);
 
@@ -459,7 +425,7 @@ TEST_F(ConnectJobFactoryTest, CreateHttpsProxyConnectJob) {
       /*ssl_config_for_proxy=*/&ssl_config,
       /*force_tunnel=*/false, PrivacyMode::PRIVACY_MODE_DISABLED,
       OnHostResolutionCallback(), DEFAULT_PRIORITY, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
       &common_connect_job_params_, &delegate_);
   EXPECT_EQ(GetCreationCount(), 1u);
 
@@ -492,7 +458,7 @@ TEST_F(ConnectJobFactoryTest, CreateHttpsProxyConnectJobWithoutScheme) {
       /*ssl_config_for_proxy=*/&ssl_config,
       /*force_tunnel=*/false, PrivacyMode::PRIVACY_MODE_DISABLED,
       OnHostResolutionCallback(), DEFAULT_PRIORITY, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
       &common_connect_job_params_, &delegate_);
   EXPECT_EQ(GetCreationCount(), 1u);
 
@@ -524,7 +490,7 @@ TEST_F(ConnectJobFactoryTest, CreateSocksProxyConnectJob) {
       /*ssl_config_for_proxy=*/nullptr,
       /*force_tunnel=*/false, PrivacyMode::PRIVACY_MODE_DISABLED,
       OnHostResolutionCallback(), DEFAULT_PRIORITY, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
       &common_connect_job_params_, &delegate_);
   EXPECT_EQ(GetCreationCount(), 1u);
 
@@ -549,7 +515,7 @@ TEST_F(ConnectJobFactoryTest, CreateSocksProxyConnectJobWithoutScheme) {
       /*ssl_config_for_proxy=*/nullptr,
       /*force_tunnel=*/false, PrivacyMode::PRIVACY_MODE_DISABLED,
       OnHostResolutionCallback(), DEFAULT_PRIORITY, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
       &common_connect_job_params_, &delegate_);
   EXPECT_EQ(GetCreationCount(), 1u);
 
@@ -578,13 +544,13 @@ TEST_F(ConnectJobFactoryTest, CreateWebsocketConnectJob) {
       /*ssl_config_for_proxy=*/nullptr,
       /*force_tunnel=*/false, PrivacyMode::PRIVACY_MODE_DISABLED,
       OnHostResolutionCallback(), DEFAULT_PRIORITY, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
       &common_connect_job_params, &delegate_);
   EXPECT_EQ(GetCreationCount(), 1u);
 
-  ASSERT_THAT(websocket_job_factory_->params(), testing::SizeIs(1));
+  ASSERT_THAT(transport_job_factory_->params(), testing::SizeIs(1));
   const TransportSocketParams& params =
-      *websocket_job_factory_->params().front();
+      *transport_job_factory_->params().front();
   EXPECT_THAT(params.destination(),
               testing::VariantWith<url::SchemeHostPort>(kEndpoint));
 }
@@ -604,13 +570,13 @@ TEST_F(ConnectJobFactoryTest, CreateWebsocketConnectJobWithoutScheme) {
       /*ssl_config_for_proxy=*/nullptr,
       /*force_tunnel=*/false, PrivacyMode::PRIVACY_MODE_DISABLED,
       OnHostResolutionCallback(), DEFAULT_PRIORITY, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
       &common_connect_job_params, &delegate_);
   EXPECT_EQ(GetCreationCount(), 1u);
 
-  ASSERT_THAT(websocket_job_factory_->params(), testing::SizeIs(1));
+  ASSERT_THAT(transport_job_factory_->params(), testing::SizeIs(1));
   const TransportSocketParams& params =
-      *websocket_job_factory_->params().front();
+      *transport_job_factory_->params().front();
   EXPECT_THAT(params.destination(),
               testing::VariantWith<HostPortPair>(kEndpoint));
 }

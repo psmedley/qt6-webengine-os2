@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,6 +57,11 @@ scoped_refptr<H265Picture> H265VaapiVideoDecoderDelegate::CreateH265Picture() {
     return nullptr;
 
   return new VaapiH265Picture(std::move(va_surface));
+}
+
+bool H265VaapiVideoDecoderDelegate::IsChromaSamplingSupported(
+    VideoChromaSampling chroma_sampling) {
+  return chroma_sampling == VideoChromaSampling::k420;
 }
 
 DecodeStatus H265VaapiVideoDecoderDelegate::SubmitFrameMetadata(

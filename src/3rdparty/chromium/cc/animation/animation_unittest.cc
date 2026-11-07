@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/strings/stringprintf.h"
+#include "base/test/gtest_util.h"
 #include "base/time/time.h"
 #include "cc/animation/animation_delegate.h"
 #include "cc/animation/animation_host.h"
@@ -428,10 +429,12 @@ TEST_F(AnimationTest, AddRemoveAnimationToNonAttachedAnimation) {
   EXPECT_TRUE(animation_->keyframe_effect()->element_animations());
   EXPECT_FALSE(animation_->keyframe_effect()
                    ->element_animations()
-                   ->HasAnyAnimationTargetingProperty(TargetProperty::FILTER));
+                   ->HasAnyAnimationTargetingProperty(TargetProperty::FILTER,
+                                                      element_id_));
   EXPECT_TRUE(animation_->keyframe_effect()
                   ->element_animations()
-                  ->HasAnyAnimationTargetingProperty(TargetProperty::OPACITY));
+                  ->HasAnyAnimationTargetingProperty(TargetProperty::OPACITY,
+                                                     element_id_));
   EXPECT_TRUE(animation_->keyframe_effect()->needs_push_properties());
 
   host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
@@ -466,6 +469,28 @@ TEST_F(AnimationTest, AddRemoveAnimationToNonAttachedAnimation) {
                                          TargetProperty::FILTER));
   EXPECT_FALSE(client_impl_.IsPropertyMutated(
       element_id_, ElementListType::ACTIVE, TargetProperty::FILTER));
+}
+
+using AnimationDeathTest = AnimationTest;
+
+TEST_F(AnimationDeathTest, RemoveAddInSameFrame) {
+  client_.RegisterElementId(element_id_, ElementListType::ACTIVE);
+  host_->AddAnimationTimeline(timeline_);
+  timeline_->AttachAnimation(animation_);
+  animation_->AttachElement(element_id_);
+
+  EXPECT_TRUE(client_.mutators_need_commit());
+  client_.set_mutators_need_commit(false);
+
+  const int keyframe_model_id =
+      AddOpacityTransitionToAnimation(animation_.get(), 1., .7f, .3f, false);
+  host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees());
+
+  animation_->RemoveKeyframeModel(keyframe_model_id);
+  AddOpacityTransitionToAnimation(animation_.get(), 1., .7f, .3f, false,
+                                  keyframe_model_id);
+  EXPECT_DCHECK_DEATH(
+      host_->PushPropertiesTo(host_impl_, client_.GetPropertyTrees()));
 }
 
 TEST_F(AnimationTest, AddRemoveAnimationCausesSetNeedsCommit) {
@@ -552,7 +577,7 @@ TEST_F(AnimationTest, ToString) {
   EXPECT_EQ(
       base::StringPrintf("Animation{id=%d, element_id=%s, "
                          "keyframe_models=[KeyframeModel{id=42, "
-                         "group=73, target_property_type=1, "
+                         "group=73, target_property_type=4, "
                          "custom_property_name=, native_property_type=2, "
                          "run_state=WAITING_FOR_TARGET_AVAILABILITY, "
                          "element_id=(0)}]}",
@@ -565,10 +590,10 @@ TEST_F(AnimationTest, ToString) {
   EXPECT_EQ(base::StringPrintf(
                 "Animation{id=%d, element_id=%s, "
                 "keyframe_models=[KeyframeModel{id=42, "
-                "group=73, target_property_type=1, custom_property_name=, "
+                "group=73, target_property_type=4, custom_property_name=, "
                 "native_property_type=2, "
                 "run_state=WAITING_FOR_TARGET_AVAILABILITY, element_id=(0)}, "
-                "KeyframeModel{id=45, group=76, target_property_type=5, "
+                "KeyframeModel{id=45, group=76, target_property_type=8, "
                 "custom_property_name=, native_property_type=2, "
                 "run_state=WAITING_FOR_TARGET_AVAILABILITY, element_id=(0)}]}",
                 animation_->id(), element_id_.ToString().c_str()),

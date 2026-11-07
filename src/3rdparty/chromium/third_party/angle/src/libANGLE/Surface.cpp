@@ -33,6 +33,7 @@ SurfaceState::SurfaceState(const egl::Config *configIn, const AttributeMap &attr
       config((configIn != nullptr) ? new egl::Config(*configIn) : nullptr),
       attributes(attributesIn),
       timestampsEnabled(false),
+      autoRefreshEnabled(false),
       directComposition(false),
       swapBehavior(EGL_NONE)
 {
@@ -60,6 +61,7 @@ EGLint SurfaceState::getPreferredSwapInterval() const
 }
 
 Surface::Surface(EGLint surfaceType,
+                 GLuint serialId,
                  const egl::Config *config,
                  const AttributeMap &attributes,
                  bool forceRobustResourceInit,
@@ -98,8 +100,10 @@ Surface::Surface(EGLint surfaceType,
       mLockBufferPitch(0),
       mBufferAgeQueriedSinceLastSwap(false),
       mIsDamageRegionSet(false),
-      mInitState(gl::InitState::Initialized),
-      mImplObserverBinding(this, kSurfaceImplSubjectIndex)
+      mColorInitState(gl::InitState::Initialized),
+      mDepthStencilInitState(gl::InitState::Initialized),
+      mImplObserverBinding(this, kSurfaceImplSubjectIndex),
+      mSerialId(serialId)
 {
     mPostSubBufferRequested =
         (attributes.get(EGL_POST_SUB_BUFFER_SUPPORTED_NV, EGL_FALSE) == EGL_TRUE);
@@ -114,6 +118,11 @@ Surface::Surface(EGLint surfaceType,
         mRenderBuffer = EGL_SINGLE_BUFFER;
     }
 
+    if (mType == EGL_WINDOW_BIT)
+    {
+        mRenderBuffer = mState.attributes.getAsInt(EGL_RENDER_BUFFER, EGL_BACK_BUFFER);
+    }
+
     mGLColorspace =
         static_cast<EGLenum>(attributes.get(EGL_GL_COLORSPACE, EGL_GL_COLORSPACE_LINEAR));
     mVGAlphaFormat =
@@ -126,7 +135,8 @@ Surface::Surface(EGLint surfaceType,
         (attributes.get(EGL_ROBUST_RESOURCE_INITIALIZATION_ANGLE, EGL_FALSE) == EGL_TRUE);
     if (mRobustResourceInitialization)
     {
-        mInitState = gl::InitState::MayNeedInit;
+        mColorInitState        = gl::InitState::MayNeedInit;
+        mDepthStencilInitState = gl::InitState::MayNeedInit;
     }
 
     mFixedSize = (attributes.get(EGL_FIXED_SIZE_ANGLE, EGL_FALSE) == EGL_TRUE);
@@ -174,7 +184,8 @@ void Surface::postSwap(const gl::Context *context)
 {
     if (mRobustResourceInitialization && mState.swapBehavior != EGL_BUFFER_PRESERVED)
     {
-        mInitState = gl::InitState::MayNeedInit;
+        mColorInitState        = gl::InitState::MayNeedInit;
+        mDepthStencilInitState = gl::InitState::MayNeedInit;
         onStateChange(angle::SubjectMessage::SubjectChanged);
     }
 
@@ -609,10 +620,14 @@ bool Surface::isYUV() const
     return false;
 }
 
+bool Surface::isCreatedWithAHB() const
+{
+    return false;
+}
+
 GLuint Surface::getId() const
 {
-    UNREACHABLE();
-    return 0;
+    return mSerialId;
 }
 
 Error Surface::getBufferAgeImpl(const gl::Context *context, EGLint *age) const
@@ -640,20 +655,38 @@ Error Surface::getBufferAge(const gl::Context *context, EGLint *age)
     return err;
 }
 
-gl::Framebuffer *Surface::createDefaultFramebuffer(const gl::Context *context,
-                                                   egl::Surface *readSurface)
+gl::InitState Surface::initState(GLenum binding, const gl::ImageIndex & /*imageIndex*/) const
 {
-    return new gl::Framebuffer(context, this, readSurface);
+    switch (binding)
+    {
+        case GL_BACK:
+            return mColorInitState;
+        case GL_DEPTH:
+        case GL_STENCIL:
+            return mDepthStencilInitState;
+        default:
+            UNREACHABLE();
+            return gl::InitState::Initialized;
+    }
 }
 
-gl::InitState Surface::initState(const gl::ImageIndex & /*imageIndex*/) const
+void Surface::setInitState(GLenum binding,
+                           const gl::ImageIndex & /*imageIndex*/,
+                           gl::InitState initState)
 {
-    return mInitState;
-}
-
-void Surface::setInitState(const gl::ImageIndex & /*imageIndex*/, gl::InitState initState)
-{
-    mInitState = initState;
+    switch (binding)
+    {
+        case GL_BACK:
+            mColorInitState = initState;
+            break;
+        case GL_DEPTH:
+        case GL_STENCIL:
+            mDepthStencilInitState = initState;
+            break;
+        default:
+            UNREACHABLE();
+            break;
+    }
 }
 
 void Surface::setTimestampsEnabled(bool enabled)
@@ -665,6 +698,13 @@ void Surface::setTimestampsEnabled(bool enabled)
 bool Surface::isTimestampsEnabled() const
 {
     return mState.timestampsEnabled;
+}
+
+Error Surface::setAutoRefreshEnabled(bool enabled)
+{
+    ANGLE_TRY(mImplementation->setAutoRefreshEnabled(enabled));
+    mState.autoRefreshEnabled = enabled;
+    return NoError();
 }
 
 bool Surface::hasProtectedContent() const
@@ -712,6 +752,9 @@ void Surface::onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMess
             break;
         case angle::SubjectMessage::SurfaceChanged:
             onStateChange(angle::SubjectMessage::SurfaceChanged);
+            break;
+        case angle::SubjectMessage::SwapchainImageChanged:
+            onStateChange(angle::SubjectMessage::SwapchainImageChanged);
             break;
         default:
             UNREACHABLE();
@@ -832,7 +875,7 @@ WindowSurface::WindowSurface(rx::EGLImplFactory *implFactory,
                              EGLNativeWindowType window,
                              const AttributeMap &attribs,
                              bool robustResourceInit)
-    : Surface(EGL_WINDOW_BIT, config, attribs, robustResourceInit)
+    : Surface(EGL_WINDOW_BIT, implFactory->getNextSurfaceID(), config, attribs, robustResourceInit)
 {
     mImplementation = implFactory->createWindowSurface(mState, window, attribs);
 }
@@ -848,7 +891,7 @@ PbufferSurface::PbufferSurface(rx::EGLImplFactory *implFactory,
                                const Config *config,
                                const AttributeMap &attribs,
                                bool robustResourceInit)
-    : Surface(EGL_PBUFFER_BIT, config, attribs, robustResourceInit)
+    : Surface(EGL_PBUFFER_BIT, implFactory->getNextSurfaceID(), config, attribs, robustResourceInit)
 {
     mImplementation = implFactory->createPbufferSurface(mState, attribs);
 }
@@ -859,7 +902,12 @@ PbufferSurface::PbufferSurface(rx::EGLImplFactory *implFactory,
                                EGLClientBuffer clientBuffer,
                                const AttributeMap &attribs,
                                bool robustResourceInit)
-    : Surface(EGL_PBUFFER_BIT, config, attribs, robustResourceInit, buftype)
+    : Surface(EGL_PBUFFER_BIT,
+              implFactory->getNextSurfaceID(),
+              config,
+              attribs,
+              robustResourceInit,
+              buftype)
 {
     mImplementation =
         implFactory->createPbufferFromClientBuffer(mState, buftype, clientBuffer, attribs);
@@ -872,7 +920,7 @@ PixmapSurface::PixmapSurface(rx::EGLImplFactory *implFactory,
                              NativePixmapType nativePixmap,
                              const AttributeMap &attribs,
                              bool robustResourceInit)
-    : Surface(EGL_PIXMAP_BIT, config, attribs, robustResourceInit)
+    : Surface(EGL_PIXMAP_BIT, implFactory->getNextSurfaceID(), config, attribs, robustResourceInit)
 {
     mImplementation = implFactory->createPixmapSurface(mState, nativePixmap, attribs);
 }

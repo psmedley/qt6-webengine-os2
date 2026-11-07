@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -159,7 +159,7 @@ bool ZXDGPopupV6WrapperImpl::Initialize(const ShellPopupParams& params) {
       &ZXDGPopupV6WrapperImpl::PopupDone,
   };
 
-  auto positioner = CreatePositioner(wayland_window_->parent_window());
+  auto positioner = CreatePositioner();
   if (!positioner)
     return false;
 
@@ -168,6 +168,8 @@ bool ZXDGPopupV6WrapperImpl::Initialize(const ShellPopupParams& params) {
       parent_xdg_surface->zxdg_surface(), positioner.get()));
   if (!zxdg_popup_v6_)
     return false;
+  connection_->wayland_window_manager()->NotifyWindowRoleAssigned(
+      wayland_window_);
 
   GrabIfPossible(connection_, wayland_window_->parent_window());
 
@@ -207,8 +209,16 @@ void ZXDGPopupV6WrapperImpl::Grab(uint32_t serial) {
                      serial);
 }
 
-wl::Object<zxdg_positioner_v6> ZXDGPopupV6WrapperImpl::CreatePositioner(
-    WaylandWindow* parent_window) {
+bool ZXDGPopupV6WrapperImpl::SupportsDecoration() {
+  // zxdg_popup_v6 doesn't support frame configuration.
+  return false;
+}
+
+void ZXDGPopupV6WrapperImpl::Decorate() {
+  NOTREACHED();
+}
+
+wl::Object<zxdg_positioner_v6> ZXDGPopupV6WrapperImpl::CreatePositioner() {
   wl::Object<zxdg_positioner_v6> positioner(
       zxdg_shell_v6_create_positioner(connection_->shell_v6()));
   if (!positioner)

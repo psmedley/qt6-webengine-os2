@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "components/autofill/core/browser/autofill_client.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
+#include "components/autofill/core/browser/payments/autofill_error_dialog_context.h"
 #include "components/autofill/core/browser/payments/card_unmask_challenge_option.h"
 #include "components/autofill/core/browser/payments/card_unmask_delegate.h"
 #include "components/autofill/core/browser/payments/virtual_card_enrollment_flow.h"
@@ -109,9 +110,12 @@ class PaymentsClient {
     std::u16string otp;
     // An opaque token used to chain consecutive payments requests together.
     std::string context_token;
-    // The url origin of the website where the unmasking happened. Should be
-    // populated when the unmasking is for a virtual-card.
-    absl::optional<GURL> last_committed_url_origin;
+    // The origin of the primary main frame where the unmasking happened.
+    // Should be populated when the unmasking is for a virtual-card.
+    absl::optional<GURL> last_committed_primary_main_frame_origin;
+    // The selected challenge option. Should be populated when we are doing CVC
+    // unmasking for a virtual card.
+    absl::optional<CardUnmaskChallengeOption> selected_challenge_option;
   };
 
   // Information retrieved from an UnmaskRequest.
@@ -141,9 +145,6 @@ class PaymentsClient {
     // card is a virtual-card which does not necessarily have the same
     // expiration date as its related actual card.
     std::string expiration_year;
-    // Challenge required for enrolling user into FIDO authentication for future
-    // card unmasking.
-    absl::optional<base::Value> fido_creation_options;
     // Challenge required for authorizing user for FIDO authentication for
     // future card unmasking.
     absl::optional<base::Value> fido_request_options;
@@ -161,6 +162,12 @@ class PaymentsClient {
     // The type of the returned credit card.
     AutofillClient::PaymentsRpcCardType card_type =
         AutofillClient::PaymentsRpcCardType::kUnknown;
+
+    // Context for the error dialog that is returned from the Payments server.
+    // If present, that means this response was an error, and these fields
+    // should be used for the autofill error dialog as they will provide detail
+    // into the specific error that occurred.
+    absl::optional<AutofillErrorDialogContext> autofill_error_dialog_context;
   };
 
   // Information required to either opt-in or opt-out a user for FIDO
@@ -212,24 +219,6 @@ class PaymentsClient {
     absl::optional<base::Value> fido_request_options;
   };
 
-  // A collection of the information required to make a credit card upload
-  // request.
-  struct UploadRequestDetails {
-    UploadRequestDetails();
-    UploadRequestDetails(const UploadRequestDetails& other);
-    ~UploadRequestDetails();
-
-    int64_t billing_customer_number = 0;
-    int detected_values;
-    CreditCard card;
-    std::u16string cvc;
-    std::vector<AutofillProfile> profiles;
-    std::u16string context_token;
-    std::string risk_data;
-    std::string app_locale;
-    std::vector<const char*> active_experiments;
-  };
-
   // A collection of the information required to make local credit cards
   // migration request.
   struct MigrationRequestDetails {
@@ -255,58 +244,6 @@ class PaymentsClient {
     // An opaque token used to chain consecutive payments requests together.
     std::string context_token;
     int64_t billing_customer_number = 0;
-  };
-
-  // An enum set in the GetUploadDetailsRequest indicating the source of the
-  // request when uploading a card to Google Payments. It should stay consistent
-  // with the same enum in Google Payments server code.
-  enum UploadCardSource {
-    // Source unknown.
-    UNKNOWN_UPLOAD_CARD_SOURCE,
-    // Single card is being uploaded from the normal credit card offer-to-save
-    // prompt during a checkout flow.
-    UPSTREAM_CHECKOUT_FLOW,
-    // Single card is being uploaded from chrome://settings/payments.
-    UPSTREAM_SETTINGS_PAGE,
-    // Single card is being uploaded after being scanned by OCR.
-    UPSTREAM_CARD_OCR,
-    // 1+ cards are being uploaded from a migration request that started during
-    // a checkout flow.
-    LOCAL_CARD_MIGRATION_CHECKOUT_FLOW,
-    // 1+ cards are being uploaded from a migration request that was initiated
-    // from chrome://settings/payments.
-    LOCAL_CARD_MIGRATION_SETTINGS_PAGE,
-  };
-
-  // TODO(crbug.com/1285086): Remove the |server_id| field from
-  //  UploadCardResponseDetails since it is never used.
-  // A collection of information received in the response for an
-  // UploadCardRequest.
-  struct UploadCardResponseDetails {
-    std::string server_id;
-    // |instrument_id| is used by the server as an identifier for the card that
-    // was uploaded. Currently, we have it in the UploadCardResponseDetails so
-    // that we can send it in the GetDetailsForEnrollRequest in the virtual card
-    // enrollment flow. Will only not be populated in the case of an imperfect
-    // conversion from string to int64_t, or if the server does not return an
-    // instrument id.
-    absl::optional<int64_t> instrument_id;
-    // |virtual_card_enrollment_state| is used to determine whether we want to
-    // pursue further action with the credit card that was uploaded regarding
-    // virtual card enrollment. For example, if the state is
-    // UNENROLLED_AND_ELIGIBLE we might offer the user the option to enroll the
-    // card that was uploaded into virtual card.
-    CreditCard::VirtualCardEnrollmentState virtual_card_enrollment_state =
-        CreditCard::VirtualCardEnrollmentState::UNSPECIFIED;
-    // |card_art_url| is the mapping that would be used by PersonalDataManager
-    // to try to get the card art for the credit card that was uploaded. It is
-    // used in flows where after uploading a card we want to display its card
-    // art. Since chrome sync does not instantly sync the card art with the url,
-    // the actual card art image might not always be present. Flows that use
-    // |card_art_url| need to make sure they handle the case where the image has
-    // not been synced yet. For virtual card eligible cards this should not be
-    // empty. If using this field use DCHECKs to ensure it is populated.
-    GURL card_art_url;
   };
 
   // A collection of information needed for the
@@ -387,6 +324,81 @@ class PaymentsClient {
     // The issuer's legal message lines in the virtual-card enroll flow for this
     // specific card based on |vcn_context_token|.
     LegalMessageLines issuer_legal_message;
+  };
+
+  // A collection of the information required to make a credit card upload
+  // request.
+  struct UploadRequestDetails {
+    UploadRequestDetails();
+    UploadRequestDetails(const UploadRequestDetails& other);
+    ~UploadRequestDetails();
+
+    int64_t billing_customer_number = 0;
+    int detected_values;
+    CreditCard card;
+    std::u16string cvc;
+    std::vector<AutofillProfile> profiles;
+    std::u16string context_token;
+    std::string risk_data;
+    std::string app_locale;
+    std::vector<const char*> active_experiments;
+  };
+
+  // An enum set in the GetUploadDetailsRequest indicating the source of the
+  // request when uploading a card to Google Payments. It should stay consistent
+  // with the same enum in Google Payments server code.
+  enum UploadCardSource {
+    // Source unknown.
+    UNKNOWN_UPLOAD_CARD_SOURCE,
+    // Single card is being uploaded from the normal credit card offer-to-save
+    // prompt during a checkout flow.
+    UPSTREAM_CHECKOUT_FLOW,
+    // Single card is being uploaded from chrome://settings/payments.
+    UPSTREAM_SETTINGS_PAGE,
+    // Single card is being uploaded after being scanned by OCR.
+    UPSTREAM_CARD_OCR,
+    // 1+ cards are being uploaded from a migration request that started during
+    // a checkout flow.
+    LOCAL_CARD_MIGRATION_CHECKOUT_FLOW,
+    // 1+ cards are being uploaded from a migration request that was initiated
+    // from chrome://settings/payments.
+    LOCAL_CARD_MIGRATION_SETTINGS_PAGE,
+  };
+
+  // A collection of information received in the response for an
+  // UploadCardRequest.
+  struct UploadCardResponseDetails {
+    UploadCardResponseDetails();
+    ~UploadCardResponseDetails();
+    // |instrument_id| is used by the server as an identifier for the card that
+    // was uploaded. Currently, we have it in the UploadCardResponseDetails so
+    // that we can send it in the GetDetailsForEnrollRequest in the virtual card
+    // enrollment flow. Will only not be populated in the case of an imperfect
+    // conversion from string to int64_t, or if the server does not return an
+    // instrument id.
+    absl::optional<int64_t> instrument_id;
+    // |virtual_card_enrollment_state| is used to determine whether we want to
+    // pursue further action with the credit card that was uploaded regarding
+    // virtual card enrollment. For example, if the state is
+    // UNENROLLED_AND_ELIGIBLE we might offer the user the option to enroll the
+    // card that was uploaded into virtual card.
+    CreditCard::VirtualCardEnrollmentState virtual_card_enrollment_state =
+        CreditCard::VirtualCardEnrollmentState::UNSPECIFIED;
+    // |card_art_url| is the mapping that would be used by PersonalDataManager
+    // to try to get the card art for the credit card that was uploaded. It is
+    // used in flows where after uploading a card we want to display its card
+    // art. Since chrome sync does not instantly sync the card art with the url,
+    // the actual card art image might not always be present. Flows that use
+    // |card_art_url| need to make sure they handle the case where the image has
+    // not been synced yet. For virtual card eligible cards this should not be
+    // empty. If using this field use DCHECKs to ensure it is populated.
+    GURL card_art_url;
+    // If the uploaded card is VCN eligible,
+    // |get_details_for_enrollment_response_details| will be populated so that
+    // we can display the virtual card enrollment bubble without needing to do
+    // another GetDetailsForEnroll network call.
+    absl::optional<GetDetailsForEnrollmentResponseDetails>
+        get_details_for_enrollment_response_details = absl::nullopt;
   };
 
   // |url_loader_factory| is reference counted so it has no lifetime or

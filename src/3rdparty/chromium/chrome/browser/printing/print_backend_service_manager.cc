@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,7 @@
 #include "content/public/browser/service_process_host.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "printing/backend/print_backend.h"
+#include "printing/printing_features.h"
 
 #if BUILDFLAG(IS_WIN)
 #include "base/win/win_util.h"
@@ -86,7 +87,7 @@ void PrintBackendServiceManager::LogCallToRemote(
 void PrintBackendServiceManager::LogCallbackFromRemote(
     base::StringPiece name,
     const CallbackContext& context) {
-  DVLOG(1) << name << "completed for remote `" << context.remote_id
+  DVLOG(1) << name << " completed for remote `" << context.remote_id
            << "` saved callback ID " << context.saved_callback_id;
 }
 
@@ -557,12 +558,13 @@ PrintBackendServiceManager::GetService(const std::string& printer_name,
   // Determine if sandboxing is appropriate.  This might be already known for
   // certain drivers/configurations, or learned during runtime.
   bool should_sandbox =
+      features::kEnableOopPrintDriversSandbox.Get() &&
       !PrinterDriverFoundToRequireElevatedPrivilege(printer_name);
 #if BUILDFLAG(IS_WIN)
-  bool avoid_sandbox =
-      PrinterDriverKnownToRequireElevatedPrivilege(printer_name, client_type);
-  if (avoid_sandbox)
-    should_sandbox = false;
+  if (should_sandbox) {
+    should_sandbox = !PrinterDriverKnownToRequireElevatedPrivilege(printer_name,
+                                                                   client_type);
+  }
 #endif
   *is_sandboxed = should_sandbox;
 
@@ -580,18 +582,17 @@ PrintBackendServiceManager::GetService(const std::string& printer_name,
   // be needed by client callers.
   DCHECK_GT(GetClientsRegisteredCount(), 0u);
 
-  // On the first print make note that so far no drivers have been discovered
-  // to require fallback beyond any predetermined known cases.
-  static bool first_print = true;
-  if (first_print) {
-#if BUILDFLAG(IS_WIN)
-    DCHECK(should_sandbox || avoid_sandbox);
-#else
-    DCHECK(should_sandbox);
-#endif
-    first_print = false;
-    base::UmaHistogramBoolean(
-        kPrintBackendRequiresElevatedPrivilegeHistogramName, /*sample=*/false);
+  if (should_sandbox) {
+    // On the first print that will try to use sandboxed service, make note that
+    // so far no drivers have been discovered to require fallback beyond any
+    // predetermined known cases.
+    static bool first_sandboxed_print = true;
+    if (first_sandboxed_print) {
+      first_sandboxed_print = false;
+      base::UmaHistogramBoolean(
+          kPrintBackendRequiresElevatedPrivilegeHistogramName,
+          /*sample=*/false);
+    }
   }
 
   std::string remote_id = GetRemoteIdForPrinterName(printer_name);
@@ -622,8 +623,8 @@ PrintBackendServiceManager::GetServiceFromBundle(
   mojo::Remote<mojom::PrintBackendService>& service = bundle->service;
   if (!service) {
     VLOG(1) << "Launching print backend "
-            << (sandboxed ? "sandboxed" : "unsandboxed") << " for '"
-            << remote_id << "'";
+            << (sandboxed ? "sandboxed" : "unsandboxed") << " for `"
+            << remote_id << "`";
 
     mojo::Remote<T>& host = bundle->host;
     content::ServiceProcessHost::Launch(
@@ -839,8 +840,8 @@ void PrintBackendServiceManager::UpdateServiceIdleTimeoutByRemoteId(
 void PrintBackendServiceManager::OnIdleTimeout(bool sandboxed,
                                                const std::string& remote_id) {
   DVLOG(1) << "Print Backend service idle timeout for "
-           << (sandboxed ? "sandboxed" : "unsandboxed") << " remote id "
-           << remote_id;
+           << (sandboxed ? "sandboxed" : "unsandboxed") << " remote id `"
+           << remote_id << "`";
   if (sandboxed) {
     sandboxed_remotes_bundles_.erase(remote_id);
   } else {
@@ -852,8 +853,8 @@ void PrintBackendServiceManager::OnRemoteDisconnected(
     bool sandboxed,
     const std::string& remote_id) {
   DVLOG(1) << "Print Backend service disconnected for "
-           << (sandboxed ? "sandboxed" : "unsandboxed") << " remote id "
-           << remote_id;
+           << (sandboxed ? "sandboxed" : "unsandboxed") << " remote id `"
+           << remote_id << "`";
   if (sandboxed) {
     sandboxed_remotes_bundles_.erase(remote_id);
   } else {

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ class PrintBackendChromeOS : public PrintBackend {
   PrintBackendChromeOS() = default;
 
   // PrintBackend implementation.
-  mojom::ResultCode EnumeratePrinters(PrinterList* printer_list) override;
+  mojom::ResultCode EnumeratePrinters(PrinterList& printer_list) override;
   mojom::ResultCode GetDefaultPrinterName(
       std::string& default_printer) override;
   mojom::ResultCode GetPrinterBasicInfo(
@@ -43,7 +43,7 @@ class PrintBackendChromeOS : public PrintBackend {
 };
 
 mojom::ResultCode PrintBackendChromeOS::EnumeratePrinters(
-    PrinterList* printer_list) {
+    PrinterList& printer_list) {
   return mojom::ResultCode::kSuccess;
 }
 
@@ -86,7 +86,7 @@ bool PrintBackendChromeOS::IsValidPrinter(const std::string& printer_name) {
 
 // static
 scoped_refptr<PrintBackend> PrintBackend::CreateInstanceImpl(
-    const base::DictionaryValue* print_backend_settings,
+    const base::Value::Dict* print_backend_settings,
     const std::string& /*locale*/) {
 #if defined(USE_CUPS)
   return base::MakeRefCounted<PrintBackendCupsIpp>(

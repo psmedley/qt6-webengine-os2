@@ -1,18 +1,21 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
 
+#include "chrome/browser/ash/crostini/crostini_browser_test_util.h"
 #include "chrome/browser/ash/crostini/fake_crostini_features.h"
+#include "chrome/browser/ash/settings/scoped_testing_cros_settings.h"
+#include "chrome/browser/ash/settings/stub_cros_settings_provider.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/policy/system_features_disable_list_policy_handler.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "chromeos/ash/components/settings/cros_settings_names.h"
 #include "components/policy/core/common/policy_pref_names.h"
-#include "components/prefs/scoped_user_pref_update.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,14 +23,15 @@
 
 namespace extensions {
 
-class TerminalPrivateBrowserTest : public InProcessBrowserTest {
+class TerminalPrivateBrowserTest : public CrostiniBrowserTestBase {
  public:
   TerminalPrivateBrowserTest(const TerminalPrivateBrowserTest&) = delete;
   TerminalPrivateBrowserTest& operator=(const TerminalPrivateBrowserTest&) =
       delete;
 
  protected:
-  TerminalPrivateBrowserTest() = default;
+  TerminalPrivateBrowserTest()
+      : CrostiniBrowserTestBase(/*register_termina=*/false) {}
 
   void ExpectJsResult(const std::string& script, const std::string& expected) {
     content::WebContents* web_contents =
@@ -37,6 +41,7 @@ class TerminalPrivateBrowserTest : public InProcessBrowserTest {
                /*world_id=*/1);
     EXPECT_EQ(eval_result.value.GetString(), expected);
   }
+  ash::ScopedTestingCrosSettings cros_settings_;
 };
 
 IN_PROC_BROWSER_TEST_F(TerminalPrivateBrowserTest, OpenTerminalProcessChecks) {
@@ -49,13 +54,13 @@ IN_PROC_BROWSER_TEST_F(TerminalPrivateBrowserTest, OpenTerminalProcessChecks) {
       resolve(lastError ? lastError.message : "success");
     })}))";
 
-  // 'vmshell not allowed' when crostini is not allowed.
-  crostini::FakeCrostiniFeatures crostini_features;
-  crostini_features.set_could_be_allowed(true);
-  crostini_features.set_is_allowed_now(false);
+  // 'vmshell not allowed' when VMs are not allowed.
+  cros_settings_.device_settings()->SetBoolean(ash::kVirtualMachinesAllowed,
+                                               false);
   ExpectJsResult(script, "vmshell not allowed");
 
-  crostini_features.set_is_allowed_now(true);
+  cros_settings_.device_settings()->SetBoolean(ash::kVirtualMachinesAllowed,
+                                               true);
   ExpectJsResult(script, "success");
 
   // openTerminalProcess not defined.
@@ -82,9 +87,8 @@ IN_PROC_BROWSER_TEST_F(TerminalPrivateBrowserTest, OpenCroshProcessChecks) {
   // 'crosh not allowed' when crosh is not allowed.
   ExpectJsResult(script, "crosh not allowed");
 
-  ListPrefUpdate update(g_browser_process->local_state(),
-                        policy::policy_prefs::kSystemFeaturesDisableList);
-  update->ClearList();
+  g_browser_process->local_state()->SetList(
+      policy::policy_prefs::kSystemFeaturesDisableList, base::Value::List());
   ExpectJsResult(script, "success");
 }
 

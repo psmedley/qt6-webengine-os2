@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -104,6 +104,10 @@ class SignalDatabaseImpl : public SignalDatabase {
   // samples will be appended and rewritten to the database. Any entries older
   // than 1 second are cleaned up on the subsequent invocation to WriteSample().
   std::map<SignalKey, proto::SignalData> recently_added_signals_;
+
+  // Enables the compaction fix. TODO(https://crbug.com/1357272): remove this
+  // after fixing the bug.
+  const bool should_fix_compaction_;
 
   base::WeakPtrFactory<SignalDatabaseImpl> weak_ptr_factory_{this};
 };

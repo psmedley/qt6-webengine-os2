@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -160,9 +160,6 @@ IN_PROC_BROWSER_TEST_F(DevToolsManagerDelegateTest, NormalToFullscreenWindow) {
 #endif
   CheckIsFullscreen(false);
   SendCommand("fullscreen");
-#if BUILDFLAG(IS_MAC)
-  faker.FinishTransition();
-#endif
   CheckIsFullscreen(true);
 }
 
@@ -225,13 +222,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsManagerDelegateTest, ExitFullscreenWindow) {
 #endif
   browser()->window()->GetExclusiveAccessContext()->EnterFullscreen(
       GURL(), EXCLUSIVE_ACCESS_BUBBLE_TYPE_NONE, display::kInvalidDisplayId);
-#if BUILDFLAG(IS_MAC)
-  faker.FinishTransition();
-#endif
   CheckIsFullscreen(true);
   SendCommand("normal");
-#if BUILDFLAG(IS_MAC)
-  faker.FinishTransition();
-#endif
   CheckIsFullscreen(false);
 }

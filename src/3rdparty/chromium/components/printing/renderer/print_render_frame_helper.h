@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -150,8 +150,6 @@ class PrintRenderFrameHelper
   // printing is build-in. This method is used by CEF.
   static void DisablePreview();
 
-  bool IsPrintingEnabled() const;
-
   void PrintNode(const blink::WebNode& node);
 
   // Get the scale factor. Returns |input_scale_factor| if it is valid and
@@ -190,6 +188,7 @@ class PrintRenderFrameHelper
     OK,
     FAIL_PRINT_INIT,
     FAIL_PRINT,
+    INVALID_PAGE_RANGE,
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
     FAIL_PREVIEW,
     INVALID_SETTINGS,
@@ -255,6 +254,8 @@ class PrintRenderFrameHelper
 
   // printing::mojom::PrintRenderFrame:
   void PrintRequestedPages() override;
+  void PrintWithParams(mojom::PrintPagesParamsPtr params,
+                       PrintWithParamsCallback callback) override;
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   void PrintForSystemDialog() override;
   void SetPrintPreviewUI(
@@ -262,7 +263,7 @@ class PrintRenderFrameHelper
   void InitiatePrintPreview(
       mojo::PendingAssociatedRemote<mojom::PrintRenderer> print_renderer,
       bool has_selection) override;
-  void PrintPreview(base::Value settings) override;
+  void PrintPreview(base::Value::Dict settings) override;
   void OnPrintPreviewDialogClosed() override;
 #endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
   void PrintFrameContent(mojom::PrintFrameContentParamsPtr params,
@@ -350,7 +351,7 @@ class PrintRenderFrameHelper
   // name, number of copies, page range, etc.
   bool UpdatePrintSettings(blink::WebLocalFrame* frame,
                            const blink::WebNode& node,
-                           const base::Value::Dict& passed_job_settings);
+                           base::Value::Dict passed_job_settings);
 #endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
 
   // Returns final print settings from the user.
@@ -367,7 +368,7 @@ class PrintRenderFrameHelper
   void PrintPages();
   bool PrintPagesNative(blink::WebLocalFrame* frame,
                         uint32_t page_count,
-                        bool is_pdf);
+                        const std::vector<uint32_t>& pages_to_print);
   void FinishFramePrinting();
   // Render the frame for printing.
   bool RenderPagesForPrint(blink::WebLocalFrame* frame,
@@ -409,12 +410,6 @@ class PrintRenderFrameHelper
       const mojom::PrintParams& default_params,
       bool ignore_css_margins,
       double* scale_factor);
-
-  // Return an array of pages to print given the print |params| and an expected
-  // |page_count|. Page numbers are zero-based.
-  static std::vector<uint32_t> GetPrintedPages(
-      const mojom::PrintPagesParams& params,
-      uint32_t page_count);
 
   // Given the |device| and |canvas| to draw on, prints the appropriate headers
   // and footers using strings from |header_footer_info| on to the canvas.
@@ -471,6 +466,9 @@ class PrintRenderFrameHelper
   void QuitScriptedPrintPreviewRunLoop();
   void QuitGetPrintSettingsFromUserRunLoop();
 
+  // Resets internal state
+  void Reset();
+
   // WebView used only to print the selection.
   std::unique_ptr<PrepareFrameAndViewForPrint> prep_frame_view_;
   bool reset_prep_frame_view_ = false;
@@ -491,7 +489,7 @@ class PrintRenderFrameHelper
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   // Settings used by a PrintRenderer to create a preview document.
-  base::Value print_renderer_job_settings_;
+  base::Value::Dict print_renderer_job_settings_;
 
   // Used to render print documents from an external source (ARC, Crostini,
   // etc.).
@@ -532,7 +530,7 @@ class PrintRenderFrameHelper
     // Create the print preview document. |pages| is empty to print all pages.
     bool CreatePreviewDocument(
         std::unique_ptr<PrepareFrameAndViewForPrint> prepared_frame,
-        const std::vector<uint32_t>& pages,
+        const PageRanges& pages,
         mojom::SkiaDocumentType doc_type,
         int document_cookie,
         bool require_document_metafile);
@@ -574,6 +572,7 @@ class PrintRenderFrameHelper
     void SetIsForArc(bool is_for_arc);
 #endif
     void set_error(enum PrintPreviewErrorBuckets error);
+    void set_error_details(const std::string& details);
 
     // Getters
     // Original frame for which preview was requested.
@@ -594,6 +593,7 @@ class PrintRenderFrameHelper
     MetafileSkia* metafile();
     ContentProxySet* typeface_content_info();
     int last_error() const;
+    const std::string& last_error_details() const;
 
    private:
     enum State {
@@ -647,6 +647,7 @@ class PrintRenderFrameHelper
     base::TimeTicks begin_time_;
 
     enum PrintPreviewErrorBuckets error_ = PREVIEW_ERROR_NONE;
+    std::string error_details_;
 
     State state_ = UNINITIALIZED;
   };
@@ -697,6 +698,9 @@ class PrintRenderFrameHelper
   //   called. This is a store for the RequestPrintPreview() call and its
   //   parameters so that it can be invoked after DidStopLoading.
   base::OnceClosure on_stop_loading_closure_;
+
+  // This is used to report PrintWithParams() call result.
+  PrintWithParamsCallback print_with_params_callback_;
 
   // Stores the quit closures of Mojo responses.
   scoped_refptr<ClosuresForMojoResponse> closures_for_mojo_responses_;

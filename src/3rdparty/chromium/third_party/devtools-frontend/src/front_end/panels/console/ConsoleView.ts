@@ -51,15 +51,21 @@ import * as UI from '../../ui/legacy/legacy.js';
 import {ConsoleContextSelector} from './ConsoleContextSelector.js';
 import consoleViewStyles from './consoleView.css.js';
 
-import type {LevelsMask} from './ConsoleFilter.js';
-import {ConsoleFilter, FilterType} from './ConsoleFilter.js';
+import {ConsoleFilter, FilterType, type LevelsMask} from './ConsoleFilter.js';
 import {ConsolePinPane} from './ConsolePinPane.js';
 import {ConsolePrompt, Events as ConsolePromptEvents} from './ConsolePrompt.js';
 import {ConsoleSidebar, Events} from './ConsoleSidebar.js';
-import {ConsoleCommand, ConsoleCommandResult, ConsoleGroupViewMessage, ConsoleTableMessageView, ConsoleViewMessage, getMessageForElement, MaxLengthForLinks} from './ConsoleViewMessage.js';
+import {
+  ConsoleCommand,
+  ConsoleCommandResult,
+  ConsoleGroupViewMessage,
+  ConsoleTableMessageView,
+  ConsoleViewMessage,
+  getMessageForElement,
+  MaxLengthForLinks,
+} from './ConsoleViewMessage.js';
 
-import type {ConsoleViewportElement, ConsoleViewportProvider} from './ConsoleViewport.js';
-import {ConsoleViewport} from './ConsoleViewport.js';
+import {ConsoleViewport, type ConsoleViewportElement, type ConsoleViewportProvider} from './ConsoleViewport.js';
 
 const UIStrings = {
   /**
@@ -1048,6 +1054,7 @@ export class ConsoleView extends UI.Widget.VBox implements UI.SearchableView.Sea
     this.groupableMessages.clear();
     this.groupableMessageTitle.clear();
     this.sidebar.clear();
+    this.pendingSidebarMessages = [];
     this.updateMessageList();
     this.hidePromptSuggestBox();
     this.viewport.setStickToBottom(true);

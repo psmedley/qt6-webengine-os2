@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -132,7 +132,7 @@ TEST_F(CopyPreventionSettingsPolicyHandlerTest, TestValidPolicy) {
 
   const base::Value* value_in_map =
       policy_map.GetValue(kPolicyName, base::Value::Type::DICT);
-  ASSERT_TRUE(value_in_pref->Equals(value_in_map));
+  ASSERT_EQ(*value_in_pref, *value_in_map);
 }
 
 TEST_F(CopyPreventionSettingsPolicyHandlerTest,

@@ -24,7 +24,7 @@
 #    include "libANGLE/renderer/gl/StateManagerGL.h"
 #    include "libANGLE/renderer/gl/cgl/DisplayCGL.h"
 
-@interface WebSwapCGLLayer : CAOpenGLLayer {
+@interface QWESwapCGLLayer : CAOpenGLLayer {
     CGLContextObj mDisplayContext;
 
     bool initialized;
@@ -38,7 +38,7 @@
             withFunctions:(const rx::FunctionsGL *)functions;
 @end
 
-@implementation WebSwapCGLLayer
+@implementation QWESwapCGLLayer
 - (id)initWithSharedState:(rx::SharedSwapState *)swapState
               withContext:(CGLContextObj)displayContext
             withFunctions:(const rx::FunctionsGL *)functions
@@ -158,7 +158,8 @@ WindowSurfaceCGL::WindowSurfaceCGL(const egl::SurfaceState &state,
       mContext(context),
       mFunctions(renderer->getFunctions()),
       mStateManager(renderer->getStateManager()),
-      mDSRenderbuffer(0)
+      mDSRenderbuffer(0),
+      mFramebufferID(0)
 {
     pthread_mutex_init(&mSwapState.mutex, nullptr);
 }
@@ -168,6 +169,12 @@ WindowSurfaceCGL::~WindowSurfaceCGL()
     EnsureCGLContextIsCurrent ensureContextCurrent(mContext);
 
     pthread_mutex_destroy(&mSwapState.mutex);
+
+    if (mFramebufferID != 0)
+    {
+        mStateManager->deleteFramebuffer(mFramebufferID);
+        mFramebufferID = 0;
+    }
 
     if (mDSRenderbuffer != 0)
     {
@@ -213,7 +220,7 @@ egl::Error WindowSurfaceCGL::initialize(const egl::Display *display)
     mSwapState.lastRendered   = &mSwapState.textures[1];
     mSwapState.beingPresented = &mSwapState.textures[2];
 
-    mSwapLayer = [[WebSwapCGLLayer alloc] initWithSharedState:&mSwapState
+    mSwapLayer = [[QWESwapCGLLayer alloc] initWithSharedState:&mSwapState
                                                   withContext:mContext
                                                 withFunctions:mFunctions];
     [mLayer addSublayer:mSwapLayer];
@@ -262,8 +269,9 @@ egl::Error WindowSurfaceCGL::swap(const gl::Context *context)
         texture.height = height;
     }
 
-    FramebufferGL *framebufferGL = GetImplAs<FramebufferGL>(context->getFramebuffer({0}));
-    stateManager->bindFramebuffer(GL_FRAMEBUFFER, framebufferGL->getFramebufferID());
+    ASSERT(mFramebufferID ==
+           GetImplAs<FramebufferGL>(context->getFramebuffer({0}))->getFramebufferID());
+    stateManager->bindFramebuffer(GL_FRAMEBUFFER, mFramebufferID);
     functions->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                                     mSwapState.beingRendered->texture, 0);
 
@@ -326,21 +334,34 @@ EGLint WindowSurfaceCGL::getSwapBehavior() const
     return EGL_BUFFER_DESTROYED;
 }
 
-FramebufferImpl *WindowSurfaceCGL::createDefaultFramebuffer(const gl::Context *context,
-                                                            const gl::FramebufferState &state)
+egl::Error WindowSurfaceCGL::attachToFramebuffer(const gl::Context *context,
+                                                 gl::Framebuffer *framebuffer)
 {
-    const FunctionsGL *functions = GetFunctionsGL(context);
-    StateManagerGL *stateManager = GetStateManagerGL(context);
+    FramebufferGL *framebufferGL = GetImplAs<FramebufferGL>(framebuffer);
+    ASSERT(framebufferGL->getFramebufferID() == 0);
 
-    GLuint framebuffer = 0;
-    functions->genFramebuffers(1, &framebuffer);
-    stateManager->bindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-    functions->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                                    mSwapState.beingRendered->texture, 0);
-    functions->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER,
-                                       mDSRenderbuffer);
+    if (mFramebufferID == 0)
+    {
+        GLuint framebufferID = 0;
+        mFunctions->genFramebuffers(1, &framebufferID);
+        mStateManager->bindFramebuffer(GL_FRAMEBUFFER, framebufferID);
+        mFunctions->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                                         mSwapState.beingRendered->texture, 0);
+        mFunctions->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+                                            GL_RENDERBUFFER, mDSRenderbuffer);
+        mFramebufferID = framebufferID;
+    }
+    framebufferGL->setFramebufferID(mFramebufferID);
+    return egl::NoError();
+}
 
-    return new FramebufferGL(state, framebuffer, true, false);
+egl::Error WindowSurfaceCGL::detachFromFramebuffer(const gl::Context *context,
+                                                   gl::Framebuffer *framebuffer)
+{
+    FramebufferGL *framebufferGL = GetImplAs<FramebufferGL>(framebuffer);
+    ASSERT(framebufferGL->getFramebufferID() == mFramebufferID);
+    framebufferGL->setFramebufferID(0);
+    return egl::NoError();
 }
 
 }  // namespace rx

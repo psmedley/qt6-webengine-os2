@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@
 #include "content/public/common/alternative_error_page_override_info.mojom.h"
 #include "content/public/common/content_client.h"
 #include "media/base/audio_parameters.h"
-#include "media/base/key_system_properties.h"
+#include "media/base/key_system_info.h"
 #include "media/base/supported_types.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/url_loader_throttle_provider.h"
@@ -60,6 +60,10 @@ struct WebURLError;
 enum class ProtocolHandlerSecurityLevel;
 }  // namespace blink
 
+namespace cast_streaming {
+class ResourceProvider;
+}  // namespace cast_streaming
+
 namespace media {
 class DecoderFactory;
 class Demuxer;
@@ -92,7 +96,12 @@ class CONTENT_EXPORT ContentRendererClient {
   virtual void RenderFrameCreated(RenderFrame* render_frame) {}
 
   // Notifies that a new WebView has been created.
-  virtual void WebViewCreated(blink::WebView* web_view) {}
+  // `outermost_origin` is only set if it is an extension scheme, otherwise
+  // it will be null. It is null to avoid leaking unnecessary information into
+  // the renderer.
+  virtual void WebViewCreated(blink::WebView* web_view,
+                              bool was_created_by_renderer,
+                              const url::Origin* outermost_origin) {}
 
   // Returns the bitmap to show when a plugin crashed, or NULL for none.
   virtual SkBitmap* GetSadPluginBitmap();
@@ -178,6 +187,11 @@ class CONTENT_EXPORT ContentRendererClient {
   virtual std::unique_ptr<blink::WebSocketHandshakeThrottleProvider>
   CreateWebSocketHandshakeThrottleProvider();
 
+  // Called immediately after the sandbox is initialized on the main thread.
+  // (If the renderer is run with --no-sandbox, it is still called in
+  // RendererMain at about the same time.)
+  virtual void PostSandboxInitialized() {}
+
   // Called on the main-thread immediately after the io thread is
   // created.
   virtual void PostIOThreadCreated(
@@ -206,7 +220,6 @@ class CONTENT_EXPORT ContentRendererClient {
   // Returns true if the navigation was handled by the embedder and should be
   // ignored by WebKit. This method is used by CEF and android_webview.
   virtual bool HandleNavigation(RenderFrame* render_frame,
-                                bool render_view_was_created_by_renderer,
                                 blink::WebFrame* frame,
                                 const blink::WebURLRequest& request,
                                 blink::WebNavigationType type,
@@ -378,8 +391,8 @@ class CONTENT_EXPORT ContentRendererClient {
   virtual blink::WebFrame* FindFrame(blink::WebLocalFrame* relative_to_frame,
                                      const std::string& name);
 
-  // Returns true if it is safe to redirect to |url|, otherwise returns false.
-  virtual bool IsSafeRedirectTarget(const GURL& url);
+  // Returns true only if it's safe to redirect `from_url` to `to_url`.
+  virtual bool IsSafeRedirectTarget(const GURL& from_url, const GURL& to_url);
 
   // The user agent string is given from the browser process. This is called at
   // most once.
@@ -405,6 +418,11 @@ class CONTENT_EXPORT ContentRendererClient {
       media::DecoderFactory* decoder_factory,
       base::RepeatingCallback<media::GpuVideoAcceleratorFactories*()>
           get_gpu_factories_cb);
+
+  // Creates a new cast_streaming::ResourceProvider. Will only be called once
+  // per RenderFrame.
+  virtual std::unique_ptr<cast_streaming::ResourceProvider>
+  CreateCastStreamingResourceProvider();
 };
 
 }  // namespace content

@@ -1,4 +1,4 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -22,6 +22,7 @@ generate_grd("build_lottie_grd") {
     "lottie/feel_the_breeze/clip_top.png",
     "lottie/feel_the_breeze/frame_image_1.png",
     "lottie/feel_the_breeze/frame_image_2.png",
+    "lottie/feel_the_breeze/string.png",
     "lottie/feel_the_breeze/tree_shadow.png",
     "lottie/float_on_by/animation.json",
     "lottie/float_on_by/shadow_a_1.png",

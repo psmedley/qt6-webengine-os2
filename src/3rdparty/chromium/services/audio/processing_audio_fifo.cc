@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,7 +81,8 @@ ProcessingAudioFifo::ProcessingAudioFifo(
     : fifo_size_(fifo_size),
       fifo_(fifo_size_),
       input_params_(input_params),
-      audio_processing_thread_("AudioProcessingThread"),
+      audio_processing_thread_("AudioProcessingThread",
+                               input_params_.GetBufferDuration()),
       processing_callback_(std::move(processing_callback)),
       new_data_captured_(base::WaitableEvent::ResetPolicy::AUTOMATIC),
       stats_reporter_(
@@ -138,10 +139,8 @@ void ProcessingAudioFifo::StartInternal(
   // Start should only be called once.
   DCHECK(!audio_processing_thread_.IsRunning());
 
-  base::Thread::Options options;
-  options.priority = base::ThreadPriority::REALTIME_AUDIO;
-
-  audio_processing_thread_.StartWithOptions(std::move(options));
+  audio_processing_thread_.StartWithOptions(
+      base::Thread::Options(base::ThreadType::kRealtimeAudio));
 
   audio_processing_thread_.task_runner()->PostTask(
       FROM_HERE, base::BindOnce(&ProcessingAudioFifo::ProcessAudioLoop,

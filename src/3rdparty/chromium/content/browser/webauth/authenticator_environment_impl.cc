@@ -1,15 +1,15 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/webauth/authenticator_environment_impl.h"
 
-#include <algorithm>
 #include <utility>
 
 #include "base/command_line.h"
 #include "base/containers/contains.h"
 #include "base/no_destructor.h"
+#include "base/ranges/algorithm.h"
 #include "build/build_config.h"
 #include "content/browser/webauth/virtual_authenticator.h"
 #include "content/browser/webauth/virtual_discovery.h"
@@ -38,15 +38,19 @@ AuthenticatorEnvironmentImpl::AuthenticatorEnvironmentImpl() = default;
 AuthenticatorEnvironmentImpl::~AuthenticatorEnvironmentImpl() = default;
 
 void AuthenticatorEnvironmentImpl::EnableVirtualAuthenticatorFor(
-    FrameTreeNode* node) {
+    FrameTreeNode* node,
+    bool enable_ui) {
   // Do not create a new virtual authenticator if there is one already defined
   // for the |node|.
   if (base::Contains(virtual_authenticator_managers_, node))
     return;
 
   node->AddObserver(this);
-  virtual_authenticator_managers_[node] =
+  auto virtual_authenticator_manager =
       std::make_unique<VirtualAuthenticatorManagerImpl>();
+  virtual_authenticator_manager->enable_ui(enable_ui);
+  virtual_authenticator_managers_[node] =
+      std::move(virtual_authenticator_manager);
 }
 
 void AuthenticatorEnvironmentImpl::DisableVirtualAuthenticatorFor(
@@ -92,10 +96,9 @@ bool AuthenticatorEnvironmentImpl::HasVirtualUserVerifyingPlatformAuthenticator(
   }
   std::vector<VirtualAuthenticator*> authenticators =
       authenticator_manager->GetAuthenticators();
-  return std::any_of(authenticators.begin(), authenticators.end(),
-                     [](VirtualAuthenticator* a) {
-                       return a->is_user_verifying_platform_authenticator();
-                     });
+  return base::ranges::any_of(authenticators, [](VirtualAuthenticator* a) {
+    return a->is_user_verifying_platform_authenticator();
+  });
 }
 
 device::FidoDiscoveryFactory*

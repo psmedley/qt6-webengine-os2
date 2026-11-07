@@ -29,11 +29,10 @@
 #include "libavutil/mem_internal.h"
 #include "libavutil/reverse.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include "get_bits.h"
 #include "avcodec.h"
 #include "golomb.h"
-#include "mathops.h"
 #include "dsd.h"
 
 #define DST_MAX_CHANNELS 6
@@ -237,7 +236,7 @@ static void build_filter(int16_t table[DST_MAX_ELEMENTS][16][256], const Table *
     }
 }
 
-static int decode_frame(AVCodecContext *avctx, void *data,
+static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
                         int *got_frame_ptr, AVPacket *avpkt)
 {
     unsigned samples_per_frame = DST_SAMPLES_PER_FRAME(avctx->sample_rate);
@@ -249,7 +248,6 @@ static int decode_frame(AVCodecContext *avctx, void *data,
     DSTContext *s = avctx->priv_data;
     GetBitContext *gb = &s->gb;
     ArithCoder *ac = &s->ac;
-    AVFrame *frame = data;
     uint8_t *dsd;
     float *pcm;
     int ret;
@@ -382,14 +380,13 @@ dsd:
 
 const FFCodec ff_dst_decoder = {
     .p.name         = "dst",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("DST (Digital Stream Transfer)"),
+    CODEC_LONG_NAME("DST (Digital Stream Transfer)"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_DST,
     .priv_data_size = sizeof(DSTContext),
     .init           = decode_init,
-    .decode         = decode_frame,
+    FF_CODEC_DECODE_CB(decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLT,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };

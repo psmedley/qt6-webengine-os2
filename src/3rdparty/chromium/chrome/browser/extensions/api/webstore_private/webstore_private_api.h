@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -388,24 +388,6 @@ class WebstorePrivateGetExtensionStatusFunction : public ExtensionFunction {
                         data_decoder::DataDecoder::ValueOrError result);
 
   // ExtensionFunction:
-  ExtensionFunction::ResponseAction Run() override;
-};
-
-class WebstorePrivateRequestExtensionFunction : public ExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("webstorePrivate.requestExtension",
-                             WEBSTOREPRIVATE_REQUESTEXTENSION)
-  WebstorePrivateRequestExtensionFunction();
-
-  WebstorePrivateRequestExtensionFunction(
-      const WebstorePrivateRequestExtensionFunction&) = delete;
-  WebstorePrivateRequestExtensionFunction& operator=(
-      const WebstorePrivateRequestExtensionFunction&) = delete;
-
- private:
-  ~WebstorePrivateRequestExtensionFunction() override;
-
-  // Extensionfunction:
   ExtensionFunction::ResponseAction Run() override;
 };
 

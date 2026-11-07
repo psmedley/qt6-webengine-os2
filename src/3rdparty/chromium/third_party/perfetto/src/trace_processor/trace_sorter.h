@@ -23,14 +23,37 @@
 #include <vector>
 
 #include "perfetto/ext/base/circular_queue.h"
+#include "perfetto/ext/base/utils.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "perfetto/trace_processor/trace_blob_view.h"
-#include "src/trace_processor/timestamped_trace_piece.h"
+#include "src/trace_processor/importers/common/trace_parser.h"
+#include "src/trace_processor/importers/fuchsia/fuchsia_record.h"
+#include "src/trace_processor/importers/systrace/systrace_line.h"
+#include "src/trace_processor/parser_types.h"
+#include "src/trace_processor/trace_sorter_queue.h"
 
 namespace perfetto {
 namespace trace_processor {
 
+enum class EventType : uint8_t {
+  kFtraceEvent,
+  kTracePacket,
+  kInlineSchedSwitch,
+  kInlineSchedWaking,
+  kJsonValue,
+  kFuchsiaRecord,
+  kTrackEvent,
+  kSystraceLine,
+  kInvalid,
+  kSize = kInvalid,
+};
+
+namespace trace_sorter_internal {
+class VariadicQueue;
+}  // namespace trace_sorter_internal
+
 class PacketSequenceState;
+class FuchsiaRecord;
 struct SystraceLine;
 
 // This class takes care of sorting events parsed from the trace stream in
@@ -80,6 +103,9 @@ struct SystraceLine;
 // within the first partition where sorting should start, and sort all events
 // from there to the end.
 class TraceSorter {
+ private:
+  using VariadicQueue = trace_sorter_internal::VariadicQueue;
+
  public:
   enum class SortingMode {
     kDefault,
@@ -89,36 +115,37 @@ class TraceSorter {
   TraceSorter(TraceProcessorContext* context,
               std::unique_ptr<TraceParser> parser,
               SortingMode);
+  ~TraceSorter();
 
   inline void PushTracePacket(int64_t timestamp,
                               PacketSequenceState* state,
-                              TraceBlobView packet) {
-    AppendNonFtraceEvent(TimestampedTracePiece(timestamp, packet_idx_++,
-                                               std::move(packet),
-                                               state->current_generation()));
+                              TraceBlobView event) {
+    uint32_t offset = variadic_queue_.Append(
+        TracePacketData{std::move(event), state->current_generation()});
+    AppendNonFtraceEvent(timestamp, offset, EventType::kTracePacket);
   }
 
   inline void PushJsonValue(int64_t timestamp, std::string json_value) {
-    AppendNonFtraceEvent(
-        TimestampedTracePiece(timestamp, packet_idx_++, std::move(json_value)));
+    uint32_t offset = variadic_queue_.Append(std::move(json_value));
+    AppendNonFtraceEvent(timestamp, offset, EventType::kJsonValue);
   }
 
   inline void PushFuchsiaRecord(int64_t timestamp,
-                                std::unique_ptr<FuchsiaRecord> record) {
-    AppendNonFtraceEvent(
-        TimestampedTracePiece(timestamp, packet_idx_++, std::move(record)));
+                                FuchsiaRecord fuchsia_record) {
+    uint32_t offset = variadic_queue_.Append(std::move(fuchsia_record));
+    AppendNonFtraceEvent(timestamp, offset, EventType::kFuchsiaRecord);
   }
 
-  inline void PushSystraceLine(std::unique_ptr<SystraceLine> systrace_line) {
-    int64_t timestamp = systrace_line->ts;
-    AppendNonFtraceEvent(TimestampedTracePiece(timestamp, packet_idx_++,
-                                               std::move(systrace_line)));
+  inline void PushSystraceLine(SystraceLine systrace_line) {
+    auto ts = systrace_line.ts;
+    auto offset = variadic_queue_.Append(std::move(systrace_line));
+    AppendNonFtraceEvent(ts, offset, EventType::kSystraceLine);
   }
 
   inline void PushTrackEventPacket(int64_t timestamp,
-                                   std::unique_ptr<TrackEventData> data) {
-    AppendNonFtraceEvent(
-        TimestampedTracePiece(timestamp, packet_idx_++, std::move(data)));
+                                   TrackEventData track_event) {
+    uint32_t offset = variadic_queue_.Append(std::move(track_event));
+    AppendNonFtraceEvent(timestamp, offset, EventType::kTrackEvent);
   }
 
   inline void PushFtraceEvent(uint32_t cpu,
@@ -126,39 +153,45 @@ class TraceSorter {
                               TraceBlobView event,
                               PacketSequenceState* state) {
     auto* queue = GetQueue(cpu + 1);
-    queue->Append(TimestampedTracePiece(
-        timestamp, packet_idx_++,
-        FtraceEventData{std::move(event), state->current_generation()}));
+    uint32_t offset = variadic_queue_.Append(
+        FtraceEventData{std::move(event), state->current_generation()});
+    queue->Append(TimestampedDescriptor{
+        timestamp, Descriptor(offset, EventType::kFtraceEvent)});
     UpdateGlobalTs(queue);
   }
   inline void PushInlineFtraceEvent(uint32_t cpu,
                                     int64_t timestamp,
                                     InlineSchedSwitch inline_sched_switch) {
-    // TODO(rsavitski): if a trace has a mix of normal & "compact" events (being
-    // pushed through this function), the ftrace batches will no longer be fully
-    // sorted by timestamp. In such situations, we will have to sort at the end
-    // of the batch. We can do better as both sub-sequences are sorted however.
-    // Consider adding extra queues, or pushing them in a merge-sort fashion
-    // instead.
+    // TODO(rsavitski): if a trace has a mix of normal & "compact" events
+    // (being pushed through this function), the ftrace batches will no longer
+    // be fully sorted by timestamp. In such situations, we will have to sort
+    // at the end of the batch. We can do better as both sub-sequences are
+    // sorted however. Consider adding extra queues, or pushing them in a
+    // merge-sort fashion
+    // // instead.
     auto* queue = GetQueue(cpu + 1);
-    queue->Append(
-        TimestampedTracePiece(timestamp, packet_idx_++, inline_sched_switch));
+    uint32_t offset = variadic_queue_.Append(inline_sched_switch);
+    queue->Append(TimestampedDescriptor{
+        timestamp, Descriptor(offset, EventType::kInlineSchedSwitch)});
     UpdateGlobalTs(queue);
   }
   inline void PushInlineFtraceEvent(uint32_t cpu,
                                     int64_t timestamp,
                                     InlineSchedWaking inline_sched_waking) {
     auto* queue = GetQueue(cpu + 1);
-    queue->Append(
-        TimestampedTracePiece(timestamp, packet_idx_++, inline_sched_waking));
+
+    uint32_t offset = variadic_queue_.Append(inline_sched_waking);
+    queue->Append(TimestampedDescriptor{
+        timestamp, Descriptor(offset, EventType::kInlineSchedWaking)});
     UpdateGlobalTs(queue);
   }
 
   void ExtractEventsForced() {
-    SortAndExtractEventsUntilPacket(packet_idx_);
-    queues_.resize(0);
+    uint32_t cur_mem_block_offset = variadic_queue_.NextOffset();
+    SortAndExtractEventsUntilPacket(cur_mem_block_offset);
+    queues_.clear();
 
-    packet_idx_for_extraction_ = packet_idx_;
+    offset_for_extraction_ = cur_mem_block_offset;
     flushes_since_extraction_ = 0;
   }
 
@@ -170,25 +203,81 @@ class TraceSorter {
       return;
     }
 
-    SortAndExtractEventsUntilPacket(packet_idx_for_extraction_);
-    packet_idx_for_extraction_ = packet_idx_;
+    SortAndExtractEventsUntilPacket(offset_for_extraction_);
+    offset_for_extraction_ = variadic_queue_.NextOffset();
     flushes_since_extraction_ = 0;
   }
 
   int64_t max_timestamp() const { return global_max_ts_; }
 
  private:
-  static constexpr uint32_t kNoBatch = std::numeric_limits<uint32_t>::max();
+  // Stores offset and type of metadata.
+  struct Descriptor {
+   public:
+    static constexpr uint8_t kTypeBits = 4;
+    static constexpr uint64_t kTypeMask = (1 << kTypeBits) - 1;
+    static constexpr uint64_t kOffsetShift = kTypeBits;
+    static constexpr uint64_t kMaxType = kTypeMask;
+
+    static_assert(static_cast<uint8_t>(EventType::kSize) <= kTypeMask,
+                  "Too many bits for type");
+
+    Descriptor(uint32_t offset, EventType type)
+        : packed_value_((static_cast<uint64_t>(offset) << kOffsetShift) |
+                        static_cast<uint64_t>(type)) {}
+
+    uint32_t offset() const {
+      return static_cast<uint32_t>(packed_value_ >> kOffsetShift);
+    }
+
+    EventType type() const {
+      return static_cast<EventType>(packed_value_ & kTypeMask);
+    }
+
+   private:
+    uint64_t packed_value_ = 0;
+  };
+
+  struct TimestampedDescriptor {
+    int64_t ts;
+    Descriptor descriptor;
+
+    // For std::lower_bound().
+    static inline bool Compare(const TimestampedDescriptor& x, int64_t ts) {
+      return x.ts < ts;
+    }
+
+    // For std::sort().
+    inline bool operator<(const TimestampedDescriptor& desc) const {
+      return ts < desc.ts ||
+             (ts == desc.ts && descriptor.offset() < desc.descriptor.offset());
+    }
+
+    // For std::sort(). Without this the compiler will fall back on invoking
+    // move operators on temporary objects.
+    friend void swap(TimestampedDescriptor& a, TimestampedDescriptor& b) {
+      // TimestampedDescriptor is 16 bytes + trivially swappable so it can be
+      // done without doing any moving.
+      using AS =
+          typename std::aligned_storage<sizeof(TimestampedDescriptor),
+                                        alignof(TimestampedDescriptor)>::type;
+      using std::swap;
+      swap(reinterpret_cast<AS&>(a), reinterpret_cast<AS&>(b));
+    }
+  };
+
+  static_assert(sizeof(TimestampedDescriptor) == 16,
+                "TimestampeDescriptor cannot grow beyond 16 bytes");
 
   struct Queue {
-    inline void Append(TimestampedTracePiece ttp) {
-      const int64_t timestamp = ttp.timestamp;
-      events_.emplace_back(std::move(ttp));
-      min_ts_ = std::min(min_ts_, timestamp);
+    inline void Append(TimestampedDescriptor ts_desc) {
+      auto ts = ts_desc.ts;
+      events_.emplace_back(std::move(ts_desc));
+      min_ts_ = std::min(min_ts_, ts);
 
       // Events are often seen in order.
-      if (PERFETTO_LIKELY(timestamp >= max_ts_)) {
-        max_ts_ = timestamp;
+      if (PERFETTO_LIKELY(ts >= max_ts_)) {
+        max_ts_ = ts;
       } else {
         // The event is breaking ordering. The first time it happens, keep
         // track of which index we are at. We know that everything before that
@@ -198,9 +287,9 @@ class TraceSorter {
         if (sort_start_idx_ == 0) {
           PERFETTO_DCHECK(events_.size() >= 2);
           sort_start_idx_ = events_.size() - 1;
-          sort_min_ts_ = timestamp;
+          sort_min_ts_ = ts;
         } else {
-          sort_min_ts_ = std::min(sort_min_ts_, timestamp);
+          sort_min_ts_ = std::min(sort_min_ts_, ts);
         }
       }
 
@@ -210,7 +299,7 @@ class TraceSorter {
     bool needs_sorting() const { return sort_start_idx_ != 0; }
     void Sort();
 
-    base::CircularQueue<TimestampedTracePiece> events_;
+    base::CircularQueue<TimestampedDescriptor> events_;
     int64_t min_ts_ = std::numeric_limits<int64_t>::max();
     int64_t max_ts_ = 0;
     size_t sort_start_idx_ = 0;
@@ -225,9 +314,11 @@ class TraceSorter {
     return &queues_[index];
   }
 
-  inline void AppendNonFtraceEvent(TimestampedTracePiece ttp) {
+  inline void AppendNonFtraceEvent(int64_t ts,
+                                   uint32_t offset,
+                                   EventType type) {
     Queue* queue = GetQueue(0);
-    queue->Append(std::move(ttp));
+    queue->Append(TimestampedDescriptor{ts, Descriptor{offset, type}});
     UpdateGlobalTs(queue);
   }
 
@@ -236,8 +327,19 @@ class TraceSorter {
     global_max_ts_ = std::max(global_max_ts_, queue->max_ts_);
   }
 
-  void MaybePushEvent(size_t queue_idx,
-                      TimestampedTracePiece ttp) PERFETTO_ALWAYS_INLINE;
+  void ParseTracePacket(const TimestampedDescriptor& ts_desc);
+  void ParseFtracePacket(uint32_t cpu, const TimestampedDescriptor& ts_desc);
+
+  template <typename T>
+  T EvictTypedVariadic(const TimestampedDescriptor& ts_desc) {
+    return variadic_queue_.Evict<T>(ts_desc.descriptor.offset());
+  }
+
+  void EvictVariadic(const TimestampedDescriptor& ts_desc);
+
+  void MaybePushAndEvictEvent(size_t queue_idx,
+                              const TimestampedDescriptor& ts_desc)
+      PERFETTO_ALWAYS_INLINE;
 
   TraceProcessorContext* context_;
   std::unique_ptr<TraceParser> parser_;
@@ -246,13 +348,16 @@ class TraceSorter {
   // forced extractionn at the end of the trace.
   SortingMode sorting_mode_ = SortingMode::kDefault;
 
-  // The packet index until which events should be extracted. Set based
-  // on the packet index in |OnReadBuffer|.
-  uint64_t packet_idx_for_extraction_ = 0;
+  // The packet offset until which events should be extracted. Set based
+  // on the packet offset in |OnReadBuffer|.
+  uint32_t offset_for_extraction_ = 0;
 
   // The number of flushes which have happened since the last incremental
   // extraction.
   uint32_t flushes_since_extraction_ = 0;
+
+  // Stores the metadata for each event type in a memory efficient manner.
+  VariadicQueue variadic_queue_;
 
   // queues_[0] is the general (non-ftrace) queue.
   // queues_[1] is the ftrace queue for CPU(0).
@@ -265,10 +370,8 @@ class TraceSorter {
   // min(e.timestamp for e in queues_).
   int64_t global_min_ts_ = std::numeric_limits<int64_t>::max();
 
-  // Monotonic increasing value used to index timestamped trace pieces.
-  uint64_t packet_idx_ = 0;
-
-  // Used for performance tests. True when setting TRACE_PROCESSOR_SORT_ONLY=1.
+  // Used for performance tests. True when setting
+  // TRACE_PROCESSOR_SORT_ONLY=1.
   bool bypass_next_stage_for_testing_ = false;
 
   // max(e.ts for e pushed to next stage)

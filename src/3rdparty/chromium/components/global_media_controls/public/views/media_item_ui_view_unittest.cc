@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,7 +60,7 @@ class MediaItemUIViewTest : public views::ViewsTestBase {
     auto device_selector =
         std::make_unique<NiceMock<test::MockMediaItemUIDeviceSelector>>();
     device_selector_ = device_selector.get();
-    device_selector_->SetPreferredSize({400, 50});
+    device_selector_->SetPreferredSize(gfx::Size(400, 50));
 
     item_ui_ = widget_->SetContentsView(std::make_unique<MediaItemUIView>(
         kTestNotificationId, item_->GetWeakPtr(), std::move(footer),

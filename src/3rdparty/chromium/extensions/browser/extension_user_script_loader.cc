@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,7 @@
 #include "base/one_shot_event.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
+#include "base/types/optional_util.h"
 #include "base/version.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -65,102 +66,138 @@ using SubstitutionMap = std::map<std::string, std::string>;
 // resource holding the content of the script.
 using ScriptResourceIds = std::map<UserScript::File*, absl::optional<int>>;
 
+// The source of script file from where it's read.
+enum class ReadScriptContentSource {
+  // ExtensionResource.
+  kFile,
+  // ResourceBundle.
+  kResouceBundle,
+};
+
 struct VerifyContentInfo {
   VerifyContentInfo(const scoped_refptr<ContentVerifier>& verifier,
                     const ExtensionId& extension_id,
                     const base::FilePath& extension_root,
                     const base::FilePath relative_path,
-                    const std::string& content)
+                    absl::optional<std::string> content)
       : verifier(verifier),
         extension_id(extension_id),
         extension_root(extension_root),
         relative_path(relative_path),
-        content(content) {}
+        content(std::move(content)) {}
+
+  // We explicitly disallow copying this because the `content` string may
+  // be quite large for different extension files.
+  VerifyContentInfo(const VerifyContentInfo&) = delete;
+  VerifyContentInfo& operator=(VerifyContentInfo&) = delete;
+
+  VerifyContentInfo(VerifyContentInfo&& other) = default;
+  VerifyContentInfo& operator=(VerifyContentInfo&& other) = default;
 
   scoped_refptr<ContentVerifier> verifier;
   ExtensionId extension_id;
   base::FilePath extension_root;
   base::FilePath relative_path;
-  std::string content;
+
+  // The content to verify, or nullopt if there was an error retrieving it
+  // from its associated file. Example of errors are: missing or unreadable
+  // file.
+  absl::optional<std::string> content;
 };
 
-// Verifies file contents as they are read.
-void VerifyContent(const VerifyContentInfo& info) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  DCHECK(info.verifier);
-  scoped_refptr<ContentVerifyJob> job(info.verifier->CreateAndStartJobFor(
-      info.extension_id, info.extension_root, info.relative_path));
-  if (job.get()) {
-    job->Read(info.content.data(), info.content.size(), MOJO_RESULT_OK);
-    job->Done();
-  }
-}
-
-void ForwardVerifyContentToIO(const VerifyContentInfo& info) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  content::GetIOThreadTaskRunner({})->PostTask(
-      FROM_HERE, base::BindOnce(&VerifyContent, info));
-}
-
-// Loads user scripts from the extension who owns these scripts.
-bool LoadScriptContent(const mojom::HostID& host_id,
-                       UserScript::File* script_file,
-                       const absl::optional<int>& script_resource_id,
-                       const SubstitutionMap* localization_messages,
-                       const scoped_refptr<ContentVerifier>& verifier) {
-  DCHECK(script_file);
-  std::string content;
+// Reads and returns {content, source} of a |script_file|.
+//   - content contains the std::string content, or nullopt if the script file
+// couldn't be read.
+std::tuple<absl::optional<std::string>, ReadScriptContentSource>
+ReadScriptContent(UserScript::File* script_file,
+                  const absl::optional<int>& script_resource_id) {
   const base::FilePath& path = ExtensionResource::GetFilePath(
       script_file->extension_root(), script_file->relative_path(),
       ExtensionResource::SYMLINKS_MUST_RESOLVE_WITHIN_ROOT);
   if (path.empty()) {
     if (script_resource_id) {
       const ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-      content = rb.LoadDataResourceString(*script_resource_id);
-    } else {
-      LOG(WARNING) << "Failed to get file path to "
-                   << script_file->relative_path().value() << " from "
-                   << script_file->extension_root().value();
-      return false;
+      return {rb.LoadDataResourceString(*script_resource_id),
+              ReadScriptContentSource::kResouceBundle};
     }
-  } else {
-    if (!base::ReadFileToString(path, &content)) {
-      LOG(WARNING) << "Failed to load user script file: " << path.value();
-      return false;
-    }
-    if (verifier.get()) {
-      // Call VerifyContent() after yielding on UI thread so it is ensured that
-      // ContentVerifierIOData is populated at the time we call VerifyContent().
-      // Priority set explicitly to avoid unwanted task priority inheritance.
-      content::GetUIThreadTaskRunner({base::TaskPriority::USER_BLOCKING})
-          ->PostTask(
-              FROM_HERE,
-              base::BindOnce(
-                  &ForwardVerifyContentToIO,
-                  VerifyContentInfo(verifier, host_id.id,
-                                    script_file->extension_root(),
-                                    script_file->relative_path(), content)));
-    }
+    LOG(WARNING) << "Failed to get file path to "
+                 << script_file->relative_path().value() << " from "
+                 << script_file->extension_root().value();
+    return {absl::nullopt, ReadScriptContentSource::kFile};
   }
+
+  std::string content;
+  if (!base::ReadFileToString(path, &content)) {
+    LOG(WARNING) << "Failed to load user script file: " << path.value();
+    return {absl::nullopt, ReadScriptContentSource::kFile};
+  }
+  return {std::move(content), ReadScriptContentSource::kFile};
+}
+
+// Verifies file contents as they are read.
+void VerifyContent(VerifyContentInfo info) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  DCHECK(info.verifier);
+  scoped_refptr<ContentVerifyJob> job(info.verifier->CreateAndStartJobFor(
+      info.extension_id, info.extension_root, info.relative_path));
+  if (job.get()) {
+    if (info.content)
+      job->Read(info.content->data(), info.content->size(), MOJO_RESULT_OK);
+    else
+      job->Read("", 0u, MOJO_RESULT_NOT_FOUND);
+    job->Done();
+  }
+}
+
+void ForwardVerifyContentToIO(VerifyContentInfo info) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&VerifyContent, std::move(info)));
+}
+
+// Loads user scripts from the extension who owns these scripts.
+void LoadScriptContent(const mojom::HostID& host_id,
+                       UserScript::File* script_file,
+                       const absl::optional<int>& script_resource_id,
+                       const SubstitutionMap* localization_messages,
+                       const scoped_refptr<ContentVerifier>& verifier) {
+  DCHECK(script_file);
+  auto [content, source] = ReadScriptContent(script_file, script_resource_id);
+
+  bool needs_content_verification = source == ReadScriptContentSource::kFile;
+  if (needs_content_verification && verifier.get()) {
+    // Note: |content| is nullopt here for missing / unreadable file. We still
+    // pass it through ContentVerifier to report content verification error.
+    VerifyContentInfo info(verifier, host_id.id, script_file->extension_root(),
+                           script_file->relative_path(), content);
+
+    // Call VerifyContent() after yielding on UI thread so it is ensured that
+    // ContentVerifierIOData is populated at the time we call VerifyContent().
+    // Priority set explicitly to avoid unwanted task priority inheritance.
+    content::GetUIThreadTaskRunner({base::TaskPriority::USER_BLOCKING})
+        ->PostTask(FROM_HERE,
+                   base::BindOnce(&ForwardVerifyContentToIO, std::move(info)));
+  }
+
+  if (!content)
+    return;
 
   // Localize the content.
   if (localization_messages) {
     std::string error;
     MessageBundle::ReplaceMessagesWithExternalDictionary(*localization_messages,
-                                                         &content, &error);
+                                                         &*content, &error);
     if (!error.empty())
       LOG(WARNING) << "Failed to replace messages in script: " << error;
   }
 
   // Remove BOM from the content.
-  if (base::StartsWith(content, base::kUtf8ByteOrderMark,
+  if (base::StartsWith(*content, base::kUtf8ByteOrderMark,
                        base::CompareCase::SENSITIVE)) {
-    script_file->set_content(content.substr(strlen(base::kUtf8ByteOrderMark)));
+    script_file->set_content(content->substr(strlen(base::kUtf8ByteOrderMark)));
   } else {
-    script_file->set_content(content);
+    script_file->set_content(*content);
   }
-
-  return true;
 }
 
 void FillScriptFileResourceIds(const UserScript::FileList& script_files,
@@ -237,12 +274,12 @@ void LoadScriptsOnFileTaskRunner(
 }
 
 UserScriptList ConvertValueToScripts(const Extension& extension,
-                                     const base::Value& list) {
+                                     const base::Value::List& list) {
   const int valid_schemes = UserScript::ValidUserScriptSchemes(
       scripting::kScriptsCanExecuteEverywhere);
 
   UserScriptList scripts;
-  for (const base::Value& value : list.GetListDeprecated()) {
+  for (const base::Value& value : list) {
     std::u16string error;
     std::unique_ptr<api::content_scripts::ContentScript> content_script =
         api::content_scripts::ContentScript::FromValue(value, &error);
@@ -251,9 +288,8 @@ UserScriptList ConvertValueToScripts(const Extension& extension,
       continue;
 
     std::unique_ptr<UserScript> script = std::make_unique<UserScript>();
-    const auto* dict = static_cast<const base::DictionaryValue*>(&value);
-    const base::Value* id_value = dict->FindKey(scripting::kId);
-    auto* id = id_value->GetIfString();
+    const auto& dict = value.GetDict();
+    auto* id = dict.FindString(scripting::kId);
     if (!id)
       continue;
 
@@ -268,7 +304,8 @@ UserScriptList ConvertValueToScripts(const Extension& extension,
     script->set_execution_world(ConvertExecutionWorld(content_script->world));
 
     if (!script_parsing::ParseMatchPatterns(
-            content_script->matches, content_script->exclude_matches.get(),
+            content_script->matches,
+            base::OptionalToPtr(content_script->exclude_matches),
             /*definition_index=*/0, extension.creation_flags(),
             scripting::kScriptsCanExecuteEverywhere, valid_schemes,
             scripting::kAllUrlsIncludesChromeUrls, script.get(), &error,
@@ -277,7 +314,8 @@ UserScriptList ConvertValueToScripts(const Extension& extension,
     }
 
     if (!script_parsing::ParseFileSources(
-            &extension, content_script->js.get(), content_script->css.get(),
+            &extension, base::OptionalToPtr(content_script->js),
+            base::OptionalToPtr(content_script->css),
             /*definition_index=*/0, script.get(), &error)) {
       continue;
     }
@@ -300,8 +338,7 @@ api::content_scripts::ContentScript CreateContentScriptObject(
     content_script.matches.push_back(pattern.GetAsString());
 
   if (!script.exclude_url_patterns().is_empty()) {
-    content_script.exclude_matches =
-        std::make_unique<std::vector<std::string>>();
+    content_script.exclude_matches.emplace();
     content_script.exclude_matches->reserve(
         script.exclude_url_patterns().size());
     for (const URLPattern& pattern : script.exclude_url_patterns())
@@ -311,23 +348,23 @@ api::content_scripts::ContentScript CreateContentScriptObject(
   // File paths may be normalized in the returned object and can differ slightly
   // compared to what was originally passed into registerContentScripts.
   if (!script.js_scripts().empty()) {
-    content_script.js = std::make_unique<std::vector<std::string>>();
+    content_script.js.emplace();
     content_script.js->reserve(script.js_scripts().size());
     for (const auto& js_script : script.js_scripts())
       content_script.js->push_back(js_script->relative_path().AsUTF8Unsafe());
   }
 
   if (!script.css_scripts().empty()) {
-    content_script.css = std::make_unique<std::vector<std::string>>();
+    content_script.css.emplace();
     content_script.css->reserve(script.css_scripts().size());
     for (const auto& css_script : script.css_scripts())
       content_script.css->push_back(css_script->relative_path().AsUTF8Unsafe());
   }
 
-  content_script.all_frames = std::make_unique<bool>(script.match_all_frames());
+  content_script.all_frames = script.match_all_frames();
   content_script.match_origin_as_fallback =
-      std::make_unique<bool>(script.match_origin_as_fallback() ==
-                             MatchOriginAsFallbackBehavior::kAlways);
+      script.match_origin_as_fallback() ==
+      MatchOriginAsFallbackBehavior::kAlways;
 
   content_script.run_at =
       script_parsing::ConvertRunLocationToManifestType(script.run_location());
@@ -558,17 +595,16 @@ void ExtensionUserScriptLoader::DynamicScriptsStorageHelper::SetDynamicScripts(
   if (!state_store_)
     return;
 
-  auto scripts_value = std::make_unique<base::Value>(base::Value::Type::LIST);
+  base::Value::List scripts_value;
   URLPatternSet persistent_patterns;
   for (const std::unique_ptr<UserScript>& script : scripts) {
     if (!base::Contains(persistent_dynamic_script_ids, script->id()))
       continue;
 
-    base::DictionaryValue value =
-        std::move(*CreateContentScriptObject(*script).ToValue());
-    value.SetStringPath(scripting::kId, script->id());
+    base::Value::Dict value = CreateContentScriptObject(*script).ToValue();
+    value.Set(scripting::kId, script->id());
 
-    scripts_value->Append(std::move(value));
+    scripts_value.Append(std::move(value));
     persistent_patterns.AddPatterns(script->url_patterns());
   }
 
@@ -576,12 +612,12 @@ void ExtensionUserScriptLoader::DynamicScriptsStorageHelper::SetDynamicScripts(
                                             std::move(persistent_patterns));
   state_store_->SetExtensionValue(extension_id_,
                                   scripting::kRegisteredScriptsStorageKey,
-                                  std::move(scripts_value));
+                                  base::Value(std::move(scripts_value)));
 }
 
 void ExtensionUserScriptLoader::DynamicScriptsStorageHelper::
     OnDynamicScriptsReadFromStorage(DynamicScriptsReadCallback callback,
-                                    std::unique_ptr<base::Value> value) {
+                                    absl::optional<base::Value> value) {
   const Extension* extension = ExtensionRegistry::Get(browser_context_)
                                    ->enabled_extensions()
                                    .GetByID(extension_id_);
@@ -589,8 +625,9 @@ void ExtensionUserScriptLoader::DynamicScriptsStorageHelper::
                        "up if the extension was disabled";
 
   UserScriptList scripts;
-  if (value && value->type() == base::Value::Type::LIST) {
-    UserScriptList dynamic_scripts = ConvertValueToScripts(*extension, *value);
+  if (value && value->is_list()) {
+    UserScriptList dynamic_scripts =
+        ConvertValueToScripts(*extension, value->GetList());
     scripts.insert(scripts.end(),
                    std::make_move_iterator(dynamic_scripts.begin()),
                    std::make_move_iterator(dynamic_scripts.end()));

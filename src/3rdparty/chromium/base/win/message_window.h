@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,8 +28,11 @@ class BASE_EXPORT MessageWindow {
   // Implement this callback to handle messages received by the message window.
   // If the callback returns |false|, the first four parameters are passed to
   // DefWindowProc(). Otherwise, |*result| is returned by the window procedure.
-  using MessageCallback = base::RepeatingCallback<
-      bool(UINT message, WPARAM wparam, LPARAM lparam, LRESULT* result)>;
+  using MessageCallback =
+      base::RepeatingCallback<bool(UINT message,
+                                   WPARAM wparam,
+                                   LPARAM lparam,
+                                   LRESULT* result)>;  // NOLINT
 
   MessageWindow();
 

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "extensions/browser/bad_message.h"
-#include "extensions/browser/blob_holder.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_registry.h"
@@ -232,7 +231,8 @@ void ReceivedBadMessage(T* bad_message_sender,
 class ArgumentListResponseValue
     : public ExtensionFunction::ResponseValueObject {
  public:
-  ArgumentListResponseValue(ExtensionFunction* function, base::Value result) {
+  ArgumentListResponseValue(ExtensionFunction* function,
+                            base::Value::List result) {
     SetFunctionResults(function, std::move(result));
     // It would be nice to DCHECK(error.empty()) but some legacy extension
     // function implementations... I'm looking at chrome.input.ime... do this
@@ -247,7 +247,7 @@ class ArgumentListResponseValue
 class ErrorWithArgumentsResponseValue : public ArgumentListResponseValue {
  public:
   ErrorWithArgumentsResponseValue(ExtensionFunction* function,
-                                  base::Value result,
+                                  base::Value::List result,
                                   const std::string& error)
       : ArgumentListResponseValue(function, std::move(result)) {
     SetFunctionError(function, error);
@@ -386,11 +386,10 @@ void ExtensionFunction::EnsureShutdownNotifierFactoryBuilt() {
 
 void ExtensionFunction::ResponseValueObject::SetFunctionResults(
     ExtensionFunction* function,
-    base::Value results) {
+    base::Value::List results) {
   DCHECK(!function->results_)
       << "Function " << function->name_ << " already has results set.";
-  function->results_ =
-      base::ListValue::From(base::Value::ToUniquePtrValue(std::move(results)));
+  function->results_ = std::move(results);
 }
 
 void ExtensionFunction::ResponseValueObject::SetFunctionError(
@@ -485,8 +484,8 @@ ExtensionFunction::~ExtensionFunction() {
   if (!response_callback_.is_null()) {
     constexpr char kShouldCallMojoCallback[] = "Ignored did_respond()";
     std::move(response_callback_)
-        .Run(ResponseType::FAILED, base::Value(base::Value::Type::LIST),
-             kShouldCallMojoCallback);
+        .Run(ResponseType::FAILED, base::Value::List(), kShouldCallMojoCallback,
+             nullptr);
   }
 #endif  // DCHECK_IS_ON()
 }
@@ -552,11 +551,11 @@ void ExtensionFunction::OnQuotaExceeded(std::string violation_error) {
 void ExtensionFunction::SetArgs(base::Value args) {
   DCHECK(args.is_list());
   DCHECK(!args_.has_value());
-  args_ = std::move(args).TakeListDeprecated();
+  args_ = std::move(args).TakeList();
 }
 
-const base::ListValue* ExtensionFunction::GetResultList() const {
-  return results_.get();
+const base::Value::List* ExtensionFunction::GetResultList() const {
+  return results_ ? &(*results_) : nullptr;
 }
 
 const std::string& ExtensionFunction::GetError() const {
@@ -659,13 +658,13 @@ void ExtensionFunction::OnServiceWorkerAck() {
 }
 
 ExtensionFunction::ResponseValue ExtensionFunction::NoArguments() {
-  return ResponseValue(new ArgumentListResponseValue(
-      this, base::Value(base::Value::Type::LIST)));
+  return ResponseValue(
+      new ArgumentListResponseValue(this, base::Value::List()));
 }
 
 ExtensionFunction::ResponseValue ExtensionFunction::OneArgument(
     base::Value arg) {
-  base::Value args(base::Value::Type::LIST);
+  base::Value::List args;
   args.Append(std::move(arg));
   return ResponseValue(new ArgumentListResponseValue(this, std::move(args)));
 }
@@ -673,25 +672,15 @@ ExtensionFunction::ResponseValue ExtensionFunction::OneArgument(
 ExtensionFunction::ResponseValue ExtensionFunction::TwoArguments(
     base::Value arg1,
     base::Value arg2) {
-  base::Value args(base::Value::Type::LIST);
+  base::Value::List args;
   args.Append(std::move(arg1));
   args.Append(std::move(arg2));
   return ResponseValue(new ArgumentListResponseValue(this, std::move(args)));
 }
 
 ExtensionFunction::ResponseValue ExtensionFunction::ArgumentList(
-    std::vector<base::Value> results) {
-  return ResponseValue(
-      new ArgumentListResponseValue(this, base::Value(std::move(results))));
-}
-
-ExtensionFunction::ResponseValue ExtensionFunction::ArgumentList(
-    std::unique_ptr<base::ListValue> args) {
-  base::Value new_args;
-  if (args)
-    new_args = base::Value::FromUniquePtrValue(std::move(args));
-  return ResponseValue(
-      new ArgumentListResponseValue(this, std::move(new_args)));
+    base::Value::List results) {
+  return ResponseValue(new ArgumentListResponseValue(this, std::move(results)));
 }
 
 ExtensionFunction::ResponseValue ExtensionFunction::Error(std::string error) {
@@ -723,20 +712,10 @@ ExtensionFunction::ResponseValue ExtensionFunction::Error(
 }
 
 ExtensionFunction::ResponseValue ExtensionFunction::ErrorWithArguments(
-    std::vector<base::Value> args,
+    base::Value::List args,
     const std::string& error) {
-  return ResponseValue(new ErrorWithArgumentsResponseValue(
-      this, base::Value(std::move(args)), error));
-}
-
-ExtensionFunction::ResponseValue ExtensionFunction::ErrorWithArguments(
-    std::unique_ptr<base::ListValue> args,
-    const std::string& error) {
-  base::Value new_args;
-  if (args)
-    new_args = base::Value::FromUniquePtrValue(std::move(args));
   return ResponseValue(
-      new ErrorWithArgumentsResponseValue(this, std::move(new_args), error));
+      new ErrorWithArgumentsResponseValue(this, std::move(args), error));
 }
 
 ExtensionFunction::ResponseValue ExtensionFunction::BadMessage() {
@@ -770,20 +749,7 @@ void ExtensionFunction::Respond(ResponseValue result) {
   SendResponseImpl(result->Apply());
 }
 
-void ExtensionFunction::OnResponded() {
-  if (!transferred_blob_uuids_.empty()) {
-    extensions::mojom::Renderer* renderer =
-        extensions::RendererStartupHelperFactory::GetForBrowserContext(
-            browser_context())
-            ->GetRenderer(
-                content::RenderProcessHost::FromID(source_process_id()));
-    if (renderer) {
-      renderer->TransferBlobs(
-          base::BindOnce(&ExtensionFunction::OnTransferBlobsAck, this,
-                         source_process_id(), transferred_blob_uuids_));
-    }
-  }
-}
+void ExtensionFunction::OnResponded() {}
 
 bool ExtensionFunction::HasOptionalArgument(size_t index) {
   DCHECK(args_);
@@ -799,10 +765,10 @@ void ExtensionFunction::WriteToConsole(blink::mojom::ConsoleMessageLevel level,
   render_frame_host_->AddMessageToConsole(level, message);
 }
 
-void ExtensionFunction::SetTransferredBlobUUIDs(
-    const std::vector<std::string>& blob_uuids) {
-  DCHECK(transferred_blob_uuids_.empty());  // Should only be called once.
-  transferred_blob_uuids_ = blob_uuids;
+void ExtensionFunction::SetTransferredBlobs(
+    std::vector<blink::mojom::SerializedBlobPtr> blobs) {
+  DCHECK(transferred_blobs_.empty());  // Should only be called once.
+  transferred_blobs_ = std::move(blobs);
 }
 
 void ExtensionFunction::SendResponseImpl(bool success) {
@@ -819,9 +785,9 @@ void ExtensionFunction::SendResponseImpl(bool success) {
 
   // If results were never set, we send an empty argument list.
   if (!results_)
-    results_ = std::make_unique<base::ListValue>();
+    results_.emplace();
 
-  base::Value results;
+  base::Value::List results;
   if (preserve_results_for_testing_) {
     // Keep |results_| untouched.
     results = results_->Clone();
@@ -829,22 +795,17 @@ void ExtensionFunction::SendResponseImpl(bool success) {
     results = std::move(*results_);
   }
 
-  std::move(response_callback_).Run(response, std::move(results), GetError());
+  extensions::mojom::ExtraResponseDataPtr extra_data;
+  if (!transferred_blobs_.empty()) {
+    extra_data = extensions::mojom::ExtraResponseData::New(
+        std::move(transferred_blobs_));
+  }
+  std::move(response_callback_)
+      .Run(response, std::move(results), GetError(), std::move(extra_data));
   LogUma(success, timer_.Elapsed(), IsKiosk(extension_.get()),
          histogram_value_);
 
   OnResponded();
-}
-
-void ExtensionFunction::OnTransferBlobsAck(
-    int process_id,
-    const std::vector<std::string>& blob_uuids) {
-  content::RenderProcessHost* process =
-      content::RenderProcessHost::FromID(process_id);
-  if (!process)
-    return;
-
-  extensions::BlobHolder::FromRenderProcessHost(process)->DropBlobs(blob_uuids);
 }
 
 ExtensionFunction::ScopedUserGestureForTests::ScopedUserGestureForTests() {

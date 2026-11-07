@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -128,15 +128,15 @@ testing::AssertionResult RequestContentScriptAPITest::RunTest(
 
   // Setup listener for actual injection of script.
   ExtensionTestMessageListener injection_succeeded_listener(
-      kInjectionSucceeded,
-      false /* won't reply */);
+      kInjectionSucceeded);
   injection_succeeded_listener.set_extension_id(extension_->id());
 
   EXPECT_TRUE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/extensions/test_file.html")));
 
   content::WebContents* web_contents =
-      browser() ? browser()->tab_strip_model()->GetActiveWebContents() : NULL;
+      browser() ? browser()->tab_strip_model()->GetActiveWebContents()
+                : nullptr;
   if (!web_contents)
     return testing::AssertionFailure() << "No web contents.";
 
@@ -161,9 +161,7 @@ testing::AssertionResult RequestContentScriptAPITest::CreateAndLoadExtension(
     PermissionOrMatcherType manifest_permission,
     PermissionOrMatcherType script_matcher) {
   // Setup a listener to note when injection rules have been setup.
-  ExtensionTestMessageListener injection_setup_listener(
-      kInjectionSetup,
-      false /* won't reply */);
+  ExtensionTestMessageListener injection_setup_listener(kInjectionSetup);
 
   std::string manifest = base::StringPrintf(kManifest,
                                             kPermissions[manifest_permission]);

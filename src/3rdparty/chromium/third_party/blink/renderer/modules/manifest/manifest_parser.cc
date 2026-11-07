@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,11 @@
 #include "third_party/blink/public/common/manifest/manifest.h"
 #include "third_party/blink/public/common/manifest/manifest_util.h"
 #include "third_party/blink/public/common/mime_util/mime_util.h"
+#include "third_party/blink/public/common/permissions_policy/origin_with_possible_wildcards.h"
 #include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
 #include "third_party/blink/public/common/security/protocol_handler_security_level.h"
 #include "third_party/blink/public/mojom/manifest/manifest.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
 #include "third_party/blink/public/platform/url_conversion.h"
 #include "third_party/blink/public/platform/web_icon_sizes_parser.h"
@@ -26,6 +28,7 @@
 #include "third_party/blink/renderer/modules/manifest/manifest_uma_util.h"
 #include "third_party/blink/renderer/modules/navigatorcontentutils/navigator_content_utils.h"
 #include "third_party/blink/renderer/platform/json/json_parser.h"
+#include "third_party/blink/renderer/platform/json/json_values.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
@@ -42,6 +45,7 @@ namespace {
 static constexpr char kUrlHandlerWildcardPrefix[] = "%2A.";
 // Keep in sync with web_app_origin_association_task.cc.
 static wtf_size_t kMaxUrlHandlersSize = 10;
+static wtf_size_t kMaxShortcutsSize = 10;
 static wtf_size_t kMaxOriginLength = 2000;
 
 // The max number of file extensions an app can handle via the File Handling
@@ -169,6 +173,7 @@ bool ManifestParser::Parse() {
   manifest_->file_handlers = ParseFileHandlers(root_object.get());
   manifest_->protocol_handlers = ParseProtocolHandlers(root_object.get());
   manifest_->url_handlers = ParseUrlHandlers(root_object.get());
+  manifest_->lock_screen = ParseLockScreen(root_object.get());
   manifest_->note_taking = ParseNoteTaking(root_object.get());
   manifest_->related_applications = ParseRelatedApplications(root_object.get());
   manifest_->prefer_related_applications =
@@ -202,7 +207,11 @@ bool ManifestParser::Parse() {
     manifest_->user_preferences = ParseUserPreferences(root_object.get());
   }
 
-  manifest_->handle_links = ParseHandleLinks(root_object.get());
+  if (RuntimeEnabledFeatures::WebAppTabStripEnabled(execution_context_) &&
+      manifest_->display_override.Contains(
+          mojom::blink::DisplayMode::kTabbed)) {
+    manifest_->tab_strip = ParseTabStrip(root_object.get());
+  }
 
   ManifestUmaUtil::ParseSucceeded(manifest_);
 
@@ -425,12 +434,6 @@ String ManifestParser::ParseDescription(const JSONObject* object) {
 
 String ManifestParser::ParseId(const JSONObject* object,
                                const KURL& start_url) {
-  if (!base::FeatureList::IsEnabled(blink::features::kWebAppEnableManifestId)) {
-    ManifestUmaUtil::ParseIdResult(
-        ManifestUmaUtil::ParseIdResultType::kFeatureDisabled);
-    return String();
-  }
-
   if (!start_url.IsValid()) {
     ManifestUmaUtil::ParseIdResult(
         ManifestUmaUtil::ParseIdResultType::kInvalidStartUrl);
@@ -544,6 +547,11 @@ Vector<mojom::blink::DisplayMode> ManifestParser::ParseDisplayOverride(
       display_enum = mojom::blink::DisplayMode::kUndefined;
     }
 
+    if (!base::FeatureList::IsEnabled(blink::features::kWebAppBorderless) &&
+        display_enum == mojom::blink::DisplayMode::kBorderless) {
+      display_enum = mojom::blink::DisplayMode::kUndefined;
+    }
+
     if (display_enum != mojom::blink::DisplayMode::kUndefined)
       display_override.push_back(display_enum);
   }
@@ -588,7 +596,7 @@ Vector<gfx::Size> ManifestParser::ParseIconSizes(const JSONObject* icon) {
   for (auto& size : web_sizes)
     sizes.push_back(size);
 
-  if (sizes.IsEmpty())
+  if (sizes.empty())
     AddErrorInfo("found icon with no valid size.");
   return sizes;
 }
@@ -609,7 +617,7 @@ ManifestParser::ParseIconPurpose(const JSONObject* icon) {
                             keywords);
 
   // "any" is the default if there are no other keywords.
-  if (keywords.IsEmpty()) {
+  if (keywords.empty()) {
     purposes.push_back(mojom::blink::ManifestImageResource::Purpose::ANY);
     return purposes;
   }
@@ -617,7 +625,7 @@ ManifestParser::ParseIconPurpose(const JSONObject* icon) {
   bool unrecognised_purpose = false;
   for (auto& keyword : keywords) {
     keyword = keyword.StripWhiteSpace();
-    if (keyword.IsEmpty())
+    if (keyword.empty())
       continue;
 
     if (EqualIgnoringASCIICase(keyword, "any")) {
@@ -636,7 +644,7 @@ ManifestParser::ParseIconPurpose(const JSONObject* icon) {
   // This implies there was at least one purpose given, but none recognised.
   // Instead of defaulting to "any" (which would not be future proof),
   // invalidate the whole icon.
-  if (purposes.IsEmpty()) {
+  if (purposes.empty()) {
     AddErrorInfo("found icon with no valid purpose; ignoring it.");
     return absl::nullopt;
   }
@@ -650,19 +658,76 @@ ManifestParser::ParseIconPurpose(const JSONObject* icon) {
   return purposes;
 }
 
-Vector<mojom::blink::ManifestImageResourcePtr> ManifestParser::ParseIcons(
-    const JSONObject* object) {
-  return ParseImageResource("icons", object);
+mojom::blink::ManifestScreenshot::FormFactor
+ManifestParser::ParseScreenshotFormFactor(const JSONObject* screenshot) {
+  absl::optional<String> form_factor_str =
+      ParseString(screenshot, "form_factor", Trim(false));
+
+  if (!form_factor_str.has_value()) {
+    return mojom::blink::ManifestScreenshot::FormFactor::kUnknown;
+  }
+
+  String form_factor = form_factor_str.value();
+
+  if (EqualIgnoringASCIICase(form_factor, "wide")) {
+    return mojom::blink::ManifestScreenshot::FormFactor::kWide;
+  } else if (EqualIgnoringASCIICase(form_factor, "narrow")) {
+    return mojom::blink::ManifestScreenshot::FormFactor::kNarrow;
+  }
+
+  AddErrorInfo(
+      "property 'form_factor' on screenshots has an invalid value, ignoring "
+      "it.");
+
+  return mojom::blink::ManifestScreenshot::FormFactor::kUnknown;
 }
 
-Vector<mojom::blink::ManifestImageResourcePtr> ManifestParser::ParseScreenshots(
+String ManifestParser::ParseScreenshotLabel(const JSONObject* object) {
+  absl::optional<String> label = ParseString(object, "label", Trim(true));
+  return label.has_value() ? *label : String();
+}
+
+Vector<mojom::blink::ManifestImageResourcePtr> ManifestParser::ParseIcons(
     const JSONObject* object) {
-  return ParseImageResource("screenshots", object);
+  return ParseImageResourceArray("icons", object);
+}
+
+Vector<mojom::blink::ManifestScreenshotPtr> ManifestParser::ParseScreenshots(
+    const JSONObject* object) {
+  Vector<mojom::blink::ManifestScreenshotPtr> screenshots;
+  JSONValue* json_value = object->Get("screenshots");
+  if (!json_value)
+    return screenshots;
+
+  JSONArray* screenshots_list = object->GetArray("screenshots");
+  if (!screenshots_list) {
+    AddErrorInfo("property 'screenshots' ignored, type array expected.");
+    return screenshots;
+  }
+
+  for (wtf_size_t i = 0; i < screenshots_list->size(); ++i) {
+    JSONObject* screenshot_object = JSONObject::Cast(screenshots_list->at(i));
+    if (!screenshot_object)
+      continue;
+
+    auto screenshot = mojom::blink::ManifestScreenshot::New();
+    auto image = ParseImageResource(screenshot_object);
+    if (!image.has_value())
+      continue;
+
+    screenshot->image = std::move(*image);
+    screenshot->form_factor = ParseScreenshotFormFactor(screenshot_object);
+    screenshot->label = ParseScreenshotLabel(screenshot_object);
+
+    screenshots.push_back(std::move(screenshot));
+  }
+
+  return screenshots;
 }
 
 Vector<mojom::blink::ManifestImageResourcePtr>
-ManifestParser::ParseImageResource(const String& key,
-                                   const JSONObject* object) {
+ManifestParser::ParseImageResourceArray(const String& key,
+                                        const JSONObject* object) {
   Vector<mojom::blink::ManifestImageResourcePtr> icons;
   JSONValue* json_value = object->Get(key);
   if (!json_value)
@@ -675,28 +740,34 @@ ManifestParser::ParseImageResource(const String& key,
   }
 
   for (wtf_size_t i = 0; i < icons_list->size(); ++i) {
-    JSONObject* icon_object = JSONObject::Cast(icons_list->at(i));
-    if (!icon_object)
-      continue;
-
-    auto icon = mojom::blink::ManifestImageResource::New();
-    icon->src = ParseIconSrc(icon_object);
-    // An icon MUST have a valid src. If it does not, it MUST be ignored.
-    if (!icon->src.IsValid())
-      continue;
-
-    icon->type = ParseIconType(icon_object);
-    icon->sizes = ParseIconSizes(icon_object);
-    auto purpose = ParseIconPurpose(icon_object);
-    if (!purpose)
-      continue;
-
-    icon->purpose = std::move(*purpose);
-
-    icons.push_back(std::move(icon));
+    auto icon = ParseImageResource(icons_list->at(i));
+    if (icon.has_value())
+      icons.push_back(std::move(*icon));
   }
 
   return icons;
+}
+
+absl::optional<mojom::blink::ManifestImageResourcePtr>
+ManifestParser::ParseImageResource(const JSONValue* object) {
+  const JSONObject* icon_object = JSONObject::Cast(object);
+  if (!icon_object)
+    return absl::nullopt;
+
+  auto icon = mojom::blink::ManifestImageResource::New();
+  icon->src = ParseIconSrc(icon_object);
+  // An icon MUST have a valid src. If it does not, it MUST be ignored.
+  if (!icon->src.IsValid())
+    return absl::nullopt;
+
+  icon->type = ParseIconType(icon_object);
+  icon->sizes = ParseIconSizes(icon_object);
+  auto purpose = ParseIconPurpose(icon_object);
+  if (!purpose)
+    return absl::nullopt;
+
+  icon->purpose = std::move(*purpose);
+  return icon;
 }
 
 String ManifestParser::ParseShortcutName(const JSONObject* shortcut) {
@@ -740,6 +811,14 @@ Vector<mojom::blink::ManifestShortcutItemPtr> ManifestParser::ParseShortcuts(
   }
 
   for (wtf_size_t i = 0; i < shortcuts_list->size(); ++i) {
+    if (i == kMaxShortcutsSize) {
+      AddErrorInfo("property 'shortcuts' contains more than " +
+                   String::Number(kMaxShortcutsSize) +
+                   " valid elements, only the first " +
+                   String::Number(kMaxShortcutsSize) + " are parsed.");
+      break;
+    }
+
     JSONObject* shortcut_object = JSONObject::Cast(shortcuts_list->at(i));
     if (!shortcut_object)
       continue;
@@ -758,7 +837,7 @@ Vector<mojom::blink::ManifestShortcutItemPtr> ManifestParser::ParseShortcuts(
     shortcut->short_name = ParseShortcutShortName(shortcut_object);
     shortcut->description = ParseShortcutDescription(shortcut_object);
     auto icons = ParseIcons(shortcut_object);
-    if (!icons.IsEmpty())
+    if (!icons.empty())
       shortcut->icons = std::move(icons);
 
     shortcuts.push_back(std::move(shortcut));
@@ -854,7 +933,7 @@ void ManifestParser::ParseFileFilter(
     Vector<mojom::blink::ManifestFileFilterPtr>* files) {
   auto file = mojom::blink::ManifestFileFilter::New();
   file->name = ParseFileFilterName(file_object);
-  if (file->name.IsEmpty()) {
+  if (file->name.empty()) {
     // https://wicg.github.io/web-share-target/level-2/#share_target-member
     // step 7.1 requires that we invalidate this FileFilter if 'name' is an
     // empty string. We also invalidate if 'name' is undefined or not a
@@ -863,7 +942,7 @@ void ManifestParser::ParseFileFilter(
   }
 
   file->accept = ParseFileFilterAccept(file_object);
-  if (file->accept.IsEmpty())
+  if (file->accept.empty())
     return;
 
   files->push_back(std::move(file));
@@ -932,7 +1011,7 @@ ManifestParser::ParseShareTargetParams(const JSONObject* share_target_params) {
   params->url = url.has_value() ? *url : String();
 
   auto files = ParseTargetFiles("files", share_target_params);
-  if (!files.IsEmpty())
+  if (!files.empty())
     params->files = std::move(files);
   return params;
 }
@@ -1061,7 +1140,7 @@ ManifestParser::ParseFileHandler(const JSONObject* file_handler) {
   }
 
   entry->accept = ParseFileHandlerAccept(file_handler->GetJSONObject("accept"));
-  if (entry->accept.IsEmpty()) {
+  if (entry->accept.empty()) {
     AddErrorInfo("FileHandler ignored. Property 'accept' is invalid.");
     return absl::nullopt;
   }
@@ -1142,7 +1221,7 @@ HashMap<String, Vector<String>> ManifestParser::ParseFileHandlerAccept(
       extensions.erase(erase_iter, extensions.end());
     }
 
-    if (!extensions.IsEmpty())
+    if (!extensions.empty())
       result.Set(mimetype, std::move(extensions));
 
     if (extension_overflow > 0)
@@ -1378,6 +1457,37 @@ ManifestParser::ParseUrlHandler(const JSONObject* object) {
   return std::move(url_handler);
 }
 
+KURL ManifestParser::ParseLockScreenStartUrl(const JSONObject* lock_screen) {
+  if (!lock_screen->Get("start_url")) {
+    return KURL();
+  }
+  KURL start_url = ParseURL(lock_screen, "start_url", manifest_url_,
+                            ParseURLRestrictions::kWithinScope);
+  if (!start_url.IsValid()) {
+    // Error already reported by ParseURL.
+    return KURL();
+  }
+
+  return start_url;
+}
+
+mojom::blink::ManifestLockScreenPtr ManifestParser::ParseLockScreen(
+    const JSONObject* manifest) {
+  if (!manifest->Get("lock_screen")) {
+    return nullptr;
+  }
+
+  const JSONObject* lock_screen_object = manifest->GetJSONObject("lock_screen");
+  if (!lock_screen_object) {
+    AddErrorInfo("property 'lock_screen' ignored, type object expected.");
+    return nullptr;
+  }
+  auto lock_screen = mojom::blink::ManifestLockScreen::New();
+  lock_screen->start_url = ParseLockScreenStartUrl(lock_screen_object);
+
+  return lock_screen;
+}
+
 KURL ManifestParser::ParseNoteTakingNewNoteUrl(const JSONObject* note_taking) {
   if (!note_taking->Get("new_note_url")) {
     return KURL();
@@ -1453,7 +1563,7 @@ ManifestParser::ParseRelatedApplications(const JSONObject* object) {
     auto application = mojom::blink::ManifestRelatedApplication::New();
     application->platform = ParseRelatedApplicationPlatform(application_object);
     // "If platform is undefined, move onto the next item if any are left."
-    if (application->platform.IsEmpty()) {
+    if (application->platform.empty()) {
       AddErrorInfo(
           "'platform' is a required field, related application"
           " ignored.");
@@ -1465,7 +1575,7 @@ ManifestParser::ParseRelatedApplications(const JSONObject* object) {
     // "If both id and url are undefined, move onto the next item if any are
     // left."
     if ((!application->url.has_value() || !application->url->IsValid()) &&
-        application->id.IsEmpty()) {
+        application->id.empty()) {
       AddErrorInfo(
           "one of 'url' or 'id' is required, related application"
           " ignored.");
@@ -1509,7 +1619,8 @@ bool ManifestParser::ParseIsolatedStorage(const JSONObject* object) {
 
 Vector<blink::ParsedPermissionsPolicyDeclaration>
 ManifestParser::ParseIsolatedAppPermissions(const JSONObject* object) {
-  PermissionsPolicyParser::Node policy;
+  PermissionsPolicyParser::Node policy{
+      OriginWithPossibleWildcards::NodeType::kHeader};
 
   JSONValue* json_value = object->Get("permissions_policy");
   if (!json_value)
@@ -1540,11 +1651,13 @@ ManifestParser::ParseIsolatedAppPermissions(const JSONObject* object) {
     new_policy.feature_name = feature;
     for (const auto& origin : allowlist) {
       // PermissionsPolicyParser expects origin strings to be wrapped in single
-      // quotes, as they would be in the header's permissions policy string.
-      String wrapped_origin = "'" + origin + "'";
+      // quotes, as they would be in the header's permissions policy string. The
+      // asterisk is a token, which does not need to be wrapped in single
+      // quotes.
+      String wrapped_origin = (origin == "*" ? origin : "'" + origin + "'");
       new_policy.allowlist.push_back(wrapped_origin);
     }
-    policy.push_back(new_policy);
+    policy.declarations.push_back(new_policy);
   }
 
   PolicyParserMessageBuffer logger(
@@ -1606,8 +1719,6 @@ Vector<String> ManifestParser::ParseOriginAllowlist(
 
 mojom::blink::ManifestLaunchHandlerPtr ManifestParser::ParseLaunchHandler(
     const JSONObject* object) {
-  using RouteTo = mojom::blink::ManifestLaunchHandler::RouteTo;
-
   if (!RuntimeEnabledFeatures::WebAppLaunchHandlerEnabled(execution_context_))
     return nullptr;
 
@@ -1622,34 +1733,12 @@ mojom::blink::ManifestLaunchHandlerPtr ManifestParser::ParseLaunchHandler(
     return nullptr;
   }
 
-  ParsedRouteTo parsed_route_to =
-      ParseFirstValidEnum<absl::optional<ParsedRouteTo>>(
-          launch_handler_object, "route_to", &RouteToFromString,
+  using ClientMode = mojom::blink::ManifestLaunchHandler::ClientMode;
+  return mojom::blink::ManifestLaunchHandler::New(
+      ParseFirstValidEnum<absl::optional<ClientMode>>(
+          launch_handler_object, "client_mode", &ClientModeFromString,
           /*invalid_value=*/absl::nullopt)
-          .value_or(ParsedRouteTo{});
-
-  // route_to: existing-client and navigate_existing_client were removed in
-  // favor of existing-client-navigate and existing-client-retain.
-  if (parsed_route_to.legacy_existing_client_value &&
-      base::FeatureList::IsEnabled(
-          blink::features::kWebAppEnableLaunchHandlerV1API)) {
-    NavigateExistingClient navigate_existing_client =
-        ParseFirstValidEnum<absl::optional<NavigateExistingClient>>(
-            launch_handler_object, "navigate_existing_client",
-            &NavigateExistingClientFromString,
-            /*invalid_value=*/absl::nullopt)
-            .value_or(NavigateExistingClient::kAlways);
-    switch (navigate_existing_client) {
-      case NavigateExistingClient::kAlways:
-        parsed_route_to.route_to = RouteTo::kExistingClientNavigate;
-        break;
-      case NavigateExistingClient::kNever:
-        parsed_route_to.route_to = RouteTo::kExistingClientRetain;
-        break;
-    }
-  }
-
-  return mojom::blink::ManifestLaunchHandler::New(parsed_route_to.route_to);
+          .value_or(ClientMode::kAuto));
 }
 
 HashMap<String, mojom::blink::ManifestTranslationItemPtr>
@@ -1757,29 +1846,94 @@ mojom::blink::ManifestUserPreferencesPtr ManifestParser::ParseUserPreferences(
     return nullptr;
   }
 
-  result->color_scheme_dark =
-      ParsePreferenceOverrides(user_preferences_map, "color_scheme_dark");
+  if (user_preferences_map->Get("color_scheme")) {
+    JSONObject* color_scheme_map =
+        user_preferences_map->GetJSONObject("color_scheme");
+    if (!color_scheme_map) {
+      AddErrorInfo("property 'color_scheme' ignored, object expected.");
+      return nullptr;
+    }
+    result->color_scheme_dark =
+        ParsePreferenceOverrides(color_scheme_map, "dark");
+  } else {
+    // TODO(crbug.com/1318305): Remove this path once the new format has become
+    // the norm.
+    result->color_scheme_dark =
+        ParsePreferenceOverrides(user_preferences_map, "color_scheme_dark");
+  }
 
   return result;
 }
 
-mojom::blink::HandleLinks ManifestParser::ParseHandleLinks(
+mojom::blink::ManifestTabStripPtr ManifestParser::ParseTabStrip(
     const JSONObject* object) {
-  // Return kUndefined if feature is disabled instead of kAuto to indicate that
-  // no behavior that depends on HandleLinks should be active.
-  if (!RuntimeEnabledFeatures::WebAppHandleLinksEnabled())
-    return mojom::blink::HandleLinks::kUndefined;
+  if (!object->Get("tab_strip"))
+    return nullptr;
 
-  const mojom::blink::HandleLinks enum_value =
-      ParseFirstValidEnum<mojom::blink::HandleLinks>(
-          object, "handle_links", &HandleLinksFromString,
-          /*invalid_value=*/mojom::blink::HandleLinks::kUndefined);
+  JSONObject* tab_strip_object = object->GetJSONObject("tab_strip");
+  if (!tab_strip_object) {
+    AddErrorInfo("property 'tab_strip' ignored, object expected.");
+    return nullptr;
+  }
 
-  // invalid_value cannot be kAuto because kAuto is a valid input string.
-  // However, if no valid value is parsed, the value returned should be kAuto.
-  if (enum_value == mojom::blink::HandleLinks::kUndefined)
-    return mojom::blink::HandleLinks::kAuto;
-  return enum_value;
+  auto result = mojom::blink::ManifestTabStrip::New();
+
+  JSONValue* home_tab_value = tab_strip_object->Get("home_tab");
+  if (home_tab_value && home_tab_value->GetType() == JSONValue::kTypeObject) {
+    JSONObject* home_tab_object = tab_strip_object->GetJSONObject("home_tab");
+    JSONValue* home_tab_icons = home_tab_object->Get("icons");
+
+    auto home_tab_params = mojom::blink::HomeTabParams::New();
+    String string_value;
+    if (home_tab_icons && !(home_tab_icons->AsString(&string_value) &&
+                            string_value.LowerASCII() == "auto")) {
+      home_tab_params->icons = ParseIcons(home_tab_object);
+    }
+    result->home_tab =
+        mojom::blink::HomeTabUnion::NewParams(std::move(home_tab_params));
+  } else {
+    result->home_tab = mojom::blink::HomeTabUnion::NewVisibility(
+        ParseTabStripMemberVisibility(home_tab_value));
+  }
+
+  JSONValue* new_tab_button_value = tab_strip_object->Get("new_tab_button");
+  if (new_tab_button_value &&
+      new_tab_button_value->GetType() == JSONValue::kTypeObject) {
+    JSONObject* new_tab_button_object =
+        tab_strip_object->GetJSONObject("new_tab_button");
+    JSONValue* new_tab_button_url = new_tab_button_object->Get("url");
+
+    auto new_tab_button_params = mojom::blink::NewTabButtonParams::New();
+    String string_value;
+    if (new_tab_button_url && !(new_tab_button_url->AsString(&string_value) &&
+                                string_value.LowerASCII() == "auto")) {
+      KURL url = ParseURL(new_tab_button_object, "url", manifest_url_,
+                          ParseURLRestrictions::kWithinScope);
+      if (!url.IsNull())
+        new_tab_button_params->url = url;
+    }
+    result->new_tab_button = mojom::blink::NewTabButtonUnion::NewParams(
+        std::move(new_tab_button_params));
+  } else {
+    result->new_tab_button = mojom::blink::NewTabButtonUnion::NewVisibility(
+        ParseTabStripMemberVisibility(new_tab_button_value));
+  }
+
+  return result;
+}
+
+mojom::blink::TabStripMemberVisibility
+ManifestParser::ParseTabStripMemberVisibility(const JSONValue* json_value) {
+  if (!json_value)
+    return mojom::blink::TabStripMemberVisibility::kAuto;
+
+  String string_value;
+  if (json_value->AsString(&string_value) &&
+      string_value.LowerASCII() == "absent") {
+    return mojom::blink::TabStripMemberVisibility::kAbsent;
+  }
+
+  return mojom::blink::TabStripMemberVisibility::kAuto;
 }
 
 void ManifestParser::AddErrorInfo(const String& error_msg,

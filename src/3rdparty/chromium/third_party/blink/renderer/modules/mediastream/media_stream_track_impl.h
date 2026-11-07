@@ -36,6 +36,7 @@
 #include "third_party/blink/renderer/modules/mediastream/media_stream_track.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/mediastream/media_constraints.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
@@ -84,7 +85,7 @@ class MODULES_EXPORT MediaStreamTrackImpl : public MediaStreamTrack,
   String ContentHint() const override;
   void SetContentHint(const String&) override;
   String readyState() const override;
-  MediaStreamTrack* clone(ScriptState*) override;
+  MediaStreamTrack* clone(ExecutionContext*) override;
   void stopTrack(ExecutionContext*) override;
   MediaTrackCapabilities* getCapabilities() const override;
   MediaTrackConstraints* getConstraints() const override;
@@ -95,7 +96,9 @@ class MODULES_EXPORT MediaStreamTrackImpl : public MediaStreamTrack,
 
   // This function is called when constrains have been successfully applied.
   // Called from UserMediaRequest when it succeeds. It is not IDL-exposed.
-  void SetConstraints(const MediaConstraints&) override;
+  void SetConstraints(const MediaConstraints& constraints) override {
+    constraints_ = constraints;
+  }
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(mute, kMute)
   DEFINE_ATTRIBUTE_EVENT_LISTENER(unmute, kUnmute)
@@ -127,8 +130,9 @@ class MODULES_EXPORT MediaStreamTrackImpl : public MediaStreamTrack,
 
   ImageCapture* GetImageCapture() override { return image_capture_; }
 
-  absl::optional<base::UnguessableToken> serializable_session_id()
-      const override;
+  absl::optional<const MediaStreamDevice> device() const override;
+
+  void BeingTransferred(const base::UnguessableToken& transfer_id) override;
 
 #if !BUILDFLAG(IS_ANDROID)
   // Only relevant for focusable streams (FocusableMediaStreamTrack).
@@ -150,8 +154,14 @@ class MODULES_EXPORT MediaStreamTrackImpl : public MediaStreamTrack,
   // this class as well as of their own class.
   void CloneInternal(MediaStreamTrackImpl*);
 
+  std::unique_ptr<MediaStreamTrackPlatform> ClonePlatformTrack();
+
  private:
   friend class CanvasCaptureMediaStreamTrack;
+
+  // MediaStreamTrack
+  void applyConstraints(ScriptPromiseResolver*,
+                        const MediaTrackConstraints*) override;
 
   // MediaStreamSource::Observer
   void SourceChangedState() override;
@@ -181,6 +191,8 @@ class MODULES_EXPORT MediaStreamTrackImpl : public MediaStreamTrack,
   Member<ImageCapture> image_capture_;
   WeakMember<ExecutionContext> execution_context_;
   HeapHashSet<WeakMember<MediaStreamTrack::Observer>> observers_;
+  bool muted_ = false;
+  MediaConstraints constraints_;
 };
 
 }  // namespace blink

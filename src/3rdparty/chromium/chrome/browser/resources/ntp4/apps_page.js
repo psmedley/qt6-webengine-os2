@@ -1,19 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {assert} from 'chrome://resources/js/assert.m.js';
+import {assert} from 'chrome://resources/js/assert.js';
 import {addSingletonGetter} from 'chrome://resources/js/cr.m.js';
-import {decorate, toCssPx} from 'chrome://resources/js/cr/ui.m.js';
-import {contextMenuHandler} from 'chrome://resources/js/cr/ui/context_menu_handler.m.js';
-import {Menu} from 'chrome://resources/js/cr/ui/menu.m.js';
-import {MenuItem} from 'chrome://resources/js/cr/ui/menu_item.m.js';
+import {decorate, toCssPx} from 'chrome://resources/js/cr/ui.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {$, appendParam, findAncestorByClass} from 'chrome://resources/js/util.m.js';
+import {$, appendParam} from 'chrome://resources/js/util.js';
 
 import {AppInfo} from './app_info.js';
+import {contextMenuHandler} from './context_menu_handler.js';
+import {Menu} from './menu.js';
+import {MenuItem} from './menu_item.js';
 import {getAppsPageIndex, getCardSlider} from './new_tab.js';
 import {getCurrentlyDraggingTile, setCurrentDropEffect, TilePage} from './tile_page.js';
+import {findAncestorByClass} from './util.js';
 
 
 
@@ -34,7 +35,7 @@ const DRAG_SOURCE = {
   OTHER_APPS_PANE: 1,
   MOST_VISITED_PANE: 2,  // Deprecated.
   BOOKMARKS_PANE: 3,     // Deprecated.
-  OUTSIDE_NTP: 4
+  OUTSIDE_NTP: 4,
 };
 const DRAG_SOURCE_LIMIT = DRAG_SOURCE.OUTSIDE_NTP + 1;
 
@@ -42,7 +43,7 @@ const DRAG_SOURCE_LIMIT = DRAG_SOURCE.OUTSIDE_NTP + 1;
 const RUN_ON_OS_LOGIN_MODE = {
   NOT_RUN: 'run_on_os_login_mode_not_run',
   WINDOWED: 'run_on_os_login_mode_windowed',
-  MINIMIZED: 'run_on_os_login_mode_minimized'
+  MINIMIZED: 'run_on_os_login_mode_minimized',
 };
 
 // The fraction of the app tile size that the icon uses.
@@ -154,8 +155,10 @@ AppContextMenu.prototype = {
   forAllLaunchTypes_(f) {
     // Order matters: index matches launchType id.
     const launchTypes = [
-      this.launchPinnedTab_, this.launchRegularTab_, this.launchFullscreen_,
-      this.launchNewWindow_
+      this.launchPinnedTab_,
+      this.launchRegularTab_,
+      this.launchFullscreen_,
+      this.launchNewWindow_,
     ];
 
     for (let i = 0; i < launchTypes.length; ++i) {
@@ -181,11 +184,13 @@ AppContextMenu.prototype = {
     this.forAllLaunchTypes_(function(launchTypeButton, id) {
       launchTypeButton.disabled = false;
       launchTypeButton.checked = app.appData.launch_type === id;
-      // There are two cases when a launch type is hidden:
-      //  1. if the launch type can't be changed.
-      //  2. type is anything except launchTypeWindow
-      launchTypeButton.hidden = !app.appData.mayChangeLaunchType ||
-          launchTypeButton !== launchTypeWindow;
+      // There are three cases when a launch type is hidden:
+      //  1. type is anything except |launchTypeWindow| or
+      //  2. if the launch type can't be changed or
+      //  3. if the launch type is hidden.
+      launchTypeButton.hidden = launchTypeButton !== launchTypeWindow ||
+          !app.appData.mayChangeLaunchType || app.appData.hideDisplayMode;
+
       if (!launchTypeButton.hidden) {
         hasLaunchType = true;
       }
@@ -295,7 +300,7 @@ AppContextMenu.prototype = {
     }
 
     chrome.send('runOnOsLogin', [app.appData.id, mode]);
-  }
+  },
 };
 
 /**
@@ -328,6 +333,7 @@ App.prototype = {
     assert(this.appData_.id, 'Got an app without an ID');
     this.id = this.appData_.id;
     this.setAttribute('role', 'menuitem');
+    this.setAttribute('aria-label', this.appData_.full_name);
 
     this.className = 'app focusable';
 
@@ -496,8 +502,14 @@ App.prototype = {
     }
 
     chrome.send('launchApp', [
-      this.appId, APP_LAUNCH.NTP_APPS_MAXIMIZED, 'chrome-ntp-icon', e.button,
-      e.altKey, e.ctrlKey, e.metaKey, e.shiftKey
+      this.appId,
+      APP_LAUNCH.NTP_APPS_MAXIMIZED,
+      'chrome-ntp-icon',
+      e.button,
+      e.altKey,
+      e.ctrlKey,
+      e.metaKey,
+      e.shiftKey,
     ]);
 
     // Don't allow the click to trigger a link or anything
@@ -516,8 +528,14 @@ App.prototype = {
       e.stopPropagation();
     } else if (e.key === 'Enter') {
       chrome.send('launchApp', [
-        this.appId, APP_LAUNCH.NTP_APPS_MAXIMIZED, '', 0, e.altKey, e.ctrlKey,
-        e.metaKey, e.shiftKey
+        this.appId,
+        APP_LAUNCH.NTP_APPS_MAXIMIZED,
+        '',
+        0,
+        e.altKey,
+        e.ctrlKey,
+        e.metaKey,
+        e.shiftKey,
       ]);
       e.preventDefault();
       e.stopPropagation();

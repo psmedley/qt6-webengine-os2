@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,8 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/no_destructor.h"
+#include "base/ranges/algorithm.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -28,13 +30,21 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#if !defined(TOOLKIT_QT)
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#endif  // !defined(TOOLKIT_QT)
 #include "chrome/browser/devtools/devtools_file_watcher.h"
+#if !defined(TOOLKIT_QT)
 #include "chrome/browser/devtools/devtools_window.h"
+#endif  // !defined(TOOLKIT_QT)
 #include "chrome/browser/devtools/url_constants.h"
+#if !defined(TOOLKIT_QT)
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_util.h"
+#endif  // !defined(TOOLKIT_QT)
 #include "chrome/browser/profiles/profile.h"
+#if !defined(TOOLKIT_QT)
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/sync/sync_service_factory.h"
@@ -44,16 +54,21 @@
 #include "chrome/browser/ui/hats/hats_service.h"
 #include "chrome/browser/ui/hats/hats_service_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#endif  // !defined(TOOLKIT_QT)
 #include "chrome/common/chrome_switches.h"
+#if !defined(TOOLKIT_QT)
 #include "chrome/common/extensions/chrome_manifest_url_handlers.h"
+#endif  // !defined(TOOLKIT_QT)
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/infobars/content/content_infobar_manager.h"
 #include "components/prefs/scoped_user_pref_update.h"
+#if !defined(TOOLKIT_QT)
 #include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync_preferences/pref_service_syncable.h"
+#endif  // !defined(TOOLKIT_QT)
 #include "components/zoom/page_zoom.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -76,13 +91,14 @@
 #include "content/public/browser/web_ui_url_loader_factory.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/url_utils.h"
+#if !defined(TOOLKIT_QT)
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/permissions/permissions_data.h"
+#endif  // !defined(TOOLKIT_QT)
 #include "google_apis/google_api_keys.h"
 #include "ipc/ipc_channel.h"
-#include "net/base/escape.h"
 #include "net/base/net_errors.h"
 #include "net/base/url_util.h"
 #include "net/http/http_response_headers.h"
@@ -95,6 +111,9 @@
 #include "third_party/blink/public/public_buildflags.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/resource/resource_bundle.h"
+#if defined(TOOLKIT_QT)
+#include "content/public/browser/web_contents_delegate.h"
+#endif  // defined(TOOLKIT_QT)
 
 using base::DictionaryValue;
 using content::BrowserThread;
@@ -142,6 +161,7 @@ base::DictionaryValue CreateFileSystemValue(
   return file_system_value;
 }
 
+#if !defined(TOOLKIT_QT)
 Browser* FindBrowser(content::WebContents* web_contents) {
   for (auto* browser : *BrowserList::GetInstance()) {
     int tab_index = browser->tab_strip_model()->GetIndexOfWebContents(
@@ -151,6 +171,7 @@ Browser* FindBrowser(content::WebContents* web_contents) {
   }
   return nullptr;
 }
+#endif  // !defined(TOOLKIT_QT)
 
 // DevToolsUIDefaultDelegate --------------------------------------------------
 
@@ -183,7 +204,9 @@ class DefaultBindingsDelegate : public DevToolsUIBindings::Delegate {
   void ReadyForTest() override {}
   void ConnectionReady() override {}
   void SetOpenNewWindowForPopups(bool value) override {}
+#if !defined(TOOLKIT_QT)
   infobars::ContentInfoBarManager* GetInfoBarManager() override;
+#endif  // !defined(TOOLKIT_QT)
   void RenderProcessGone(bool crashed) override {}
   void ShowCertificateViewer(const std::string& cert_chain) override {}
   content::WebContents* web_contents_;
@@ -198,17 +221,21 @@ void DefaultBindingsDelegate::OpenInNewTab(const std::string& url) {
   content::OpenURLParams params(GURL(url), content::Referrer(),
                                 WindowOpenDisposition::NEW_FOREGROUND_TAB,
                                 ui::PAGE_TRANSITION_LINK, false);
+#if !defined(TOOLKIT_QT)
   Browser* browser = FindBrowser(web_contents_);
   browser->OpenURL(params);
+#endif  // !defined(TOOLKIT_QT)
 }
 
 void DefaultBindingsDelegate::InspectedContentsClosing() {
   web_contents_->ClosePage();
 }
 
+#if !defined(TOOLKIT_QT)
 infobars::ContentInfoBarManager* DefaultBindingsDelegate::GetInfoBarManager() {
   return infobars::ContentInfoBarManager::FromWebContents(web_contents_);
 }
+#endif  // !defined(TOOLKIT_QT)
 
 std::unique_ptr<base::DictionaryValue> BuildObjectForResponse(
     const net::HttpResponseHeaders* rh,
@@ -299,8 +326,8 @@ std::string SanitizeRemoteBase(const std::string& value) {
 }
 
 std::string SanitizeRemoteFrontendURL(const std::string& value) {
-  GURL url(net::UnescapeBinaryURLComponent(
-      value, net::UnescapeRule::REPLACE_PLUS_WITH_SPACE));
+  GURL url(base::UnescapeBinaryURLComponent(
+      value, base::UnescapeRule::REPLACE_PLUS_WITH_SPACE));
   std::string path = url.path();
   std::vector<std::string> parts = base::SplitString(
       path, "/", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
@@ -313,20 +340,15 @@ std::string SanitizeRemoteFrontendURL(const std::string& value) {
                             revision.c_str(), filename.c_str());
   std::string sanitized = SanitizeFrontendURL(url, url::kHttpsScheme,
       kRemoteFrontendDomain, path, true).spec();
-  return net::EscapeQueryParamValue(sanitized, false);
+  return base::EscapeQueryParamValue(sanitized, false);
 }
 
 std::string SanitizeEnabledExperiments(const std::string& value) {
-  bool valid = std::find_if_not(value.begin(), value.end(), [](char ch) {
-                 if (base::IsAsciiAlpha(ch) || base::IsAsciiDigit(ch) ||
-                     ch == ';' || ch == '_')
-                   return true;
-                 return false;
-               }) == value.end();
-  if (!valid) {
-    return std::string();
-  }
-  return value;
+  const auto is_legal = [](char ch) {
+    return base::IsAsciiAlpha(ch) || base::IsAsciiDigit(ch) || ch == ';' ||
+           ch == '_';
+  };
+  return base::ranges::all_of(value, is_legal) ? value : std::string();
 }
 
 std::string SanitizeFrontendQueryParam(
@@ -359,6 +381,9 @@ std::string SanitizeFrontendQueryParam(
 
   if (key == "enabledExperiments")
     return SanitizeEnabledExperiments(value);
+
+  if (key == "targetType" && value == "tab")
+    return value;
 
   return std::string();
 }
@@ -654,7 +679,9 @@ std::string DevToolsUIBindings::GetTypeForMetrics() {
 
 DevToolsUIBindings::DevToolsUIBindings(content::WebContents* web_contents)
     : profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())),
+#if !defined(TOOLKIT_QT)
       android_bridge_(DevToolsAndroidBridge::Factory::GetForProfile(profile_)),
+#endif  // !defined(TOOLKIT_QT)
       web_contents_(web_contents),
       delegate_(new DefaultBindingsDelegate(web_contents_)),
       devices_updates_enabled_(false),
@@ -687,30 +714,26 @@ DevToolsUIBindings::~DevToolsUIBindings() {
   // Remove self from global list.
   DevToolsUIBindingsList& instances =
       DevToolsUIBindings::GetDevToolsUIBindings();
-  auto it(std::find(instances.begin(), instances.end(), this));
+  auto it = base::ranges::find(instances, this);
   DCHECK(it != instances.end());
   instances.erase(it);
 }
 
 // content::DevToolsFrontendHost::Delegate implementation ---------------------
 void DevToolsUIBindings::HandleMessageFromDevToolsFrontend(
-    base::Value message) {
+    base::Value::Dict message) {
   if (!frontend_host_)
     return;
-  const std::string* method = nullptr;
-  base::Value* params = nullptr;
-  if (message.is_dict()) {
-    method = message.FindStringKey(kFrontendHostMethod);
-    params = message.FindKey(kFrontendHostParams);
-  }
+  const std::string* method = message.FindString(kFrontendHostMethod);
+  base::Value* params = message.Find(kFrontendHostParams);
   if (!method || (params && !params->is_list())) {
     LOG(ERROR) << "Invalid message was sent to embedder: " << message;
     return;
   }
-  int id = message.FindIntKey(kFrontendHostId).value_or(0);
-  std::vector<base::Value> params_list;
+  int id = message.FindInt(kFrontendHostId).value_or(0);
+  base::Value::List params_list;
   if (params)
-    params_list = std::move(*params).TakeListDeprecated();
+    params_list = std::move(*params).TakeList();
   embedder_message_dispatcher_->Dispatch(
       base::BindOnce(&DevToolsUIBindings::SendMessageAck,
                      weak_factory_.GetWeakPtr(), id),
@@ -878,8 +901,12 @@ void DevToolsUIBindings::LoadNetworkResource(DispatchCallback callback,
             std::move(pending_remote)));
   } else if (content::HasWebUIScheme(gurl)) {
     content::WebContents* target_tab =
+#if !defined(TOOLKIT_QT)
         DevToolsWindow::AsDevToolsWindow(web_contents_)
             ->GetInspectedWebContents();
+#else
+        agent_host_->GetWebContents();
+#endif  // !defined(TOOLKIT_QT)
 #if defined(NDEBUG)
     // In release builds, allow files from the chrome://, devtools:// and
     // chrome-untrusted:// schemes if a custom devtools front-end was specified.
@@ -899,7 +926,8 @@ void DevToolsUIBindings::LoadNetworkResource(DispatchCallback callback,
     if (allow_web_ui_scheme && target_tab &&
         target_tab->GetLastCommittedURL().scheme() == gurl.scheme()) {
       std::vector<std::string> allowed_webui_hosts;
-      content::RenderFrameHost* frame_host = web_contents()->GetMainFrame();
+      content::RenderFrameHost* frame_host =
+          web_contents()->GetPrimaryMainFrame();
 
       mojo::PendingRemote<network::mojom::URLLoaderFactory> pending_remote =
           content::CreateWebUIURLLoaderFactory(
@@ -917,10 +945,15 @@ void DevToolsUIBindings::LoadNetworkResource(DispatchCallback callback,
     }
   } else {
     content::WebContents* target_tab =
+#if !defined(TOOLKIT_QT)
         DevToolsWindow::AsDevToolsWindow(web_contents_)
             ->GetInspectedWebContents();
+#else
+        agent_host_->GetWebContents();
+#endif  // !defined(TOOLKIT_QT)
     if (target_tab) {
-      auto* partition = target_tab->GetMainFrame()->GetStoragePartition();
+      auto* partition =
+          target_tab->GetPrimaryMainFrame()->GetStoragePartition();
       url_loader_factory = partition->GetURLLoaderFactoryForBrowserProcess();
     } else {
       base::DictionaryValue response;
@@ -942,7 +975,9 @@ void DevToolsUIBindings::OpenInNewTab(const std::string& url) {
 void DevToolsUIBindings::ShowItemInFolder(const std::string& file_system_path) {
   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
         frontend_host_);
+#if !defined(TOOLKIT_QT)
   file_helper_->ShowItemInFolder(file_system_path);
+#endif  // !defined(TOOLKIT_QT)
 }
 
 void DevToolsUIBindings::SaveToFile(const std::string& url,
@@ -976,8 +1011,12 @@ void DevToolsUIBindings::AddFileSystem(const std::string& type) {
   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
         frontend_host_);
   file_helper_->AddFileSystem(
+#if !defined(TOOLKIT_QT)
       type, base::BindRepeating(&DevToolsUIBindings::ShowDevToolsInfoBar,
                                 weak_factory_.GetWeakPtr()));
+#else
+      type, base::NullCallback());
+#endif  // !defined(TOOLKIT_QT)
 }
 
 void DevToolsUIBindings::RemoveFileSystem(const std::string& file_system_path) {
@@ -992,8 +1031,12 @@ void DevToolsUIBindings::UpgradeDraggedFileSystemPermissions(
         frontend_host_);
   file_helper_->UpgradeDraggedFileSystemPermissions(
       file_system_url,
+#if !defined(TOOLKIT_QT)
       base::BindRepeating(&DevToolsUIBindings::ShowDevToolsInfoBar,
                           weak_factory_.GetWeakPtr()));
+#else
+      base::NullCallback());
+#endif  // !defined(TOOLKIT_QT)
 }
 
 void DevToolsUIBindings::IndexPath(
@@ -1151,6 +1194,7 @@ void DevToolsUIBindings::SendPortForwardingStatus(base::Value status) {
 }
 
 void DevToolsUIBindings::SetDevicesUpdatesEnabled(bool enabled) {
+#if !defined(TOOLKIT_QT)
   if (devices_updates_enabled_ == enabled)
     return;
   devices_updates_enabled_ = enabled;
@@ -1191,10 +1235,12 @@ void DevToolsUIBindings::SetDevicesUpdatesEnabled(bool enabled) {
     pref_change_registrar_.RemoveAll();
     SendPortForwardingStatus(base::DictionaryValue());
   }
+#endif  // !defined(TOOLKIT_QT)
 }
 
 void DevToolsUIBindings::PerformActionOnRemotePage(const std::string& page_id,
                                                    const std::string& action) {
+#if !defined(TOOLKIT_QT)
   if (!remote_targets_handler_)
     return;
   scoped_refptr<content::DevToolsAgentHost> host =
@@ -1209,13 +1255,16 @@ void DevToolsUIBindings::PerformActionOnRemotePage(const std::string& page_id,
     host->Activate();
   else if (action == kRemotePageActionClose)
     host->Close();
+#endif  // !defined(TOOLKIT_QT)
 }
 
 void DevToolsUIBindings::OpenRemotePage(const std::string& browser_id,
                                         const std::string& url) {
+#if !defined(TOOLKIT_QT)
   if (!remote_targets_handler_)
     return;
   remote_targets_handler_->Open(browser_id, url);
+#endif  // !defined(TOOLKIT_QT)
 }
 
 void DevToolsUIBindings::OpenNodeFrontend() {
@@ -1259,6 +1308,7 @@ void DevToolsUIBindings::GetSyncInformation(DispatchCallback callback) {
 
 base::Value DevToolsUIBindings::GetSyncInformationForProfile(Profile* profile) {
   base::Value result(base::Value::Type::DICTIONARY);
+#if !defined(TOOLKIT_QT)
   syncer::SyncService* sync_service =
       SyncServiceFactory::GetForProfile(profile);
   if (!sync_service) {
@@ -1292,6 +1342,7 @@ base::Value DevToolsUIBindings::GetSyncInformationForProfile(Profile* profile) {
       account_image.As1xPNGBytes();
   if (png_bytes->size() > 0)
     result.SetStringKey("accountImage", base::Base64Encode(*png_bytes));
+#endif  // !defined(TOOLKIT_QT)
 
   return result;
 }
@@ -1368,6 +1419,7 @@ void DevToolsUIBindings::RecordUserMetricsAction(const std::string& name) {
 void DevToolsUIBindings::SendJsonRequest(DispatchCallback callback,
                                          const std::string& browser_id,
                                          const std::string& url) {
+#if !defined(TOOLKIT_QT)
   if (!android_bridge_) {
     std::move(callback).Run(nullptr);
     return;
@@ -1376,6 +1428,7 @@ void DevToolsUIBindings::SendJsonRequest(DispatchCallback callback,
       browser_id, url,
       base::BindOnce(&DevToolsUIBindings::JsonReceived,
                      weak_factory_.GetWeakPtr(), std::move(callback)));
+#endif  // !defined(TOOLKIT_QT)
 }
 
 void DevToolsUIBindings::JsonReceived(DispatchCallback callback,
@@ -1389,6 +1442,7 @@ void DevToolsUIBindings::JsonReceived(DispatchCallback callback,
   std::move(callback).Run(&message_value);
 }
 
+#if !defined(TOOLKIT_QT)
 void DevToolsUIBindings::DeviceCountChanged(int count) {
   CallClientMethod("DevToolsAPI", "deviceCountUpdated", base::Value(count));
 }
@@ -1397,6 +1451,7 @@ void DevToolsUIBindings::DevicesUpdated(const std::string& source,
                                         const base::Value& targets) {
   CallClientMethod("DevToolsAPI", "devicesUpdated", targets.Clone());
 }
+#endif  // !defined(TOOLKIT_QT)
 
 void DevToolsUIBindings::FileSavedAs(const std::string& url,
                                      const std::string& file_system_path) {
@@ -1499,6 +1554,7 @@ void DevToolsUIBindings::SearchCompleted(
                    base::Value(file_system_path), std::move(file_paths_value));
 }
 
+#if !defined(TOOLKIT_QT)
 void DevToolsUIBindings::ShowDevToolsInfoBar(
     const std::u16string& message,
     DevToolsInfoBarDelegate::Callback callback) {
@@ -1508,15 +1564,17 @@ void DevToolsUIBindings::ShowDevToolsInfoBar(
   }
   DevToolsInfoBarDelegate::Create(message, std::move(callback));
 }
+#endif  // !defined(TOOLKIT_QT)
 
 void DevToolsUIBindings::AddDevToolsExtensionsToClient() {
+#if !defined(TOOLKIT_QT)
   const extensions::ExtensionRegistry* registry =
       extensions::ExtensionRegistry::Get(profile_->GetOriginalProfile());
   if (!registry)
     return;
 
-  base::ListValue results;
-  base::ListValue component_extension_origins;
+  base::Value::List results;
+  base::Value::List component_extension_origins;
   bool have_user_installed_devtools_extensions = false;
   for (const scoped_refptr<const extensions::Extension>& extension :
        registry->enabled_extensions()) {
@@ -1537,17 +1595,17 @@ void DevToolsUIBindings::AddDevToolsExtensionsToClient() {
     // process. Grant the devtools process the ability to request URLs from the
     // extension.
     content::ChildProcessSecurityPolicy::GetInstance()->GrantRequestOrigin(
-        web_contents_->GetMainFrame()->GetProcess()->GetID(),
+        web_contents_->GetPrimaryMainFrame()->GetProcess()->GetID(),
         url::Origin::Create(extension->url()));
 
-    std::unique_ptr<base::DictionaryValue> extension_info(
-        new base::DictionaryValue());
-    extension_info->SetStringKey("startPage", url.spec());
-    extension_info->SetStringKey("name", extension->name());
-    extension_info->SetBoolKey(
-        "exposeExperimentalAPIs",
-        extension->permissions_data()->HasAPIPermission(
-            extensions::mojom::APIPermissionID::kExperimental));
+    base::Value::Dict extension_info;
+    extension_info.Set("startPage", url.spec());
+    extension_info.Set("name", extension->name());
+    extension_info.Set("exposeExperimentalAPIs",
+                       extension->permissions_data()->HasAPIPermission(
+                           extensions::mojom::APIPermissionID::kExperimental));
+    extension_info.Set("allowFileAccess", extensions::util::AllowFileAccess(
+                                              extension->id(), profile_));
     results.Append(std::move(extension_info));
 
     if (!(extensions::Manifest::IsPolicyLocation(extension->location()) ||
@@ -1564,8 +1622,10 @@ void DevToolsUIBindings::AddDevToolsExtensionsToClient() {
   }
 
   CallClientMethod("DevToolsAPI", "setOriginsForbiddenForExtensions",
-                   std::move(component_extension_origins));
-  CallClientMethod("DevToolsAPI", "addExtensions", std::move(results));
+                   base::Value(std::move(component_extension_origins)));
+  CallClientMethod("DevToolsAPI", "addExtensions",
+                   base::Value(std::move(results)));
+#endif  // !defined(TOOLKIT_QT)
 }
 
 void DevToolsUIBindings::RegisterExtensionsAPI(const std::string& origin,
@@ -1573,6 +1633,7 @@ void DevToolsUIBindings::RegisterExtensionsAPI(const std::string& origin,
   extensions_api_[origin + "/"] = script;
 }
 
+#if !defined(TOOLKIT_QT)
 namespace {
 
 void ShowSurveyCallback(DevToolsUIBindings::DispatchCallback callback,
@@ -1583,9 +1644,11 @@ void ShowSurveyCallback(DevToolsUIBindings::DispatchCallback callback,
 }
 
 }  // namespace
+#endif  // !defined(TOOLKIT_QT)
 
 void DevToolsUIBindings::ShowSurvey(DispatchCallback callback,
                                     const std::string& trigger) {
+#if !defined(TOOLKIT_QT)
   HatsService* hats_service =
       HatsServiceFactory::GetForProfile(profile_->GetOriginalProfile(), true);
   if (!hats_service) {
@@ -1598,16 +1661,19 @@ void DevToolsUIBindings::ShowSurvey(DispatchCallback callback,
       base::BindOnce(ShowSurveyCallback, std::move(split_callback.first), true),
       base::BindOnce(ShowSurveyCallback, std::move(split_callback.second),
                      false));
+#endif  // !defined(TOOLKIT_QT)
 }
 
 void DevToolsUIBindings::CanShowSurvey(DispatchCallback callback,
                                        const std::string& trigger) {
+#if !defined(TOOLKIT_QT)
   HatsService* hats_service =
       HatsServiceFactory::GetForProfile(profile_->GetOriginalProfile(), true);
   bool can_show = hats_service ? hats_service->CanShowSurvey(trigger) : false;
   base::DictionaryValue response;
   response.SetBoolKey("canShowSurvey", can_show);
   std::move(callback).Run(&response);
+#endif  // !defined(TOOLKIT_QT)
 }
 
 void DevToolsUIBindings::SetDelegate(Delegate* delegate) {
@@ -1658,7 +1724,7 @@ void DevToolsUIBindings::CallClientMethod(
     return;
   // If the client renderer is gone (e.g., the window was closed with both the
   // inspector and client being destroyed), the message can not be sent.
-  if (!web_contents_->GetMainFrame()->IsRenderFrameCreated())
+  if (!web_contents_->GetPrimaryMainFrame()->IsRenderFrameLive())
     return;
   base::Value::List arguments;
   if (!arg1.is_none()) {
@@ -1670,7 +1736,7 @@ void DevToolsUIBindings::CallClientMethod(
       }
     }
   }
-  web_contents_->GetMainFrame()->ExecuteJavaScriptMethod(
+  web_contents_->GetPrimaryMainFrame()->ExecuteJavaScriptMethod(
       base::ASCIIToUTF16(object_name), base::ASCIIToUTF16(method_name),
       std::move(arguments), std::move(completion_callback));
 }
@@ -1706,6 +1772,7 @@ void DevToolsUIBindings::ReadyToCommitNavigation(
     return;
   }
 
+#if !defined(TOOLKIT_QT)
   content::RenderFrameHost* frame = navigation_handle->GetRenderFrameHost();
   std::string origin =
       navigation_handle->GetURL().DeprecatedGetOriginAsURL().spec();
@@ -1715,10 +1782,15 @@ void DevToolsUIBindings::ReadyToCommitNavigation(
   std::string script = base::StringPrintf("%s(\"%s\")", it->second.c_str(),
                                           base::GenerateGUID().c_str());
   content::DevToolsFrontendHost::SetupExtensionsAPI(frame, script);
+#endif  //! defined(TOOLKIT_QT)
 }
 
 void DevToolsUIBindings::DocumentOnLoadCompletedInPrimaryMainFrame() {
+  // Rely on LoadCompleted event dispatched by the frontend rather than the
+  // 'onload' DOM event.
+#if !defined(TOOLKIT_QT)
   FrontendLoaded();
+#endif  // !defined(TOOLKIT_QT)
 }
 
 void DevToolsUIBindings::PrimaryPageChanged() {

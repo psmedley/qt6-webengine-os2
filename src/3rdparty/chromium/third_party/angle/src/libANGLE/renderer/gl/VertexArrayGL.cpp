@@ -212,7 +212,7 @@ angle::Result VertexArrayGL::syncDrawState(const gl::Context *context,
         indexRange.start = first;
         indexRange.end   = first + count - 1;
 
-        if (features.shiftInstancedArrayDataWithExtraOffset.enabled && first > 0)
+        if (features.shiftInstancedArrayDataWithOffset.enabled && first > 0)
         {
             gl::AttributesMask updatedStreamingAttribsMask = needsStreamingAttribs;
             auto candidateAttributesMask =
@@ -438,7 +438,7 @@ angle::Result VertexArrayGL::streamAttributes(
 
             GLuint adjustedDivisor = GetAdjustedDivisor(mAppliedNumViews, binding.getDivisor());
             // streamedVertexCount is only going to be modified by
-            // shiftInstancedArrayDataWithExtraOffset workaround, otherwise it's const
+            // shiftInstancedArrayDataWithOffset workaround, otherwise it's const
             size_t streamedVertexCount = ComputeVertexBindingElementCount(
                 adjustedDivisor, indexRange.vertexCount(), instanceCount);
 
@@ -489,6 +489,15 @@ angle::Result VertexArrayGL::streamAttributes(
                     // The workaround is only for latest Mac Intel so glMapBufferRange should be
                     // supported
                     ASSERT(CanMapBufferForRead(functions));
+                    // Validate if there is OOB access of the input buffer.
+                    angle::CheckedNumeric<GLint64> inputRequiredSize;
+                    inputRequiredSize = copySize;
+                    inputRequiredSize += static_cast<unsigned int>(binding.getOffset());
+                    ANGLE_CHECK(GetImplAs<ContextGL>(context),
+                                inputRequiredSize.IsValid() && inputRequiredSize.ValueOrDie() <=
+                                                                   bindingBufferPointer->getSize(),
+                                "Failed to map buffer range of the attribute buffer.",
+                                GL_OUT_OF_MEMORY);
                     uint8_t *inputBufferPointer = MapBufferRangeWithFallback(
                         functions, GL_ARRAY_BUFFER, binding.getOffset(), copySize, GL_MAP_READ_BIT);
                     ASSERT(inputBufferPointer);
@@ -646,6 +655,7 @@ angle::Result VertexArrayGL::updateAttribEnabled(const gl::Context *context, siz
 
 angle::Result VertexArrayGL::updateAttribPointer(const gl::Context *context, size_t attribIndex)
 {
+    const angle::FeaturesGL &features = GetFeaturesGL(context);
 
     const VertexAttribute &attrib = mState.getVertexAttribute(attribIndex);
 
@@ -687,8 +697,16 @@ angle::Result VertexArrayGL::updateAttribPointer(const gl::Context *context, siz
     // is not NULL.
 
     StateManagerGL *stateManager = GetStateManagerGL(context);
-    GLuint bufferId              = GetNativeBufferID(arrayBuffer);
+    BufferGL *bufferGL           = GetImplAs<BufferGL>(arrayBuffer);
+    GLuint bufferId              = bufferGL->getBufferID();
     stateManager->bindBuffer(gl::BufferBinding::Array, bufferId);
+    if (features.ensureNonEmptyBufferIsBoundForDraw.enabled && bufferGL->getBufferSize() == 0)
+    {
+        constexpr uint32_t data = 0;
+        ANGLE_TRY(bufferGL->setData(context, gl::BufferBinding::Array, &data, sizeof(data),
+                                    gl::BufferUsage::StaticDraw));
+        ASSERT(bufferGL->getBufferSize() > 0);
+    }
     ANGLE_TRY(callVertexAttribPointer(context, static_cast<GLuint>(attribIndex), attrib,
                                       binding.getStride(), binding.getOffset()));
 

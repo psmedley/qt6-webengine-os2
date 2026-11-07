@@ -1,6 +1,6 @@
 #!/usr/bin/env vpython3
 #
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 #
@@ -185,9 +185,6 @@ def main():
       '--test-apk',
       os.path.join(args.client_outdir,
                    'apks/WebLayerInstrumentationTest.apk'),
-      '--test-jar',
-      os.path.join(args.client_outdir,
-                   'test.lib.java/WebLayerInstrumentationTest.jar'),
       '--apk-under-test',
       os.path.join(args.client_outdir, 'apks/WebLayerShellSystemWebView.apk'),
       '--use-webview-provider',

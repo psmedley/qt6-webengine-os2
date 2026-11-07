@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,8 +28,8 @@ MediaStreamDevicePolicy GetDevicePolicy(const Profile* profile,
 
   const PrefService* prefs = profile->GetPrefs();
 
-  const base::Value* list = prefs->GetList(allowed_urls_pref_name);
-  for (const base::Value& i : list->GetListDeprecated()) {
+  const base::Value::List& list = prefs->GetList(allowed_urls_pref_name);
+  for (const base::Value& i : list) {
     const std::string* value = i.GetIfString();
     if (value) {
       ContentSettingsPattern pattern =

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -79,6 +79,7 @@ class TabStripPageHandler : public tab_strip::mojom::PageHandler,
   FRIEND_TEST_ALL_PREFIXES(TabStripPageHandlerTest, MoveGroup);
   FRIEND_TEST_ALL_PREFIXES(TabStripPageHandlerTest, MoveGroupAcrossProfiles);
   FRIEND_TEST_ALL_PREFIXES(TabStripPageHandlerTest, MoveGroupAcrossWindows);
+  FRIEND_TEST_ALL_PREFIXES(TabStripPageHandlerTest, MoveGroupMultipleTabs);
   FRIEND_TEST_ALL_PREFIXES(TabStripPageHandlerTest, MoveTab);
   FRIEND_TEST_ALL_PREFIXES(TabStripPageHandlerTest, MoveTabAcrossProfiles);
   FRIEND_TEST_ALL_PREFIXES(TabStripPageHandlerTest, MoveTabAcrossWindows);
@@ -109,7 +110,6 @@ class TabStripPageHandler : public tab_strip::mojom::PageHandler,
   // tab_strip::mojom::PageHandler:
   void GetTabs(GetTabsCallback callback) override;
   void GetGroupVisualData(GetGroupVisualDataCallback callback) override;
-  void GetThemeColors(GetThemeColorsCallback callback) override;
   void CloseContainer() override;
   void CloseTab(int32_t tab_id, bool tab_was_swiped) override;
   void ShowEditDialogForGroup(const std::string& group_id,

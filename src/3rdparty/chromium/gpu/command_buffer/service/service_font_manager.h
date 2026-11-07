@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,6 +49,7 @@ class GPU_GLES2_EXPORT ServiceFontManager
   bool AddHandle(SkDiscardableHandleId handle_id,
                  ServiceDiscardableHandle handle);
   bool DeleteHandle(SkDiscardableHandleId handle_id);
+  void AssertHandle(SkDiscardableHandleId handle_id);
 
   base::Lock lock_;
 
@@ -67,6 +68,7 @@ class GPU_GLES2_EXPORT ServiceFontManager
     void Lock() { ++ref_count_; }
     bool Delete() { return handle_.Delete(); }
     int ref_count() const { return ref_count_; }
+    bool IsLocked() const { return handle_.IsLockedForTesting(); }
 
    private:
     ServiceDiscardableHandle handle_;

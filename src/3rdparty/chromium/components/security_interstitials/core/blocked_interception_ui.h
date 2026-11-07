@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@ class BlockedInterceptionUI {
 
   ~BlockedInterceptionUI();
 
-  void PopulateStringsForHTML(base::Value* load_time_data);
+  void PopulateStringsForHTML(base::Value::Dict& load_time_data);
   void HandleCommand(SecurityInterstitialCommand command);
 
  private:

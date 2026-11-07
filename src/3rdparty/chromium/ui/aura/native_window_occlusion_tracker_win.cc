@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -254,12 +254,8 @@ bool NativeWindowOcclusionTrackerWin::IsWindowVisibleAndFullyOpaque(
   // not displayed. explorer.exe, in particular has one that's the
   // size of the desktop. It's usually behind Chrome windows in the z-order,
   // but using a remote desktop can move it up in the z-order. So, ignore them.
-  DWORD reason;
-  if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &reason,
-                                      sizeof(reason))) &&
-      reason != 0) {
+  if (gfx::IsWindowCloaked(hwnd))
     return false;
-  }
 
   RECT win_rect;
   // Filter out windows that take up zero area. The call to GetWindowRect is one
@@ -315,6 +311,8 @@ void NativeWindowOcclusionTrackerWin::UpdateOcclusionState(
     // The window was destroyed while processing occlusion.
     if (it == hwnd_root_window_map_.end())
       continue;
+    it->second->GetHost()->set_on_current_workspace(
+        root_window_pair.second.on_current_workspace);
     // Check Window::IsVisible here, on the UI thread, because it can't be
     // checked on the occlusion calculation thread. Do this first before
     // checking screen_locked_ or display_on_ so that hidden windows remain
@@ -584,11 +582,13 @@ void NativeWindowOcclusionTrackerWin::WindowOcclusionCalculator::
 
     // Reset RootOcclusionState to a clean state.
     root_window_pair.second = {};
+    root_window_pair.second.on_current_workspace =
+        IsWindowOnCurrentVirtualDesktop(hwnd);
     // IsIconic() checks for a minimized window. Immediately set the state of
     // minimized windows to HIDDEN.
     if (IsIconic(hwnd)) {
       root_window_pair.second.occlusion_state = Window::OcclusionState::HIDDEN;
-    } else if (IsWindowOnCurrentVirtualDesktop(hwnd) == false) {
+    } else if (root_window_pair.second.on_current_workspace == false) {
       // If window is not on the current virtual desktop, immediately
       // set the state of the window to OCCLUDED.
       root_window_pair.second.occlusion_state =
@@ -948,6 +948,10 @@ bool NativeWindowOcclusionTrackerWin::WindowOcclusionCalculator::
 absl::optional<bool> NativeWindowOcclusionTrackerWin::
     WindowOcclusionCalculator::IsWindowOnCurrentVirtualDesktop(HWND hwnd) {
   if (!virtual_desktop_manager_)
+    return true;
+
+  // If the window is not cloaked, it is not on another desktop.
+  if (!gfx::IsWindowCloaked(hwnd))
     return true;
 
   return gfx::IsWindowOnCurrentVirtualDesktop(hwnd, virtual_desktop_manager_);

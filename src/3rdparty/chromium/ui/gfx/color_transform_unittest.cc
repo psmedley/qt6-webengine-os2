@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -440,96 +440,18 @@ TEST(SimpleColorSpace, DefaultToSRGB) {
   EXPECT_EQ(t2->NumberOfStepsForTesting(), 0u);
 }
 
-// This tests to make sure that we don't emit "pow" parts of a
-// transfer function unless necessary.
-TEST(SimpleColorSpace, ShaderSourceTrFnOptimizations) {
-  skcms_Matrix3x3 primaries;
-  gfx::ColorSpace::CreateSRGB().GetPrimaryMatrix(&primaries);
-
-  skcms_TransferFunction fn_no_pow = {
-      1.f, 2.f, 0.f, 1.f, 0.f, 0.f, 0.f,
-  };
-  skcms_TransferFunction fn_yes_pow = {
-      2.f, 2.f, 0.f, 1.f, 0.f, 0.f, 0.f,
-  };
-  gfx::ColorSpace src;
-  gfx::ColorSpace dst = gfx::ColorSpace::CreateXYZD50();
-  std::string shader_string;
-
-  src = gfx::ColorSpace::CreateCustom(primaries, fn_no_pow);
-  shader_string =
-      ColorTransform::NewColorTransform(src, dst)->GetShaderSource();
-  EXPECT_EQ(shader_string.find("pow("), std::string::npos);
-
-  src = gfx::ColorSpace::CreateCustom(primaries, fn_yes_pow);
-  shader_string =
-      ColorTransform::NewColorTransform(src, dst)->GetShaderSource();
-  EXPECT_NE(shader_string.find("pow("), std::string::npos);
-}
-
-// Note: This is not actually "testing" anything -- the goal of this test is to
-// to make reviewing shader code simpler by giving an example of the resulting
-// shader source. This should be updated whenever shader generation is updated.
-// This test produces slightly different results on Android.
-TEST(SimpleColorSpace, SampleShaderSource) {
-  ColorSpace bt709 = ColorSpace::CreateREC709();
-  ColorSpace output(ColorSpace::PrimaryID::BT2020,
-                    ColorSpace::TransferID::GAMMA28);
-  std::string source =
-      ColorTransform::NewColorTransform(bt709, output)->GetShaderSource();
-  std::string expected =
-      "float TransferFn1(float v) {\n"
-      "  if (v < 4.04499359e-02)\n"
-      "    v = 7.73993805e-02 * v;\n"
-      "  else\n"
-      "    v = pow(9.47867334e-01 * v + 5.21326549e-02, 2.40000010e+00);\n"
-      "  return v;\n"
-      "}\n"
-      "float TransferFn3(float v) {\n"
-      "  if (v < 0.00000000e+00)\n"
-      "    v = 0.00000000e+00 * v;\n"
-      "  else\n"
-      "    v = pow(v, 3.57142866e-01);\n"
-      "  return v;\n"
-      "}\n"
-      "vec3 DoColorConversion(vec3 color) {\n"
-      "  color = mat3(1.16438353e+00, 1.16438353e+00, 1.16438353e+00,\n"
-      "               -2.28029018e-09, -2.13248596e-01, 2.11240172e+00,\n"
-      "               1.79274118e+00, -5.32909274e-01, -5.96049432e-10) "
-      "* color;\n"
-      "  color += vec3(-9.69429970e-01, 3.00019622e-01, -1.12926018e+00);\n"
-      "  color.r = TransferFn1(color.r);\n"
-      "  color.g = TransferFn1(color.g);\n"
-      "  color.b = TransferFn1(color.b);\n"
-      "  color = mat3(6.27404153e-01, 6.90974295e-02, 1.63914450e-02,\n"
-      "               3.29283088e-01, 9.19540644e-01, 8.80132765e-02,\n"
-      "               4.33131158e-02, 1.13623142e-02, 8.95595193e-01) "
-      "* color;\n"
-      "  color.r = TransferFn3(color.r);\n"
-      "  color.g = TransferFn3(color.g);\n"
-      "  color.b = TransferFn3(color.b);\n"
-      "  return color;\n"
-      "}\n";
-  EXPECT_EQ(source, expected);
-}
-
 // Checks that the generated SkSL fragment shaders can be parsed by
 // SkSL::Compiler.
 TEST(SimpleColorSpace, CanParseSkShaderSource) {
   std::vector<ColorSpace> common_color_spaces = {
       ColorSpace::CreateSRGB(),         ColorSpace::CreateDisplayP3D65(),
-      ColorSpace::CreateExtendedSRGB(), ColorSpace::CreateSCRGBLinear(),
+      ColorSpace::CreateExtendedSRGB(), ColorSpace::CreateSRGBLinear(),
       ColorSpace::CreateJpeg(),         ColorSpace::CreateREC601(),
       ColorSpace::CreateREC709()};
   for (const auto& src : common_color_spaces) {
     for (const auto& dst : common_color_spaces) {
       auto transform = ColorTransform::NewColorTransform(src, dst);
-      std::string source = "half4 main(half4 color) {\n" +
-                           transform->GetSkShaderSource() + " return color; }";
-      SkRuntimeEffect::Result result = SkRuntimeEffect::MakeForColorFilter(
-          SkString(source.c_str(), source.length()), /*options=*/{});
-      EXPECT_NE(result.effect, nullptr);
-      EXPECT_STREQ(result.errorText.c_str(), "");
+      EXPECT_NE(transform->GetSkRuntimeEffect(), nullptr);
     }
   }
 }
@@ -605,9 +527,9 @@ typedef std::tuple<ColorSpace::PrimaryID,
                    bool>
     ColorSpaceTestData;
 
-class ColorSpaceTest : public testing::TestWithParam<ColorSpaceTestData> {
+class ColorSpaceTestBase : public testing::TestWithParam<ColorSpaceTestData> {
  public:
-  ColorSpaceTest()
+  ColorSpaceTestBase()
       : color_space_(std::get<0>(GetParam()),
                      std::get<1>(GetParam()),
                      std::get<2>(GetParam()),
@@ -620,7 +542,7 @@ class ColorSpaceTest : public testing::TestWithParam<ColorSpaceTestData> {
   ColorTransform::Options options_;
 };
 
-TEST_P(ColorSpaceTest, testNullTransform) {
+TEST_P(ColorSpaceTestBase, testNullTransform) {
   std::unique_ptr<ColorTransform> t(
       ColorTransform::NewColorTransform(color_space_, color_space_, options_));
   ColorTransform::TriStim tristim(0.4f, 0.5f, 0.6f);
@@ -630,7 +552,7 @@ TEST_P(ColorSpaceTest, testNullTransform) {
   EXPECT_NEAR(tristim.z(), 0.6f, kMathEpsilon);
 }
 
-TEST_P(ColorSpaceTest, toXYZandBack) {
+TEST_P(ColorSpaceTestBase, toXYZandBack) {
   std::unique_ptr<ColorTransform> t1(ColorTransform::NewColorTransform(
       color_space_, ColorSpace::CreateXYZD50(), options_));
   std::unique_ptr<ColorTransform> t2(ColorTransform::NewColorTransform(
@@ -645,7 +567,7 @@ TEST_P(ColorSpaceTest, toXYZandBack) {
 
 INSTANTIATE_TEST_SUITE_P(
     A,
-    ColorSpaceTest,
+    ColorSpaceTestBase,
     testing::Combine(testing::ValuesIn(all_primaries),
                      testing::ValuesIn(simple_transfers),
                      testing::Values(ColorSpace::MatrixID::BT709),
@@ -654,7 +576,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 INSTANTIATE_TEST_SUITE_P(
     B,
-    ColorSpaceTest,
+    ColorSpaceTestBase,
     testing::Combine(testing::Values(ColorSpace::PrimaryID::BT709),
                      testing::ValuesIn(simple_transfers),
                      testing::ValuesIn(all_matrices),
@@ -663,7 +585,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 INSTANTIATE_TEST_SUITE_P(
     C,
-    ColorSpaceTest,
+    ColorSpaceTestBase,
     testing::Combine(testing::ValuesIn(all_primaries),
                      testing::Values(ColorSpace::TransferID::BT709),
                      testing::ValuesIn(all_matrices),
@@ -770,7 +692,7 @@ TEST(ColorSpaceTest, HLGSDRWhiteLevel) {
       0.5f,       // 0.5 * sqrt(1.0 * 100 / 100)
       0.65641f,   // 0.17883277 * ln(1.0 * 200 / 100 - 0.28466892) + 0.55991073
   };
-  constexpr float nits[] = {80.f, 100.f, 200.f};
+  constexpr float nits[] = {203.f / 2, 203.f, 203.f * 2};
 
   for (size_t i = 0; i < 3; ++i) {
     // We'll set the SDR white level to the values in |nits| and also the
@@ -796,7 +718,7 @@ TEST(ColorSpaceTest, HLGSDRWhiteLevel) {
     // via a ColorSpace with the right SDR white level.
     switch (i) {
       case 0:
-        EXPECT_NEAR(val.x(), 1.f, kMathEpsilon);
+        EXPECT_NEAR(val.x(), 1.6f, kMathEpsilon);
         break;
       case 1:
         EXPECT_NEAR(val.y(), 1.f, kMathEpsilon);
@@ -809,10 +731,6 @@ TEST(ColorSpaceTest, HLGSDRWhiteLevel) {
         EXPECT_NEAR(val.y(), 1.f, kMathEpsilon);
         break;
     }
-
-    // The nit ratios should be preserved by the transform.
-    EXPECT_NEAR(val.y() / val.x(), nits[1] / nits[0], kMathEpsilon);
-    EXPECT_NEAR(val.z() / val.x(), nits[2] / nits[0], kMathEpsilon);
 
     // Test the inverse transform.
     std::unique_ptr<ColorTransform> xform_inv(
@@ -903,62 +821,6 @@ TEST(ColorSpaceTest, PiecewiseHDR) {
       }
     }
   }
-}
-
-TEST(ColorSpaceTest, HLGHDRToSDR) {
-  ColorSpace hlg_cs(ColorSpace::PrimaryID::BT709, ColorSpace::TransferID::HLG);
-  ColorSpace dest_sdr_cs(ColorSpace::PrimaryID::BT709,
-                         ColorSpace::TransferID::LINEAR);
-  gfx::ColorTransform::Options sdr_options;
-  sdr_options.tone_map_pq_and_hlg_to_sdr = true;
-  auto sdr_transform =
-      ColorTransform::NewColorTransform(hlg_cs, dest_sdr_cs, sdr_options);
-
-  // HLG conversion will produce values above 1 w/o intervention.
-  ColorTransform::TriStim sdr_val = {1, 1, 1};
-  sdr_transform->Transform(&sdr_val, 1);
-  EXPECT_FLOAT_EQ(sdr_val.x(), 1);
-  EXPECT_FLOAT_EQ(sdr_val.y(), 1);
-  EXPECT_FLOAT_EQ(sdr_val.z(), 1);
-
-  ColorSpace dest_hdr_cs(ColorSpace::PrimaryID::BT709,
-                         ColorSpace::TransferID::LINEAR_HDR);
-  gfx::ColorTransform::Options hdr_options;
-  hdr_options.tone_map_pq_and_hlg_to_sdr = false;
-  auto hdr_transform =
-      ColorTransform::NewColorTransform(hlg_cs, dest_hdr_cs, hdr_options);
-
-  ColorTransform::TriStim hdr_val = {1, 1, 1};
-  hdr_transform->Transform(&hdr_val, 1);
-  EXPECT_NE(sdr_val, hdr_val);
-}
-
-TEST(ColorSpaceTest, PQHDRToSDR) {
-  ColorSpace pq_cs(ColorSpace::PrimaryID::BT709, ColorSpace::TransferID::PQ);
-  ColorSpace dest_sdr_cs(ColorSpace::PrimaryID::BT709,
-                         ColorSpace::TransferID::LINEAR);
-  gfx::ColorTransform::Options sdr_options;
-  sdr_options.tone_map_pq_and_hlg_to_sdr = true;
-  auto sdr_transform =
-      ColorTransform::NewColorTransform(pq_cs, dest_sdr_cs, sdr_options);
-
-  // PQ conversion will produce values above 1 w/o intervention.
-  ColorTransform::TriStim sdr_val = {1, 1, 1};
-  sdr_transform->Transform(&sdr_val, 1);
-  EXPECT_FLOAT_EQ(sdr_val.x(), 1);
-  EXPECT_FLOAT_EQ(sdr_val.y(), 1);
-  EXPECT_FLOAT_EQ(sdr_val.z(), 1);
-
-  ColorSpace dest_hdr_cs(ColorSpace::PrimaryID::BT709,
-                         ColorSpace::TransferID::LINEAR_HDR);
-  gfx::ColorTransform::Options hdr_options;
-  hdr_options.tone_map_pq_and_hlg_to_sdr = false;
-  auto hdr_transform =
-      ColorTransform::NewColorTransform(pq_cs, dest_hdr_cs, hdr_options);
-
-  ColorTransform::TriStim hdr_val = {1, 1, 1};
-  hdr_transform->Transform(&hdr_val, 1);
-  EXPECT_NE(sdr_val, hdr_val);
 }
 
 }  // namespace gfx

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,10 +48,11 @@ class QuotaManagerProxyTest : public testing::Test {
 
 TEST_F(QuotaManagerProxyTest, GetBucketPath) {
   base::test::TestFuture<storage::QuotaErrorOr<storage::BucketInfo>> future;
-  quota_manager_proxy_->GetOrCreateBucket(
+  BucketInitParams params(
       blink::StorageKey::CreateFromStringForTesting("http://example.com"),
-      "draft_bucket", base::ThreadTaskRunnerHandle::Get(),
-      future.GetCallback());
+      "draft_bucket");
+  quota_manager_proxy_->UpdateOrCreateBucket(
+      params, base::ThreadTaskRunnerHandle::Get(), future.GetCallback());
   auto bucket = future.Take();
   EXPECT_TRUE(bucket.ok());
 
@@ -65,10 +66,11 @@ TEST_F(QuotaManagerProxyTest, GetBucketPath) {
 
 TEST_F(QuotaManagerProxyTest, GetClientBucketPath) {
   base::test::TestFuture<storage::QuotaErrorOr<storage::BucketInfo>> future;
-  quota_manager_proxy_->GetOrCreateBucket(
+  BucketInitParams params(
       blink::StorageKey::CreateFromStringForTesting("http://example.com"),
-      "draft_bucket", base::ThreadTaskRunnerHandle::Get(),
-      future.GetCallback());
+      "draft_bucket");
+  quota_manager_proxy_->UpdateOrCreateBucket(
+      params, base::ThreadTaskRunnerHandle::Get(), future.GetCallback());
   auto bucket = future.Take();
   EXPECT_TRUE(bucket.ok());
 
@@ -89,11 +91,14 @@ TEST_F(QuotaManagerProxyTest, GetClientBucketPath) {
                 bucket->ToBucketLocator(), QuotaClientType::kIndexedDatabase),
             expected_path);
 
-  // BackgroundFetch/CacheStorage
-  expected_path = bucket_path.AppendASCII("CacheStorage");
+  // BackgroundFetch
+  expected_path = bucket_path.AppendASCII("BackgroundFetch");
   EXPECT_EQ(quota_manager_proxy_->GetClientBucketPath(
                 bucket->ToBucketLocator(), QuotaClientType::kBackgroundFetch),
             expected_path);
+
+  // CacheStorage
+  expected_path = bucket_path.AppendASCII("CacheStorage");
   EXPECT_EQ(
       quota_manager_proxy_->GetClientBucketPath(
           bucket->ToBucketLocator(), QuotaClientType::kServiceWorkerCache),

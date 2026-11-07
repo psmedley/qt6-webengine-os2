@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,8 +28,6 @@ SQLitePersistentStoreBackendBase::SQLitePersistentStoreBackendBase(
     scoped_refptr<base::SequencedTaskRunner> client_task_runner)
     : path_(path),
       histogram_tag_(std::move(histogram_tag)),
-      initialized_(false),
-      corruption_detected_(false),
       current_version_number_(current_version_number),
       compatible_version_number_(compatible_version_number),
       background_task_runner_(std::move(background_task_runner)),

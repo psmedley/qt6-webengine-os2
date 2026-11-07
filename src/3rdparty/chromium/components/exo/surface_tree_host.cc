@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -197,6 +197,11 @@ void SurfaceTreeHost::DidPresentCompositorFrame(
   active_presentation_callbacks_.erase(it);
 }
 
+void SurfaceTreeHost::SetSecurityDelegate(SecurityDelegate* security_delegate) {
+  DCHECK(security_delegate_ == nullptr);
+  security_delegate_ = security_delegate;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // SurfaceDelegate overrides:
 
@@ -218,6 +223,11 @@ bool SurfaceTreeHost::IsInputEnabled(Surface*) const {
 
 void SurfaceTreeHost::OnNewOutputAdded() {
   UpdateDisplayOnTree();
+}
+
+SecurityDelegate* SurfaceTreeHost::GetSecurityDelegate() {
+  DCHECK(security_delegate_);
+  return security_delegate_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -300,6 +310,8 @@ void SurfaceTreeHost::SubmitCompositorFrame() {
                  resource.color_space.GetContentColorUsage());
   }
 
+  frame.metadata.may_contain_video = root_surface_->ContainsVideo();
+
   layer_tree_frame_sink_holder_->SubmitCompositorFrame(std::move(frame));
 }
 
@@ -320,7 +332,7 @@ void SurfaceTreeHost::SubmitEmptyCompositorFrame() {
 
   viz::SolidColorDrawQuad* solid_quad =
       render_pass->CreateAndAppendDrawQuad<viz::SolidColorDrawQuad>();
-  solid_quad->SetNew(quad_state, quad_rect, quad_rect, SK_ColorBLACK,
+  solid_quad->SetNew(quad_state, quad_rect, quad_rect, SkColors::kBlack,
                      /*force_anti_aliasing_off=*/false);
   layer_tree_frame_sink_holder_->SubmitCompositorFrame(std::move(frame));
 }

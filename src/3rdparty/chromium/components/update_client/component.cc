@@ -1,10 +1,9 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/update_client/component.h"
 
-#include <algorithm>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -18,6 +17,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/notreached.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/sequenced_task_runner_handle.h"
@@ -349,11 +349,9 @@ void Component::SetParseResult(const ProtocolParser::Result& result) {
             return "";
           }
 
-          auto it =
-              std::find_if(std::begin(result.data), std::end(result.data),
-                           [&expected](const ProtocolParser::Result::Data& d) {
-                             return d.install_data_index == expected;
-                           });
+          const auto it = base::ranges::find(
+              result.data, expected,
+              &ProtocolParser::Result::Data::install_data_index);
 
           const bool matched = it != std::end(result.data);
           DVLOG(2) << "Expected install_data_index: " << expected
@@ -642,6 +640,13 @@ void Component::StateChecking::DoHandle() {
     return;
   }
 
+  if (component.update_context_.is_cancelled) {
+    TransitionState(std::make_unique<StateUpdateError>(&component));
+    component.error_category_ = ErrorCategory::kService;
+    component.error_code_ = static_cast<int>(ServiceError::CANCELLED);
+    return;
+  }
+
   if (component.status_ == "ok") {
     TransitionState(std::make_unique<StateCanUpdate>(&component));
     return;
@@ -706,6 +711,13 @@ void Component::StateCanUpdate::DoHandle() {
     return;
   }
 
+  if (component.update_context_.is_cancelled) {
+    TransitionState(std::make_unique<StateUpdateError>(&component));
+    component.error_category_ = ErrorCategory::kService;
+    component.error_code_ = static_cast<int>(ServiceError::CANCELLED);
+    return;
+  }
+
   // Start computing the cost of the this update from here on.
   component.update_begin_ = base::TimeTicks::Now();
 
@@ -736,7 +748,7 @@ void Component::StateUpToDate::DoHandle() {
   auto& component = State::component();
   DCHECK(component.crx_component());
 
-  component.NotifyObservers(Events::COMPONENT_NOT_UPDATED);
+  component.NotifyObservers(Events::COMPONENT_ALREADY_UP_TO_DATE);
   EndState();
 }
 
@@ -795,6 +807,13 @@ void Component::StateDownloadingDiff::DownloadComplete(
     component.AppendEvent(component.MakeEventDownloadMetrics(download_metrics));
 
   crx_downloader_ = nullptr;
+
+  if (component.update_context_.is_cancelled) {
+    TransitionState(std::make_unique<StateUpdateError>(&component));
+    component.error_category_ = ErrorCategory::kService;
+    component.error_code_ = static_cast<int>(ServiceError::CANCELLED);
+    return;
+  }
 
   if (download_result.error) {
     DCHECK(download_result.response.empty());
@@ -865,6 +884,13 @@ void Component::StateDownloading::DownloadComplete(
     component.AppendEvent(component.MakeEventDownloadMetrics(download_metrics));
 
   crx_downloader_ = nullptr;
+
+  if (component.update_context_.is_cancelled) {
+    TransitionState(std::make_unique<StateUpdateError>(&component));
+    component.error_category_ = ErrorCategory::kService;
+    component.error_code_ = static_cast<int>(ServiceError::CANCELLED);
+    return;
+  }
 
   if (download_result.error) {
     DCHECK(download_result.response.empty());

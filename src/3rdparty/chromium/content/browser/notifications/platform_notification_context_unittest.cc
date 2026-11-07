@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/public/browser/notification_database_data.h"
-#include "content/public/browser/permission_type.h"
+#include "content/public/browser/permission_result.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/test/browser_task_environment.h"
@@ -28,6 +28,7 @@
 #include "content/test/mock_platform_notification_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/notifications/notification_resources.h"
+#include "third_party/blink/public/common/permissions/permission_utils.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration_options.mojom.h"
@@ -210,9 +211,11 @@ class PlatformNotificationContextTest : public ::testing::Test {
 
   void SetPermissionStatus(const GURL& origin,
                            blink::mojom::PermissionStatus permission_status) {
-    ON_CALL(*permission_manager_,
-            GetPermissionStatus(PermissionType::NOTIFICATIONS, origin, origin))
-        .WillByDefault(Return(permission_status));
+    ON_CALL(*permission_manager_, GetPermissionResultForOriginWithoutContext(
+                                      blink::PermissionType::NOTIFICATIONS,
+                                      url::Origin::Create(origin)))
+        .WillByDefault(Return(content::PermissionResult(
+            permission_status, PermissionStatusSource::UNSPECIFIED)));
   }
 
   // Returns the file path to the leveldb database for |context|.
@@ -585,7 +588,8 @@ TEST_F(PlatformNotificationContextTest, ServiceWorkerUnregistered) {
       script_url, key, options, blink::mojom::FetchClientSettingsObject::New(),
       base::BindOnce(&PlatformNotificationContextTest::DidRegisterServiceWorker,
                      base::Unretained(this), &service_worker_registration_id),
-      /*requesting_frame_id=*/GlobalRenderFrameHostId());
+      /*requesting_frame_id=*/GlobalRenderFrameHostId(),
+      PolicyContainerPolicies());
 
   base::RunLoop().RunUntilIdle();
   ASSERT_NE(service_worker_registration_id,
@@ -924,11 +928,11 @@ TEST_F(PlatformNotificationContextTest, WriteReadNotificationResources) {
 
   // Store resources for the new notification.
   std::vector<NotificationResourceData> resources;
-  resources.push_back(
-      {notification_id, origin, blink::NotificationResources()});
+  resources.emplace_back(notification_id, origin,
+                         blink::NotificationResources());
   // Also try inserting resources for an invalid notification id.
   std::string invalid_id = "invalid-id";
-  resources.push_back({invalid_id, origin, blink::NotificationResources()});
+  resources.emplace_back(invalid_id, origin, blink::NotificationResources());
   // Writing resources should succeed.
   ASSERT_TRUE(
       WriteNotificationResourcesSync(context.get(), std::move(resources)));
@@ -965,8 +969,8 @@ TEST_F(PlatformNotificationContextTest, ReDisplayNotifications) {
   std::string notification_id =
       WriteNotificationDataSync(context.get(), origin, data2);
   std::vector<NotificationResourceData> resources;
-  resources.push_back(
-      {notification_id, origin, blink::NotificationResources()});
+  resources.emplace_back(notification_id, origin,
+                         blink::NotificationResources());
   WriteNotificationResourcesSync(context.get(), std::move(resources));
   // 1 notification without resources.
   NotificationDatabaseData data3;

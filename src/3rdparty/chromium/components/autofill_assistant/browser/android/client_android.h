@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,15 +11,15 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "components/autofill_assistant/browser/android/dependencies.h"
+#include "components/autofill_assistant/browser/android/dependencies_android.h"
 #include "components/autofill_assistant/browser/android/ui_controller_android.h"
 #include "components/autofill_assistant/browser/client.h"
 #include "components/autofill_assistant/browser/controller.h"
 #include "components/autofill_assistant/browser/device_context.h"
+#include "components/autofill_assistant/browser/public/password_change/website_login_manager.h"
 #include "components/autofill_assistant/browser/service.pb.h"
 #include "components/autofill_assistant/browser/service/access_token_fetcher.h"
 #include "components/autofill_assistant/browser/service/service.h"
-#include "components/autofill_assistant/browser/website_login_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -58,17 +58,13 @@ class ClientAndroid : public Client,
   // Returns whether UI is currently being displayed to the user.
   bool IsVisible() const;
 
-  bool Start(const GURL& url,
+  void Start(const GURL& url,
              std::unique_ptr<TriggerContext> trigger_context,
              std::unique_ptr<Service> test_service_to_inject,
              const base::android::JavaRef<jobject>& joverlay_coordinator,
              const absl::optional<TriggerScriptProto>& trigger_script);
   void OnJavaDestroyUI(JNIEnv* env,
                        const base::android::JavaParamRef<jobject>& jcaller);
-  void TransferUITo(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& jcaller,
-      const base::android::JavaParamRef<jobject>& jother_web_contents);
 
   base::android::ScopedJavaLocalRef<jstring> GetPrimaryAccountName(
       JNIEnv* env,
@@ -110,6 +106,9 @@ class ClientAndroid : public Client,
   void ShowFatalError(JNIEnv* env,
                       const base::android::JavaParamRef<jobject>& jcaller);
 
+  bool IsSupervisedUser(JNIEnv* env,
+                        const base::android::JavaParamRef<jobject>& jcaller);
+
   void OnSpokenFeedbackAccessibilityServiceChanged(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& jcaller,
@@ -126,7 +125,7 @@ class ClientAndroid : public Client,
   void DestroyUI() override;
   version_info::Channel GetChannel() const override;
   std::string GetEmailAddressForAccessTokenAccount() const override;
-  std::string GetChromeSignedInEmailAddress() const override;
+  std::string GetSignedInEmail() const override;
   absl::optional<std::pair<int, int>> GetWindowSize() const override;
   ClientContextProto::ScreenOrientation GetScreenOrientation() const override;
   void FetchPaymentsClientToken(
@@ -137,7 +136,8 @@ class ClientAndroid : public Client,
   password_manager::PasswordChangeSuccessTracker*
   GetPasswordChangeSuccessTracker() const override;
   std::string GetLocale() const override;
-  std::string GetCountryCode() const override;
+  std::string GetLatestCountryCode() const override;
+  std::string GetStoredPermanentCountryCode() const override;
   DeviceContext GetDeviceContext() const override;
   bool IsAccessibilityEnabled() const override;
   bool IsSpokenFeedbackAccessibilityServiceEnabled() const override;
@@ -146,6 +146,16 @@ class ClientAndroid : public Client,
   void RecordDropOut(Metrics::DropOutReason reason) override;
   bool HasHadUI() const override;
   ScriptExecutorUiDelegate* GetScriptExecutorUiDelegate() override;
+  bool MustUseBackendData() const override;
+  void GetAnnotateDomModelVersion(
+      base::OnceCallback<void(absl::optional<int64_t>)> callback)
+      const override;
+  bool IsXmlSigned(const std::string& xml_string) const override;
+  const std::vector<std::string> ExtractValuesFromSingleTagXml(
+      const std::string& xml_string,
+      const std::vector<std::string>& keys) const override;
+  bool GetMakeSearchesAndBrowsingBetterEnabled() const override;
+  bool GetMetricsReportingEnabled() const override;
 
   // Overrides AccessTokenFetcher
   void FetchAccessToken(
@@ -179,10 +189,15 @@ class ClientAndroid : public Client,
   // UiDelegate::PerformUserAction() or -1 if not found.
   int FindDirectAction(const std::string& action_name);
 
+  void OnAnnotateDomModelFileAvailable(
+      base::OnceCallback<void(absl::optional<int64_t>)> callback,
+      bool available);
+
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 
   // Contains AssistantStaticDependencies which do not change.
-  const std::unique_ptr<const Dependencies> dependencies_;
+  const std::unique_ptr<const DependenciesAndroid> dependencies_;
+  const raw_ptr<AnnotateDomModelService> annotate_dom_model_service_;
   // Can change based on activity attachment.
   const base::android::ScopedJavaGlobalRef<jobject> jdependencies_;
 

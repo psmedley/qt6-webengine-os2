@@ -1,4 +1,4 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -12,6 +12,7 @@ import("//testing/test.gni")
 import("//ui/base/ui_features.gni")
 
 assert(use_ozone)
+assert(is_chromeos_ash)
 
 buildflag_header("buildflags") {
   header = "buildflags.h"
@@ -28,8 +29,6 @@ static_library("exo") {
   sources = [
     "buffer.cc",
     "buffer.h",
-    "capabilities.cc",
-    "capabilities.h",
     "data_device.cc",
     "data_device.h",
     "data_device_delegate.h",
@@ -67,6 +66,8 @@ static_library("exo") {
     "seat.cc",
     "seat.h",
     "seat_observer.h",
+    "security_delegate.cc",
+    "security_delegate.h",
     "shared_memory.cc",
     "shared_memory.h",
     "shell_surface_util.cc",
@@ -107,7 +108,6 @@ static_library("exo") {
     "//third_party/blink/public/common",
     "//ui/accessibility:ax_base",
     "//ui/aura",
-    "//ui/aura/cursor",
     "//ui/base/dragdrop:types",
     "//ui/base/dragdrop/mojom",
     "//ui/base/ime",
@@ -147,7 +147,9 @@ static_library("exo") {
       "//ash/keyboard/ui",
       "//ash/public/cpp",
       "//ash/resources/vector_icons",
-      "//chromeos/crosapi/cpp",
+      "//chromeos/crosapi/cpp:crosapi_constants",
+      "//chromeos/dbus/power",
+      "//chromeos/dbus/power:power_manager_proto",
       "//chromeos/ui/base",
       "//chromeos/ui/frame",
       "//components/app_restore",
@@ -209,14 +211,6 @@ static_library("exo") {
       configs += [ ":xkbcommon" ]
     }
   }
-
-  if (is_chromecast) {
-    deps += [ "//ui/accessibility:accessibility" ]
-    sources += [
-      "fullscreen_shell_surface.cc",
-      "fullscreen_shell_surface.h",
-    ]
-  }
 }
 
 source_set("test_support") {
@@ -229,6 +223,10 @@ source_set("test_support") {
     "test/exo_test_base_views.h",
     "test/exo_test_suite_aura.cc",
     "test/exo_test_suite_aura.h",
+    "test/mock_security_delegate.cc",
+    "test/mock_security_delegate.h",
+    "test/test_security_delegate.cc",
+    "test/test_security_delegate.h",
   ]
 
   public_deps = [ "//testing/gtest" ]
@@ -349,6 +347,8 @@ source_set("unit_tests") {
       "//ash/public/cpp",
       "//ash/public/cpp/external_arc",
       "//build:chromeos_buildflags",
+      "//chromeos/dbus/power",
+      "//chromeos/dbus/power:power_manager_proto",
       "//chromeos/ui/base",
       "//chromeos/ui/frame",
       "//components/fullscreen_control",
@@ -356,14 +356,10 @@ source_set("unit_tests") {
       "//ui/base/cursor/mojom:cursor_type",
       "//ui/base/dragdrop:types",
       "//ui/base/dragdrop/mojom",
+      "//ui/base/ime/ash",
       "//ui/gfx:test_support",
       "//ui/gfx/geometry",
     ]
-  }
-
-  if (is_chromecast) {
-    deps += [ "//ui/accessibility:accessibility" ]
-    sources += [ "fullscreen_shell_surface_unittest.cc" ]
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/public/common/main_function_params.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/abseil-cpp/absl/types/variant.h"
 
 namespace variations {
@@ -29,14 +30,33 @@ class ZygoteForkDelegate;
 
 class CONTENT_EXPORT ContentMainDelegate {
  public:
-  virtual ~ContentMainDelegate() {}
+  // Indicates the delegate is being invoked in the browser process. The
+  // `kProcessType` switch will be empty.
+  struct InvokedInBrowserProcess {
+    // True if running in a test harness.
+    bool is_running_test = false;
+  };
+
+  // Indicates the delegate is being invoked in a child process. The
+  // `kProcessType` switch will hold the precise child process type.
+  struct InvokedInChildProcess {};
+
+  // The context in which a delegate method is invoked, including the process
+  // type and whether it is in a test harness. Can distinguish between
+  // the browser process and child processes; for more fine-grained process
+  // types check the `switches::kProcessType` command-line switch.
+  using InvokedIn =
+      absl::variant<InvokedInBrowserProcess, InvokedInChildProcess>;
+
+  virtual ~ContentMainDelegate() = default;
 
   // Tells the embedder that the absolute basic startup has been done, i.e.
-  // it's now safe to create singletons and check the command line. Return true
-  // if the process should exit afterwards, and if so, |exit_code| should be
-  // set. This is the place for embedder to do the things that must happen at
-  // the start. Most of its startup code should be in the methods below.
-  virtual bool BasicStartupComplete(int* exit_code);
+  // it's now safe to create singletons and check the command line. Return an
+  // error code if the process should exit afterwards. This is the place for
+  // embedder to do the things that must happen at the start. Most of its
+  // startup code should be in the methods below, handling of early exit
+  // command-line switches can wait until PreBrowserMain at the latest.
+  virtual absl::optional<int> BasicStartupComplete();
 
   // This is where the embedder puts all of its startup code that needs to run
   // before the sandbox is engaged.
@@ -54,7 +74,10 @@ class CONTENT_EXPORT ContentMainDelegate {
       const std::string& process_type,
       MainFunctionParams main_function_params);
 
-  // Called right before the process exits.
+  // Called right before the process exits. Note: an empty process_type must not
+  // be assumed to be an exclusive browser process, processes that exit early
+  // (e.g. attempt and fail to be the browser process) will also go through this
+  // path.
   virtual void ProcessExiting(const std::string& process_type) {}
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
@@ -89,37 +112,47 @@ class CONTENT_EXPORT ContentMainDelegate {
 
   // Allows the embedder to perform platform-specific initialization before
   // BrowserMain() is invoked (i.e. before BrowserMainRunner, BrowserMainLoop,
-  // BrowserMainParts, etc. are created).
-  virtual void PreBrowserMain() {}
+  // BrowserMainParts, etc. are created). Return an error code if the process
+  // should exit afterwards. This is the place for embedder to do the things
+  // that can shortcut browser execution (i.e. command-line switches).
+  virtual absl::optional<int> PreBrowserMain();
 
   // Returns true if content should create field trials and initialize the
   // FeatureList instance for this process. Default implementation returns true.
   // Embedders that need to control when and/or how FeatureList should be
   // created should override and return false.
-  virtual bool ShouldCreateFeatureList();
+  virtual bool ShouldCreateFeatureList(InvokedIn invoked_in);
+
+  // Returns true if content should initialize Mojo before calling
+  // PostEarlyInitialization(). Returns true by default. If this returns false,
+  // the embedder must initialize Mojo. Embedders may wish to override this to
+  // control when Mojo is initialized; for example, Mojo needs to be initialized
+  // after FeatureList, so embedders who delay FeatureList setup must also delay
+  // Mojo setup.
+  virtual bool ShouldInitializeMojo(InvokedIn invoked_in);
 
   // Creates and returns the VariationsIdsProvider. If null is returned,
   // a VariationsIdsProvider is created with a mode of `kUseSignedInState`.
   // VariationsIdsProvider is a singleton.
   virtual variations::VariationsIdsProvider* CreateVariationsIdsProvider();
 
-  // Allows the embedder to perform initialization once field trials/FeatureList
-  // initialization has completed if ShouldCreateFeatureList() returns true.
-  // Otherwise, the embedder is responsible for calling this method once feature
-  // list initialization is complete. Called in every process.
-  virtual void PostFieldTrialInitialization() {}
-
   // Allows the embedder to perform its own initialization after early content
-  // initialization. At this point, it is possible to post to base::ThreadPool
-  // or to the main thread loop via base::ThreadTaskRunnerHandle, but the tasks
-  // won't run immediately.
+  // initialization.
   //
-  // If ShouldCreateFeatureList() returns true, the field trials and FeatureList
-  // have been initialized. Otherwise, the implementation must initialize the
-  // field trials and FeatureList and call PostFieldTrialInitialization().
+  // At this point, it is possible to post to base::ThreadPool, but the tasks
+  // won't run until base::ThreadPoolInstance::Start() is called.
   //
-  // |is_running_tests| indicates whether it is running in tests.
-  virtual void PostEarlyInitialization(bool is_running_tests) {}
+  // It is also possible to post tasks to the main thread loop via
+  // base::ThreadTaskRunnerHandle. These tasks won't run until
+  // base::RunLoop::Run() is called on the main thread, which happens after all
+  // ContentMainDelegate entry points.
+  //
+  // If ShouldCreateFeatureList() returns true for `invoked_in`, the
+  // field trials and FeatureList have been initialized. Otherwise, the
+  // implementation must initialize the field trials and FeatureList before
+  // returning from PostEarlyInitialization. Return an error code if the process
+  // should exit afterwards.
+  virtual absl::optional<int> PostEarlyInitialization(InvokedIn invoked_in);
 
 #if BUILDFLAG(IS_WIN)
   // Allows the embedder to indicate that console control events (e.g., Ctrl-C,

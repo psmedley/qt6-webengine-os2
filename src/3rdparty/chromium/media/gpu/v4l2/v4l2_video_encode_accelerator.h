@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -200,9 +200,7 @@ class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
                                            uint32_t framerate);
 
   // Do several initializations (e.g. set up format) on |encoder_task_runner_|.
-  void InitializeTask(const Config& config,
-                      bool* result,
-                      base::WaitableEvent* done);
+  void InitializeTask(const Config& config);
 
   // Set up formats and initialize the device for them.
   bool SetFormats(VideoPixelFormat input_format,
@@ -296,7 +294,7 @@ class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
   size_t output_buffer_byte_size_;
   uint32_t output_format_fourcc_;
 
-  uint32_t current_bitrate_;
+  Bitrate current_bitrate_;
   size_t current_framerate_;
 
   // Encoder state, owned and operated by |encoder_task_runner_|.

@@ -130,7 +130,7 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
       mojo::PendingRemote<mojom::blink::BlobURLToken>,
       base::TimeTicks input_start_time,
       const String& href_translate,
-      const absl::optional<WebImpression>& impression,
+      const absl::optional<Impression>& impression,
       const LocalFrameToken* initiator_frame_token,
       std::unique_ptr<SourceLocation> source_location,
       mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>
@@ -147,6 +147,7 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   void DidChangeCpuTiming(base::TimeDelta) override;
   void DidObserveLoadingBehavior(LoadingBehaviorFlag) override;
   void DidObserveNewFeatureUsage(const UseCounterFeature&) override;
+  void DidObserveSoftNavigation(uint32_t count) override;
   void DidObserveLayoutShift(double score, bool after_input_or_scroll) override;
   void DidObserveLayoutNg(uint32_t all_block_count,
                           uint32_t ng_block_count,
@@ -158,16 +159,7 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   void SelectorMatchChanged(const Vector<String>& added_selectors,
                             const Vector<String>& removed_selectors) override;
 
-  // Creates a WebDocumentLoaderImpl that is a DocumentLoader but also has:
-  // - storage to store an extra data that can be used by the content layer
-  // - wrapper methods to expose DocumentLoader's variables to the content
-  //   layer
-  DocumentLoader* CreateDocumentLoader(
-      LocalFrame*,
-      WebNavigationType,
-      std::unique_ptr<WebNavigationParams> navigation_params,
-      std::unique_ptr<PolicyContainer> policy_container,
-      std::unique_ptr<WebDocumentLoader::ExtraData> extra_data) override;
+  void DidCreateDocumentLoader(DocumentLoader*) override;
 
   String UserAgentOverride() override;
   WTF::String UserAgent() override;
@@ -202,6 +194,7 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   WebRemotePlaybackClient* CreateWebRemotePlaybackClient(
       HTMLMediaElement&) override;
   void DidChangeScrollOffset() override;
+  void NotifyCurrentHistoryItemChanged() override;
   void DidUpdateCurrentHistoryItem() override;
 
   bool AllowContentInitiatedDataUrlNavigations(const KURL&) override;
@@ -215,8 +208,6 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   void DispatchDidChangeManifest() override;
 
   unsigned BackForwardLength() override;
-
-  BlameContext* GetFrameBlameContext() override;
 
   KURL OverrideFlashEmbedWithHTML(const KURL&) override;
 
@@ -253,7 +244,10 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   void FocusedElementChanged(Element* element) override;
 
   void OnMainFrameIntersectionChanged(
-      const gfx::Rect& intersection_rect) override;
+      const gfx::Rect& main_frame_intersection_rect) override;
+
+  void OnMainFrameViewportRectangleChanged(
+      const gfx::Rect& main_frame_viewport_rect) override;
 
   void OnOverlayPopupAdDetected() override;
 

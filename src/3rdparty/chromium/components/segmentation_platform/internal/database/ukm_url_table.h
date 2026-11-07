@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,9 @@ class UkmUrlTable {
   UkmUrlTable(UkmUrlTable&) = delete;
   UkmUrlTable& operator=(UkmUrlTable&) = delete;
 
+  // Converts the given GURL to string.
+  static std::string GetDatabaseUrlString(const GURL& url);
+
   // Returns an ID for the URL. The ID will be a persistent hash of the `url`.
   static UrlId GenerateUrlId(const GURL& url);
 
@@ -38,10 +41,17 @@ class UkmUrlTable {
 
   // Writes `url` to database with `url_id`. It is invalid to call this method
   // when `url_id` exists in the database.
-  bool WriteUrl(const GURL& url, UrlId url_id);
+  bool WriteUrl(const GURL& url, UrlId url_id, base::Time timestamp);
+
+  // Update the last used timestamp for the URL.
+  bool UpdateUrlTimestamp(UrlId url_id, base::Time timestamp);
 
   // Removes all the URLs in `urls`.
   bool RemoveUrls(const std::vector<UrlId>& urls);
+
+  // Delete URLs whose last used timestamps were earlier than or equal to
+  // `time`.
+  bool DeleteUrlsBeforeTimestamp(base::Time time);
 
  private:
   raw_ptr<sql::Database> db_ GUARDED_BY_CONTEXT(sequence_checker_);

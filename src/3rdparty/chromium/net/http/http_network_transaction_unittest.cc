@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -193,7 +193,7 @@ bool IsTransportSocketPoolStalled(HttpNetworkSession* session) {
 std::string GetHeaders(const base::Value& params) {
   if (!params.is_dict())
     return "";
-  const base::Value* header_list = params.FindListKey("headers");
+  const base::Value::List* header_list = params.GetDict().FindList("headers");
   if (!header_list)
     return "";
   std::string headers;
@@ -297,7 +297,7 @@ class CapturingProxyResolver : public ProxyResolver {
  public:
   struct LookupInfo {
     GURL url;
-    NetworkIsolationKey network_isolation_key;
+    NetworkAnonymizationKey network_anonymization_key;
   };
 
   CapturingProxyResolver()
@@ -309,13 +309,13 @@ class CapturingProxyResolver : public ProxyResolver {
   ~CapturingProxyResolver() override = default;
 
   int GetProxyForURL(const GURL& url,
-                     const NetworkIsolationKey& network_isolation_key,
+                     const NetworkAnonymizationKey& network_anonymization_key,
                      ProxyInfo* results,
                      CompletionOnceCallback callback,
                      std::unique_ptr<Request>* request,
                      const NetLogWithSource& net_log) override {
     results->UseProxyServer(proxy_server_);
-    lookup_info_.push_back(LookupInfo{url, network_isolation_key});
+    lookup_info_.push_back(LookupInfo{url, network_anonymization_key});
     return OK;
   }
 
@@ -617,6 +617,10 @@ class HttpNetworkTransactionTest : public PlatformTest,
 
   const CommonConnectJobParams dummy_connect_job_params_;
 
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey =
+      NetworkAnonymizationKey(SchemefulSite(GURL("https://foo.test/")),
+                              SchemefulSite(GURL("https://bar.test/")));
+
   const net::NetworkIsolationKey kNetworkIsolationKey =
       NetworkIsolationKey(SchemefulSite(GURL("https://foo.test/")),
                           SchemefulSite(GURL("https://bar.test/")));
@@ -914,10 +918,10 @@ TEST_F(HttpNetworkTransactionTest, SimpleGETHostResolutionFailure) {
   request.traffic_annotation =
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
 
-  MockHostResolver* resolver = new MockHostResolver();
+  auto resolver = std::make_unique<MockHostResolver>();
   resolver->rules()->AddSimulatedTimeoutFailure("www.example.org");
   session_deps_.net_log = net::NetLog::Get();
-  session_deps_.host_resolver.reset(resolver);
+  session_deps_.host_resolver = std::move(resolver);
   std::unique_ptr<HttpNetworkSession> session = CreateSession(&session_deps_);
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
   TestCompletionCallback callback;
@@ -1576,7 +1580,7 @@ TEST_F(HttpNetworkTransactionTest, ReuseConnection) {
     "hello", "world"
   };
 
-  for (int i = 0; i < 2; ++i) {
+  for (const auto* expected_response_data : kExpectedResponseData) {
     HttpRequestInfo request;
     request.method = "GET";
     request.url = GURL("http://www.example.org/");
@@ -1603,7 +1607,7 @@ TEST_F(HttpNetworkTransactionTest, ReuseConnection) {
     std::string response_data;
     rv = ReadTransaction(&trans, &response_data);
     EXPECT_THAT(rv, IsOk());
-    EXPECT_EQ(kExpectedResponseData[i], response_data);
+    EXPECT_EQ(expected_response_data, response_data);
   }
 }
 
@@ -2086,7 +2090,7 @@ void HttpNetworkTransactionTest::PreconnectErrorResendRequestTest(
   if (write_failure) {
     ASSERT_FALSE(read_failure);
     data1_writes.push_back(*write_failure);
-    data1_reads.push_back(MockRead(ASYNC, OK));
+    data1_reads.emplace_back(ASYNC, OK);
   } else {
     ASSERT_TRUE(read_failure);
     if (use_spdy) {
@@ -2094,10 +2098,10 @@ void HttpNetworkTransactionTest::PreconnectErrorResendRequestTest(
       if (chunked_upload)
         data1_writes.push_back(CreateMockWrite(spdy_request_body));
     } else {
-      data1_writes.push_back(MockWrite(kHttpRequest));
+      data1_writes.emplace_back(kHttpRequest);
       if (chunked_upload) {
-        data1_writes.push_back(MockWrite("6\r\nfoobar\r\n"));
-        data1_writes.push_back(MockWrite("0\r\n\r\n"));
+        data1_writes.emplace_back("6\r\nfoobar\r\n");
+        data1_writes.emplace_back("0\r\n\r\n");
       }
     }
     data1_reads.push_back(*read_failure);
@@ -2116,19 +2120,18 @@ void HttpNetworkTransactionTest::PreconnectErrorResendRequestTest(
       data2_writes.push_back(CreateMockWrite(spdy_request_body, seq++, ASYNC));
     data2_reads.push_back(CreateMockRead(spdy_response, seq++, ASYNC));
     data2_reads.push_back(CreateMockRead(spdy_data, seq++, ASYNC));
-    data2_reads.push_back(MockRead(ASYNC, OK, seq++));
+    data2_reads.emplace_back(ASYNC, OK, seq++);
   } else {
     int seq = 0;
-    data2_writes.push_back(
-        MockWrite(ASYNC, kHttpRequest, strlen(kHttpRequest), seq++));
+    data2_writes.emplace_back(ASYNC, kHttpRequest, strlen(kHttpRequest), seq++);
     if (chunked_upload) {
-      data2_writes.push_back(MockWrite(ASYNC, "6\r\nfoobar\r\n", 11, seq++));
-      data2_writes.push_back(MockWrite(ASYNC, "0\r\n\r\n", 5, seq++));
+      data2_writes.emplace_back(ASYNC, "6\r\nfoobar\r\n", 11, seq++);
+      data2_writes.emplace_back(ASYNC, "0\r\n\r\n", 5, seq++);
     }
-    data2_reads.push_back(
-        MockRead(ASYNC, kHttpResponse, strlen(kHttpResponse), seq++));
-    data2_reads.push_back(MockRead(ASYNC, kHttpData, strlen(kHttpData), seq++));
-    data2_reads.push_back(MockRead(ASYNC, OK, seq++));
+    data2_reads.emplace_back(ASYNC, kHttpResponse, strlen(kHttpResponse),
+                             seq++);
+    data2_reads.emplace_back(ASYNC, kHttpData, strlen(kHttpData), seq++);
+    data2_reads.emplace_back(ASYNC, OK, seq++);
   }
   SequencedSocketData data2(data2_reads, data2_writes);
   session_deps_.socket_factory->AddSocketDataProvider(&data2);
@@ -3043,14 +3046,15 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthWithAddressChange) {
   request.traffic_annotation =
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
 
-  MockHostResolver* resolver = new MockHostResolver();
+  auto resolver = std::make_unique<MockHostResolver>();
+  auto* resolver_ptr = resolver.get();
   session_deps_.net_log = net::NetLog::Get();
-  session_deps_.host_resolver.reset(resolver);
+  session_deps_.host_resolver = std::move(resolver);
   std::unique_ptr<HttpNetworkSession> session = CreateSession(&session_deps_);
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
 
-  resolver->rules()->ClearRules();
-  resolver->rules()->AddRule("www.example.org", "127.0.0.1");
+  resolver_ptr->rules()->ClearRules();
+  resolver_ptr->rules()->AddRule("www.example.org", "127.0.0.1");
 
   MockWrite data_writes1[] = {
       MockWrite("GET / HTTP/1.1\r\n"
@@ -3115,8 +3119,8 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthWithAddressChange) {
   ASSERT_FALSE(endpoint.address().empty());
   EXPECT_EQ("127.0.0.1:80", endpoint.ToString());
 
-  resolver->rules()->ClearRules();
-  resolver->rules()->AddRule("www.example.org", "127.0.0.2");
+  resolver_ptr->rules()->ClearRules();
+  resolver_ptr->rules()->AddRule("www.example.org", "127.0.0.2");
 
   TestCompletionCallback callback2;
 
@@ -3608,7 +3612,7 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyNoKeepAliveHttp10) {
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   RecordingNetLogObserver net_log_observer;
   NetLogWithSource net_log_with_source =
@@ -3729,7 +3733,7 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyNoKeepAliveHttp10) {
   HttpAuthCache::Entry* entry = session->http_auth_cache()->Lookup(
       url::SchemeHostPort(url::SchemeHostPort(GURL("http://myproxy:70"))),
       HttpAuth::AUTH_PROXY, "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC,
-      NetworkIsolationKey());
+      NetworkAnonymizationKey());
   ASSERT_TRUE(entry);
   ASSERT_EQ(kFoo, entry->credentials().username());
   ASSERT_EQ(kBar, entry->credentials().password());
@@ -3758,7 +3762,7 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyNoKeepAliveHttp11) {
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   RecordingNetLogObserver net_log_observer;
   session_deps_.net_log = NetLog::Get();
@@ -3906,7 +3910,7 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyKeepAliveHttp10) {
 
     // Configure against proxy server "myproxy:70".
     session_deps_.proxy_resolution_service =
-        ConfiguredProxyResolutionService::CreateFixed(
+        ConfiguredProxyResolutionService::CreateFixedForTest(
             "myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
     RecordingNetLogObserver net_log_observer;
     session_deps_.net_log = NetLog::Get();
@@ -4019,7 +4023,7 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyKeepAliveHttp11) {
 
     // Configure against proxy server "myproxy:70".
     session_deps_.proxy_resolution_service =
-        ConfiguredProxyResolutionService::CreateFixed(
+        ConfiguredProxyResolutionService::CreateFixedForTest(
             "myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
     RecordingNetLogObserver net_log_observer;
     session_deps_.net_log = NetLog::Get();
@@ -4133,7 +4137,7 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyKeepAliveExtraData) {
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   RecordingNetLogObserver net_log_observer;
   session_deps_.net_log = NetLog::Get();
@@ -4260,7 +4264,7 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyKeepAliveHangupDuringBody) {
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   std::unique_ptr<HttpNetworkSession> session = CreateSession(&session_deps_);
 
@@ -4349,7 +4353,7 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyCancelTunnel) {
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -4410,7 +4414,7 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyMatchesServerAuthNoTunnel) {
 
   // Proxy matches request URL.
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   NetLogWithSource net_log_with_source =
       NetLogWithSource::Make(NetLogSourceType::NONE);
@@ -4509,14 +4513,14 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyMatchesServerAuthNoTunnel) {
   HttpAuthCache::Entry* entry = session->http_auth_cache()->Lookup(
       url::SchemeHostPort(url::SchemeHostPort(GURL("http://myproxy:70"))),
       HttpAuth::AUTH_PROXY, "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC,
-      NetworkIsolationKey());
+      NetworkAnonymizationKey());
   ASSERT_TRUE(entry);
   ASSERT_EQ(kFoo, entry->credentials().username());
   ASSERT_EQ(kBar, entry->credentials().password());
   entry = session->http_auth_cache()->Lookup(
       url::SchemeHostPort(url::SchemeHostPort(GURL("http://myproxy:70"))),
       HttpAuth::AUTH_SERVER, "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC,
-      NetworkIsolationKey());
+      NetworkAnonymizationKey());
   ASSERT_TRUE(entry);
   ASSERT_EQ(kFoo2, entry->credentials().username());
   ASSERT_EQ(kBar2, entry->credentials().password());
@@ -4542,20 +4546,22 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyMatchesServerAuthNoTunnel) {
 
 // Test the no-tunnel HTTP auth case where proxy and server origins and realms
 // are the same, but the user/passwords are different, and with different
-// NetworkIsolationKeys. Sends one request with a NIK, response to both proxy
-// and auth challenges, sends another request with another NIK, expecting only
-// the proxy credentials to be cached, and thus sees only a server auth
+// NetworkAnonymizationKeys. Sends one request with a NIK, response to both
+// proxy and auth challenges, sends another request with another NIK, expecting
+// only the proxy credentials to be cached, and thus sees only a server auth
 // challenge. Then sends a request with the original NIK, expecting cached proxy
 // and auth credentials that match the ones used in the first request.
 //
 // Serves to verify credentials are correctly separated based on
-// HttpAuth::Target and NetworkIsolationKeys, but NetworkIsolationKey only
-// affects server credentials, not proxy credentials.
+// HttpAuth::Target and NetworkAnonymizationKeys, but NetworkAnonymizationKey
+// only affects server credentials, not proxy credentials.
 TEST_F(HttpNetworkTransactionTest,
-       BasicAuthProxyMatchesServerAuthWithNetworkIsolationKeyNoTunnel) {
+       BasicAuthProxyMatchesServerAuthWithNetworkAnonymizationKeyNoTunnel) {
   const SchemefulSite kSite1(GURL("https://foo.test/"));
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
   const net::NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
   const SchemefulSite kSite2(GURL("https://bar.test/"));
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
   const net::NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
 
   // This test would need to use a single socket without this option enabled.
@@ -4567,13 +4573,14 @@ TEST_F(HttpNetworkTransactionTest,
 
   // Proxy matches request URL.
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   NetLogWithSource net_log_with_source =
       NetLogWithSource::Make(NetLogSourceType::NONE);
 
   session_deps_.net_log = NetLog::Get();
-  session_deps_.key_auth_cache_server_entries_by_network_isolation_key = true;
+  session_deps_.key_auth_cache_server_entries_by_network_anonymization_key =
+      true;
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
 
   MockWrite data_writes[] = {
@@ -4630,7 +4637,7 @@ TEST_F(HttpNetworkTransactionTest,
   session_deps_.socket_factory->AddSocketDataProvider(&data);
 
   MockWrite data_writes2[] = {
-      // Initial request using a different NetworkIsolationKey includes the
+      // Initial request using a different NetworkAnonymizationKey includes the
       // cached proxy credentials, but not server credentials.
       MockWrite("GET http://myproxy:70/ HTTP/1.1\r\n"
                 "Host: myproxy:70\r\n"
@@ -4669,6 +4676,7 @@ TEST_F(HttpNetworkTransactionTest,
   request.traffic_annotation =
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
   request.network_isolation_key = kNetworkIsolationKey1;
+  request.network_anonymization_key = kNetworkAnonymizationKey1;
 
   auto trans =
       std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY, session.get());
@@ -4704,36 +4712,39 @@ TEST_F(HttpNetworkTransactionTest,
   EXPECT_EQ("hello", response_data);
 
   // Check that the proxy credentials were cached correctly. The should be
-  // accessible with any NetworkIsolationKey.
+  // accessible with any NetworkAnonymizationKey.
   HttpAuthCache::Entry* entry = session->http_auth_cache()->Lookup(
       url::SchemeHostPort(url::SchemeHostPort(GURL("http://myproxy:70"))),
       HttpAuth::AUTH_PROXY, "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC,
-      kNetworkIsolationKey1);
+      kNetworkAnonymizationKey1);
   ASSERT_TRUE(entry);
   ASSERT_EQ(kFoo, entry->credentials().username());
   ASSERT_EQ(kBar, entry->credentials().password());
   EXPECT_EQ(entry, session->http_auth_cache()->Lookup(
                        url::SchemeHostPort(GURL("http://myproxy:70")),
                        HttpAuth::AUTH_PROXY, "MyRealm1",
-                       HttpAuth::AUTH_SCHEME_BASIC, kNetworkIsolationKey2));
+                       HttpAuth::AUTH_SCHEME_BASIC, kNetworkAnonymizationKey2));
 
   // Check that the server credentials were cached correctly. The should be
-  // accessible with only kNetworkIsolationKey1.
+  // accessible with only kNetworkAnonymizationKey1.
   entry = session->http_auth_cache()->Lookup(
       url::SchemeHostPort(GURL("http://myproxy:70")), HttpAuth::AUTH_SERVER,
-      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkIsolationKey1);
+      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkAnonymizationKey1);
   ASSERT_TRUE(entry);
   ASSERT_EQ(kFoo2, entry->credentials().username());
   ASSERT_EQ(kBar2, entry->credentials().password());
-  // Looking up the server entry with another NetworkIsolationKey should fail.
+  // Looking up the server entry with another NetworkAnonymizationKey should
+  // fail.
   EXPECT_FALSE(session->http_auth_cache()->Lookup(
       url::SchemeHostPort(GURL("http://myproxy:70")), HttpAuth::AUTH_SERVER,
-      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkIsolationKey2));
+      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkAnonymizationKey2));
 
-  // Make another request with a different NetworkIsolationKey. It should use
-  // another socket, reuse the cached proxy credentials, but result in a server
-  // auth challenge.
+  // Make another request with a different NetworkAnonymizationKey. It should
+  // use another socket, reuse the cached proxy credentials, but result in a
+  // server auth challenge.
   request.network_isolation_key = kNetworkIsolationKey2;
+  request.network_anonymization_key = kNetworkAnonymizationKey2;
+
   trans =
       std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY, session.get());
   rv = trans->Start(&request, callback.callback(), net_log_with_source);
@@ -4761,33 +4772,34 @@ TEST_F(HttpNetworkTransactionTest,
   // Check that the proxy credentials are still cached.
   entry = session->http_auth_cache()->Lookup(
       url::SchemeHostPort(GURL("http://myproxy:70")), HttpAuth::AUTH_PROXY,
-      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkIsolationKey1);
+      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkAnonymizationKey1);
   ASSERT_TRUE(entry);
   ASSERT_EQ(kFoo, entry->credentials().username());
   ASSERT_EQ(kBar, entry->credentials().password());
   EXPECT_EQ(entry, session->http_auth_cache()->Lookup(
                        url::SchemeHostPort(GURL("http://myproxy:70")),
                        HttpAuth::AUTH_PROXY, "MyRealm1",
-                       HttpAuth::AUTH_SCHEME_BASIC, kNetworkIsolationKey2));
+                       HttpAuth::AUTH_SCHEME_BASIC, kNetworkAnonymizationKey2));
 
   // Check that the correct server credentials are cached for each
-  // NetworkIsolationKey.
+  // NetworkAnonymizationKey.
   entry = session->http_auth_cache()->Lookup(
       url::SchemeHostPort(GURL("http://myproxy:70")), HttpAuth::AUTH_SERVER,
-      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkIsolationKey1);
+      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkAnonymizationKey1);
   ASSERT_TRUE(entry);
   ASSERT_EQ(kFoo2, entry->credentials().username());
   ASSERT_EQ(kBar2, entry->credentials().password());
   entry = session->http_auth_cache()->Lookup(
       url::SchemeHostPort(GURL("http://myproxy:70")), HttpAuth::AUTH_SERVER,
-      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkIsolationKey2);
+      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkAnonymizationKey2);
   ASSERT_TRUE(entry);
   ASSERT_EQ(kFoo3, entry->credentials().username());
   ASSERT_EQ(kBar3, entry->credentials().password());
 
-  // Make a request with the original NetworkIsolationKey. It should reuse the
-  // first socket, and the proxy credentials sent on the first socket.
+  // Make a request with the original NetworkAnonymizationKey. It should reuse
+  // the first socket, and the proxy credentials sent on the first socket.
   request.network_isolation_key = kNetworkIsolationKey1;
+  request.network_anonymization_key = kNetworkAnonymizationKey1;
   trans =
       std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY, session.get());
   rv = trans->Start(&request, callback.callback(), net_log_with_source);
@@ -4806,10 +4818,12 @@ TEST_F(HttpNetworkTransactionTest,
 
 // Much like the test above, but uses tunnelled connections.
 TEST_F(HttpNetworkTransactionTest,
-       BasicAuthProxyMatchesServerAuthWithNetworkIsolationKeyWithTunnel) {
+       BasicAuthProxyMatchesServerAuthWithNetworkAnonymizationKeyWithTunnel) {
   const SchemefulSite kSite1(GURL("https://foo.test/"));
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
   const net::NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
   const SchemefulSite kSite2(GURL("https://bar.test/"));
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
   const net::NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
 
   // This test would need to use a single socket without this option enabled.
@@ -4821,12 +4835,13 @@ TEST_F(HttpNetworkTransactionTest,
 
   // Proxy matches request URL.
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "HTTPS myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   NetLogWithSource net_log_with_source =
       NetLogWithSource::Make(NetLogSourceType::NONE);
   session_deps_.net_log = NetLog::Get();
-  session_deps_.key_auth_cache_server_entries_by_network_isolation_key = true;
+  session_deps_.key_auth_cache_server_entries_by_network_anonymization_key =
+      true;
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
 
   MockWrite data_writes[] = {
@@ -4893,7 +4908,7 @@ TEST_F(HttpNetworkTransactionTest,
   session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl2);
 
   MockWrite data_writes2[] = {
-      // Initial request using a different NetworkIsolationKey includes the
+      // Initial request using a different NetworkAnonymizationKey includes the
       // cached proxy credentials when establishing a tunnel.
       MockWrite("CONNECT myproxy:70 HTTP/1.1\r\n"
                 "Host: myproxy:70\r\n"
@@ -4942,6 +4957,7 @@ TEST_F(HttpNetworkTransactionTest,
   request.traffic_annotation =
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
   request.network_isolation_key = kNetworkIsolationKey1;
+  request.network_anonymization_key = kNetworkAnonymizationKey1;
 
   auto trans =
       std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY, session.get());
@@ -4977,36 +4993,39 @@ TEST_F(HttpNetworkTransactionTest,
   EXPECT_EQ("hello", response_data);
 
   // Check that the proxy credentials were cached correctly. The should be
-  // accessible with any NetworkIsolationKey.
+  // accessible with any NetworkAnonymizationKey.
   HttpAuthCache::Entry* entry = session->http_auth_cache()->Lookup(
       url::SchemeHostPort(url::SchemeHostPort(GURL("https://myproxy:70"))),
       HttpAuth::AUTH_PROXY, "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC,
-      kNetworkIsolationKey1);
+      kNetworkAnonymizationKey1);
   ASSERT_TRUE(entry);
   ASSERT_EQ(kFoo, entry->credentials().username());
   ASSERT_EQ(kBar, entry->credentials().password());
   EXPECT_EQ(entry, session->http_auth_cache()->Lookup(
                        url::SchemeHostPort(GURL("https://myproxy:70")),
                        HttpAuth::AUTH_PROXY, "MyRealm1",
-                       HttpAuth::AUTH_SCHEME_BASIC, kNetworkIsolationKey2));
+                       HttpAuth::AUTH_SCHEME_BASIC, kNetworkAnonymizationKey2));
 
   // Check that the server credentials were cached correctly. The should be
-  // accessible with only kNetworkIsolationKey1.
+  // accessible with only kNetworkAnonymizationKey1.
   entry = session->http_auth_cache()->Lookup(
       url::SchemeHostPort(GURL("https://myproxy:70")), HttpAuth::AUTH_SERVER,
-      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkIsolationKey1);
+      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkAnonymizationKey1);
   ASSERT_TRUE(entry);
   ASSERT_EQ(kFoo2, entry->credentials().username());
   ASSERT_EQ(kBar2, entry->credentials().password());
-  // Looking up the server entry with another NetworkIsolationKey should fail.
+  // Looking up the server entry with another NetworkAnonymiationKey should
+  // fail.
   EXPECT_FALSE(session->http_auth_cache()->Lookup(
       url::SchemeHostPort(GURL("https://myproxy:70")), HttpAuth::AUTH_SERVER,
-      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkIsolationKey2));
+      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkAnonymizationKey2));
 
-  // Make another request with a different NetworkIsolationKey. It should use
+  // Make another request with a different NetworkAnonymiationKey. It should use
   // another socket, reuse the cached proxy credentials, but result in a server
   // auth challenge.
   request.network_isolation_key = kNetworkIsolationKey2;
+  request.network_anonymization_key = kNetworkAnonymizationKey2;
+
   trans =
       std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY, session.get());
   rv = trans->Start(&request, callback.callback(), net_log_with_source);
@@ -5034,33 +5053,35 @@ TEST_F(HttpNetworkTransactionTest,
   // Check that the proxy credentials are still cached.
   entry = session->http_auth_cache()->Lookup(
       url::SchemeHostPort(GURL("https://myproxy:70")), HttpAuth::AUTH_PROXY,
-      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkIsolationKey1);
+      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkAnonymizationKey1);
   ASSERT_TRUE(entry);
   ASSERT_EQ(kFoo, entry->credentials().username());
   ASSERT_EQ(kBar, entry->credentials().password());
   EXPECT_EQ(entry, session->http_auth_cache()->Lookup(
                        url::SchemeHostPort(GURL("https://myproxy:70")),
                        HttpAuth::AUTH_PROXY, "MyRealm1",
-                       HttpAuth::AUTH_SCHEME_BASIC, kNetworkIsolationKey2));
+                       HttpAuth::AUTH_SCHEME_BASIC, kNetworkAnonymizationKey2));
 
   // Check that the correct server credentials are cached for each
-  // NetworkIsolationKey.
+  // NetworkAnonymiationKey.
   entry = session->http_auth_cache()->Lookup(
       url::SchemeHostPort(GURL("https://myproxy:70")), HttpAuth::AUTH_SERVER,
-      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkIsolationKey1);
+      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkAnonymizationKey1);
   ASSERT_TRUE(entry);
   ASSERT_EQ(kFoo2, entry->credentials().username());
   ASSERT_EQ(kBar2, entry->credentials().password());
   entry = session->http_auth_cache()->Lookup(
       url::SchemeHostPort(GURL("https://myproxy:70")), HttpAuth::AUTH_SERVER,
-      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkIsolationKey2);
+      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, kNetworkAnonymizationKey2);
   ASSERT_TRUE(entry);
   ASSERT_EQ(kFoo3, entry->credentials().username());
   ASSERT_EQ(kBar3, entry->credentials().password());
 
-  // Make a request with the original NetworkIsolationKey. It should reuse the
-  // first socket, and the proxy credentials sent on the first socket.
+  // Make a request with the original NetworkAnonymiationKey. It should reuse
+  // the first socket, and the proxy credentials sent on the first socket.
   request.network_isolation_key = kNetworkIsolationKey1;
+  request.network_anonymization_key = kNetworkAnonymizationKey1;
+
   trans =
       std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY, session.get());
   rv = trans->Start(&request, callback.callback(), net_log_with_source);
@@ -5088,7 +5109,7 @@ TEST_F(HttpNetworkTransactionTest, SanitizeProxyAuthHeaders) {
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -5195,7 +5216,7 @@ TEST_F(HttpNetworkTransactionTest, HttpsServerRequestsProxyAuthThroughProxy) {
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
 
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   RecordingNetLogObserver net_log_observer;
   session_deps_.net_log = NetLog::Get();
@@ -5258,14 +5279,14 @@ TEST_F(HttpNetworkTransactionTest,
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   auto auth_handler_factory = std::make_unique<HttpAuthHandlerMock::Factory>();
   auth_handler_factory->set_do_init_from_challenge(true);
   auto mock_handler = std::make_unique<HttpAuthHandlerMock>();
   mock_handler->set_allows_default_credentials(true);
-  auth_handler_factory->AddMockHandler(mock_handler.release(),
+  auth_handler_factory->AddMockHandler(std::move(mock_handler),
                                        HttpAuth::AUTH_PROXY);
   session_deps_.http_auth_handler_factory = std::move(auth_handler_factory);
 
@@ -5374,14 +5395,14 @@ TEST_F(HttpNetworkTransactionTest,
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   auto auth_handler_factory = std::make_unique<HttpAuthHandlerMock::Factory>();
   auth_handler_factory->set_do_init_from_challenge(true);
   auto mock_handler = std::make_unique<HttpAuthHandlerMock>();
   mock_handler->set_allows_default_credentials(true);
-  auth_handler_factory->AddMockHandler(mock_handler.release(),
+  auth_handler_factory->AddMockHandler(std::move(mock_handler),
                                        HttpAuth::AUTH_PROXY);
   session_deps_.http_auth_handler_factory = std::move(auth_handler_factory);
 
@@ -5495,14 +5516,14 @@ TEST_F(HttpNetworkTransactionTest,
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   auto auth_handler_factory = std::make_unique<HttpAuthHandlerMock::Factory>();
   auth_handler_factory->set_do_init_from_challenge(true);
   auto mock_handler = std::make_unique<HttpAuthHandlerMock>();
   mock_handler->set_allows_default_credentials(true);
-  auth_handler_factory->AddMockHandler(mock_handler.release(),
+  auth_handler_factory->AddMockHandler(std::move(mock_handler),
                                        HttpAuth::AUTH_PROXY);
   session_deps_.http_auth_handler_factory = std::move(auth_handler_factory);
 
@@ -5595,7 +5616,7 @@ TEST_F(HttpNetworkTransactionTest,
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   auto auth_handler_factory = std::make_unique<HttpAuthHandlerMock::Factory>();
@@ -5612,13 +5633,13 @@ TEST_F(HttpNetworkTransactionTest,
   mock_handler->set_allows_default_credentials(true);
   mock_handler->set_allows_explicit_credentials(true);
   mock_handler->set_connection_based(true);
-  auth_handler_factory->AddMockHandler(mock_handler.release(),
+  auth_handler_factory->AddMockHandler(std::move(mock_handler),
                                        HttpAuth::AUTH_PROXY);
   mock_handler = std::make_unique<HttpAuthHandlerMock>();
   mock_handler->set_allows_default_credentials(true);
   mock_handler->set_allows_explicit_credentials(true);
   mock_handler->set_connection_based(true);
-  auth_handler_factory->AddMockHandler(mock_handler.release(),
+  auth_handler_factory->AddMockHandler(std::move(mock_handler),
                                        HttpAuth::AUTH_PROXY);
   session_deps_.http_auth_handler_factory = std::move(auth_handler_factory);
 
@@ -5713,20 +5734,20 @@ TEST_F(HttpNetworkTransactionTest,
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   auto auth_handler_factory = std::make_unique<HttpAuthHandlerMock::Factory>();
   auth_handler_factory->set_do_init_from_challenge(true);
   auto mock_handler = std::make_unique<HttpAuthHandlerMock>();
   mock_handler->set_allows_default_credentials(true);
-  auth_handler_factory->AddMockHandler(mock_handler.release(),
+  auth_handler_factory->AddMockHandler(std::move(mock_handler),
                                        HttpAuth::AUTH_PROXY);
   // Add another handler for the second challenge. It supports default
   // credentials, but they shouldn't be used, since they were already tried.
   mock_handler = std::make_unique<HttpAuthHandlerMock>();
   mock_handler->set_allows_default_credentials(true);
-  auth_handler_factory->AddMockHandler(mock_handler.release(),
+  auth_handler_factory->AddMockHandler(std::move(mock_handler),
                                        HttpAuth::AUTH_PROXY);
   session_deps_.http_auth_handler_factory = std::move(auth_handler_factory);
 
@@ -5824,7 +5845,7 @@ TEST_F(HttpNetworkTransactionTest, NonPermanentGenerateAuthTokenError) {
   mock_handler->set_allows_explicit_credentials(true);
   mock_handler->set_connection_based(true);
   mock_handler->SetGenerateExpectation(true, ERR_INVALID_AUTH_CREDENTIALS);
-  auth_handler_factory->AddMockHandler(mock_handler.release(),
+  auth_handler_factory->AddMockHandler(std::move(mock_handler),
                                        HttpAuth::AUTH_SERVER);
 
   // Add another handler for the second challenge. It supports default
@@ -5833,7 +5854,7 @@ TEST_F(HttpNetworkTransactionTest, NonPermanentGenerateAuthTokenError) {
   mock_handler->set_allows_default_credentials(true);
   mock_handler->set_allows_explicit_credentials(true);
   mock_handler->set_connection_based(true);
-  auth_handler_factory->AddMockHandler(mock_handler.release(),
+  auth_handler_factory->AddMockHandler(std::move(mock_handler),
                                        HttpAuth::AUTH_SERVER);
   session_deps_.http_auth_handler_factory = std::move(auth_handler_factory);
 
@@ -5937,14 +5958,14 @@ TEST_F(HttpNetworkTransactionTest, NonPermanentGenerateAuthTokenError) {
 // schemes, based on the path of the URL being requests.
 class SameProxyWithDifferentSchemesProxyResolver : public ProxyResolver {
  public:
-  SameProxyWithDifferentSchemesProxyResolver() {}
+  SameProxyWithDifferentSchemesProxyResolver() = default;
 
   SameProxyWithDifferentSchemesProxyResolver(
       const SameProxyWithDifferentSchemesProxyResolver&) = delete;
   SameProxyWithDifferentSchemesProxyResolver& operator=(
       const SameProxyWithDifferentSchemesProxyResolver&) = delete;
 
-  ~SameProxyWithDifferentSchemesProxyResolver() override {}
+  ~SameProxyWithDifferentSchemesProxyResolver() override = default;
 
   static constexpr uint16_t kProxyPort = 10000;
 
@@ -5958,7 +5979,7 @@ class SameProxyWithDifferentSchemesProxyResolver : public ProxyResolver {
 
   // ProxyResolver implementation.
   int GetProxyForURL(const GURL& url,
-                     const NetworkIsolationKey& network_isolation_key,
+                     const NetworkAnonymizationKey& network_anonymization_key,
                      ProxyInfo* results,
                      CompletionOnceCallback callback,
                      std::unique_ptr<Request>* request,
@@ -6216,7 +6237,7 @@ TEST_F(HttpNetworkTransactionTest, HttpProxyLoadTimingNoPacTwoRequests) {
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   NetLogWithSource net_log_with_source =
       NetLogWithSource::Make(NetLogSourceType::NONE);
@@ -6321,7 +6342,7 @@ TEST_F(HttpNetworkTransactionTest, HttpProxyLoadTimingWithPacTwoRequests) {
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   NetLogWithSource net_log_with_source =
       NetLogWithSource::Make(NetLogSourceType::NONE);
@@ -6409,8 +6430,8 @@ TEST_F(HttpNetworkTransactionTest, HttpProxyLoadTimingWithPacTwoRequests) {
   session->CloseAllConnections(ERR_FAILED, "Very good reason");
 }
 
-// Make sure that NetworkIsolationKeys are passed down to the proxy layer.
-TEST_F(HttpNetworkTransactionTest, ProxyResolvedWithNetworkIsolationKey) {
+// Make sure that NetworkAnonymizationKeys are passed down to the proxy layer.
+TEST_F(HttpNetworkTransactionTest, ProxyResolvedWithNetworkAnonymizationKey) {
   const SchemefulSite kSite(GURL("https://foo.test/"));
 
   ProxyConfig proxy_config;
@@ -6458,12 +6479,12 @@ TEST_F(HttpNetworkTransactionTest, ProxyHostResolutionFailure) {
 
   // Configure against https proxy server "proxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
-  MockHostResolver* resolver = new MockHostResolver();
+  auto resolver = std::make_unique<MockHostResolver>();
   resolver->rules()->AddSimulatedTimeoutFailure("proxy");
   session_deps_.net_log = net::NetLog::Get();
-  session_deps_.host_resolver.reset(resolver);
+  session_deps_.host_resolver = std::move(resolver);
   std::unique_ptr<HttpNetworkSession> session = CreateSession(&session_deps_);
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
   TestCompletionCallback callback;
@@ -6487,7 +6508,7 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxyGet) {
 
   // Configure against https proxy server "proxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = NetLog::Get();
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -6569,7 +6590,7 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyGet) {
 
   // Configure against https proxy server "proxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = NetLog::Get();
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -6650,7 +6671,7 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyGetWithSessionRace) {
 
   // Configure SPDY proxy server "proxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   NetLogWithSource net_log_with_source =
       NetLogWithSource::Make(NetLogSourceType::NONE);
@@ -6691,7 +6712,7 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyGetWithSessionRace) {
   SpdySessionKey key(HostPortPair("proxy", 70), ProxyServer::Direct(),
                      PRIVACY_MODE_DISABLED,
                      SpdySessionKey::IsProxySession::kTrue, SocketTag(),
-                     NetworkIsolationKey(), SecureDnsPolicy::kAllow);
+                     NetworkAnonymizationKey(), SecureDnsPolicy::kAllow);
   base::WeakPtr<SpdySession> spdy_session =
       CreateSpdySession(session.get(), key, net_log_with_source);
 
@@ -6723,7 +6744,7 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyGetWithProxyAuth) {
 
   // Configure against https proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = NetLog::Get();
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -6821,7 +6842,7 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyConnectHttps) {
 
   // Configure against https proxy server "proxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = NetLog::Get();
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -6908,7 +6929,7 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyConnectSpdy) {
 
   // Configure against https proxy server "proxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = NetLog::Get();
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -7001,7 +7022,7 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyConnectFailure) {
 
   // Configure against https proxy server "proxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = NetLog::Get();
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -7222,7 +7243,7 @@ TEST_F(HttpNetworkTransactionTest,
        HttpsProxySpdyConnectHttpsLoadTimingTwoRequestsTwoServers) {
   // Configure against https proxy server "proxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = NetLog::Get();
   std::unique_ptr<HttpNetworkSession> session(
@@ -7360,7 +7381,7 @@ TEST_F(HttpNetworkTransactionTest,
        HttpsProxySpdyConnectHttpsLoadTimingTwoRequestsSameServer) {
   // Configure against https proxy server "proxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = NetLog::Get();
   std::unique_ptr<HttpNetworkSession> session(
@@ -7487,7 +7508,7 @@ TEST_F(HttpNetworkTransactionTest,
 TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyLoadTimingTwoHttpRequests) {
   // Configure against https proxy server "proxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = NetLog::Get();
   std::unique_ptr<HttpNetworkSession> session(
@@ -7866,7 +7887,7 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxyAuthRetry) {
 
   // Configure against https proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = NetLog::Get();
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -7972,7 +7993,7 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxyAuthRetryNoKeepAlive) {
 
   // Configure against https proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = NetLog::Get();
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -8094,7 +8115,7 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxyAuthRetryNoKeepAliveChangeProxy) {
 
   // Configure against https proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.proxy_resolution_service->SetProxyDelegate(
       proxy_delegate.get());
@@ -8220,7 +8241,7 @@ TEST_F(HttpNetworkTransactionTest,
 
   // Configure against https proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.proxy_resolution_service->SetProxyDelegate(
       proxy_delegate.get());
@@ -8334,7 +8355,7 @@ void HttpNetworkTransactionTest::ConnectStatusHelperWithExpectedStatus(
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
 
@@ -8551,7 +8572,7 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyThenServer) {
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
 
@@ -9368,7 +9389,6 @@ TEST_F(HttpNetworkTransactionTest, NTLMOverHttp2WithWebsockets) {
   ssl1.next_protos_expected_in_ssl_config = NextProtoVector{kProtoHTTP11};
   session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl1);
 
-  session_deps_.enable_websocket_over_http2 = true;
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
 
   HttpRequestInfo initial_request_info;
@@ -9383,7 +9403,7 @@ TEST_F(HttpNetworkTransactionTest, NTLMOverHttp2WithWebsockets) {
   EXPECT_THAT(initial_callback.GetResult(rv), IsOk());
 
   EXPECT_FALSE(session->http_server_properties()->RequiresHTTP11(
-      url::SchemeHostPort(kInitialUrl), NetworkIsolationKey()));
+      url::SchemeHostPort(kInitialUrl), NetworkAnonymizationKey()));
 
   HttpRequestInfo websocket_request_info;
   websocket_request_info.method = "GET";
@@ -9434,7 +9454,7 @@ TEST_F(HttpNetworkTransactionTest, NTLMOverHttp2WithWebsockets) {
   // part here is that the scheme that requires HTTP/1.1 should be HTTPS, not
   // WSS.
   EXPECT_TRUE(session->http_server_properties()->RequiresHTTP11(
-      url::SchemeHostPort(kInitialUrl), NetworkIsolationKey()));
+      url::SchemeHostPort(kInitialUrl), NetworkAnonymizationKey()));
 }
 
 #endif  // BUILDFLAG(ENABLE_WEBSOCKETS)
@@ -9449,7 +9469,7 @@ TEST_F(HttpNetworkTransactionTest, NTLMProxyTLSHandshakeReset) {
   // The NTLM test data expects the proxy to be named 'server'. The origin is
   // https://origin/.
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY server", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   SSLContextConfig config;
@@ -9646,7 +9666,7 @@ TEST_F(HttpNetworkTransactionTest, DontRecycleTransportSocketForSSLTunnel) {
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -11021,12 +11041,12 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthCacheAndPreauth) {
 // Tests that nonce count increments when multiple auth attempts
 // are started with the same nonce.
 TEST_F(HttpNetworkTransactionTest, DigestPreAuthNonceCount) {
-  HttpAuthHandlerDigest::Factory* digest_factory =
-      new HttpAuthHandlerDigest::Factory();
-  HttpAuthHandlerDigest::FixedNonceGenerator* nonce_generator =
-      new HttpAuthHandlerDigest::FixedNonceGenerator("0123456789abcdef");
-  digest_factory->set_nonce_generator(nonce_generator);
-  session_deps_.http_auth_handler_factory.reset(digest_factory);
+  auto digest_factory = std::make_unique<HttpAuthHandlerDigest::Factory>();
+  auto nonce_generator =
+      std::make_unique<HttpAuthHandlerDigest::FixedNonceGenerator>(
+          "0123456789abcdef");
+  digest_factory->set_nonce_generator(std::move(nonce_generator));
+  session_deps_.http_auth_handler_factory = std::move(digest_factory);
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
 
   // Transaction 1: authenticate (foo, bar) on MyRealm1
@@ -11171,16 +11191,6 @@ TEST_F(HttpNetworkTransactionTest, ResetStateForRestart) {
   response->response_time = base::Time::Now();
   response->was_cached = true;  // (Wouldn't ever actually be true...)
 
-  { // Setup state for response_.vary_data
-    HttpRequestInfo request;
-    std::string temp("HTTP/1.1 200 OK\nVary: foo, bar\n\n");
-    std::replace(temp.begin(), temp.end(), '\n', '\0');
-    scoped_refptr<HttpResponseHeaders> headers(new HttpResponseHeaders(temp));
-    request.extra_headers.SetHeader("Foo", "1");
-    request.extra_headers.SetHeader("bar", "23");
-    EXPECT_TRUE(response->vary_data.Init(request, *headers.get()));
-  }
-
   // Cause the above state to be reset.
   trans.ResetStateForRestart();
 
@@ -11192,7 +11202,6 @@ TEST_F(HttpNetworkTransactionTest, ResetStateForRestart) {
   EXPECT_FALSE(response->headers);
   EXPECT_FALSE(response->was_cached);
   EXPECT_EQ(0U, response->ssl_info.cert_status);
-  EXPECT_FALSE(response->vary_data.is_valid());
 }
 
 // Test HTTPS connections to a site with a bad certificate
@@ -11254,7 +11263,7 @@ TEST_F(HttpNetworkTransactionTest, HTTPSBadCertificate) {
 // proxy
 TEST_F(HttpNetworkTransactionTest, HTTPSBadCertificateViaProxy) {
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   HttpRequestInfo request;
@@ -11332,7 +11341,7 @@ TEST_F(HttpNetworkTransactionTest, HTTPSBadCertificateViaProxy) {
 // Test HTTPS connections to a site, going through an HTTPS proxy
 TEST_F(HttpNetworkTransactionTest, HTTPSViaHttpsProxy) {
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "HTTPS proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = net::NetLog::Get();
 
@@ -11396,7 +11405,7 @@ TEST_F(HttpNetworkTransactionTest, HTTPSViaHttpsProxy) {
 // Test that an HTTPS Proxy cannot redirect a CONNECT request for main frames.
 TEST_F(HttpNetworkTransactionTest, RedirectOfHttpsConnectViaHttpsProxy) {
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "HTTPS proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = net::NetLog::Get();
 
@@ -11463,7 +11472,7 @@ TEST_F(HttpNetworkTransactionTest,
        RedirectOfHttpsConnectSubresourceViaHttpsProxy) {
   base::HistogramTester histograms;
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "HTTPS proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = net::NetLog::Get();
 
@@ -11509,9 +11518,9 @@ TEST_F(HttpNetworkTransactionTest,
 TEST_F(HttpNetworkTransactionTest,
        RedirectOfHttpsConnectViaAutoDetectedHttpsProxy) {
   base::HistogramTester histograms;
-  session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromAutoDetectedPacResult(
-          "HTTPS proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
+  session_deps_.proxy_resolution_service = ConfiguredProxyResolutionService::
+      CreateFixedFromAutoDetectedPacResultForTest("HTTPS proxy:70",
+                                                  TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = net::NetLog::Get();
 
   HttpRequestInfo request;
@@ -11557,7 +11566,7 @@ TEST_F(HttpNetworkTransactionTest,
 TEST_F(HttpNetworkTransactionTest, RedirectOfHttpsConnectViaSpdyProxy) {
   base::HistogramTester histograms;
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = net::NetLog::Get();
 
@@ -11628,7 +11637,7 @@ TEST_F(HttpNetworkTransactionTest, RedirectOfHttpsConnectViaSpdyProxy) {
 // Test that an HTTPS proxy's response to a CONNECT request is filtered.
 TEST_F(HttpNetworkTransactionTest, ErrorResponseToHttpsConnectViaHttpsProxy) {
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   HttpRequestInfo request;
@@ -11673,7 +11682,7 @@ TEST_F(HttpNetworkTransactionTest, ErrorResponseToHttpsConnectViaHttpsProxy) {
 // Test that a SPDY proxy's response to a CONNECT request is filtered.
 TEST_F(HttpNetworkTransactionTest, ErrorResponseToHttpsConnectViaSpdyProxy) {
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   HttpRequestInfo request;
@@ -11738,7 +11747,7 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthSpdyProxy) {
 
   // Configure against https proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "HTTPS myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   RecordingNetLogObserver net_log_observer;
   session_deps_.net_log = NetLog::Get();
@@ -11871,7 +11880,7 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthSpdyProxy) {
 // HTTPS proxy
 TEST_F(HttpNetworkTransactionTest, HTTPSBadCertificateViaHttpsProxy) {
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   HttpRequestInfo request;
@@ -12003,7 +12012,7 @@ TEST_F(HttpNetworkTransactionTest, BuildRequest_UserAgentOverTunnel) {
               std::string() /* accept-language */, setting_user_agent);
     }
     session_deps_.proxy_resolution_service =
-        ConfiguredProxyResolutionService::CreateFixed(
+        ConfiguredProxyResolutionService::CreateFixedForTest(
             "myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
     std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
     for (const char* request_user_agent : kTestUserAgents) {
@@ -12379,7 +12388,7 @@ TEST_F(HttpNetworkTransactionTest, SOCKS4_HTTP_GET) {
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
 
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "SOCKS myproxy:1080", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = net::NetLog::Get();
 
@@ -12435,7 +12444,7 @@ TEST_F(HttpNetworkTransactionTest, SOCKS4_SSL_GET) {
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
 
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "SOCKS myproxy:1080", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = net::NetLog::Get();
 
@@ -12496,7 +12505,7 @@ TEST_F(HttpNetworkTransactionTest, SOCKS4_HTTP_GET_no_PAC) {
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
 
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "socks4://myproxy:1080", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = net::NetLog::Get();
 
@@ -12551,7 +12560,7 @@ TEST_F(HttpNetworkTransactionTest, SOCKS5_HTTP_GET) {
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
 
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "SOCKS5 myproxy:1080", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = net::NetLog::Get();
 
@@ -12619,7 +12628,7 @@ TEST_F(HttpNetworkTransactionTest, SOCKS5_SSL_GET) {
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
 
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "SOCKS5 myproxy:1080", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = net::NetLog::Get();
 
@@ -12706,7 +12715,7 @@ std::unique_ptr<HttpNetworkSession> SetupSessionForGroupIdTests(
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetHttp2AlternativeService(
       url::SchemeHostPort("https", "host.with.alternate", 443),
-      NetworkIsolationKey(), alternative_service, expiration);
+      NetworkAnonymizationKey(), alternative_service, expiration);
 
   return session;
 }
@@ -12736,7 +12745,7 @@ TEST_F(HttpNetworkTransactionTest, GroupIdForDirectConnections) {
           "http://www.example.org/direct",
           ClientSocketPool::GroupId(
               url::SchemeHostPort(url::kHttpScheme, "www.example.org", 80),
-              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkIsolationKey(),
+              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
               SecureDnsPolicy::kAllow),
           false,
       },
@@ -12745,7 +12754,7 @@ TEST_F(HttpNetworkTransactionTest, GroupIdForDirectConnections) {
           "http://[2001:1418:13:1::25]/direct",
           ClientSocketPool::GroupId(
               url::SchemeHostPort(url::kHttpScheme, "[2001:1418:13:1::25]", 80),
-              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkIsolationKey(),
+              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
               SecureDnsPolicy::kAllow),
           false,
       },
@@ -12756,7 +12765,7 @@ TEST_F(HttpNetworkTransactionTest, GroupIdForDirectConnections) {
           "https://www.example.org/direct_ssl",
           ClientSocketPool::GroupId(
               url::SchemeHostPort(url::kHttpsScheme, "www.example.org", 443),
-              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkIsolationKey(),
+              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
               SecureDnsPolicy::kAllow),
           true,
       },
@@ -12766,7 +12775,7 @@ TEST_F(HttpNetworkTransactionTest, GroupIdForDirectConnections) {
           ClientSocketPool::GroupId(
               url::SchemeHostPort(url::kHttpsScheme, "[2001:1418:13:1::25]",
                                   443),
-              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkIsolationKey(),
+              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
               SecureDnsPolicy::kAllow),
           true,
       },
@@ -12776,32 +12785,34 @@ TEST_F(HttpNetworkTransactionTest, GroupIdForDirectConnections) {
           ClientSocketPool::GroupId(
               url::SchemeHostPort(url::kHttpsScheme, "host.with.alternate",
                                   443),
-              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkIsolationKey(),
+              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
               SecureDnsPolicy::kAllow),
           true,
       },
   };
 
-  for (size_t i = 0; i < std::size(tests); ++i) {
+  for (const auto& test : tests) {
     session_deps_.proxy_resolution_service =
-        ConfiguredProxyResolutionService::CreateFixed(
-            tests[i].proxy_server, TRAFFIC_ANNOTATION_FOR_TESTS);
+        ConfiguredProxyResolutionService::CreateFixedForTest(
+            test.proxy_server, TRAFFIC_ANNOTATION_FOR_TESTS);
     std::unique_ptr<HttpNetworkSession> session(
         SetupSessionForGroupIdTests(&session_deps_));
 
     HttpNetworkSessionPeer peer(session.get());
-    CaptureGroupIdTransportSocketPool* transport_conn_pool =
-        new CaptureGroupIdTransportSocketPool(&dummy_connect_job_params_);
+    auto transport_conn_pool =
+        std::make_unique<CaptureGroupIdTransportSocketPool>(
+            &dummy_connect_job_params_);
+    auto* transport_conn_pool_ptr = transport_conn_pool.get();
     auto mock_pool_manager = std::make_unique<MockClientSocketPoolManager>();
     mock_pool_manager->SetSocketPool(ProxyServer::Direct(),
-                                     base::WrapUnique(transport_conn_pool));
+                                     std::move(transport_conn_pool));
     peer.SetClientSocketPoolManager(std::move(mock_pool_manager));
 
     EXPECT_EQ(ERR_IO_PENDING,
-              GroupIdTransactionHelper(tests[i].url, session.get()));
-    EXPECT_EQ(tests[i].expected_group_id,
-              transport_conn_pool->last_group_id_received());
-    EXPECT_TRUE(transport_conn_pool->socket_requested());
+              GroupIdTransactionHelper(test.url, session.get()));
+    EXPECT_EQ(test.expected_group_id,
+              transport_conn_pool_ptr->last_group_id_received());
+    EXPECT_TRUE(transport_conn_pool_ptr->socket_requested());
   }
 }
 
@@ -12812,7 +12823,7 @@ TEST_F(HttpNetworkTransactionTest, GroupIdForHTTPProxyConnections) {
           "http://www.example.org/http_proxy_normal",
           ClientSocketPool::GroupId(
               url::SchemeHostPort(url::kHttpScheme, "www.example.org", 80),
-              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkIsolationKey(),
+              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
               SecureDnsPolicy::kAllow),
           false,
       },
@@ -12823,7 +12834,7 @@ TEST_F(HttpNetworkTransactionTest, GroupIdForHTTPProxyConnections) {
           "https://www.example.org/http_connect_ssl",
           ClientSocketPool::GroupId(
               url::SchemeHostPort(url::kHttpsScheme, "www.example.org", 443),
-              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkIsolationKey(),
+              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
               SecureDnsPolicy::kAllow),
           true,
       },
@@ -12834,16 +12845,16 @@ TEST_F(HttpNetworkTransactionTest, GroupIdForHTTPProxyConnections) {
           ClientSocketPool::GroupId(
               url::SchemeHostPort(url::kHttpsScheme, "host.with.alternate",
                                   443),
-              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkIsolationKey(),
+              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
               SecureDnsPolicy::kAllow),
           true,
       },
   };
 
-  for (size_t i = 0; i < std::size(tests); ++i) {
+  for (const auto& test : tests) {
     session_deps_.proxy_resolution_service =
-        ConfiguredProxyResolutionService::CreateFixed(
-            tests[i].proxy_server, TRAFFIC_ANNOTATION_FOR_TESTS);
+        ConfiguredProxyResolutionService::CreateFixedForTest(
+            test.proxy_server, TRAFFIC_ANNOTATION_FOR_TESTS);
     std::unique_ptr<HttpNetworkSession> session(
         SetupSessionForGroupIdTests(&session_deps_));
 
@@ -12851,17 +12862,17 @@ TEST_F(HttpNetworkTransactionTest, GroupIdForHTTPProxyConnections) {
 
     ProxyServer proxy_server(ProxyServer::SCHEME_HTTP,
                              HostPortPair("http_proxy", 80));
-    CaptureGroupIdTransportSocketPool* http_proxy_pool =
-        new CaptureGroupIdTransportSocketPool(&dummy_connect_job_params_);
+    auto http_proxy_pool = std::make_unique<CaptureGroupIdTransportSocketPool>(
+        &dummy_connect_job_params_);
+    auto* http_proxy_pool_ptr = http_proxy_pool.get();
     auto mock_pool_manager = std::make_unique<MockClientSocketPoolManager>();
-    mock_pool_manager->SetSocketPool(proxy_server,
-                                     base::WrapUnique(http_proxy_pool));
+    mock_pool_manager->SetSocketPool(proxy_server, std::move(http_proxy_pool));
     peer.SetClientSocketPoolManager(std::move(mock_pool_manager));
 
     EXPECT_EQ(ERR_IO_PENDING,
-              GroupIdTransactionHelper(tests[i].url, session.get()));
-    EXPECT_EQ(tests[i].expected_group_id,
-              http_proxy_pool->last_group_id_received());
+              GroupIdTransactionHelper(test.url, session.get()));
+    EXPECT_EQ(test.expected_group_id,
+              http_proxy_pool_ptr->last_group_id_received());
   }
 }
 
@@ -12872,7 +12883,7 @@ TEST_F(HttpNetworkTransactionTest, GroupIdForSOCKSConnections) {
           "http://www.example.org/socks4_direct",
           ClientSocketPool::GroupId(
               url::SchemeHostPort(url::kHttpScheme, "www.example.org", 80),
-              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkIsolationKey(),
+              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
               SecureDnsPolicy::kAllow),
           false,
       },
@@ -12881,7 +12892,7 @@ TEST_F(HttpNetworkTransactionTest, GroupIdForSOCKSConnections) {
           "http://www.example.org/socks5_direct",
           ClientSocketPool::GroupId(
               url::SchemeHostPort(url::kHttpScheme, "www.example.org", 80),
-              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkIsolationKey(),
+              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
               SecureDnsPolicy::kAllow),
           false,
       },
@@ -12892,7 +12903,7 @@ TEST_F(HttpNetworkTransactionTest, GroupIdForSOCKSConnections) {
           "https://www.example.org/socks4_ssl",
           ClientSocketPool::GroupId(
               url::SchemeHostPort(url::kHttpsScheme, "www.example.org", 443),
-              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkIsolationKey(),
+              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
               SecureDnsPolicy::kAllow),
           true,
       },
@@ -12901,7 +12912,7 @@ TEST_F(HttpNetworkTransactionTest, GroupIdForSOCKSConnections) {
           "https://www.example.org/socks5_ssl",
           ClientSocketPool::GroupId(
               url::SchemeHostPort(url::kHttpsScheme, "www.example.org", 443),
-              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkIsolationKey(),
+              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
               SecureDnsPolicy::kAllow),
           true,
       },
@@ -12912,37 +12923,37 @@ TEST_F(HttpNetworkTransactionTest, GroupIdForSOCKSConnections) {
           ClientSocketPool::GroupId(
               url::SchemeHostPort(url::kHttpsScheme, "host.with.alternate",
                                   443),
-              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkIsolationKey(),
+              PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
               SecureDnsPolicy::kAllow),
           true,
       },
   };
 
-  for (size_t i = 0; i < std::size(tests); ++i) {
+  for (const auto& test : tests) {
     session_deps_.proxy_resolution_service =
-        ConfiguredProxyResolutionService::CreateFixed(
-            tests[i].proxy_server, TRAFFIC_ANNOTATION_FOR_TESTS);
+        ConfiguredProxyResolutionService::CreateFixedForTest(
+            test.proxy_server, TRAFFIC_ANNOTATION_FOR_TESTS);
     std::unique_ptr<HttpNetworkSession> session(
         SetupSessionForGroupIdTests(&session_deps_));
 
     HttpNetworkSessionPeer peer(session.get());
 
     ProxyServer proxy_server(
-        ProxyUriToProxyServer(tests[i].proxy_server, ProxyServer::SCHEME_HTTP));
+        ProxyUriToProxyServer(test.proxy_server, ProxyServer::SCHEME_HTTP));
     ASSERT_TRUE(proxy_server.is_valid());
-    CaptureGroupIdTransportSocketPool* socks_conn_pool =
-        new CaptureGroupIdTransportSocketPool(&dummy_connect_job_params_);
+    auto socks_conn_pool = std::make_unique<CaptureGroupIdTransportSocketPool>(
+        &dummy_connect_job_params_);
+    auto* socks_conn_pool_ptr = socks_conn_pool.get();
     auto mock_pool_manager = std::make_unique<MockClientSocketPoolManager>();
-    mock_pool_manager->SetSocketPool(proxy_server,
-                                     base::WrapUnique(socks_conn_pool));
+    mock_pool_manager->SetSocketPool(proxy_server, std::move(socks_conn_pool));
     peer.SetClientSocketPoolManager(std::move(mock_pool_manager));
 
     HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
 
     EXPECT_EQ(ERR_IO_PENDING,
-              GroupIdTransactionHelper(tests[i].url, session.get()));
-    EXPECT_EQ(tests[i].expected_group_id,
-              socks_conn_pool->last_group_id_received());
+              GroupIdTransactionHelper(test.url, session.get()));
+    EXPECT_EQ(test.expected_group_id,
+              socks_conn_pool_ptr->last_group_id_received());
   }
 }
 
@@ -12954,7 +12965,7 @@ TEST_F(HttpNetworkTransactionTest, ReconsiderProxyAfterFailedConnection) {
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
 
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "myproxy:70;foobar:80", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   // This simulates failure resolving all hostnames; that means we will fail
@@ -13127,7 +13138,7 @@ TEST_F(HttpNetworkTransactionTest, DrainResetOK) {
 // Test HTTPS connections going through a proxy that sends extra data.
 TEST_F(HttpNetworkTransactionTest, HTTPSViaProxyWithExtraData) {
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   HttpRequestInfo request;
@@ -13309,9 +13320,10 @@ TEST_F(HttpNetworkTransactionTest, CancelDuringInitRequestBody) {
     CompletionOnceCallback callback_;
   };
 
-  FakeUploadElementReader* fake_reader = new FakeUploadElementReader;
+  auto fake_reader = std::make_unique<FakeUploadElementReader>();
+  auto* fake_reader_ptr = fake_reader.get();
   std::vector<std::unique_ptr<UploadElementReader>> element_readers;
-  element_readers.push_back(base::WrapUnique(fake_reader));
+  element_readers.push_back(std::move(fake_reader));
   ElementsUploadDataStream upload_data_stream(std::move(element_readers), 0);
 
   HttpRequestInfo request;
@@ -13334,7 +13346,7 @@ TEST_F(HttpNetworkTransactionTest, CancelDuringInitRequestBody) {
   base::RunLoop().RunUntilIdle();
 
   // Transaction is pending on request body initialization.
-  CompletionOnceCallback init_callback = fake_reader->TakeCallback();
+  CompletionOnceCallback init_callback = fake_reader_ptr->TakeCallback();
   ASSERT_FALSE(init_callback.is_null());
 
   // Return Init()'s result after the transaction gets destroyed.
@@ -13533,7 +13545,7 @@ TEST_F(HttpNetworkTransactionTest, IgnoreAltSvcWithInvalidCert) {
       session->http_server_properties();
   EXPECT_TRUE(
       http_server_properties
-          ->GetAlternativeServiceInfos(test_server, NetworkIsolationKey())
+          ->GetAlternativeServiceInfos(test_server, NetworkAnonymizationKey())
           .empty());
 
   EXPECT_THAT(callback.WaitForResult(), IsOk());
@@ -13551,7 +13563,7 @@ TEST_F(HttpNetworkTransactionTest, IgnoreAltSvcWithInvalidCert) {
 
   EXPECT_TRUE(
       http_server_properties
-          ->GetAlternativeServiceInfos(test_server, NetworkIsolationKey())
+          ->GetAlternativeServiceInfos(test_server, NetworkAnonymizationKey())
           .empty());
 }
 
@@ -13592,7 +13604,7 @@ TEST_F(HttpNetworkTransactionTest, HonorAlternativeServiceHeader) {
       session->http_server_properties();
   EXPECT_TRUE(
       http_server_properties
-          ->GetAlternativeServiceInfos(test_server, NetworkIsolationKey())
+          ->GetAlternativeServiceInfos(test_server, NetworkAnonymizationKey())
           .empty());
 
   EXPECT_THAT(callback.WaitForResult(), IsOk());
@@ -13609,8 +13621,8 @@ TEST_F(HttpNetworkTransactionTest, HonorAlternativeServiceHeader) {
   EXPECT_EQ("hello world", response_data);
 
   AlternativeServiceInfoVector alternative_service_info_vector =
-      http_server_properties->GetAlternativeServiceInfos(test_server,
-                                                         NetworkIsolationKey());
+      http_server_properties->GetAlternativeServiceInfos(
+          test_server, NetworkAnonymizationKey());
   ASSERT_EQ(1u, alternative_service_info_vector.size());
   AlternativeService alternative_service(kProtoHTTP2, "mail.example.org", 443);
   EXPECT_EQ(alternative_service,
@@ -13618,13 +13630,13 @@ TEST_F(HttpNetworkTransactionTest, HonorAlternativeServiceHeader) {
 }
 
 TEST_F(HttpNetworkTransactionTest,
-       HonorAlternativeServiceHeaderWithNetworkIsolationKey) {
+       HonorAlternativeServiceHeaderWithNetworkAnonymizationKey) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
       // enabled_features
       {features::kPartitionHttpServerPropertiesByNetworkIsolationKey,
-       // Need to partition connections by NetworkIsolationKey for
-       // SpdySessionKeys to include NetworkIsolationKeys.
+       // Need to partition connections by NetworkAnonymizationKey for
+       // SpdySessionKeys to include NetworkAnonymizationKeys.
        features::kPartitionConnectionsByNetworkIsolationKey},
       // disabled_features
       {});
@@ -13634,8 +13646,10 @@ TEST_F(HttpNetworkTransactionTest,
       std::make_unique<HttpServerProperties>();
 
   const SchemefulSite kSite1(GURL("https://foo.test/"));
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
   const net::NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
   const SchemefulSite kSite2(GURL("https://bar.test/"));
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
   const net::NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
 
   MockRead data_reads[] = {
@@ -13652,6 +13666,7 @@ TEST_F(HttpNetworkTransactionTest,
   request.traffic_annotation =
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
   request.network_isolation_key = kNetworkIsolationKey1;
+  request.network_anonymization_key = kNetworkAnonymizationKey1;
 
   StaticSocketDataProvider data(data_reads, base::span<MockWrite>());
   session_deps_.socket_factory->AddSocketDataProvider(&data);
@@ -13675,7 +13690,7 @@ TEST_F(HttpNetworkTransactionTest,
       session->http_server_properties();
   EXPECT_TRUE(
       http_server_properties
-          ->GetAlternativeServiceInfos(test_server, kNetworkIsolationKey1)
+          ->GetAlternativeServiceInfos(test_server, kNetworkAnonymizationKey1)
           .empty());
 
   EXPECT_THAT(callback.WaitForResult(), IsOk());
@@ -13692,22 +13707,22 @@ TEST_F(HttpNetworkTransactionTest,
   EXPECT_EQ("hello world", response_data);
 
   AlternativeServiceInfoVector alternative_service_info_vector =
-      http_server_properties->GetAlternativeServiceInfos(test_server,
-                                                         kNetworkIsolationKey1);
+      http_server_properties->GetAlternativeServiceInfos(
+          test_server, kNetworkAnonymizationKey1);
   ASSERT_EQ(1u, alternative_service_info_vector.size());
   AlternativeService alternative_service(kProtoHTTP2, "mail.example.org", 443);
   EXPECT_EQ(alternative_service,
             alternative_service_info_vector[0].alternative_service());
 
   // Make sure the alternative service information is only associated with
-  // kNetworkIsolationKey1.
+  // kNetworkAnonymizationKey1.
   EXPECT_TRUE(
       http_server_properties
-          ->GetAlternativeServiceInfos(test_server, NetworkIsolationKey())
+          ->GetAlternativeServiceInfos(test_server, NetworkAnonymizationKey())
           .empty());
   EXPECT_TRUE(
       http_server_properties
-          ->GetAlternativeServiceInfos(test_server, kNetworkIsolationKey2)
+          ->GetAlternativeServiceInfos(test_server, kNetworkAnonymizationKey2)
           .empty());
 }
 
@@ -13742,7 +13757,7 @@ TEST_F(HttpNetworkTransactionTest,
       session->http_server_properties();
   EXPECT_TRUE(
       http_server_properties
-          ->GetAlternativeServiceInfos(test_server, NetworkIsolationKey())
+          ->GetAlternativeServiceInfos(test_server, NetworkAnonymizationKey())
           .empty());
 
   int rv = trans.Start(&request, callback.callback(), NetLogWithSource());
@@ -13762,7 +13777,7 @@ TEST_F(HttpNetworkTransactionTest,
 
   EXPECT_TRUE(
       http_server_properties
-          ->GetAlternativeServiceInfos(test_server, NetworkIsolationKey())
+          ->GetAlternativeServiceInfos(test_server, NetworkAnonymizationKey())
           .empty());
 }
 
@@ -13802,7 +13817,7 @@ TEST_F(HttpNetworkTransactionTest,
                                          444);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetHttp2AlternativeService(
-      url::SchemeHostPort(request.url), NetworkIsolationKey(),
+      url::SchemeHostPort(request.url), NetworkAnonymizationKey(),
       alternative_service, expiration);
 
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
@@ -13843,7 +13858,7 @@ TEST_F(HttpNetworkTransactionTest,
   AlternativeService alternative_service(kProtoHTTP2, "", 444);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetHttp2AlternativeService(
-      url::SchemeHostPort(request.url), NetworkIsolationKey(),
+      url::SchemeHostPort(request.url), NetworkAnonymizationKey(),
       alternative_service, expiration);
 
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
@@ -13863,12 +13878,12 @@ TEST_F(HttpNetworkTransactionTest, ClearAlternativeServices) {
   AlternativeService alternative_service(kProtoQUIC, "", 80);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetQuicAlternativeService(
-      test_server, NetworkIsolationKey(), alternative_service, expiration,
+      test_server, NetworkAnonymizationKey(), alternative_service, expiration,
       session->context().quic_context->params()->supported_versions);
-  EXPECT_EQ(1u,
-            http_server_properties
-                ->GetAlternativeServiceInfos(test_server, NetworkIsolationKey())
-                .size());
+  EXPECT_EQ(1u, http_server_properties
+                    ->GetAlternativeServiceInfos(test_server,
+                                                 NetworkAnonymizationKey())
+                    .size());
 
   // Send a clear header.
   MockRead data_reads[] = {
@@ -13913,7 +13928,7 @@ TEST_F(HttpNetworkTransactionTest, ClearAlternativeServices) {
 
   EXPECT_TRUE(
       http_server_properties
-          ->GetAlternativeServiceInfos(test_server, NetworkIsolationKey())
+          ->GetAlternativeServiceInfos(test_server, NetworkAnonymizationKey())
           .empty());
 }
 
@@ -13954,7 +13969,7 @@ TEST_F(HttpNetworkTransactionTest, HonorMultipleAlternativeServiceHeaders) {
       session->http_server_properties();
   EXPECT_TRUE(
       http_server_properties
-          ->GetAlternativeServiceInfos(test_server, NetworkIsolationKey())
+          ->GetAlternativeServiceInfos(test_server, NetworkAnonymizationKey())
           .empty());
 
   EXPECT_THAT(callback.WaitForResult(), IsOk());
@@ -13971,8 +13986,8 @@ TEST_F(HttpNetworkTransactionTest, HonorMultipleAlternativeServiceHeaders) {
   EXPECT_EQ("hello world", response_data);
 
   AlternativeServiceInfoVector alternative_service_info_vector =
-      http_server_properties->GetAlternativeServiceInfos(test_server,
-                                                         NetworkIsolationKey());
+      http_server_properties->GetAlternativeServiceInfos(
+          test_server, NetworkAnonymizationKey());
   ASSERT_EQ(2u, alternative_service_info_vector.size());
 
   AlternativeService alternative_service(kProtoHTTP2, "www.example.com", 443);
@@ -14022,11 +14037,11 @@ TEST_F(HttpNetworkTransactionTest, IdentifyQuicBroken) {
   AlternativeService alternative_service(kProtoQUIC, alternative);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetQuicAlternativeService(
-      server, NetworkIsolationKey(), alternative_service, expiration,
+      server, NetworkAnonymizationKey(), alternative_service, expiration,
       DefaultSupportedQuicVersions());
   // Mark the QUIC alternative service as broken.
-  http_server_properties->MarkAlternativeServiceBroken(alternative_service,
-                                                       NetworkIsolationKey());
+  http_server_properties->MarkAlternativeServiceBroken(
+      alternative_service, NetworkAnonymizationKey());
 
   HttpRequestInfo request;
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
@@ -14097,14 +14112,15 @@ TEST_F(HttpNetworkTransactionTest, IdentifyQuicNotBroken) {
           session->context().quic_context->params()->supported_versions));
 
   http_server_properties->SetAlternativeServices(
-      server, NetworkIsolationKey(), alternative_service_info_vector);
+      server, NetworkAnonymizationKey(), alternative_service_info_vector);
 
   // Mark one of the QUIC alternative service as broken.
-  http_server_properties->MarkAlternativeServiceBroken(alternative_service1,
-                                                       NetworkIsolationKey());
-  EXPECT_EQ(2u, http_server_properties
-                    ->GetAlternativeServiceInfos(server, NetworkIsolationKey())
-                    .size());
+  http_server_properties->MarkAlternativeServiceBroken(
+      alternative_service1, NetworkAnonymizationKey());
+  EXPECT_EQ(2u,
+            http_server_properties
+                ->GetAlternativeServiceInfos(server, NetworkAnonymizationKey())
+                .size());
 
   HttpRequestInfo request;
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
@@ -14157,7 +14173,7 @@ TEST_F(HttpNetworkTransactionTest, MarkBrokenAlternateProtocolAndFallback) {
                                                666);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetHttp2AlternativeService(
-      server, NetworkIsolationKey(), alternative_service, expiration);
+      server, NetworkAnonymizationKey(), alternative_service, expiration);
 
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
   TestCompletionCallback callback;
@@ -14176,13 +14192,13 @@ TEST_F(HttpNetworkTransactionTest, MarkBrokenAlternateProtocolAndFallback) {
   EXPECT_EQ("hello world", response_data);
 
   const AlternativeServiceInfoVector alternative_service_info_vector =
-      http_server_properties->GetAlternativeServiceInfos(server,
-                                                         NetworkIsolationKey());
+      http_server_properties->GetAlternativeServiceInfos(
+          server, NetworkAnonymizationKey());
   ASSERT_EQ(1u, alternative_service_info_vector.size());
   EXPECT_EQ(alternative_service,
             alternative_service_info_vector[0].alternative_service());
   EXPECT_TRUE(http_server_properties->IsAlternativeServiceBroken(
-      alternative_service, NetworkIsolationKey()));
+      alternative_service, NetworkAnonymizationKey()));
 }
 
 // Ensure that we are not allowed to redirect traffic via an alternate protocol
@@ -14222,8 +14238,8 @@ TEST_F(HttpNetworkTransactionTest, AlternateProtocolPortRestrictedBlocked) {
                                          kUnrestrictedAlternatePort);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetHttp2AlternativeService(
-      url::SchemeHostPort(restricted_port_request.url), NetworkIsolationKey(),
-      alternative_service, expiration);
+      url::SchemeHostPort(restricted_port_request.url),
+      NetworkAnonymizationKey(), alternative_service, expiration);
 
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
   TestCompletionCallback callback;
@@ -14273,8 +14289,8 @@ TEST_F(HttpNetworkTransactionTest, AlternateProtocolPortRestrictedPermitted) {
                                          kUnrestrictedAlternatePort);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetHttp2AlternativeService(
-      url::SchemeHostPort(restricted_port_request.url), NetworkIsolationKey(),
-      alternative_service, expiration);
+      url::SchemeHostPort(restricted_port_request.url),
+      NetworkAnonymizationKey(), alternative_service, expiration);
 
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
   TestCompletionCallback callback;
@@ -14323,8 +14339,8 @@ TEST_F(HttpNetworkTransactionTest, AlternateProtocolPortRestrictedAllowed) {
                                          kRestrictedAlternatePort);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetHttp2AlternativeService(
-      url::SchemeHostPort(restricted_port_request.url), NetworkIsolationKey(),
-      alternative_service, expiration);
+      url::SchemeHostPort(restricted_port_request.url),
+      NetworkAnonymizationKey(), alternative_service, expiration);
 
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
   TestCompletionCallback callback;
@@ -14373,8 +14389,8 @@ TEST_F(HttpNetworkTransactionTest, AlternateProtocolPortUnrestrictedAllowed1) {
                                          kRestrictedAlternatePort);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetHttp2AlternativeService(
-      url::SchemeHostPort(unrestricted_port_request.url), NetworkIsolationKey(),
-      alternative_service, expiration);
+      url::SchemeHostPort(unrestricted_port_request.url),
+      NetworkAnonymizationKey(), alternative_service, expiration);
 
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
   TestCompletionCallback callback;
@@ -14423,8 +14439,8 @@ TEST_F(HttpNetworkTransactionTest, AlternateProtocolPortUnrestrictedAllowed2) {
                                          kUnrestrictedAlternatePort);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetHttp2AlternativeService(
-      url::SchemeHostPort(unrestricted_port_request.url), NetworkIsolationKey(),
-      alternative_service, expiration);
+      url::SchemeHostPort(unrestricted_port_request.url),
+      NetworkAnonymizationKey(), alternative_service, expiration);
 
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
   TestCompletionCallback callback;
@@ -14465,7 +14481,7 @@ TEST_F(HttpNetworkTransactionTest, AlternateProtocolUnsafeBlocked) {
                                          kUnsafePort);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetHttp2AlternativeService(
-      url::SchemeHostPort(request.url), NetworkIsolationKey(),
+      url::SchemeHostPort(request.url), NetworkAnonymizationKey(),
       alternative_service, expiration);
 
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
@@ -14794,7 +14810,7 @@ TEST_F(HttpNetworkTransactionTest, UseOriginNotAlternativeForProxy) {
   AlternativeService alternative_service(kProtoHTTP2, alternative);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetHttp2AlternativeService(
-      server, NetworkIsolationKey(), alternative_service, expiration);
+      server, NetworkAnonymizationKey(), alternative_service, expiration);
 
   // Non-alternative job should hang.
   MockConnect never_finishing_connect(SYNCHRONOUS, ERR_IO_PENDING);
@@ -15031,7 +15047,7 @@ TEST_F(HttpNetworkTransactionTest,
   SpdySessionKey key(host_port_pair, ProxyServer::Direct(),
                      PRIVACY_MODE_DISABLED,
                      SpdySessionKey::IsProxySession::kFalse, SocketTag(),
-                     NetworkIsolationKey(), SecureDnsPolicy::kAllow);
+                     NetworkAnonymizationKey(), SecureDnsPolicy::kAllow);
   base::WeakPtr<SpdySession> spdy_session =
       CreateSpdySession(session.get(), key, NetLogWithSource());
 
@@ -15171,8 +15187,8 @@ TEST_F(HttpNetworkTransactionTest, GenerateAuthToken) {
     MockWrite write;
     MockRead read;
     int expected_rv;
-    const MockWrite* extra_write;
-    const MockRead* extra_read;
+    raw_ptr<const MockWrite> extra_write;
+    raw_ptr<const MockRead> extra_read;
   };
 
   static const int kNoSSL = 500;
@@ -15850,57 +15866,59 @@ TEST_F(HttpNetworkTransactionTest, GenerateAuthToken) {
   for (const auto& test_config : test_configs) {
     SCOPED_TRACE(::testing::Message() << "Test config at "
                                       << test_config.line_number);
-    HttpAuthHandlerMock::Factory* auth_factory(
-        new HttpAuthHandlerMock::Factory());
-    session_deps_.http_auth_handler_factory.reset(auth_factory);
+    auto auth_factory = std::make_unique<HttpAuthHandlerMock::Factory>();
+    auto* auth_factory_ptr = auth_factory.get();
+    session_deps_.http_auth_handler_factory = std::move(auth_factory);
     SSLInfo empty_ssl_info;
 
     // Set up authentication handlers as necessary.
     if (test_config.proxy_auth_timing != AUTH_NONE) {
       for (int n = 0; n < 3; n++) {
-        HttpAuthHandlerMock* auth_handler(new HttpAuthHandlerMock());
+        auto auth_handler = std::make_unique<HttpAuthHandlerMock>();
         std::string auth_challenge = "Mock realm=proxy";
         url::SchemeHostPort scheme_host_port(GURL(test_config.proxy_url));
         HttpAuthChallengeTokenizer tokenizer(auth_challenge.begin(),
                                              auth_challenge.end());
-        auth_handler->InitFromChallenge(&tokenizer, HttpAuth::AUTH_PROXY,
-                                        empty_ssl_info, NetworkIsolationKey(),
-                                        scheme_host_port, NetLogWithSource());
+        auth_handler->InitFromChallenge(
+            &tokenizer, HttpAuth::AUTH_PROXY, empty_ssl_info,
+            NetworkAnonymizationKey(), scheme_host_port, NetLogWithSource());
         auth_handler->SetGenerateExpectation(
             test_config.proxy_auth_timing == AUTH_ASYNC,
             n == 0 ? test_config.first_generate_proxy_token_rv : OK);
-        auth_factory->AddMockHandler(auth_handler, HttpAuth::AUTH_PROXY);
+        auth_factory_ptr->AddMockHandler(std::move(auth_handler),
+                                         HttpAuth::AUTH_PROXY);
       }
     }
     if (test_config.server_auth_timing != AUTH_NONE) {
-      HttpAuthHandlerMock* auth_handler(new HttpAuthHandlerMock());
+      auto auth_handler = std::make_unique<HttpAuthHandlerMock>();
       std::string auth_challenge = "Mock realm=server";
       url::SchemeHostPort scheme_host_port(GURL(test_config.server_url));
       HttpAuthChallengeTokenizer tokenizer(auth_challenge.begin(),
                                            auth_challenge.end());
       auth_handler->InitFromChallenge(&tokenizer, HttpAuth::AUTH_SERVER,
-                                      empty_ssl_info, NetworkIsolationKey(),
+                                      empty_ssl_info, NetworkAnonymizationKey(),
                                       scheme_host_port, NetLogWithSource());
       auth_handler->SetGenerateExpectation(
           test_config.server_auth_timing == AUTH_ASYNC,
           test_config.first_generate_server_token_rv);
-      auth_factory->AddMockHandler(auth_handler, HttpAuth::AUTH_SERVER);
+      auth_factory_ptr->AddMockHandler(std::move(auth_handler),
+                                       HttpAuth::AUTH_SERVER);
 
       // The second handler always succeeds. It should only be used where there
       // are multiple auth sessions for server auth in the same network
       // transaction using the same auth scheme.
       std::unique_ptr<HttpAuthHandlerMock> second_handler =
           std::make_unique<HttpAuthHandlerMock>();
-      second_handler->InitFromChallenge(&tokenizer, HttpAuth::AUTH_SERVER,
-                                        empty_ssl_info, NetworkIsolationKey(),
-                                        scheme_host_port, NetLogWithSource());
+      second_handler->InitFromChallenge(
+          &tokenizer, HttpAuth::AUTH_SERVER, empty_ssl_info,
+          NetworkAnonymizationKey(), scheme_host_port, NetLogWithSource());
       second_handler->SetGenerateExpectation(true, OK);
-      auth_factory->AddMockHandler(second_handler.release(),
-                                   HttpAuth::AUTH_SERVER);
+      auth_factory_ptr->AddMockHandler(std::move(second_handler),
+                                       HttpAuth::AUTH_SERVER);
     }
     if (test_config.proxy_url) {
       session_deps_.proxy_resolution_service =
-          ConfiguredProxyResolutionService::CreateFixed(
+          ConfiguredProxyResolutionService::CreateFixedForTest(
               test_config.proxy_url, TRAFFIC_ANNOTATION_FOR_TESTS);
     } else {
       session_deps_.proxy_resolution_service =
@@ -15930,8 +15948,8 @@ TEST_F(HttpNetworkTransactionTest, GenerateAuthToken) {
       // kProxyChallenge uses Proxy-Connection: close which means that the
       // socket is closed and a new one will be created for the next request.
       if (read_write_round.read.data == kProxyChallenge.data) {
-        mock_reads.push_back(std::vector<MockRead>());
-        mock_writes.push_back(std::vector<MockWrite>());
+        mock_reads.emplace_back();
+        mock_writes.emplace_back();
       }
 
       if (read_write_round.extra_read) {
@@ -15993,14 +16011,15 @@ TEST_F(HttpNetworkTransactionTest, GenerateAuthToken) {
 
 TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
   // Do multi-round authentication and make sure it works correctly.
-  HttpAuthHandlerMock::Factory* auth_factory(
-      new HttpAuthHandlerMock::Factory());
-  session_deps_.http_auth_handler_factory.reset(auth_factory);
+  auto auth_factory = std::make_unique<HttpAuthHandlerMock::Factory>();
+  auto* auth_factory_ptr = auth_factory.get();
+  session_deps_.http_auth_handler_factory = std::move(auth_factory);
   session_deps_.proxy_resolution_service =
       ConfiguredProxyResolutionService::CreateDirect();
   session_deps_.host_resolver->rules()->AddRule("www.example.com", "10.0.0.1");
 
-  HttpAuthHandlerMock* auth_handler(new HttpAuthHandlerMock());
+  auto auth_handler = std::make_unique<HttpAuthHandlerMock>();
+  auto* auth_handler_ptr = auth_handler.get();
   auth_handler->set_connection_based(true);
   std::string auth_challenge = "Mock realm=server";
   GURL url("http://www.example.com");
@@ -16008,9 +16027,10 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
                                        auth_challenge.end());
   SSLInfo empty_ssl_info;
   auth_handler->InitFromChallenge(&tokenizer, HttpAuth::AUTH_SERVER,
-                                  empty_ssl_info, NetworkIsolationKey(),
+                                  empty_ssl_info, NetworkAnonymizationKey(),
                                   url::SchemeHostPort(url), NetLogWithSource());
-  auth_factory->AddMockHandler(auth_handler, HttpAuth::AUTH_SERVER);
+  auth_factory_ptr->AddMockHandler(std::move(auth_handler),
+                                   HttpAuth::AUTH_SERVER);
 
   int rv = OK;
   const HttpResponseInfo* response = nullptr;
@@ -16028,15 +16048,16 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
   HttpNetworkSessionPeer session_peer(session.get());
   CommonConnectJobParams common_connect_job_params(
       session->CreateCommonConnectJobParams());
-  TransportClientSocketPool* transport_pool = new TransportClientSocketPool(
+  auto transport_pool = std::make_unique<TransportClientSocketPool>(
       50,                            // Max sockets for pool
       1,                             // Max sockets per group
       base::Seconds(10),             // unused_idle_socket_timeout
       ProxyServer::Direct(), false,  // is_for_websockets
       &common_connect_job_params);
+  auto* transport_pool_ptr = transport_pool.get();
   auto mock_pool_manager = std::make_unique<MockClientSocketPoolManager>();
   mock_pool_manager->SetSocketPool(ProxyServer::Direct(),
-                                   base::WrapUnique(transport_pool));
+                                   std::move(transport_pool));
   session_peer.SetClientSocketPoolManager(std::move(mock_pool_manager));
 
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
@@ -16093,11 +16114,11 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
 
   const ClientSocketPool::GroupId kSocketGroup(
       url::SchemeHostPort(url::kHttpScheme, "www.example.com", 80),
-      PrivacyMode::PRIVACY_MODE_DISABLED, NetworkIsolationKey(),
+      PrivacyMode::PRIVACY_MODE_DISABLED, NetworkAnonymizationKey(),
       SecureDnsPolicy::kAllow);
 
   // First round of authentication.
-  auth_handler->SetGenerateExpectation(false, OK);
+  auth_handler_ptr->SetGenerateExpectation(false, OK);
   rv = trans.Start(&request, callback.callback(), NetLogWithSource());
   if (rv == ERR_IO_PENDING)
     rv = callback.WaitForResult();
@@ -16105,9 +16126,9 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
   response = trans.GetResponseInfo();
   ASSERT_TRUE(response);
   EXPECT_TRUE(response->auth_challenge.has_value());
-  EXPECT_EQ(0u, transport_pool->IdleSocketCountInGroup(kSocketGroup));
+  EXPECT_EQ(0u, transport_pool_ptr->IdleSocketCountInGroup(kSocketGroup));
   EXPECT_EQ(HttpAuthHandlerMock::State::WAIT_FOR_GENERATE_AUTH_TOKEN,
-            auth_handler->state());
+            auth_handler_ptr->state());
 
   // In between rounds, another request comes in for the same domain.
   // It should not be able to grab the TCP socket that trans has already
@@ -16122,7 +16143,7 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
   // the pool until after authentication completes.
 
   // Second round of authentication.
-  auth_handler->SetGenerateExpectation(false, OK);
+  auth_handler_ptr->SetGenerateExpectation(false, OK);
   rv = trans.RestartWithAuth(AuthCredentials(kFoo, kBar), callback.callback());
   if (rv == ERR_IO_PENDING)
     rv = callback.WaitForResult();
@@ -16130,12 +16151,12 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
   response = trans.GetResponseInfo();
   ASSERT_TRUE(response);
   EXPECT_FALSE(response->auth_challenge.has_value());
-  EXPECT_EQ(0u, transport_pool->IdleSocketCountInGroup(kSocketGroup));
+  EXPECT_EQ(0u, transport_pool_ptr->IdleSocketCountInGroup(kSocketGroup));
   EXPECT_EQ(HttpAuthHandlerMock::State::WAIT_FOR_GENERATE_AUTH_TOKEN,
-            auth_handler->state());
+            auth_handler_ptr->state());
 
   // Third round of authentication.
-  auth_handler->SetGenerateExpectation(false, OK);
+  auth_handler_ptr->SetGenerateExpectation(false, OK);
   rv = trans.RestartWithAuth(AuthCredentials(), callback.callback());
   if (rv == ERR_IO_PENDING)
     rv = callback.WaitForResult();
@@ -16143,12 +16164,12 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
   response = trans.GetResponseInfo();
   ASSERT_TRUE(response);
   EXPECT_FALSE(response->auth_challenge.has_value());
-  EXPECT_EQ(0u, transport_pool->IdleSocketCountInGroup(kSocketGroup));
+  EXPECT_EQ(0u, transport_pool_ptr->IdleSocketCountInGroup(kSocketGroup));
   EXPECT_EQ(HttpAuthHandlerMock::State::WAIT_FOR_GENERATE_AUTH_TOKEN,
-            auth_handler->state());
+            auth_handler_ptr->state());
 
   // Fourth round of authentication, which completes successfully.
-  auth_handler->SetGenerateExpectation(false, OK);
+  auth_handler_ptr->SetGenerateExpectation(false, OK);
   rv = trans.RestartWithAuth(AuthCredentials(), callback.callback());
   if (rv == ERR_IO_PENDING)
     rv = callback.WaitForResult();
@@ -16156,13 +16177,13 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
   response = trans.GetResponseInfo();
   ASSERT_TRUE(response);
   EXPECT_FALSE(response->auth_challenge.has_value());
-  EXPECT_EQ(0u, transport_pool->IdleSocketCountInGroup(kSocketGroup));
+  EXPECT_EQ(0u, transport_pool_ptr->IdleSocketCountInGroup(kSocketGroup));
 
   // In WAIT_FOR_CHALLENGE, although in reality the auth handler is done. A real
   // auth handler should transition to a DONE state in concert with the remote
   // server. But that's not something we can test here with a mock handler.
   EXPECT_EQ(HttpAuthHandlerMock::State::WAIT_FOR_CHALLENGE,
-            auth_handler->state());
+            auth_handler_ptr->state());
 
   // Read the body since the fourth round was successful. This will also
   // release the socket back to the pool.
@@ -16176,7 +16197,7 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
   EXPECT_EQ(0, rv);
   // There are still 0 idle sockets, since the trans_compete transaction
   // will be handed it immediately after trans releases it to the group.
-  EXPECT_EQ(0u, transport_pool->IdleSocketCountInGroup(kSocketGroup));
+  EXPECT_EQ(0u, transport_pool_ptr->IdleSocketCountInGroup(kSocketGroup));
 
   // The competing request can now finish. Wait for the headers and then
   // read the body.
@@ -16190,7 +16211,7 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
   EXPECT_EQ(0, rv);
 
   // Finally, the socket is released to the group.
-  EXPECT_EQ(1u, transport_pool->IdleSocketCountInGroup(kSocketGroup));
+  EXPECT_EQ(1u, transport_pool_ptr->IdleSocketCountInGroup(kSocketGroup));
 }
 
 // This tests the case that a request is issued via http instead of spdy after
@@ -16399,7 +16420,7 @@ TEST_F(HttpNetworkTransactionTest, CancelAfterHeaders) {
 // Test a basic GET request through a proxy.
 TEST_F(HttpNetworkTransactionTest, ProxyGet) {
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = NetLog::Get();
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -16466,7 +16487,7 @@ TEST_F(HttpNetworkTransactionTest, ProxyGet) {
 // Test a basic HTTPS GET request through a proxy.
 TEST_F(HttpNetworkTransactionTest, ProxyTunnelGet) {
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   RecordingNetLogObserver net_log_observer;
   session_deps_.net_log = NetLog::Get();
@@ -16551,7 +16572,7 @@ TEST_F(HttpNetworkTransactionTest, ProxyTunnelGet) {
 // literal host.
 TEST_F(HttpNetworkTransactionTest, ProxyTunnelGetIPv6) {
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   RecordingNetLogObserver net_log_observer;
   session_deps_.net_log = NetLog::Get();
@@ -16629,7 +16650,7 @@ TEST_F(HttpNetworkTransactionTest, ProxyTunnelGetIPv6) {
 // while establishing the tunnel.
 TEST_F(HttpNetworkTransactionTest, ProxyTunnelGetHangup) {
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   RecordingNetLogObserver net_log_observer;
   session_deps_.net_log = NetLog::Get();
@@ -16709,7 +16730,7 @@ TEST_F(HttpNetworkTransactionTest, PreconnectWithExistingSpdySession) {
   SpdySessionKey key(host_port_pair, ProxyServer::Direct(),
                      PRIVACY_MODE_DISABLED,
                      SpdySessionKey::IsProxySession::kFalse, SocketTag(),
-                     NetworkIsolationKey(), SecureDnsPolicy::kAllow);
+                     NetworkAnonymizationKey(), SecureDnsPolicy::kAllow);
   base::WeakPtr<SpdySession> spdy_session =
       CreateSpdySession(session.get(), key, NetLogWithSource());
 
@@ -16763,9 +16784,9 @@ TEST_F(HttpNetworkTransactionTest, SSLWriteCertError) {
     ERR_CERT_AUTHORITY_INVALID,
     ERR_CERT_DATE_INVALID,
   };
-  for (size_t i = 0; i < std::size(kErrors); i++) {
-    CheckErrorIsPassedBack(kErrors[i], ASYNC);
-    CheckErrorIsPassedBack(kErrors[i], SYNCHRONOUS);
+  for (int error : kErrors) {
+    CheckErrorIsPassedBack(error, ASYNC);
+    CheckErrorIsPassedBack(error, SYNCHRONOUS);
   }
 }
 
@@ -16987,7 +17008,7 @@ TEST_F(HttpNetworkTransactionTest, ClientAuthCertCache_Direct_FalseStart) {
 //     proxy.
 TEST_F(HttpNetworkTransactionTest, ClientAuthCertCache_Proxy_Fail) {
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = NetLog::Get();
 
@@ -17280,7 +17301,7 @@ TEST_F(HttpNetworkTransactionTest, UseIPConnectionPooling) {
 
   // Preload mail.example.com into HostCache.
   rv = session_deps_.host_resolver->LoadIntoCache(
-      HostPortPair("mail.example.com", 443), NetworkIsolationKey(),
+      HostPortPair("mail.example.com", 443), NetworkAnonymizationKey(),
       absl::nullopt);
   EXPECT_THAT(rv, IsOk());
 
@@ -17455,7 +17476,7 @@ TEST_F(HttpNetworkTransactionTest, RetryWithoutConnectionPooling) {
 
   // Preload mail.example.org into HostCache.
   int rv = session_deps_.host_resolver->LoadIntoCache(
-      HostPortPair("mail.example.org", 443), NetworkIsolationKey(),
+      HostPortPair("mail.example.org", 443), NetworkAnonymizationKey(),
       absl::nullopt);
   EXPECT_THAT(rv, IsOk());
 
@@ -17582,7 +17603,7 @@ TEST_F(HttpNetworkTransactionTest, ReturnHTTP421OnRetry) {
 
   // Preload mail.example.org into HostCache.
   int rv = session_deps_.host_resolver->LoadIntoCache(
-      HostPortPair("mail.example.org", 443), NetworkIsolationKey(),
+      HostPortPair("mail.example.org", 443), NetworkAnonymizationKey(),
       absl::nullopt);
   EXPECT_THAT(rv, IsOk());
 
@@ -17634,6 +17655,164 @@ TEST_F(HttpNetworkTransactionTest, ReturnHTTP421OnRetry) {
   EXPECT_TRUE(response->was_alpn_negotiated);
   EXPECT_TRUE(response->ssl_info.cert);
   ASSERT_THAT(ReadTransaction(&trans2, &response_data), IsOk());
+  EXPECT_EQ("hello!", response_data);
+}
+
+TEST_F(HttpNetworkTransactionTest,
+       Response421WithStreamingBodyWithNonNullSource) {
+  const std::string ip_addr = "1.2.3.4";
+  IPAddress ip;
+  ASSERT_TRUE(ip.AssignFromIPLiteral(ip_addr));
+  IPEndPoint peer_addr = IPEndPoint(ip, 443);
+
+  session_deps_.host_resolver = std::make_unique<MockCachingHostResolver>();
+  session_deps_.host_resolver->rules()->AddRule("www.example.org", ip_addr);
+  std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
+
+  const std::string request_body = "hello";
+  spdy::SpdySerializedFrame req1 = spdy_util_.ConstructChunkedSpdyPost({}, 0);
+  spdy::SpdySerializedFrame req1_body =
+      spdy_util_.ConstructSpdyDataFrame(1, request_body, /*fin=*/true);
+  spdy::SpdySerializedFrame rst =
+      spdy_util_.ConstructSpdyRstStream(1, spdy::ERROR_CODE_CANCEL);
+  MockWrite writes1[] = {
+      CreateMockWrite(req1, 0),
+      CreateMockWrite(req1_body, 1),
+      CreateMockWrite(rst, 4),
+  };
+
+  spdy::Http2HeaderBlock response_headers;
+  response_headers[spdy::kHttp2StatusHeader] = "421";
+  spdy::SpdySerializedFrame resp1 =
+      spdy_util_.ConstructSpdyReply(1, std::move(response_headers));
+  MockRead reads1[] = {CreateMockRead(resp1, 2), MockRead(ASYNC, 0, 3)};
+
+  MockConnect connect1(ASYNC, OK, peer_addr);
+  SequencedSocketData data1(connect1, reads1, writes1);
+  session_deps_.socket_factory->AddSocketDataProvider(&data1);
+
+  AddSSLSocketData();
+
+  SpdyTestUtil spdy_util2;
+  spdy::SpdySerializedFrame req2 = spdy_util2.ConstructChunkedSpdyPost({}, 0);
+  spdy::SpdySerializedFrame req2_body =
+      spdy_util2.ConstructSpdyDataFrame(1, request_body, /*fin=*/true);
+  MockWrite writes2[] = {
+      CreateMockWrite(req2, 0),
+      CreateMockWrite(req2_body, 1),
+  };
+
+  spdy::Http2HeaderBlock resp2_headers;
+  resp2_headers[spdy::kHttp2StatusHeader] = "200";
+  spdy::SpdySerializedFrame resp2 =
+      spdy_util2.ConstructSpdyReply(1, std::move(resp2_headers));
+  spdy::SpdySerializedFrame resp2_body(
+      spdy_util2.ConstructSpdyDataFrame(1, true));
+  MockRead reads2[] = {CreateMockRead(resp2, 2), CreateMockRead(resp2_body, 3),
+                       MockRead(ASYNC, 0, 4)};
+
+  MockConnect connect2(ASYNC, OK, peer_addr);
+  SequencedSocketData data2(connect2, reads2, writes2);
+  session_deps_.socket_factory->AddSocketDataProvider(&data2);
+
+  AddSSLSocketData();
+
+  TestCompletionCallback callback;
+  HttpRequestInfo request;
+  ChunkedUploadDataStream upload_data_stream(0, /*has_null_source=*/false);
+  upload_data_stream.AppendData(request_body.data(), request_body.size(),
+                                /*is_done=*/true);
+  request.method = "POST";
+  request.url = GURL("https://www.example.org");
+  request.load_flags = 0;
+  request.traffic_annotation =
+      net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
+  request.upload_data_stream = &upload_data_stream;
+  HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
+
+  int rv = trans.Start(&request, callback.callback(),
+                       NetLogWithSource::Make(NetLogSourceType::NONE));
+  EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
+  rv = callback.WaitForResult();
+  EXPECT_THAT(rv, IsOk());
+
+  const HttpResponseInfo* response = trans.GetResponseInfo();
+  std::string response_data;
+  ASSERT_TRUE(response);
+  ASSERT_TRUE(response->headers);
+  EXPECT_EQ("HTTP/1.1 200", response->headers->GetStatusLine());
+  EXPECT_TRUE(response->was_fetched_via_spdy);
+  EXPECT_TRUE(response->was_alpn_negotiated);
+  EXPECT_TRUE(response->ssl_info.cert);
+  ASSERT_THAT(ReadTransaction(&trans, &response_data), IsOk());
+  EXPECT_EQ("hello!", response_data);
+}
+
+TEST_F(HttpNetworkTransactionTest, Response421WithStreamingBodyWithNullSource) {
+  const std::string ip_addr = "1.2.3.4";
+  IPAddress ip;
+  ASSERT_TRUE(ip.AssignFromIPLiteral(ip_addr));
+  IPEndPoint peer_addr = IPEndPoint(ip, 443);
+
+  session_deps_.host_resolver = std::make_unique<MockCachingHostResolver>();
+  session_deps_.host_resolver->rules()->AddRule("www.example.org", ip_addr);
+  std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
+
+  const std::string request_body = "hello";
+  spdy::SpdySerializedFrame req1 = spdy_util_.ConstructChunkedSpdyPost({}, 0);
+  spdy::SpdySerializedFrame req1_body =
+      spdy_util_.ConstructSpdyDataFrame(1, request_body, /*fin=*/true);
+  spdy::SpdySerializedFrame rst =
+      spdy_util_.ConstructSpdyRstStream(1, spdy::ERROR_CODE_CANCEL);
+  MockWrite writes1[] = {
+      CreateMockWrite(req1, 0),
+      CreateMockWrite(req1_body, 1),
+      CreateMockWrite(rst, 5),
+  };
+
+  spdy::Http2HeaderBlock response_headers;
+  response_headers[spdy::kHttp2StatusHeader] = "421";
+  spdy::SpdySerializedFrame resp1 =
+      spdy_util_.ConstructSpdyReply(1, std::move(response_headers));
+  spdy::SpdySerializedFrame resp1_body(
+      spdy_util_.ConstructSpdyDataFrame(1, true));
+  MockRead reads1[] = {CreateMockRead(resp1, 2), CreateMockRead(resp1_body, 3),
+                       MockRead(ASYNC, 0, 4)};
+
+  MockConnect connect1(ASYNC, OK, peer_addr);
+  SequencedSocketData data1(connect1, reads1, writes1);
+  session_deps_.socket_factory->AddSocketDataProvider(&data1);
+
+  AddSSLSocketData();
+
+  TestCompletionCallback callback;
+  HttpRequestInfo request;
+  ChunkedUploadDataStream upload_data_stream(0, /*has_null_source=*/true);
+  upload_data_stream.AppendData(request_body.data(), request_body.size(),
+                                /*is_done=*/true);
+  request.method = "POST";
+  request.url = GURL("https://www.example.org");
+  request.load_flags = 0;
+  request.traffic_annotation =
+      net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
+  request.upload_data_stream = &upload_data_stream;
+  HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
+
+  int rv = trans.Start(&request, callback.callback(),
+                       NetLogWithSource::Make(NetLogSourceType::NONE));
+  EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
+  rv = callback.WaitForResult();
+  EXPECT_THAT(rv, IsOk());
+
+  const HttpResponseInfo* response = trans.GetResponseInfo();
+  std::string response_data;
+  ASSERT_TRUE(response);
+  ASSERT_TRUE(response->headers);
+  EXPECT_EQ("HTTP/1.1 421", response->headers->GetStatusLine());
+  EXPECT_TRUE(response->was_fetched_via_spdy);
+  EXPECT_TRUE(response->was_alpn_negotiated);
+  EXPECT_TRUE(response->ssl_info.cert);
+  ASSERT_THAT(ReadTransaction(&trans, &response_data), IsOk());
   EXPECT_EQ("hello!", response_data);
 }
 
@@ -17699,7 +17878,7 @@ TEST_F(HttpNetworkTransactionTest,
 
   // Preload cache entries into HostCache.
   rv = session_deps_.host_resolver->LoadIntoCache(
-      HostPortPair("mail.example.com", 443), NetworkIsolationKey(),
+      HostPortPair("mail.example.com", 443), NetworkAnonymizationKey(),
       absl::nullopt);
   EXPECT_THAT(rv, IsOk());
 
@@ -17834,7 +18013,7 @@ TEST_F(HttpNetworkTransactionTest, AlternativeServiceNotOnHttp11) {
   AlternativeService alternative_service(kProtoHTTP2, alternative);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetHttp2AlternativeService(
-      server, NetworkIsolationKey(), alternative_service, expiration);
+      server, NetworkAnonymizationKey(), alternative_service, expiration);
 
   HttpRequestInfo request;
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
@@ -17902,7 +18081,7 @@ TEST_F(HttpNetworkTransactionTest, FailedAlternativeServiceIsNotUserVisible) {
   AlternativeService alternative_service(kProtoHTTP2, alternative);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetHttp2AlternativeService(
-      server, NetworkIsolationKey(), alternative_service, expiration);
+      server, NetworkAnonymizationKey(), alternative_service, expiration);
 
   HttpNetworkTransaction trans1(DEFAULT_PRIORITY, session.get());
   HttpRequestInfo request1;
@@ -17929,7 +18108,7 @@ TEST_F(HttpNetworkTransactionTest, FailedAlternativeServiceIsNotUserVisible) {
   // Alternative should be marked as broken, because HTTP/1.1 is not sufficient
   // for alternative service.
   EXPECT_TRUE(http_server_properties->IsAlternativeServiceBroken(
-      alternative_service, NetworkIsolationKey()));
+      alternative_service, NetworkAnonymizationKey()));
 
   // Since |alternative_service| is broken, a second transaction to server
   // should not start an alternate Job.  It should pool to existing connection
@@ -18012,7 +18191,7 @@ TEST_F(HttpNetworkTransactionTest, AlternativeServiceShouldNotPoolToHttp11) {
   AlternativeService alternative_service(kProtoHTTP2, alternative);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties->SetHttp2AlternativeService(
-      server, NetworkIsolationKey(), alternative_service, expiration);
+      server, NetworkAnonymizationKey(), alternative_service, expiration);
 
   // First transaction to alternative to open an HTTP/1.1 socket.
   HttpRequestInfo request1;
@@ -18137,7 +18316,7 @@ TEST_F(HttpNetworkTransactionTest, DoNotUseSpdySessionForHttpOverTunnel) {
   data1.set_connect_data(connect_data1);
 
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "HTTPS proxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = net::NetLog::Get();
   SSLSocketDataProvider ssl1(ASYNC, OK);  // to the proxy
@@ -18473,7 +18652,7 @@ TEST_F(HttpNetworkTransactionTest, CloseIdleSpdySessionToOpenNewOne) {
   SpdySessionKey spdy_session_key_a(
       host_port_pair_a, ProxyServer::Direct(), PRIVACY_MODE_DISABLED,
       SpdySessionKey::IsProxySession::kFalse, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow);
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow);
   EXPECT_FALSE(
       HasSpdySession(session->spdy_session_pool(), spdy_session_key_a));
 
@@ -18509,7 +18688,7 @@ TEST_F(HttpNetworkTransactionTest, CloseIdleSpdySessionToOpenNewOne) {
   SpdySessionKey spdy_session_key_b(
       host_port_pair_b, ProxyServer::Direct(), PRIVACY_MODE_DISABLED,
       SpdySessionKey::IsProxySession::kFalse, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow);
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow);
   EXPECT_FALSE(
       HasSpdySession(session->spdy_session_pool(), spdy_session_key_b));
   HttpRequestInfo request2;
@@ -18542,7 +18721,7 @@ TEST_F(HttpNetworkTransactionTest, CloseIdleSpdySessionToOpenNewOne) {
   SpdySessionKey spdy_session_key_a1(
       host_port_pair_a1, ProxyServer::Direct(), PRIVACY_MODE_DISABLED,
       SpdySessionKey::IsProxySession::kFalse, SocketTag(),
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow);
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow);
   EXPECT_FALSE(
       HasSpdySession(session->spdy_session_pool(), spdy_session_key_a1));
   HttpRequestInfo request3;
@@ -19478,7 +19657,7 @@ TEST_F(HttpNetworkTransactionTest, ProxyHeadersNotSentOverWssTunnel) {
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -19585,7 +19764,7 @@ TEST_F(HttpNetworkTransactionTest, ProxyHeadersNotSentOverWsTunnel) {
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -19625,7 +19804,7 @@ TEST_F(HttpNetworkTransactionTest, ProxyHeadersNotSentOverWsTunnel) {
 
   session->http_auth_cache()->Add(
       url::SchemeHostPort(GURL("http://myproxy:70/")), HttpAuth::AUTH_PROXY,
-      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, NetworkIsolationKey(),
+      "MyRealm1", HttpAuth::AUTH_SCHEME_BASIC, NetworkAnonymizationKey(),
       "Basic realm=MyRealm1", AuthCredentials(kFoo, kBar), "/");
 
   TestWebSocketHandshakeStreamCreateHelper websocket_stream_create_helper;
@@ -19658,7 +19837,7 @@ TEST_F(HttpNetworkTransactionTest, WebSocketNotSentOverQuicProxy) {
   for (bool secure : {true, false}) {
     SCOPED_TRACE(secure);
     session_deps_.proxy_resolution_service =
-        ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+        ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
             "QUIC myproxy.org:443", TRAFFIC_ANNOTATION_FOR_TESTS);
     session_deps_.enable_quic = true;
 
@@ -19931,15 +20110,16 @@ TEST_F(HttpNetworkTransactionTest, ProxyResolutionFailsAsync) {
   ProxyConfig proxy_config;
   proxy_config.set_pac_url(GURL("http://fooproxyurl"));
   proxy_config.set_pac_mandatory(true);
-  MockAsyncProxyResolverFactory* proxy_resolver_factory =
-      new MockAsyncProxyResolverFactory(false);
+  auto proxy_resolver_factory =
+      std::make_unique<MockAsyncProxyResolverFactory>(false);
+  auto* proxy_resolver_factory_ptr = proxy_resolver_factory.get();
   MockAsyncProxyResolver resolver;
   session_deps_.proxy_resolution_service =
       std::make_unique<ConfiguredProxyResolutionService>(
 
           std::make_unique<ProxyConfigServiceFixed>(ProxyConfigWithAnnotation(
               proxy_config, TRAFFIC_ANNOTATION_FOR_TESTS)),
-          base::WrapUnique(proxy_resolver_factory), nullptr,
+          std::move(proxy_resolver_factory), nullptr,
           /*quick_check_enabled=*/true);
   HttpRequestInfo request;
   request.method = "GET";
@@ -19954,7 +20134,7 @@ TEST_F(HttpNetworkTransactionTest, ProxyResolutionFailsAsync) {
   int rv = trans.Start(&request, callback.callback(), NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
-  proxy_resolver_factory->pending_requests()[0]->CompleteNowWithForwarder(
+  proxy_resolver_factory_ptr->pending_requests()[0]->CompleteNowWithForwarder(
       ERR_FAILED, &resolver);
   EXPECT_THAT(callback.WaitForResult(),
               IsError(ERR_MANDATORY_PROXY_CONFIGURATION_FAILED));
@@ -19962,7 +20142,7 @@ TEST_F(HttpNetworkTransactionTest, ProxyResolutionFailsAsync) {
 
 TEST_F(HttpNetworkTransactionTest, NoSupportedProxies) {
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC myproxy.org:443", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.enable_quic = false;
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -19990,7 +20170,7 @@ class HttpNetworkTransactionReportingTest
       public ::testing::WithParamInterface<bool> {
  protected:
   HttpNetworkTransactionReportingTest() {
-    std::vector<base::Feature> required_features = {
+    std::vector<base::test::FeatureRef> required_features = {
         features::kPartitionNelAndReportingByNetworkIsolationKey};
     if (UseDocumentReporting()) {
       required_features.push_back(features::kDocumentReporting);
@@ -20025,7 +20205,7 @@ class HttpNetworkTransactionReportingTest
     request.traffic_annotation =
         net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
     request.network_isolation_key = kNetworkIsolationKey;
-
+    request.network_anonymization_key = kNetworkAnonymizationKey;
     MockWrite data_writes[] = {
         MockWrite("GET / HTTP/1.1\r\n"
                   "Host: www.example.org\r\n"
@@ -20092,7 +20272,7 @@ TEST_P(HttpNetworkTransactionReportingTest, ProcessReportToHeaderHttps) {
   const ReportingEndpoint endpoint =
       reporting_context()->cache()->GetEndpointForTesting(
           ReportingEndpointGroupKey(
-              kNetworkIsolationKey,
+              kNetworkAnonymizationKey,
               url::Origin::Create(GURL("https://www.example.org/")), "nel"),
           GURL("https://www.example.org/upload/"));
   EXPECT_TRUE(endpoint);
@@ -20139,6 +20319,7 @@ class HttpNetworkTransactionNetworkErrorLoggingTest
     request_.method = "GET";
     request_.url = GURL(url_);
     request_.network_isolation_key = kNetworkIsolationKey;
+    request_.network_anonymization_key = kNetworkAnonymizationKey;
     request_.extra_headers = extra_headers_;
     request_.reporting_upload_depth = reporting_upload_depth_;
     request_.traffic_annotation =
@@ -20204,7 +20385,7 @@ class HttpNetworkTransactionNetworkErrorLoggingTest
     const NetworkErrorLoggingService::RequestDetails& error =
         network_error_logging_service()->errors()[index];
     EXPECT_EQ(url_, error.uri);
-    EXPECT_EQ(kNetworkIsolationKey, error.network_isolation_key);
+    EXPECT_EQ(kNetworkAnonymizationKey, error.network_anonymization_key);
     EXPECT_EQ(kReferrer, error.referrer);
     EXPECT_EQ(kUserAgent, error.user_agent);
     EXPECT_EQ(server_ip, error.server_ip);
@@ -20245,7 +20426,7 @@ TEST_F(HttpNetworkTransactionNetworkErrorLoggingTest,
 TEST_F(HttpNetworkTransactionNetworkErrorLoggingTest,
        DontProcessNelHeaderProxy) {
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   session_deps_.net_log = NetLog::Get();
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
@@ -20309,7 +20490,7 @@ TEST_F(HttpNetworkTransactionNetworkErrorLoggingTest, ProcessNelHeaderHttps) {
   RequestPolicy();
   ASSERT_EQ(1u, network_error_logging_service()->headers().size());
   const auto& header = network_error_logging_service()->headers()[0];
-  EXPECT_EQ(kNetworkIsolationKey, header.network_isolation_key);
+  EXPECT_EQ(kNetworkAnonymizationKey, header.network_anonymization_key);
   EXPECT_EQ(url::Origin::Create(GURL("https://www.example.org/")),
             header.origin);
   EXPECT_EQ(IPAddress::IPv4Localhost(), header.received_ip_address);
@@ -20330,16 +20511,14 @@ TEST_F(HttpNetworkTransactionNetworkErrorLoggingTest, CreateReportSuccess) {
 }
 
 TEST_F(HttpNetworkTransactionNetworkErrorLoggingTest,
-       CreateReportErrorAfterStart) {
+       CreateReportDNSErrorAfterStartSync) {
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
   auto trans =
       std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY, session.get());
 
-  MockConnect mock_connect(SYNCHRONOUS, ERR_NAME_NOT_RESOLVED);
-  StaticSocketDataProvider data;
-  data.set_connect_data(mock_connect);
-  session_deps_.socket_factory->AddSocketDataProvider(&data);
-
+  session_deps_.host_resolver->set_synchronous_mode(true);
+  session_deps_.host_resolver->rules()->AddRule(GURL(url_).host(),
+                                                ERR_NAME_NOT_RESOLVED);
   TestCompletionCallback callback;
 
   int rv = trans->Start(&request_, callback.callback(), NetLogWithSource());
@@ -20352,18 +20531,15 @@ TEST_F(HttpNetworkTransactionNetworkErrorLoggingTest,
               IPAddress() /* server_ip */);
 }
 
-// Same as above except the error is ASYNC
 TEST_F(HttpNetworkTransactionNetworkErrorLoggingTest,
-       CreateReportErrorAfterStartAsync) {
+       CreateReportDNSErrorAfterStartAsync) {
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
   auto trans =
       std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY, session.get());
 
-  MockConnect mock_connect(ASYNC, ERR_NAME_NOT_RESOLVED);
-  StaticSocketDataProvider data;
-  data.set_connect_data(mock_connect);
-  session_deps_.socket_factory->AddSocketDataProvider(&data);
-
+  session_deps_.host_resolver->set_synchronous_mode(false);
+  session_deps_.host_resolver->rules()->AddRule(GURL(url_).host(),
+                                                ERR_NAME_NOT_RESOLVED);
   TestCompletionCallback callback;
 
   int rv = trans->Start(&request_, callback.callback(), NetLogWithSource());
@@ -20374,6 +20550,53 @@ TEST_F(HttpNetworkTransactionNetworkErrorLoggingTest,
   ASSERT_EQ(1u, network_error_logging_service()->errors().size());
   CheckReport(0 /* index */, 0 /* status_code */, ERR_NAME_NOT_RESOLVED,
               IPAddress() /* server_ip */);
+}
+
+TEST_F(HttpNetworkTransactionNetworkErrorLoggingTest,
+       CreateReportErrorAfterStart) {
+  std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
+  auto trans =
+      std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY, session.get());
+
+  MockConnect mock_connect(SYNCHRONOUS, ERR_CONNECTION_REFUSED);
+  StaticSocketDataProvider data;
+  data.set_connect_data(mock_connect);
+  session_deps_.socket_factory->AddSocketDataProvider(&data);
+
+  TestCompletionCallback callback;
+
+  int rv = trans->Start(&request_, callback.callback(), NetLogWithSource());
+  EXPECT_THAT(callback.GetResult(rv), IsError(ERR_CONNECTION_REFUSED));
+
+  trans.reset();
+
+  ASSERT_EQ(1u, network_error_logging_service()->errors().size());
+  CheckReport(0 /* index */, 0 /* status_code */, ERR_CONNECTION_REFUSED,
+              IPAddress::IPv4Localhost() /* server_ip */);
+}
+
+// Same as above except the error is ASYNC
+TEST_F(HttpNetworkTransactionNetworkErrorLoggingTest,
+       CreateReportErrorAfterStartAsync) {
+  std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
+  auto trans =
+      std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY, session.get());
+
+  MockConnect mock_connect(ASYNC, ERR_CONNECTION_REFUSED);
+  StaticSocketDataProvider data;
+  data.set_connect_data(mock_connect);
+  session_deps_.socket_factory->AddSocketDataProvider(&data);
+
+  TestCompletionCallback callback;
+
+  int rv = trans->Start(&request_, callback.callback(), NetLogWithSource());
+  EXPECT_THAT(callback.GetResult(rv), IsError(ERR_CONNECTION_REFUSED));
+
+  trans.reset();
+
+  ASSERT_EQ(1u, network_error_logging_service()->errors().size());
+  CheckReport(0 /* index */, 0 /* status_code */, ERR_CONNECTION_REFUSED,
+              IPAddress::IPv4Localhost() /* server_ip */);
 }
 
 TEST_F(HttpNetworkTransactionNetworkErrorLoggingTest,
@@ -20912,7 +21135,7 @@ TEST_F(HttpNetworkTransactionNetworkErrorLoggingTest,
 
   // Preload mail.example.org into HostCache.
   int rv = session_deps_.host_resolver->LoadIntoCache(
-      HostPortPair("mail.example.org", 443), NetworkIsolationKey(),
+      HostPortPair("mail.example.org", 443), NetworkAnonymizationKey(),
       absl::nullopt);
   EXPECT_THAT(rv, IsOk());
 
@@ -21153,7 +21376,7 @@ TEST_F(HttpNetworkTransactionNetworkErrorLoggingTest, DontCreateReportProxy) {
 
   // Configure against proxy server "myproxy:70".
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
 
@@ -21838,7 +22061,7 @@ TEST_F(HttpNetworkTransactionTest, ZeroRTTConfirmErrorAsync) {
 TEST_F(HttpNetworkTransactionTest, AuthEverything) {
   // Note these hosts must match the CheckBasic*Auth() functions.
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   auto cert_request_info_proxy = base::MakeRefCounted<SSLCertRequestInfo>();
@@ -22025,7 +22248,7 @@ TEST_F(HttpNetworkTransactionTest, AuthEverything) {
 TEST_F(HttpNetworkTransactionTest, AuthEverythingWithConnectClose) {
   // Note these hosts must match the CheckBasic*Auth() functions.
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   auto cert_request_info_proxy = base::MakeRefCounted<SSLCertRequestInfo>();
@@ -22265,7 +22488,7 @@ TEST_F(HttpNetworkTransactionTest, AuthEverythingWithConnectClose) {
 TEST_F(HttpNetworkTransactionTest, ProxyHTTPAndServerTLSAuth) {
   // Note these hosts must match the CheckBasic*Auth() functions.
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   auto cert_request_info_origin = base::MakeRefCounted<SSLCertRequestInfo>();
@@ -22458,12 +22681,14 @@ TEST_F(HttpNetworkTransactionTest, ClientCertSocketReuse) {
 }
 
 // Test for kPartitionConnectionsByNetworkIsolationKey. Runs 3 requests in
-// sequence with two different NetworkIsolationKeys, the first and last have the
-// same key, the second a different one. Checks that the requests are
+// sequence with two different NetworkAnonymizationKeys, the first and last have
+// the same key, the second a different one. Checks that the requests are
 // partitioned across sockets as expected.
 TEST_F(HttpNetworkTransactionTest, NetworkIsolation) {
   const SchemefulSite kSite1(GURL("http://origin1/"));
   const SchemefulSite kSite2(GURL("http://origin2/"));
+  NetworkAnonymizationKey network_anonymization_key1(kSite1, kSite1);
+  NetworkAnonymizationKey network_anonymization_key2(kSite2, kSite2);
   NetworkIsolationKey network_isolation_key1(kSite1, kSite1);
   NetworkIsolationKey network_isolation_key2(kSite2, kSite2);
 
@@ -22568,6 +22793,7 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolation) {
     request1.traffic_annotation =
         net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
     request1.network_isolation_key = network_isolation_key1;
+    request1.network_anonymization_key = network_anonymization_key1;
     auto trans1 = std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY,
                                                            session.get());
     int rv = trans1->Start(&request1, callback.callback(), NetLogWithSource());
@@ -22583,6 +22809,7 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolation) {
     request2.traffic_annotation =
         net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
     request2.network_isolation_key = network_isolation_key2;
+    request2.network_anonymization_key = network_anonymization_key2;
     auto trans2 = std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY,
                                                            session.get());
     rv = trans2->Start(&request2, callback.callback(), NetLogWithSource());
@@ -22598,6 +22825,7 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolation) {
     request3.traffic_annotation =
         net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
     request3.network_isolation_key = network_isolation_key1;
+    request3.network_anonymization_key = network_anonymization_key1;
     auto trans3 = std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY,
                                                            session.get());
     rv = trans3->Start(&request3, callback.callback(), NetLogWithSource());
@@ -22612,6 +22840,8 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolation) {
 TEST_F(HttpNetworkTransactionTest, NetworkIsolationH2) {
   const SchemefulSite kSite1(GURL("http://origin1/"));
   const SchemefulSite kSite2(GURL("http://origin2/"));
+  NetworkAnonymizationKey network_anonymization_key1(kSite1, kSite1);
+  NetworkAnonymizationKey network_anonymization_key2(kSite2, kSite2);
   NetworkIsolationKey network_isolation_key1(kSite1, kSite1);
   NetworkIsolationKey network_isolation_key2(kSite2, kSite2);
 
@@ -22623,7 +22853,7 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationH2) {
     SCOPED_TRACE(use_proxy);
     if (use_proxy) {
       session_deps_.proxy_resolution_service =
-          ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+          ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
               "HTTPS proxy:443", TRAFFIC_ANNOTATION_FOR_TESTS);
     } else {
       session_deps_.proxy_resolution_service =
@@ -22782,6 +23012,8 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationH2) {
       request1.traffic_annotation =
           net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
       request1.network_isolation_key = network_isolation_key1;
+      request1.network_anonymization_key = network_anonymization_key1;
+
       auto trans1 =
           std::make_unique<HttpNetworkTransaction>(LOWEST, session.get());
       int rv =
@@ -22798,6 +23030,7 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationH2) {
       request2.traffic_annotation =
           net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
       request2.network_isolation_key = network_isolation_key2;
+      request2.network_anonymization_key = network_anonymization_key2;
       auto trans2 =
           std::make_unique<HttpNetworkTransaction>(LOWEST, session.get());
       rv = trans2->Start(&request2, callback.callback(), NetLogWithSource());
@@ -22813,6 +23046,8 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationH2) {
       request3.traffic_annotation =
           net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
       request3.network_isolation_key = network_isolation_key1;
+      request3.network_anonymization_key = network_anonymization_key1;
+
       auto trans3 =
           std::make_unique<HttpNetworkTransaction>(LOWEST, session.get());
       rv = trans3->Start(&request3, callback.callback(), NetLogWithSource());
@@ -22825,9 +23060,9 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationH2) {
   }
 }
 
-// Preconnect two sockets with different NetworkIsolationKeys when
-// features::kPartitionConnectionsByNetworkIsolationKey is enabled. Then issue a
-// request and make sure the correct socket is used. Loops three times,
+// Preconnect two sockets with different NetworkAnonymizationKeys when
+// features::kPartitionConnectionsByNetworkIsolationKey is enabled. Then
+// issue a request and make sure the correct socket is used. Loops three times,
 // expecting to use the first preconnect, second preconnect, and neither.
 TEST_F(HttpNetworkTransactionTest, NetworkIsolationPreconnect) {
   base::test::ScopedFeatureList feature_list;
@@ -22843,10 +23078,12 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationPreconnect) {
   const SchemefulSite kSite1(GURL("http://origin1/"));
   const SchemefulSite kSite2(GURL("http://origin2/"));
   const SchemefulSite kSite3(GURL("http://origin3/"));
+  NetworkAnonymizationKey preconnect1_anonymization_key(kSite1, kSite1);
+  NetworkAnonymizationKey preconnect2_anonymization_key(kSite2, kSite2);
+  NetworkAnonymizationKey not_preconnected_anonymization_key(kSite3, kSite3);
   NetworkIsolationKey preconnect1_isolation_key(kSite1, kSite1);
   NetworkIsolationKey preconnect2_isolation_key(kSite2, kSite2);
   NetworkIsolationKey not_preconnected_isolation_key(kSite3, kSite3);
-
   // Test that only preconnects with
   for (TestCase test_case :
        {TestCase::kUseFirstPreconnect, TestCase::kUseSecondPreconnect,
@@ -22882,6 +23119,7 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationPreconnect) {
                                          base::span<const MockRead>(),
                                          base::span<const MockWrite>());
 
+    NetworkAnonymizationKey network_anonymization_key_for_request;
     NetworkIsolationKey network_isolation_key_for_request;
 
     switch (test_case) {
@@ -22889,17 +23127,21 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationPreconnect) {
         session_deps.socket_factory->AddSocketDataProvider(&used_socket_data);
         session_deps.socket_factory->AddSocketDataProvider(&preconnect2_data);
         network_isolation_key_for_request = preconnect1_isolation_key;
+        network_anonymization_key_for_request = preconnect1_anonymization_key;
         break;
       case TestCase::kUseSecondPreconnect:
         session_deps.socket_factory->AddSocketDataProvider(&preconnect1_data);
         session_deps.socket_factory->AddSocketDataProvider(&used_socket_data);
         network_isolation_key_for_request = preconnect2_isolation_key;
+        network_anonymization_key_for_request = preconnect2_anonymization_key;
         break;
       case TestCase::kDontUsePreconnect:
         session_deps.socket_factory->AddSocketDataProvider(&preconnect1_data);
         session_deps.socket_factory->AddSocketDataProvider(&preconnect2_data);
         session_deps.socket_factory->AddSocketDataProvider(&used_socket_data);
         network_isolation_key_for_request = not_preconnected_isolation_key;
+        network_anonymization_key_for_request =
+            not_preconnected_anonymization_key;
         break;
     }
 
@@ -22913,12 +23155,15 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationPreconnect) {
         net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
 
     request.network_isolation_key = preconnect1_isolation_key;
+    request.network_anonymization_key = preconnect1_anonymization_key;
     session->http_stream_factory()->PreconnectStreams(1, request);
 
     request.network_isolation_key = preconnect2_isolation_key;
+    request.network_anonymization_key = preconnect2_anonymization_key;
     session->http_stream_factory()->PreconnectStreams(1, request);
 
     request.network_isolation_key = network_isolation_key_for_request;
+    request.network_anonymization_key = network_anonymization_key_for_request;
 
     EXPECT_EQ(2, GetIdleSocketCountInTransportSocketPool(session.get()));
 
@@ -22951,8 +23196,8 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationPreconnect) {
   }
 }
 
-// Test that the NetworkIsolationKey is passed down to SSLConfig so the session
-// cache is isolated.
+// Test that the NetworkAnonymizationKey is passed down to SSLConfig so the
+// session cache is isolated.
 TEST_F(HttpNetworkTransactionTest, NetworkIsolationSSL) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
@@ -22962,8 +23207,10 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationSSL) {
 
   const SchemefulSite kSite1(GURL("http://origin1/"));
   const SchemefulSite kSite2(GURL("http://origin2/"));
-  const NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
-  const NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
+  const net::NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
+  const net::NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
 
   // The server always sends Connection: close, so each request goes over a
@@ -23011,13 +23258,13 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationSSL) {
 
   SSLSocketDataProvider ssl_data1(ASYNC, OK);
   ssl_data1.expected_host_and_port = HostPortPair("foo.test", 443);
-  ssl_data1.expected_network_isolation_key = kNetworkIsolationKey1;
+  ssl_data1.expected_network_anonymization_key = kNetworkAnonymizationKey1;
   SSLSocketDataProvider ssl_data2(ASYNC, OK);
   ssl_data2.expected_host_and_port = HostPortPair("foo.test", 443);
-  ssl_data2.expected_network_isolation_key = kNetworkIsolationKey2;
+  ssl_data2.expected_network_anonymization_key = kNetworkAnonymizationKey2;
   SSLSocketDataProvider ssl_data3(ASYNC, OK);
   ssl_data3.expected_host_and_port = HostPortPair("foo.test", 443);
-  ssl_data3.expected_network_isolation_key = kNetworkIsolationKey1;
+  ssl_data3.expected_network_anonymization_key = kNetworkAnonymizationKey1;
   session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl_data1);
   session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl_data2);
   session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl_data3);
@@ -23029,6 +23276,8 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationSSL) {
   request1.traffic_annotation =
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
   request1.network_isolation_key = kNetworkIsolationKey1;
+  request1.network_anonymization_key = kNetworkAnonymizationKey1;
+
   auto trans1 =
       std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY, session.get());
   int rv = trans1->Start(&request1, callback.callback(), NetLogWithSource());
@@ -23044,6 +23293,7 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationSSL) {
   request2.traffic_annotation =
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
   request2.network_isolation_key = kNetworkIsolationKey2;
+  request2.network_anonymization_key = kNetworkAnonymizationKey2;
   auto trans2 =
       std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY, session.get());
   rv = trans2->Start(&request2, callback.callback(), NetLogWithSource());
@@ -23059,6 +23309,7 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationSSL) {
   request3.traffic_annotation =
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
   request3.network_isolation_key = kNetworkIsolationKey1;
+  request3.network_anonymization_key = kNetworkAnonymizationKey1;
   auto trans3 =
       std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY, session.get());
   rv = trans3->Start(&request3, callback.callback(), NetLogWithSource());
@@ -23069,8 +23320,8 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationSSL) {
   trans3.reset();
 }
 
-// Test that the NetworkIsolationKey is passed down to SSLConfig so the session
-// cache is isolated, for both origins and proxies.
+// Test that the NetworkAnonymizationKey is passed down to SSLConfig so the
+// session cache is isolated, for both origins and proxies.
 TEST_F(HttpNetworkTransactionTest, NetworkIsolationSSLProxy) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
@@ -23079,13 +23330,15 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationSSLProxy) {
       {});
 
   session_deps_.proxy_resolution_service =
-      ConfiguredProxyResolutionService::CreateFixed(
+      ConfiguredProxyResolutionService::CreateFixedForTest(
           "https://myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   const SchemefulSite kSite1(GURL("http://origin1/"));
   const SchemefulSite kSite2(GURL("http://origin2/"));
-  const NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
-  const NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
+  const NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
+  const NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
+  const net::NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
+  const net::NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
   std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
 
   // Make both a tunneled and non-tunneled request.
@@ -23095,6 +23348,7 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationSSLProxy) {
   request1.traffic_annotation =
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
   request1.network_isolation_key = kNetworkIsolationKey1;
+  request1.network_anonymization_key = kNetworkAnonymizationKey1;
 
   HttpRequestInfo request2;
   request2.method = "GET";
@@ -23102,6 +23356,7 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationSSLProxy) {
   request2.traffic_annotation =
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
   request2.network_isolation_key = kNetworkIsolationKey2;
+  request2.network_anonymization_key = kNetworkAnonymizationKey2;
 
   const MockWrite kWrites1[] = {
       MockWrite("CONNECT foo.test:443 HTTP/1.1\r\n"
@@ -23137,13 +23392,13 @@ TEST_F(HttpNetworkTransactionTest, NetworkIsolationSSLProxy) {
 
   SSLSocketDataProvider ssl_proxy1(ASYNC, OK);
   ssl_proxy1.expected_host_and_port = HostPortPair("myproxy", 70);
-  ssl_proxy1.expected_network_isolation_key = kNetworkIsolationKey1;
+  ssl_proxy1.expected_network_anonymization_key = kNetworkAnonymizationKey1;
   SSLSocketDataProvider ssl_origin1(ASYNC, OK);
   ssl_origin1.expected_host_and_port = HostPortPair("foo.test", 443);
-  ssl_origin1.expected_network_isolation_key = kNetworkIsolationKey1;
+  ssl_origin1.expected_network_anonymization_key = kNetworkAnonymizationKey1;
   SSLSocketDataProvider ssl_proxy2(ASYNC, OK);
   ssl_proxy2.expected_host_and_port = HostPortPair("myproxy", 70);
-  ssl_proxy2.expected_network_isolation_key = kNetworkIsolationKey2;
+  ssl_proxy2.expected_network_anonymization_key = kNetworkAnonymizationKey2;
   session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl_proxy1);
   session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl_origin1);
   session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl_proxy2);

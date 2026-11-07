@@ -95,9 +95,7 @@ const app = express();
 app.use((req, res, next) => {
   res.header('Origin-Trial', [
     // Token for http://localhost:8080
-    'Ak2PbRK+Dtqxmf674mzpBNMFBexvOQC4PJUEL4oOIn4Yzsd2cr9p7IPmOwctzEnW44LbNg1fFt2F4mXOd4oxgA4AAABJeyJvcmlnaW4iOiJodHRwOi8vbG9jYWxob3N0OjgwODAiLCJmZWF0dXJlIjoiV2ViR1BVIiwiZXhwaXJ5IjoxNjUyODMxOTk5fQ==',
-    // Token for http://localhost:8081
-    'At4vqQ4HYWorpfwbvDdiIIENLLbftULveMfTVwtz/DOHmQ91n5pBYVxIrSglnGGc048cB0gZnTQHSRnupwJt1AAAAABJeyJvcmlnaW4iOiJodHRwOi8vbG9jYWxob3N0OjgwODEiLCJmZWF0dXJlIjoiV2ViR1BVIiwiZXhwaXJ5IjoxNjUyODMxOTk5fQ==',
+    'AvyDIV+RJoYs8fn3W6kIrBhWw0te0klraoz04mw/nPb8VTus3w5HCdy+vXqsSzomIH745CT6B5j1naHgWqt/tw8AAABJeyJvcmlnaW4iOiJodHRwOi8vbG9jYWxob3N0OjgwODAiLCJmZWF0dXJlIjoiV2ViR1BVIiwiZXhwaXJ5IjoxNjYzNzE4Mzk5fQ==',
   ]);
   next();
 });
@@ -135,14 +133,19 @@ app.get('/out/:suite/listing.js', async (req, res, next) => {
 
 // Serve all other .js files by fetching the source .ts file and compiling it.
 app.get('/out/**/*.js', async (req, res, next) => {
-  const tsUrl = path.relative('/out', req.url).replace(/\.js$/, '.ts');
+  const jsUrl = path.relative('/out', req.url);
+  const tsUrl = jsUrl.replace(/\.js$/, '.ts');
   if (compileCache.has(tsUrl)) {
     res.setHeader('Content-Type', 'application/javascript');
     res.send(compileCache.get(tsUrl));
     return;
   }
 
-  const absPath = path.join(srcDir, tsUrl);
+  let absPath = path.join(srcDir, tsUrl);
+  if (!fs.existsSync(absPath)) {
+    // The .ts file doesn't exist. Try .js file in case this is a .js/.d.ts pair.
+    absPath = path.join(srcDir, jsUrl);
+  }
 
   try {
     const result = await babel.transformFileAsync(absPath, babelConfig);

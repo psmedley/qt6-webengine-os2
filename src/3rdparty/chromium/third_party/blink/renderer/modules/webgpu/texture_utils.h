@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,10 @@
 
 namespace blink {
 
-bool ComputeAndValidateRequiredBytesInCopy(size_t data_size,
-                                           WGPUTextureDataLayout layout,
+size_t EstimateWriteTextureBytesUpperBound(WGPUTextureDataLayout layout,
                                            WGPUExtent3D extent,
                                            WGPUTextureFormat format,
-                                           WGPUTextureAspect aspect,
-                                           size_t* required_copy_size,
-                                           GPUDevice* device);
+                                           WGPUTextureAspect aspect);
 
 }  // namespace blink
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,7 +61,7 @@ bool GetAppOutputInternal(const CommandLine& cmd_line,
     ssize_t bytes_read = read(pipe_fd[0], buffer, sizeof(buffer));
     if (bytes_read <= 0)
       break;
-    output->append(buffer, bytes_read);
+    output->append(buffer, static_cast<size_t>(bytes_read));
   }
   close(pipe_fd[0]);
 
@@ -114,7 +114,8 @@ uint32_t LaunchOptions::AddHandleToTransfer(
     zx_handle_t handle) {
   CHECK_LE(handles_to_transfer->size(), std::numeric_limits<uint16_t>::max())
       << "Number of handles to transfer exceeds total allowed";
-  uint32_t handle_id = PA_HND(PA_USER1, handles_to_transfer->size());
+  auto handle_id =
+      static_cast<uint32_t>(PA_HND(PA_USER1, handles_to_transfer->size()));
   handles_to_transfer->push_back({handle_id, handle});
   return handle_id;
 }
@@ -158,32 +159,36 @@ Process LaunchProcess(const std::vector<std::string>& argv,
     argv_cstr.push_back(arg.c_str());
   argv_cstr.push_back(nullptr);
 
-  // Determine the environment to pass to the new process. If
-  // |clear_environment|, |environment| or |current_directory| are set then we
-  // construct a new (possibly empty) environment, otherwise we let fdio_spawn()
-  // clone the caller's environment into the new process.
-  uint32_t spawn_flags = FDIO_SPAWN_DEFAULT_LDSVC | FDIO_SPAWN_CLONE_UTC_CLOCK |
-                         options.spawn_flags;
-
+  // If |environment| is set then it contains values to set/replace to create
+  // the new process' environment.
   EnvironmentMap environ_modifications = options.environment;
+
+  // "PWD" is set in the new process' environment, to one of:
+  // 1. The value of |current_directory|, if set.
+  // 2. The value specified in |environment|, if any.
+  // 3. The current process' current working directory, if known.
   if (!options.current_directory.empty()) {
     environ_modifications["PWD"] = options.current_directory.value();
-  } else {
+  } else if (environ_modifications.find("PWD") == environ_modifications.end()) {
     FilePath cwd;
-    GetCurrentDirectory(&cwd);
-    environ_modifications["PWD"] = cwd.value();
+    if (GetCurrentDirectory(&cwd)) {
+      environ_modifications["PWD"] = cwd.value();
+    }
   }
 
-  std::unique_ptr<char*[]> new_environ;
-  if (!environ_modifications.empty()) {
-    char* const empty_environ = nullptr;
-    char* const* old_environ =
-        options.clear_environment ? &empty_environ : environ;
-    new_environ =
-        internal::AlterEnvironment(old_environ, environ_modifications);
-  } else if (!options.clear_environment) {
-    spawn_flags |= FDIO_SPAWN_CLONE_ENVIRON;
-  }
+  // By default the calling process' environment is copied, and the collated
+  // modifications applied, to create the new process' environment. If
+  // |clear_environment| is set then only the collated modifications are used.
+  char* const kEmptyEnviron = nullptr;
+  char* const* old_environ =
+      options.clear_environment ? &kEmptyEnviron : environ;
+  std::unique_ptr<char*[]> new_environ =
+      internal::AlterEnvironment(old_environ, environ_modifications);
+
+  // Always clone the library loader service and UTC clock to new processes,
+  // in addition to any flags specified by the caller.
+  uint32_t spawn_flags = FDIO_SPAWN_DEFAULT_LDSVC | FDIO_SPAWN_CLONE_UTC_CLOCK |
+                         options.spawn_flags;
 
   // Add actions to clone handles for any specified paths into the new process'
   // namespace.

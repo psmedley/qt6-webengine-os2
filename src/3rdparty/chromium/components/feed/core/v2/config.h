@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,9 @@ struct Config {
   base::TimeDelta stale_content_threshold = base::Hours(24);
   // Content older than this threshold will not be shown to the user.
   base::TimeDelta content_expiration_threshold = base::Hours(48);
+  // For users with no follows, content older than this will not be shown.
+  base::TimeDelta subscriptionless_content_expiration_threshold =
+      base::Days(14);
   // How long the window is for background refresh tasks. If the task cannot be
   // scheduled in the window, the background refresh is aborted.
   base::TimeDelta background_refresh_window_length = base::Hours(24);
@@ -57,14 +60,15 @@ struct Config {
   base::TimeDelta session_id_max_age = base::Days(30);
   // Maximum number of images prefetched per refresh.
   int max_prefetch_image_requests_per_refresh = 50;
-  // The minimum interval from the last time the notice is viewed in order for
-  // it to be considered viewed again.
-  base::TimeDelta minimum_notice_view_interval = base::Minutes(5);
 
   // Configuration for Web Feeds.
 
   // How long before Web Feed content is considered stale.
   base::TimeDelta web_feed_stale_content_threshold = base::Hours(1);
+  // How long before Web Feed content is considered stale if there are no
+  // subscriptions.
+  base::TimeDelta subscriptionless_web_feed_stale_content_threshold =
+      base::Days(7);
   // TimeDelta after startup to fetch recommended and subscribed Web Feeds if
   // they are stale. If zero, no fetching is done.
   // This delay is also used to trigger retrying stored follow/unfollow requests
@@ -98,7 +102,7 @@ struct Config {
   // Until we get the new list contents API working, keep using FeedQuery.
   // TODO(crbug/1152592): remove this when new endpoint is tested enough.
   // Set using snippets-internals, or the --webfeed-legacy-feedquery switch.
-  bool use_feed_query_requests_for_web_feeds = false;
+  bool use_feed_query_requests = false;
 
   // Set of optional capabilities included in requests. See
   // CreateFeedQueryRequest() for required capabilities.
@@ -111,7 +115,8 @@ struct Config {
   Config(const Config& other);
   ~Config();
 
-  base::TimeDelta GetStalenessThreshold(const StreamType& stream_type) const;
+  base::TimeDelta GetStalenessThreshold(const StreamType& stream_type,
+                                        bool is_web_feed_subscriber) const;
 };
 
 // Gets the current configuration.
@@ -119,7 +124,7 @@ const Config& GetFeedConfig();
 
 // Sets whether the legacy feed endpoint should be used for Web Feed content
 // fetches.
-void SetUseFeedQueryRequestsForWebFeeds(const bool use_legacy);
+void SetUseFeedQueryRequests(const bool use_legacy);
 
 void SetFeedConfigForTesting(const Config& config);
 void OverrideConfigWithFinchForTesting();

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,17 @@
 
 #include "base/check.h"
 #include "base/check_op.h"
+#include "base/types/expected.h"
+#include "base/values.h"
+#include "content/browser/attribution_reporting/attribution_reporting.mojom.h"
 #include "content/browser/attribution_reporting/attribution_reporting.pb.h"
 #include "third_party/blink/public/common/attribution_reporting/constants.h"
 
 namespace content {
 
 namespace {
+
+using ::attribution_reporting::mojom::SourceRegistrationError;
 
 constexpr char kFilterSourceType[] = "source_type";
 
@@ -76,6 +81,68 @@ absl::optional<AttributionFilterData>
 AttributionFilterData::FromTriggerFilterValues(FilterValues&& filter_values) {
   return FromFilterValues(std::move(filter_values),
                           /*extra_filters_allowed=*/0);
+}
+
+// static
+base::expected<AttributionFilterData, SourceRegistrationError>
+AttributionFilterData::FromSourceJSON(base::Value* input_value) {
+  // TODO(johnidel): Consider logging registration JSON metrics here.
+  if (!input_value)
+    return AttributionFilterData();
+
+  base::Value::Dict* dict = input_value->GetIfDict();
+  if (!dict)
+    return base::unexpected(SourceRegistrationError::kFilterDataWrongType);
+
+  const size_t num_filters = dict->size();
+  if (num_filters > blink::kMaxAttributionFiltersPerSource)
+    return base::unexpected(SourceRegistrationError::kFilterDataTooManyKeys);
+
+  if (dict->contains(kFilterSourceType)) {
+    return base::unexpected(
+        SourceRegistrationError::kFilterDataHasSourceTypeKey);
+  }
+
+  FilterValues::container_type filter_values;
+  filter_values.reserve(dict->size());
+
+  for (auto [filter, value] : *dict) {
+    if (filter.size() > blink::kMaxBytesPerAttributionFilterString)
+      return base::unexpected(SourceRegistrationError::kFilterDataKeyTooLong);
+
+    base::Value::List* list = value.GetIfList();
+    if (!list) {
+      return base::unexpected(
+          SourceRegistrationError::kFilterDataListWrongType);
+    }
+
+    const size_t num_values = list->size();
+    if (num_values > blink::kMaxValuesPerAttributionFilter)
+      return base::unexpected(SourceRegistrationError::kFilterDataListTooLong);
+
+    std::vector<std::string> values;
+    values.reserve(num_values);
+
+    for (base::Value& item : *list) {
+      std::string* string = item.GetIfString();
+      if (!string) {
+        return base::unexpected(
+            SourceRegistrationError::kFilterDataValueWrongType);
+      }
+
+      if (string->size() > blink::kMaxBytesPerAttributionFilterString) {
+        return base::unexpected(
+            SourceRegistrationError::kFilterDataValueTooLong);
+      }
+
+      values.push_back(std::move(*string));
+    }
+
+    filter_values.emplace_back(filter, std::move(values));
+  }
+
+  return AttributionFilterData(
+      FilterValues(base::sorted_unique, std::move(filter_values)));
 }
 
 // static

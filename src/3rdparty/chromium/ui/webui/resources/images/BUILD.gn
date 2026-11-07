@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -10,17 +10,6 @@ generate_grd("build_grdp") {
   out_grd = "$target_gen_dir/resources.grdp"
   input_files_base_dir = rebase_path(".", "//")
   input_files = [
-    # Component apps common image resources - 1x
-    "apps/topbar_button_close.png",
-    "apps/topbar_button_maximize.png",
-    "apps/topbar_button_minimize.png",
-
-    # Component apps common image resources - 2x
-    "2x/apps/topbar_button_close.png",
-    "2x/apps/topbar_button_maximize.png",
-    "2x/apps/topbar_button_minimize.png",
-
-    # Non-apps images
     "add.svg",
     "cancel_red.svg",
     "checkbox_black.png",
@@ -68,6 +57,8 @@ generate_grd("build_grdp") {
       "icon_edit.svg",
       "icon_expand_less.svg",
       "icon_expand_more.svg",
+      "icon_folder_open.svg",
+      "icon_journeys.svg",
       "icon_more_vert.svg",
       "icon_picture_delete.svg",
       "icon_settings.svg",

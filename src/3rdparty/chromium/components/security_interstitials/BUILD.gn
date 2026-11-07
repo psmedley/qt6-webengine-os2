@@ -1,4 +1,4 @@
-# Copyright 2022 The Chromium Authors. All rights reserved.
+# Copyright 2022 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,8 +7,5 @@ import("//third_party/closure_compiler/compile_js.gni")
 assert(enable_js_type_check)
 
 group("closure_compile") {
-  deps = [
-    "content/resources:closure_compile",
-    "core/common/resources:closure_compile",
-  ]
+  deps = [ "core/common/resources:closure_compile" ]
 }

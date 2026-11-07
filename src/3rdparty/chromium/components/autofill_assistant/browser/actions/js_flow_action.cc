@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,9 +26,9 @@ const char kJsFlowActionEnabledGroup[] = "Enabled";
 
 JsFlowAction::JsFlowAction(ActionDelegate* delegate, const ActionProto& proto)
     : Action(delegate, proto),
-      js_flow_executor_(
-          std::make_unique<JsFlowExecutorImpl>(delegate->GetWebContents(),
-                                               this)) {
+      js_flow_executor_(std::make_unique<JsFlowExecutorImpl>(
+          /* delegate= */ this,
+          delegate->GetJsFlowDevtoolsWrapper())) {
   DCHECK(proto_.has_js_flow());
 }
 
@@ -85,10 +85,13 @@ void JsFlowAction::OnNativeActionFinished(
                             std::unique_ptr<base::Value> result_value)>
         finished_callback,
     std::unique_ptr<ProcessedActionProto> processed_action) {
-  VLOG(2) << "Native action finished with status "
-          << processed_action->status();
+  // Intentionally left empty to make output more readable in combination with
+  // the start message above.
+  VLOG(2) << "                       " << processed_action->status();
 
   current_native_action_.reset();
+
+  delegate_->MaybeSetPreviousAction(*processed_action);
 
   std::move(finished_callback)
       .Run(ClientStatus(processed_action->status(),
@@ -109,6 +112,11 @@ void JsFlowAction::InternalProcessAction(ProcessActionCallback callback) {
 void JsFlowAction::OnFlowFinished(ProcessActionCallback callback,
                                   const ClientStatus& status,
                                   std::unique_ptr<base::Value> return_value) {
+  // Since we can not know in advance how many native actions need to be run
+  // we will create a dangling promise. By destroying the flow executor we make
+  // sure that these will not be executed.
+  js_flow_executor_.reset(nullptr);
+
   UpdateProcessedAction(status);
 
   // If the flow returned a value, we extract the status and possibly a flow

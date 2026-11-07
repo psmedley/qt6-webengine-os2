@@ -1,4 +1,4 @@
-# Copyright 2022 The Chromium Authors. All rights reserved.
+# Copyright 2022 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -29,5 +29,20 @@ static_library("internal") {
     "//components/user_notes/model:model",
     "//sql",
     "//url",
+  ]
+}
+
+source_set("unit_tests") {
+  testonly = true
+  sources = [ "user_note_database_unittest.cc" ]
+
+  deps = [
+    ":internal",
+    "//base",
+    "//components/user_notes/browser",
+    "//components/user_notes/model:unit_tests",
+    "//sql",
+    "//sql:test_support",
+    "//testing/gtest",
   ]
 }

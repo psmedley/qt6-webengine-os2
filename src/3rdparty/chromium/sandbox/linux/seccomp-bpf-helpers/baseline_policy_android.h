@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,9 +25,6 @@ namespace sandbox {
 class SANDBOX_EXPORT BaselinePolicyAndroid : public BaselinePolicy {
  public:
   struct RuntimeOptions {
-    // Allows sched_setaffinity for a core selection performance experiment.
-    bool allow_sched_affinity = false;
-
     // Allows a subset of the userfaultfd ioctls that are needed for ART GC.
     bool allow_userfaultfd_ioctls = false;
   };

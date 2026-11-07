@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,12 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gl/gl_surface_egl.h"
+#include "ui/ozone/platform/wayland/common/wayland_overlay_config.h"
 #include "ui/ozone/platform/wayland/gpu/wayland_surface_gpu.h"
-#include "ui/ozone/public/overlay_plane.h"
 #include "ui/ozone/public/swap_completion_callback.h"
 
 namespace ui {
@@ -29,13 +30,16 @@ using BufferId = uint32_t;
 class GbmSurfacelessWayland : public gl::SurfacelessEGL,
                               public WaylandSurfaceGpu {
  public:
-  GbmSurfacelessWayland(WaylandBufferManagerGpu* buffer_manager,
+  GbmSurfacelessWayland(gl::GLDisplayEGL* display,
+                        WaylandBufferManagerGpu* buffer_manager,
                         gfx::AcceleratedWidget widget);
 
   GbmSurfacelessWayland(const GbmSurfacelessWayland&) = delete;
   GbmSurfacelessWayland& operator=(const GbmSurfacelessWayland&) = delete;
 
-  void QueueOverlayPlane(OverlayPlane plane, BufferId buffer_id);
+  float surface_scale_factor() const { return surface_scale_factor_; }
+
+  void QueueWaylandOverlayConfig(wl::WaylandOverlayConfig config);
 
   // gl::GLSurface:
   bool ScheduleOverlayPlane(
@@ -49,15 +53,18 @@ class GbmSurfacelessWayland : public gl::SurfacelessEGL,
                                 int y,
                                 int width,
                                 int height,
-                                PresentationCallback callback) override;
+                                PresentationCallback callback,
+                                gl::FrameData data) override;
   void SwapBuffersAsync(SwapCompletionCallback completion_callback,
-                        PresentationCallback presentation_callback) override;
+                        PresentationCallback presentation_callback,
+                        gl::FrameData data) override;
   void PostSubBufferAsync(int x,
                           int y,
                           int width,
                           int height,
                           SwapCompletionCallback completion_callback,
-                          PresentationCallback presentation_callback) override;
+                          PresentationCallback presentation_callback,
+                          gl::FrameData data) override;
   EGLConfig GetConfig() override;
   void SetRelyOnImplicitSync() override;
   bool SupportsPlaneGpuFences() const override;
@@ -68,8 +75,9 @@ class GbmSurfacelessWayland : public gl::SurfacelessEGL,
               float scale_factor,
               const gfx::ColorSpace& color_space,
               bool has_alpha) override;
+  void SetForceGlFlushOnSwapBuffers() override;
 
-  BufferId GetOrCreateSolidColorBuffer(SkColor color, const gfx::Size& size);
+  BufferId GetOrCreateSolidColorBuffer(SkColor4f color, const gfx::Size& size);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(WaylandSurfaceFactoryTest,
@@ -88,7 +96,7 @@ class GbmSurfacelessWayland : public gl::SurfacelessEGL,
     ~SolidColorBufferHolder();
 
     BufferId GetOrCreateSolidColorBuffer(
-        SkColor color,
+        SkColor4f color,
         WaylandBufferManagerGpu* buffer_manager);
 
     void OnSubmission(BufferId buffer_id,
@@ -100,14 +108,14 @@ class GbmSurfacelessWayland : public gl::SurfacelessEGL,
     // anything and stored on the gpu side for convenience so that WBHM doesn't
     // become more complex.
     struct SolidColorBuffer {
-      SolidColorBuffer(SkColor color, BufferId buffer_id)
+      SolidColorBuffer(const SkColor4f& color, BufferId buffer_id)
           : color(color), buffer_id(buffer_id) {}
       SolidColorBuffer(SolidColorBuffer&& buffer) = default;
       SolidColorBuffer& operator=(SolidColorBuffer&& buffer) = default;
       ~SolidColorBuffer() = default;
 
       // Color of the buffer.
-      SkColor color = SK_ColorWHITE;
+      SkColor4f color = SkColors::kWhite;
       // The buffer id that is mapped with the buffer id created on the browser
       // side.
       BufferId buffer_id = 0;
@@ -130,31 +138,27 @@ class GbmSurfacelessWayland : public gl::SurfacelessEGL,
   // primary plane informations. It is a "compositor frame" on AcceleratedWidget
   // level. This information gets into browser process and overlays are
   // translated to be attached to WaylandSurfaces of the AcceleratedWidget.
+  // TODO(fangzhoug): This should be changed to support Vulkan.
   struct PendingFrame {
     explicit PendingFrame(uint32_t frame_id);
     ~PendingFrame();
-
-    // Queues overlay configs to |planes|.
-    void ScheduleOverlayPlanes(GbmSurfacelessWayland* surfaceless);
-    void Flush();
 
     // Unique identifier of the frame within this AcceleratedWidget.
     uint32_t frame_id;
 
     bool ready = false;
 
-    // TODO(fangzhoug): This should be changed to support Vulkan.
-    std::vector<gl::GLSurfaceOverlay> overlays;
-    std::vector<gfx::OverlayPlaneData> non_backed_overlays;
     SwapCompletionCallback completion_callback;
     PresentationCallback presentation_callback;
-    // Merged release fence fd. This is taken as the union of all release
-    // fences for a particular OnSubmission.
-    bool schedule_planes_succeeded = false;
+    gl::FrameData data;
 
-    // Contains |buffer_id|s to OverlayPlanes, used for committing overlays and
-    // wait for OnSubmission's.
-    std::vector<std::pair<BufferId, OverlayPlane>> planes;
+    // Says if scheduling succeeded.
+    bool schedule_planes_succeeded = true;
+
+    std::vector<BufferId> in_flight_color_buffers;
+    // Contains |buffer_id|s to gl::GLSurfaceOverlay, used for committing
+    // overlays and wait for OnSubmission's.
+    std::vector<wl::WaylandOverlayConfig> configs;
   };
 
   void MaybeSubmitFrames();
@@ -165,7 +169,7 @@ class GbmSurfacelessWayland : public gl::SurfacelessEGL,
   // Sets a flag that skips glFlush step in unittests.
   void SetNoGLFlushForTests();
 
-  WaylandBufferManagerGpu* const buffer_manager_;
+  const raw_ptr<WaylandBufferManagerGpu> buffer_manager_;
 
   // The native surface. Deleting this is allowed to free the EGLNativeWindow.
   gfx::AcceleratedWidget widget_;
@@ -180,11 +184,11 @@ class GbmSurfacelessWayland : public gl::SurfacelessEGL,
   // PendingFrames that have received OnSubmission(), pending OnPresentation()
   // calls.
   std::vector<std::unique_ptr<PendingFrame>> pending_presentation_frames_;
-  bool has_implicit_external_sync_;
   bool last_swap_buffers_result_ = true;
   bool use_egl_fence_sync_ = true;
 
   bool no_gl_flush_for_tests_ = false;
+  bool requires_gl_flush_on_swap_buffers_ = false;
 
   // Scale factor of the current surface.
   float surface_scale_factor_ = 1.f;

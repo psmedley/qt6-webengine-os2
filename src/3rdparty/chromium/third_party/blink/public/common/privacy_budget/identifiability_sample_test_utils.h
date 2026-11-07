@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,6 +35,8 @@ class COMPONENT_EXPORT(PRIVACY_BUDGET_TEST_SUPPORT)
   bool IsSurfaceAllowed(IdentifiableSurface surface) const override;
 
   bool IsTypeAllowed(IdentifiableSurface::Type type) const override;
+
+  bool ShouldActivelySample() const override;
 
  private:
   raw_ptr<CallCounts> state_ = nullptr;

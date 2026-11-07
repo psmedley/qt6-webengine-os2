@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
+#include "components/autofill/core/browser/metrics/autofill_metrics.h"
 #include "components/autofill/core/browser/payments/virtual_card_enrollment_flow.h"
 
 namespace autofill {
@@ -73,6 +74,17 @@ void LogGetDetailsForEnrollmentRequestResult(VirtualCardEnrollmentSource source,
       succeeded);
 }
 
+void LogGetDetailsForEnrollmentRequestLatency(
+    VirtualCardEnrollmentSource source,
+    AutofillClient::PaymentsRpcResult result,
+    base::TimeDelta latency) {
+  base::UmaHistogramMediumTimes(
+      "Autofill.VirtualCard.GetDetailsForEnrollment.Latency." +
+          VirtualCardEnrollmentSourceToMetricSuffix(source) +
+          PaymentsRpcResultToMetricsSuffix(result),
+      latency);
+}
+
 void LogUpdateVirtualCardEnrollmentRequestAttempt(
     VirtualCardEnrollmentSource source,
     VirtualCardEnrollmentRequestType type) {
@@ -135,6 +147,21 @@ void LogVirtualCardEnrollBubbleLatencySinceUpstream(
     const base::TimeDelta& latency) {
   base::UmaHistogramTimes(
       "Autofill.VirtualCardEnrollBubble.LatencySinceUpstream", latency);
+}
+
+void LogVirtualCardEnrollmentNotOfferedDueToMaxStrikes(
+    VirtualCardEnrollmentSource source) {
+  base::UmaHistogramEnumeration(
+      "Autofill.StrikeDatabase.VirtualCardEnrollmentNotOfferedDueToMaxStrikes",
+      source);
+}
+
+void LogVirtualCardEnrollmentNotOfferedDueToRequiredDelay(
+    VirtualCardEnrollmentSource source) {
+  base::UmaHistogramEnumeration(
+      "Autofill.StrikeDatabase."
+      "VirtualCardEnrollmentNotOfferedDueToRequiredDelay",
+      source);
 }
 
 std::string VirtualCardEnrollmentBubbleSourceToMetricSuffix(

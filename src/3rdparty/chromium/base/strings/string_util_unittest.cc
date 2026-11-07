@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -479,23 +479,26 @@ static const struct collapse_case_ascii {
   const bool trim;
   const char* output;
 } collapse_cases_ascii[] = {
-  {" Google Video ", false, "Google Video"},
-  {"Google Video", false, "Google Video"},
-  {"", false, ""},
-  {"  ", false, ""},
-  {"\t\rTest String\n", false, "Test String"},
-  {"    Test     \n  \t String    ", false, "Test String"},
-  {"   Test String", false, "Test String"},
-  {"Test String    ", false, "Test String"},
-  {"Test String", false, "Test String"},
-  {"", true, ""},
-  {"\n", true, ""},
-  {"  \r  ", true, ""},
-  {"\nFoo", true, "Foo"},
-  {"\r  Foo  ", true, "Foo"},
-  {" Foo bar ", true, "Foo bar"},
-  {"  \tFoo  bar  \n", true, "Foo bar"},
-  {" a \r b\n c \r\n d \t\re \t f \n ", true, "abcde f"},
+    {" Google Video ", false, "Google Video"},
+    {"Google Video", false, "Google Video"},
+    {"", false, ""},
+    {"  ", false, ""},
+    {"\t\rTest String\n", false, "Test String"},
+    {"    Test     \n  \t String    ", false, "Test String"},
+    {"   Test String", false, "Test String"},
+    {"Test String    ", false, "Test String"},
+    {"Test String", false, "Test String"},
+    {"", true, ""},
+    {"\n", true, ""},
+    {"  \r  ", true, ""},
+    {"\nFoo", true, "Foo"},
+    {"\r  Foo  ", true, "Foo"},
+    {" Foo bar ", true, "Foo bar"},
+    // \u00A0 is whitespace, but not _ASCII_ whitespace, so it should not be
+    // collapsed by CollapseWhitespaceASCII().
+    {"Foo\u00A0bar", true, "Foo\u00A0bar"},
+    {"  \tFoo  bar  \n", true, "Foo bar"},
+    {" a \r b\n c \r\n d \t\re \t f \n ", true, "abcde f"},
 };
 
 TEST(StringUtilTest, CollapseWhitespaceASCII) {
@@ -658,22 +661,6 @@ TEST(StringUtilTest, ToUpperASCII) {
 
   EXPECT_EQ("CC2", ToUpperASCII("Cc2"));
   EXPECT_EQ(u"CC2", ToUpperASCII(u"Cc2"));
-}
-
-TEST(StringUtilTest, LowerCaseEqualsASCII) {
-  static const struct {
-    const char*    src_a;
-    const char*    dst;
-  } lowercase_cases[] = {
-    { "FoO", "foo" },
-    { "foo", "foo" },
-    { "FOO", "foo" },
-  };
-
-  for (const auto& i : lowercase_cases) {
-    EXPECT_TRUE(LowerCaseEqualsASCII(ASCIIToUTF16(i.src_a), i.dst));
-    EXPECT_TRUE(LowerCaseEqualsASCII(i.src_a, i.dst));
-  }
 }
 
 TEST(StringUtilTest, FormatBytesUnlocalized) {
@@ -1340,6 +1327,28 @@ TEST(StringUtilTest, MakeBasicStringPieceTest) {
   EXPECT_TRUE(MakeWStringPiece(baz.end(), baz.end()).empty());
 }
 
+enum class StreamableTestEnum { kGreeting, kLocation };
+
+std::ostream& operator<<(std::ostream& os, const StreamableTestEnum& value) {
+  switch (value) {
+    case StreamableTestEnum::kGreeting:
+      return os << "hello";
+    case StreamableTestEnum::kLocation:
+      return os << "world";
+  }
+}
+
+TEST(StringUtilTest, StreamableToString) {
+  EXPECT_EQ(StreamableToString("foo"), "foo");
+  EXPECT_EQ(StreamableToString(123), "123");
+  EXPECT_EQ(StreamableToString(StreamableTestEnum::kGreeting), "hello");
+  EXPECT_EQ(StreamableToString(StreamableTestEnum::kGreeting, " ",
+                               StreamableTestEnum::kLocation),
+            "hello world");
+  EXPECT_EQ(StreamableToString("42 in hex is ", std::hex, 42),
+            "42 in hex is 2a");
+}
+
 TEST(StringUtilTest, RemoveChars) {
   const char kRemoveChars[] = "-/+*";
   std::string input = "A-+bc/d!*";
@@ -1472,6 +1481,39 @@ TEST(StringUtilTest, EqualsCaseInsensitiveASCII) {
   EXPECT_TRUE(EqualsCaseInsensitiveASCII("Asdf", "aSDF"));
   EXPECT_FALSE(EqualsCaseInsensitiveASCII("bsdf", "aSDF"));
   EXPECT_FALSE(EqualsCaseInsensitiveASCII("Asdf", "aSDFz"));
+
+  EXPECT_TRUE(EqualsCaseInsensitiveASCII(u"", u""));
+  EXPECT_TRUE(EqualsCaseInsensitiveASCII(u"Asdf", u"aSDF"));
+  EXPECT_FALSE(EqualsCaseInsensitiveASCII(u"bsdf", u"aSDF"));
+  EXPECT_FALSE(EqualsCaseInsensitiveASCII(u"Asdf", u"aSDFz"));
+
+  EXPECT_TRUE(EqualsCaseInsensitiveASCII(u"", ""));
+  EXPECT_TRUE(EqualsCaseInsensitiveASCII(u"Asdf", "aSDF"));
+  EXPECT_FALSE(EqualsCaseInsensitiveASCII(u"bsdf", "aSDF"));
+  EXPECT_FALSE(EqualsCaseInsensitiveASCII(u"Asdf", "aSDFz"));
+
+  EXPECT_TRUE(EqualsCaseInsensitiveASCII("", u""));
+  EXPECT_TRUE(EqualsCaseInsensitiveASCII("Asdf", u"aSDF"));
+  EXPECT_FALSE(EqualsCaseInsensitiveASCII("bsdf", u"aSDF"));
+  EXPECT_FALSE(EqualsCaseInsensitiveASCII("Asdf", u"aSDFz"));
+
+  // The `WStringPiece` overloads are only defined on Windows.
+#if BUILDFLAG(IS_WIN)
+  EXPECT_TRUE(EqualsCaseInsensitiveASCII(L"", L""));
+  EXPECT_TRUE(EqualsCaseInsensitiveASCII(L"Asdf", L"aSDF"));
+  EXPECT_FALSE(EqualsCaseInsensitiveASCII(L"bsdf", L"aSDF"));
+  EXPECT_FALSE(EqualsCaseInsensitiveASCII(L"Asdf", L"aSDFz"));
+
+  EXPECT_TRUE(EqualsCaseInsensitiveASCII(L"", ""));
+  EXPECT_TRUE(EqualsCaseInsensitiveASCII(L"Asdf", "aSDF"));
+  EXPECT_FALSE(EqualsCaseInsensitiveASCII(L"bsdf", "aSDF"));
+  EXPECT_FALSE(EqualsCaseInsensitiveASCII(L"Asdf", "aSDFz"));
+
+  EXPECT_TRUE(EqualsCaseInsensitiveASCII("", L""));
+  EXPECT_TRUE(EqualsCaseInsensitiveASCII("Asdf", L"aSDF"));
+  EXPECT_FALSE(EqualsCaseInsensitiveASCII("bsdf", L"aSDF"));
+  EXPECT_FALSE(EqualsCaseInsensitiveASCII("Asdf", L"aSDFz"));
+#endif
 }
 
 TEST(StringUtilTest, IsUnicodeWhitespace) {

@@ -1,5 +1,4 @@
-
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -126,7 +125,7 @@ int MaxOverflowPayloadSize(int page_size) {
 }  // namespace
 
 LeafPayloadReader::LeafPayloadReader(DatabasePageReader* db_reader)
-    : db_reader_(db_reader), page_id_(DatabasePageReader::kInvalidPageId) {}
+    : db_reader_(db_reader) {}
 
 LeafPayloadReader::~LeafPayloadReader() = default;
 
@@ -195,7 +194,7 @@ bool LeafPayloadReader::Initialize(int64_t payload_size, int payload_offset) {
       page_size) {
     // Corruption can result in overly large payload sizes. Reject the obvious
     // case where the in-page payload extends past the end of the page.
-    page_id_ = DatabasePageReader::kInvalidPageId;
+    page_id_ = DatabasePageReader::kHighestInvalidPageId;
     return false;
   }
 
@@ -214,7 +213,7 @@ bool LeafPayloadReader::ReadPayload(int64_t offset,
   DCHECK(buffer != nullptr);
 
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(page_id_ != DatabasePageReader::kInvalidPageId)
+  DCHECK(DatabasePageReader::IsValidPageId(page_id_))
       << "Initialize() not called, or last call did not succeed";
 
   if (offset < inline_payload_size_) {
@@ -287,7 +286,7 @@ bool LeafPayloadReader::ReadPayload(int64_t offset,
 
 const uint8_t* LeafPayloadReader::ReadInlinePayload() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(page_id_ != DatabasePageReader::kInvalidPageId)
+  DCHECK(DatabasePageReader::IsValidPageId(page_id_))
       << "Initialize() not called, or last call did not succeed";
 
   if (db_reader_->ReadPage(page_id_) != SQLITE_OK)
@@ -327,3 +326,4 @@ bool LeafPayloadReader::PopulateNextOverflowPageId() {
 
 }  // namespace recover
 }  // namespace sql
+

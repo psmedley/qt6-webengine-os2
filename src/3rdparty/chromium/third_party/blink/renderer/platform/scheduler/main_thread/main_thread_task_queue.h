@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/memory/weak_ptr.h"
+#include "base/task/common/lazy_now.h"
 #include "base/task/sequence_manager/task_queue.h"
 #include "base/task/sequence_manager/task_queue_impl.h"
 #include "base/task/sequence_manager/time_domain.h"
@@ -121,7 +122,8 @@ class PLATFORM_EXPORT MainThreadTaskQueue
 
   // Returns name of the given queue type. Returned string has application
   // lifetime.
-  static const char* NameForQueueType(QueueType queue_type);
+  static base::sequence_manager::QueueName NameForQueueType(
+      QueueType queue_type);
 
   // Returns true if task queues of the given queue type can be created on a
   // per-frame basis, and false if they are only created on a shared basis for
@@ -160,8 +162,9 @@ class PLATFORM_EXPORT MainThreadTaskQueue
       kCompositor = 9,  // Main-thread only.
       kInput = 10,
       kPostMessageForwarding = 11,
+      kInternalNavigationCancellation = 12,
 
-      kCount = 12
+      kCount = 13
     };
 
     // kPrioritisationTypeWidthBits is the number of bits required
@@ -418,7 +421,7 @@ class PLATFORM_EXPORT MainThreadTaskQueue
 
   void OnTaskCompleted(const base::sequence_manager::Task& task,
                        TaskQueue::TaskTiming* task_timing,
-                       base::sequence_manager::LazyNow* lazy_now);
+                       base::LazyNow* lazy_now);
 
   void LogTaskExecution(perfetto::EventContext& ctx,
                         const base::sequence_manager::Task& task);
@@ -440,9 +443,6 @@ class PLATFORM_EXPORT MainThreadTaskQueue
       TaskType task_type) {
     return task_queue_->CreateTaskRunner(static_cast<int>(task_type));
   }
-
-  void SetNetRequestPriority(net::RequestPriority net_request_priority);
-  absl::optional<net::RequestPriority> net_request_priority() const;
 
   void SetWebSchedulingPriority(WebSchedulingPriority priority);
   absl::optional<WebSchedulingPriority> web_scheduling_priority() const;
@@ -491,10 +491,6 @@ class PLATFORM_EXPORT MainThreadTaskQueue
 
   bool HasTaskToRunImmediatelyOrReadyDelayedTask() const {
     return task_queue_->HasTaskToRunImmediatelyOrReadyDelayedTask();
-  }
-
-  void SetBlameContext(base::trace_event::BlameContext* blame_context) {
-    task_queue_->SetBlameContext(blame_context);
   }
 
   void SetShouldReportPostedTasksWhenDisabled(bool should_report) {
@@ -550,13 +546,6 @@ class PLATFORM_EXPORT MainThreadTaskQueue
 
   const QueueType queue_type_;
   const QueueTraits queue_traits_;
-
-  // Warning: net_request_priority is not the same as the priority of the queue.
-  // It is the priority (at the loading stack level) of the resource associated
-  // to the queue, if one exists.
-  //
-  // Used to track UMA metrics for resource loading tasks split by net priority.
-  absl::optional<net::RequestPriority> net_request_priority_;
 
   // |web_scheduling_priority_| is the priority of the task queue within the web
   // scheduling API. This priority is used in conjunction with the frame

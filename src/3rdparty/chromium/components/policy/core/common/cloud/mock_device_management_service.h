@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,6 +80,7 @@ class FakeDeviceManagementService : public DeviceManagementService {
       std::map<std::string, std::string>* query_params);
   JobAction CaptureRequest(
       enterprise_management::DeviceManagementRequest* request);
+  JobAction CaptureTimeout(base::TimeDelta* timeout);
 
   // Convenience actions to post a task which will call |SetResponseForTesting|
   // on the job.
@@ -163,6 +164,7 @@ class FakeJobConfiguration : public DMServerJobConfiguration {
 
   void SetRequestPayload(const std::string& request_payload);
   void SetShouldRetryResponse(DeviceManagementService::Job::RetryMethod method);
+  void SetTimeoutDuration(base::TimeDelta timeout);
 
  private:
   DeviceManagementService::Job::RetryMethod ShouldRetry(

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,23 +29,26 @@
 #include "cc/test/test_types.h"
 #include "components/viz/client/client_resource_provider.h"
 #include "components/viz/common/features.h"
+#include "components/viz/common/quads/aggregated_render_pass_draw_quad.h"
+#include "components/viz/common/quads/compositor_render_pass_draw_quad.h"
 #include "components/viz/common/quads/picture_draw_quad.h"
+#include "components/viz/common/quads/solid_color_draw_quad.h"
 #include "components/viz/common/quads/texture_draw_quad.h"
+#include "components/viz/common/quads/yuv_video_draw_quad.h"
 #include "components/viz/common/resources/bitmap_allocation.h"
 #include "components/viz/common/resources/resource_format_utils.h"
 #include "components/viz/common/switches.h"
 #include "components/viz/service/display/delegated_ink_point_pixel_test_helper.h"
-#include "components/viz/service/display/gl_renderer.h"
 #include "components/viz/service/display/software_renderer.h"
 #include "components/viz/service/display/viz_pixel_test.h"
 #include "components/viz/test/buildflags.h"
 #include "components/viz/test/test_in_process_context_provider.h"
 #include "components/viz/test/test_shared_bitmap_manager.h"
 #include "components/viz/test/test_types.h"
-#include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/client/shared_image_interface.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
 #include "media/base/video_frame.h"
+#include "media/base/video_types.h"
 #include "media/renderers/video_resource_updater.h"
 #include "media/video/half_float_maker.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -56,9 +59,9 @@
 #include "third_party/skia/include/effects/SkColorMatrixFilter.h"
 #include "ui/gfx/color_transform.h"
 #include "ui/gfx/geometry/mask_filter_info.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/test/icc_profiles.h"
-
-using gpu::gles2::GLES2Interface;
+#include "ui/gfx/video_types.h"
 
 namespace viz {
 namespace {
@@ -110,13 +113,12 @@ ResourceId CreateGpuResource(scoped_refptr<ContextProvider> context_provider,
   DCHECK(sii);
   gpu::Mailbox mailbox = sii->CreateSharedImage(
       format, size, color_space, kTopLeft_GrSurfaceOrigin, kPremul_SkAlphaType,
-      gpu::SHARED_IMAGE_USAGE_DISPLAY, pixels);
+      gpu::SHARED_IMAGE_USAGE_DISPLAY_READ, pixels);
   gpu::SyncToken sync_token = sii->GenUnverifiedSyncToken();
 
-  TransferableResource gl_resource = TransferableResource::MakeGL(
-      mailbox, GL_LINEAR, GL_TEXTURE_2D, sync_token, size,
+  TransferableResource gl_resource = TransferableResource::MakeGpu(
+      mailbox, GL_LINEAR, GL_TEXTURE_2D, sync_token, size, format,
       false /* is_overlay_candidate */);
-  gl_resource.format = format;
   gl_resource.color_space = std::move(color_space);
   auto release_callback =
       base::BindOnce(&DeleteSharedImage, std::move(context_provider), mailbox);
@@ -209,12 +211,13 @@ void CreateTestRenderPassDrawQuad(const SharedQuadState* shared_state,
 //   if false, a 1/2 width and height rectangle in the middle of the quad will
 //   be filled with texel_color_two, other part of the texture is filled with
 //   texel_color_one,
+// TODO(crbug.com/1308932): Make this function use SkColor4f
 void CreateTestTwoColoredTextureDrawQuad(
     bool gpu_resource,
     const gfx::Rect& rect,
-    SkColor texel_color_one,
-    SkColor texel_color_two,
-    SkColor background_color,
+    SkColor4f texel_color_one,
+    SkColor4f texel_color_two,
+    SkColor4f background_color,
     bool premultiplied_alpha,
     bool flipped_texture_quad,
     bool half_and_half,
@@ -224,18 +227,20 @@ void CreateTestTwoColoredTextureDrawQuad(
     SharedBitmapManager* shared_bitmap_manager,
     scoped_refptr<ContextProvider> child_context_provider,
     AggregatedRenderPass* render_pass) {
+  // As this function renders to an RGBA_8888 texture, it makes sense to use
+  // integer colors
   SkPMColor pixel_color_one =
       premultiplied_alpha
-          ? SkPreMultiplyColor(texel_color_one)
+          ? SkPreMultiplyColor(texel_color_one.toSkColor())
           : SkPackARGB32NoCheck(
-                SkColorGetA(texel_color_one), SkColorGetR(texel_color_one),
-                SkColorGetG(texel_color_one), SkColorGetB(texel_color_one));
+                255 * texel_color_one.fA, 255 * texel_color_one.fR,
+                255 * texel_color_one.fG, 255 * texel_color_one.fB);
   SkPMColor pixel_color_two =
       premultiplied_alpha
-          ? SkPreMultiplyColor(texel_color_two)
+          ? SkPreMultiplyColor(texel_color_two.toSkColor())
           : SkPackARGB32NoCheck(
-                SkColorGetA(texel_color_two), SkColorGetR(texel_color_two),
-                SkColorGetG(texel_color_two), SkColorGetB(texel_color_two));
+                255 * texel_color_two.fA, 255 * texel_color_two.fR,
+                255 * texel_color_two.fG, 255 * texel_color_two.fB);
   // The default color is texel_color_one
   std::vector<uint32_t> pixels(rect.size().GetArea(), pixel_color_one);
   if (half_and_half) {
@@ -289,16 +294,16 @@ void CreateTestTwoColoredTextureDrawQuad(
   quad->SetNew(shared_state, rect, rect, needs_blending, mapped_resource,
                premultiplied_alpha, uv_top_left, uv_bottom_right,
                background_color, vertex_opacity, flipped_texture_quad,
-               nearest_neighbor, /*secure_output_only=*/false,
-               gfx::ProtectedVideoType::kClear);
+               nearest_neighbor,
+               /*secure_output=*/false, gfx::ProtectedVideoType::kClear);
 }
 
 void CreateTestTextureDrawQuad(
     bool gpu_resource,
     const gfx::Rect& rect,
-    SkColor texel_color,
+    SkColor4f texel_color,
     float vertex_opacity[4],
-    SkColor background_color,
+    SkColor4f background_color,
     bool premultiplied_alpha,
     const SharedQuadState* shared_state,
     DisplayResourceProvider* resource_provider,
@@ -306,12 +311,13 @@ void CreateTestTextureDrawQuad(
     SharedBitmapManager* shared_bitmap_manager,
     scoped_refptr<ContextProvider> child_context_provider,
     AggregatedRenderPass* render_pass) {
-  SkPMColor pixel_color = premultiplied_alpha
-                              ? SkPreMultiplyColor(texel_color)
-                              : SkPackARGB32NoCheck(SkColorGetA(texel_color),
-                                                    SkColorGetR(texel_color),
-                                                    SkColorGetG(texel_color),
-                                                    SkColorGetB(texel_color));
+  // As this function renders to an RGBA_8888 texture, it makes sense to use
+  // integer colors
+  SkPMColor pixel_color =
+      premultiplied_alpha
+          ? SkPreMultiplyColor(texel_color.toSkColor())
+          : SkPackARGB32NoCheck(texel_color.fA * 255, texel_color.fR * 255,
+                                texel_color.fG * 255, texel_color.fB * 255);
   size_t num_pixels = static_cast<size_t>(rect.width()) * rect.height();
   std::vector<uint32_t> pixels(num_pixels, pixel_color);
 
@@ -350,14 +356,15 @@ void CreateTestTextureDrawQuad(
   quad->SetNew(shared_state, rect, rect, needs_blending, mapped_resource,
                premultiplied_alpha, uv_top_left, uv_bottom_right,
                background_color, vertex_opacity, flipped, nearest_neighbor,
-               /*secure_output_only=*/false, gfx::ProtectedVideoType::kClear);
+               /*secure_output=*/false, gfx::ProtectedVideoType::kClear);
 }
 
+// TODO(crbug.com/1308932): Make this function use SkColor4f
 void CreateTestTextureDrawQuad(
     bool gpu_resource,
     const gfx::Rect& rect,
-    SkColor texel_color,
-    SkColor background_color,
+    SkColor4f texel_color,
+    SkColor4f background_color,
     bool premultiplied_alpha,
     const SharedQuadState* shared_state,
     DisplayResourceProvider* resource_provider,
@@ -393,7 +400,7 @@ void CreateTestYUVVideoDrawQuad_FromVideoFrame(
   bool needs_blending = true;
 
   if (with_alpha) {
-    memset(video_frame->data(media::VideoFrame::kAPlane), alpha_value,
+    memset(video_frame->writable_data(media::VideoFrame::kAPlane), alpha_value,
            video_frame->stride(media::VideoFrame::kAPlane) *
                video_frame->rows(media::VideoFrame::kAPlane));
   }
@@ -440,29 +447,28 @@ void CreateTestYUVVideoDrawQuad_FromVideoFrame(
   ResourceId mapped_resource_u = resource_map[resource_u];
   ResourceId mapped_resource_v = resource_map[resource_v];
   ResourceId mapped_resource_a = kInvalidResourceId;
-  if (with_alpha)
-    mapped_resource_a = resource_map[resource_a];
-  const gfx::Size ya_tex_size = video_frame->coded_size();
-  const gfx::Size uv_tex_size = media::VideoFrame::PlaneSizeInSamples(
-      video_frame->format(), media::VideoFrame::kUPlane,
-      video_frame->coded_size());
-  DCHECK(uv_tex_size == media::VideoFrame::PlaneSizeInSamples(
-                            video_frame->format(), media::VideoFrame::kVPlane,
-                            video_frame->coded_size()));
+
   if (with_alpha) {
-    DCHECK(ya_tex_size == media::VideoFrame::PlaneSizeInSamples(
-                              video_frame->format(), media::VideoFrame::kAPlane,
-                              video_frame->coded_size()));
+    mapped_resource_a = resource_map[resource_a];
+  }
+  const gfx::Size uv_sample_size = media::VideoFrame::SampleSize(
+      video_frame->format(), media::VideoFrame::kUPlane);
+  const gfx::Size coded_size = video_frame->coded_size();
+  DCHECK_EQ(uv_sample_size,
+            media::VideoFrame::SampleSize(video_frame->format(),
+                                          media::VideoFrame::kVPlane));
+  if (with_alpha) {
+    DCHECK_EQ(gfx::Size(1, 1),
+              media::VideoFrame::SampleSize(video_frame->format(),
+                                            media::VideoFrame::kAPlane))
+        << "Expected A plane to have same size as Y plane.";
   }
 
-  gfx::RectF ya_tex_coord_rect(tex_coord_rect.x() * ya_tex_size.width(),
-                               tex_coord_rect.y() * ya_tex_size.height(),
-                               tex_coord_rect.width() * ya_tex_size.width(),
-                               tex_coord_rect.height() * ya_tex_size.height());
-  gfx::RectF uv_tex_coord_rect(tex_coord_rect.x() * uv_tex_size.width(),
-                               tex_coord_rect.y() * uv_tex_size.height(),
-                               tex_coord_rect.width() * uv_tex_size.width(),
-                               tex_coord_rect.height() * uv_tex_size.height());
+  const gfx::Rect video_visible_rect = gfx::ToNearestRect(
+      gfx::RectF(tex_coord_rect.x() * coded_size.width(),
+                 tex_coord_rect.y() * coded_size.height(),
+                 tex_coord_rect.width() * coded_size.width(),
+                 tex_coord_rect.height() * coded_size.height()));
 
   auto* yuv_quad = render_pass->CreateAndAppendDrawQuad<YUVVideoDrawQuad>();
   uint32_t bits_per_channel = 8;
@@ -489,11 +495,11 @@ void CreateTestYUVVideoDrawQuad_FromVideoFrame(
     bits_per_channel = 8;
   }
 
-  yuv_quad->SetNew(shared_state, rect, visible_rect, needs_blending,
-                   ya_tex_coord_rect, uv_tex_coord_rect, ya_tex_size,
-                   uv_tex_size, mapped_resource_y, mapped_resource_u,
-                   mapped_resource_v, mapped_resource_a, video_color_space,
-                   offset, multiplier, bits_per_channel);
+  yuv_quad->SetNew(shared_state, rect, visible_rect, needs_blending, coded_size,
+                   video_visible_rect, uv_sample_size, mapped_resource_y,
+                   mapped_resource_u, mapped_resource_v, mapped_resource_a,
+                   video_color_space, offset, multiplier, bits_per_channel,
+                   gfx::ProtectedVideoType::kClear, absl::nullopt);
 }
 
 void CreateTestY16TextureDrawQuad_FromVideoFrame(
@@ -530,7 +536,7 @@ void CreateTestY16TextureDrawQuad_FromVideoFrame(
   float vertex_opacity[4] = {1.0f, 1.0f, 1.0f, 1.0f};
   quad->SetNew(shared_state, rect, rect, needs_blending, mapped_resource_y,
                false, tex_coord_rect.origin(), tex_coord_rect.bottom_right(),
-               SK_ColorBLACK, vertex_opacity, false, false,
+               SkColors::kBlack, vertex_opacity, false, false,
                /*secure_output_only=*/false, gfx::ProtectedVideoType::kClear);
 }
 
@@ -564,7 +570,7 @@ scoped_refptr<media::VideoFrame> CreateHighbitVideoFrame(
        plane <= media::VideoFrame::kVPlane; ++plane) {
     int width = video_frame->row_bytes(plane);
     const uint8_t* src = video_frame->data(plane);
-    uint16_t* dst = reinterpret_cast<uint16_t*>(ret->data(plane));
+    uint16_t* dst = reinterpret_cast<uint16_t*>(ret->writable_data(plane));
     for (int row = 0; row < video_frame->rows(plane); row++) {
       for (int x = 0; x < width; x++) {
         // Replicate the top bits into the lower bits, this way
@@ -601,7 +607,7 @@ void CreateTestYUVVideoDrawQuad_Striped(
   uint8_t u_value = 0;
   uint8_t v_value = 0;
   for (int i = 0; i < video_frame->rows(media::VideoFrame::kYPlane); ++i) {
-    uint8_t* y_row = video_frame->data(media::VideoFrame::kYPlane) +
+    uint8_t* y_row = video_frame->writable_data(media::VideoFrame::kYPlane) +
                      video_frame->stride(media::VideoFrame::kYPlane) * i;
     for (int j = 0; j < video_frame->row_bytes(media::VideoFrame::kYPlane);
          ++j) {
@@ -609,9 +615,9 @@ void CreateTestYUVVideoDrawQuad_Striped(
     }
   }
   for (int i = 0; i < video_frame->rows(media::VideoFrame::kUPlane); ++i) {
-    uint8_t* u_row = video_frame->data(media::VideoFrame::kUPlane) +
+    uint8_t* u_row = video_frame->writable_data(media::VideoFrame::kUPlane) +
                      video_frame->stride(media::VideoFrame::kUPlane) * i;
-    uint8_t* v_row = video_frame->data(media::VideoFrame::kVPlane) +
+    uint8_t* v_row = video_frame->writable_data(media::VideoFrame::kVPlane) +
                      video_frame->stride(media::VideoFrame::kVPlane) * i;
     for (int j = 0; j < video_frame->row_bytes(media::VideoFrame::kUPlane);
          ++j) {
@@ -669,7 +675,7 @@ void CreateTestYUVVideoDrawQuad_TwoColor(
   int sample_size[] = {1, 2, 2};
 
   for (int i = 0; i < 3; ++i) {
-    memset(video_frame->data(planes[i]), yuv_background[i],
+    memset(video_frame->writable_data(planes[i]), yuv_background[i],
            video_frame->stride(planes[i]) * video_frame->rows(planes[i]));
   }
 
@@ -688,7 +694,7 @@ void CreateTestYUVVideoDrawQuad_TwoColor(
     for (int y = sample_rect.y(); y < sample_rect.bottom(); ++y) {
       for (int x = sample_rect.x(); x < sample_rect.right(); ++x) {
         size_t offset = y * video_frame->stride(planes[i]) + x;
-        video_frame->data(planes[i])[offset] = yuv_foreground[i];
+        video_frame->writable_data(planes[i])[offset] = yuv_foreground[i];
       }
     }
   }
@@ -722,13 +728,13 @@ void CreateTestYUVVideoDrawQuad_Solid(
 
   // YUV values of a solid, constant, color. Useful for testing that color
   // space/color range are being handled properly.
-  memset(video_frame->data(media::VideoFrame::kYPlane), y,
+  memset(video_frame->writable_data(media::VideoFrame::kYPlane), y,
          video_frame->stride(media::VideoFrame::kYPlane) *
              video_frame->rows(media::VideoFrame::kYPlane));
-  memset(video_frame->data(media::VideoFrame::kUPlane), u,
+  memset(video_frame->writable_data(media::VideoFrame::kUPlane), u,
          video_frame->stride(media::VideoFrame::kUPlane) *
              video_frame->rows(media::VideoFrame::kUPlane));
-  memset(video_frame->data(media::VideoFrame::kVPlane), v,
+  memset(video_frame->writable_data(media::VideoFrame::kVPlane), v,
          video_frame->stride(media::VideoFrame::kVPlane) *
              video_frame->rows(media::VideoFrame::kVPlane));
 
@@ -757,6 +763,8 @@ void CreateTestYUVVideoDrawQuad_NV12(
   const gfx::Size ya_tex_size = rect.size();
   const gfx::Size uv_tex_size = media::VideoFrame::PlaneSizeInSamples(
       media::PIXEL_FORMAT_NV12, media::VideoFrame::kUVPlane, rect.size());
+  const gfx::Size uv_sample_size = media::VideoFrame::SampleSize(
+      media::PIXEL_FORMAT_NV12, media::VideoFrame::kUVPlane);
 
   std::vector<uint8_t> y_pixels(ya_tex_size.GetArea(), y);
   ResourceId resource_y = CreateGpuResource(
@@ -782,20 +790,18 @@ void CreateTestYUVVideoDrawQuad_NV12(
   ResourceId mapped_resource_u = resource_map[resource_u];
   ResourceId mapped_resource_v = resource_map[resource_v];
 
-  gfx::RectF ya_tex_coord_rect(tex_coord_rect.x() * ya_tex_size.width(),
-                               tex_coord_rect.y() * ya_tex_size.height(),
-                               tex_coord_rect.width() * ya_tex_size.width(),
-                               tex_coord_rect.height() * ya_tex_size.height());
-  gfx::RectF uv_tex_coord_rect(tex_coord_rect.x() * uv_tex_size.width(),
-                               tex_coord_rect.y() * uv_tex_size.height(),
-                               tex_coord_rect.width() * uv_tex_size.width(),
-                               tex_coord_rect.height() * uv_tex_size.height());
+  const gfx::Rect video_frame_visible_rect = gfx::ToNearestRect(
+      gfx::RectF(tex_coord_rect.x() * ya_tex_size.width(),
+                 tex_coord_rect.y() * ya_tex_size.height(),
+                 tex_coord_rect.width() * ya_tex_size.width(),
+                 tex_coord_rect.height() * ya_tex_size.height()));
 
   auto* yuv_quad = render_pass->CreateAndAppendDrawQuad<YUVVideoDrawQuad>();
   yuv_quad->SetNew(shared_state, rect, visible_rect, needs_blending,
-                   ya_tex_coord_rect, uv_tex_coord_rect, ya_tex_size,
-                   uv_tex_size, mapped_resource_y, mapped_resource_u,
-                   mapped_resource_v, resource_a, color_space, 0.0f, 1.0f, 8);
+                   ya_tex_size, video_frame_visible_rect, uv_sample_size,
+                   mapped_resource_y, mapped_resource_u, mapped_resource_v,
+                   resource_a, color_space, 0.0f, 1.0f, 8,
+                   gfx::ProtectedVideoType::kClear, absl::nullopt);
 }
 
 void CreateTestY16TextureDrawQuad_TwoColor(
@@ -824,7 +830,7 @@ void CreateTestY16TextureDrawQuad_TwoColor(
   DCHECK_EQ(video_frame->stride(0) % 2, 0);
 
   for (int j = 0; j < video_frame->rows(0); ++j) {
-    uint8_t* row = video_frame->data(0) + j * video_frame->stride(0);
+    uint8_t* row = video_frame->writable_data(0) + j * video_frame->stride(0);
     if (j < foreground_rect.y() || j >= foreground_rect.bottom()) {
       for (int i = 0; i < video_frame->stride(0) / 2; ++i) {
         *row++ = i & 0xFF;  // Fill R with anything. It is not rendered.
@@ -858,8 +864,8 @@ void CreateTestY16TextureDrawQuad_TwoColor(
 
 // Create two quads of specified colors on half-pixel boundaries.
 void CreateTestAxisAlignedQuads(const gfx::Rect& rect,
-                                SkColor front_color,
-                                SkColor back_color,
+                                SkColor4f front_color,
+                                SkColor4f back_color,
                                 bool needs_blending,
                                 bool force_aa_off,
                                 AggregatedRenderPass* pass) {
@@ -893,7 +899,6 @@ INSTANTIATE_TEST_SUITE_P(,
                          testing::ValuesIn(GetRendererTypes()),
                          testing::PrintToStringParamName());
 
-// Test GLRenderer as well as SkiaRenderer.
 using GPURendererPixelTest = VizPixelTestWithParam;
 INSTANTIATE_TEST_SUITE_P(,
                          GPURendererPixelTest,
@@ -905,27 +910,6 @@ INSTANTIATE_TEST_SUITE_P(,
 // GetGpuRendererTypesNoDawn() can return an empty list, e.g. on Fuchsia ARM64.
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(GPURendererPixelTest);
 
-// Provides an exact comparator for GLRenderer and fuzzy comparator for Skia
-// based (eg. SoftwareRenderer and SkiaRenderer).
-class FuzzyForSkiaOnlyPixelComparator : public cc::PixelComparator {
- public:
-  explicit FuzzyForSkiaOnlyPixelComparator(RendererType type) {
-    if (type == RendererType::kGL) {
-      comparator_ = std::make_unique<cc::ExactPixelComparator>(false);
-    } else {
-      comparator_ = std::make_unique<cc::FuzzyPixelOffByOneComparator>(false);
-    }
-  }
-
-  bool Compare(const SkBitmap& actual_bmp,
-               const SkBitmap& expected_bmp) const override {
-    return comparator_->Compare(actual_bmp, expected_bmp);
-  }
-
- private:
-  std::unique_ptr<cc::PixelComparator> comparator_;
-};
-
 TEST_P(RendererPixelTest, SimpleGreenRect) {
   gfx::Rect rect(this->device_viewport_size_);
 
@@ -936,7 +920,7 @@ TEST_P(RendererPixelTest, SimpleGreenRect) {
       gfx::Transform(), rect, pass.get(), gfx::MaskFilterInfo());
 
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(shared_state, rect, rect, SK_ColorGREEN, false);
+  color_quad->SetNew(shared_state, rect, rect, SkColors::kGreen, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -959,7 +943,7 @@ TEST_P(RendererPixelTest, SimpleGreenRectNonRootRenderPass) {
                                 gfx::MaskFilterInfo());
 
   auto* color_quad = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(child_shared_state, rect, rect, SK_ColorGREEN, false);
+  color_quad->SetNew(child_shared_state, rect, rect, SkColors::kGreen, false);
 
   AggregatedRenderPassId root_id{1};
   auto root_pass = CreateTestRenderPass(root_id, rect, gfx::Transform());
@@ -994,15 +978,15 @@ TEST_P(RendererPixelTest, PremultipliedTextureWithoutBackground) {
 
   CreateTestTextureDrawQuad(
       !is_software_renderer(), gfx::Rect(this->device_viewport_size_),
-      SkColorSetARGB(128, 0, 255, 0),  // Texel color.
-      SK_ColorTRANSPARENT,             // Background color.
-      true,                            // Premultiplied alpha.
+      {0.0f, 1.0f, 0.0f, 0.5f},  // Texel color.
+      SkColors::kTransparent,    // Background color.
+      true,                      // Premultiplied alpha.
       shared_state, this->resource_provider_.get(),
       this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
       this->child_context_provider_, pass.get());
 
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(shared_state, rect, rect, SK_ColorWHITE, false);
+  color_quad->SetNew(shared_state, rect, rect, SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -1024,9 +1008,9 @@ TEST_P(RendererPixelTest, PremultipliedTextureWithBackground) {
 
   CreateTestTextureDrawQuad(
       !is_software_renderer(), gfx::Rect(this->device_viewport_size_),
-      SkColorSetARGB(204, 120, 255, 120),  // Texel color.
-      SK_ColorGREEN,                       // Background color.
-      true,                                // Premultiplied alpha.
+      SkColor4f::FromColor(SkColorSetARGB(204, 120, 255, 120)),  // Texel color.
+      SkColors::kGreen,  // Background color.
+      true,              // Premultiplied alpha.
       texture_quad_state, this->resource_provider_.get(),
       this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
       this->child_context_provider_, pass.get());
@@ -1034,7 +1018,7 @@ TEST_P(RendererPixelTest, PremultipliedTextureWithBackground) {
   SharedQuadState* color_quad_state = CreateTestSharedQuadState(
       gfx::Transform(), rect, pass.get(), gfx::MaskFilterInfo());
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(color_quad_state, rect, rect, SK_ColorWHITE, false);
+  color_quad->SetNew(color_quad_state, rect, rect, SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -1055,12 +1039,12 @@ TEST_P(RendererPixelTest, TextureDrawQuadVisibleRectInsetTopLeft) {
 
   CreateTestTwoColoredTextureDrawQuad(
       !is_software_renderer(), gfx::Rect(this->device_viewport_size_),
-      SkColorSetARGB(0, 120, 255, 255),  // Texel color 1.
-      SkColorSetARGB(204, 120, 0, 255),  // Texel color 2.
-      SK_ColorGREEN,                     // Background color.
-      true,                              // Premultiplied alpha.
-      false,                             // flipped_texture_quad.
-      false,                             // Half and half.
+      SkColor4f::FromColor(SkColorSetARGB(0, 120, 255, 255)),  // Texel color 1.
+      SkColor4f::FromColor(SkColorSetARGB(204, 120, 0, 255)),  // Texel color 2.
+      SkColors::kGreen,  // Background color.
+      true,              // Premultiplied alpha.
+      false,             // flipped_texture_quad.
+      false,             // Half and half.
       texture_quad_state, this->resource_provider_.get(),
       this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
       this->child_context_provider_, pass.get());
@@ -1068,7 +1052,7 @@ TEST_P(RendererPixelTest, TextureDrawQuadVisibleRectInsetTopLeft) {
   SharedQuadState* color_quad_state = CreateTestSharedQuadState(
       gfx::Transform(), rect, pass.get(), gfx::MaskFilterInfo());
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(color_quad_state, rect, rect, SK_ColorWHITE, false);
+  color_quad->SetNew(color_quad_state, rect, rect, SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -1092,12 +1076,12 @@ TEST_P(RendererPixelTest,
 
   CreateTestTwoColoredTextureDrawQuad(
       !is_software_renderer(), gfx::Rect(this->device_viewport_size_),
-      SkColorSetARGB(0, 120, 255, 255),  // Texel color 1.
-      SkColorSetARGB(204, 120, 0, 255),  // Texel color 2.
-      SK_ColorGREEN,                     // Background color.
-      true,                              // Premultiplied alpha.
-      false,                             // flipped_texture_quad.
-      false,                             // Half and half.
+      SkColor4f::FromColor(SkColorSetARGB(0, 120, 255, 255)),  // Texel color 1.
+      SkColor4f::FromColor(SkColorSetARGB(204, 120, 0, 255)),  // Texel color 2.
+      SkColors::kGreen,  // Background color.
+      true,              // Premultiplied alpha.
+      false,             // flipped_texture_quad.
+      false,             // Half and half.
       texture_quad_state, this->resource_provider_.get(),
       this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
       this->child_context_provider_, pass.get());
@@ -1111,7 +1095,7 @@ TEST_P(RendererPixelTest,
   SharedQuadState* color_quad_state = CreateTestSharedQuadState(
       gfx::Transform(), rect, pass.get(), gfx::MaskFilterInfo());
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(color_quad_state, rect, rect, SK_ColorWHITE, false);
+  color_quad->SetNew(color_quad_state, rect, rect, SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -1123,6 +1107,13 @@ TEST_P(RendererPixelTest,
 }
 
 TEST_P(RendererPixelTest, TextureDrawQuadVisibleRectInsetBottomRight) {
+#if BUILDFLAG(IS_LINUX) && defined(THREAD_SANITIZER)
+  // Test is flaking with failed large allocations under TSAN when using
+  // SkiaRenderer with GL backend. See https://crbug.com/1320955.
+  if (renderer_type() == RendererType::kSkiaGL)
+    return;
+#endif
+
   gfx::Rect rect(this->device_viewport_size_);
 
   AggregatedRenderPassId id{1};
@@ -1133,12 +1124,12 @@ TEST_P(RendererPixelTest, TextureDrawQuadVisibleRectInsetBottomRight) {
 
   CreateTestTwoColoredTextureDrawQuad(
       !is_software_renderer(), gfx::Rect(this->device_viewport_size_),
-      SkColorSetARGB(0, 120, 255, 255),  // Texel color 1.
-      SkColorSetARGB(204, 120, 0, 255),  // Texel color 2.
-      SK_ColorGREEN,                     // Background color.
-      true,                              // Premultiplied alpha.
-      false,                             // flipped_texture_quad.
-      false,                             // Half and half.
+      SkColor4f::FromColor(SkColorSetARGB(0, 120, 255, 255)),  // Texel color 1.
+      SkColor4f::FromColor(SkColorSetARGB(204, 120, 0, 255)),  // Texel color 2.
+      SkColors::kGreen,  // Background color.
+      true,              // Premultiplied alpha.
+      false,             // flipped_texture_quad.
+      false,             // Half and half.
       texture_quad_state, this->resource_provider_.get(),
       this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
       this->child_context_provider_, pass.get());
@@ -1146,7 +1137,7 @@ TEST_P(RendererPixelTest, TextureDrawQuadVisibleRectInsetBottomRight) {
   SharedQuadState* color_quad_state = CreateTestSharedQuadState(
       gfx::Transform(), rect, pass.get(), gfx::MaskFilterInfo());
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(color_quad_state, rect, rect, SK_ColorWHITE, false);
+  color_quad->SetNew(color_quad_state, rect, rect, SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -1169,12 +1160,13 @@ TEST_P(GPURendererPixelTest, SolidColorBlend) {
   shared_state->blend_mode = SkBlendMode::kDstOut;
 
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(shared_state, rect, rect, SK_ColorRED, false);
+  color_quad->SetNew(shared_state, rect, rect, SkColors::kRed, false);
 
   SharedQuadState* shared_state_background = CreateTestSharedQuadState(
       gfx::Transform(), rect, pass.get(), gfx::MaskFilterInfo());
 
-  SkColor background_color = SkColorSetRGB(0xff, 0xff * 14 / 16, 0xff);
+  SkColor4f background_color =
+      SkColor4f::FromColor(SkColorSetRGB(0xff, 0xff * 14 / 16, 0xff));
   auto* color_quad_background =
       pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   color_quad_background->SetNew(shared_state_background, rect, rect,
@@ -1199,7 +1191,7 @@ TEST_P(GPURendererPixelTest, SolidColorWithTemperature) {
       gfx::Transform(), rect, pass.get(), gfx::MaskFilterInfo());
 
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(shared_state, rect, rect, SK_ColorYELLOW, false);
+  color_quad->SetNew(shared_state, rect, rect, SkColors::kYellow, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -1228,14 +1220,14 @@ TEST_P(GPURendererPixelTest, SolidColorWithTemperatureNonRootRenderPass) {
   AggregatedRenderPass* child_pass = cc::AddRenderPass(
       &render_passes_in_draw_order, child_pass_id, viewport_rect,
       gfx::Transform(), cc::FilterOperations());
-  cc::AddQuad(child_pass, child_rect, SK_ColorGREEN);
+  cc::AddQuad(child_pass, child_rect, SkColors::kGreen);
 
   // Root pass.
   AggregatedRenderPassId root_pass_id{1};
   AggregatedRenderPass* root_pass = cc::AddRenderPass(
       &render_passes_in_draw_order, root_pass_id, viewport_rect,
       gfx::Transform(), cc::FilterOperations());
-  cc::AddQuad(root_pass, root_rect, SK_ColorYELLOW);
+  cc::AddQuad(root_pass, root_rect, SkColors::kYellow);
 
   SharedQuadState* pass_shared_state =
       CreateTestSharedQuadState(gfx::Transform(), viewport_rect, root_pass,
@@ -1271,10 +1263,10 @@ TEST_P(GPURendererPixelTest,
   float vertex_opacity[4] = {1.f, 1.f, 0.f, 0.f};
   CreateTestTextureDrawQuad(
       !is_software_renderer(), gfx::Rect(this->device_viewport_size_),
-      SkColorSetARGB(204, 120, 255, 120),  // Texel color.
+      SkColor4f::FromColor(SkColorSetARGB(204, 120, 255, 120)),  // SK_ColorT
       vertex_opacity,
-      SK_ColorGREEN,  // Background color.
-      true,           // Premultiplied alpha.
+      SkColors::kGreen,  // Background color.
+      true,              // Premultiplied alpha.
       texture_quad_state, this->resource_provider_.get(),
       this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
       this->child_context_provider_, pass.get());
@@ -1282,7 +1274,7 @@ TEST_P(GPURendererPixelTest,
   SharedQuadState* color_quad_state = CreateTestSharedQuadState(
       gfx::Transform(), rect, pass.get(), gfx::MaskFilterInfo());
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(color_quad_state, rect, rect, SK_ColorWHITE, false);
+  color_quad->SetNew(color_quad_state, rect, rect, SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -1338,7 +1330,7 @@ class IntersectingQuadPixelTest : public VizPixelTestWithParam {
     auto* background_quad =
         render_pass_->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
     background_quad->SetNew(background_quad_state, viewport_rect_,
-                            viewport_rect_, SK_ColorWHITE, false);
+                            viewport_rect_, SkColors::kWhite, false);
     pass_list_.push_back(std::move(render_pass_));
     EXPECT_TRUE(
         this->RunPixelTest(&pass_list_, base::FilePath(ref_file), comparator));
@@ -1415,9 +1407,9 @@ TEST_P(IntersectingQuadPixelTest, SolidColorQuads) {
   auto* quad2 = this->template CreateAndAppendDrawQuad<SolidColorDrawQuad>();
 
   quad->SetNew(this->front_quad_state_, this->quad_rect_, this->quad_rect_,
-               SK_ColorBLUE, false);
+               SkColors::kBlue, false);
   quad2->SetNew(this->back_quad_state_, this->quad_rect_, this->quad_rect_,
-                SK_ColorGREEN, false);
+                SkColors::kGreen, false);
   this->AppendBackgroundAndRunTest(
       cc::FuzzyPixelComparator(false, 2.f, 0.f, 256.f, 256, 0.f),
       FILE_PATH_LITERAL("intersecting_blue_green.png"));
@@ -1426,21 +1418,19 @@ TEST_P(IntersectingQuadPixelTest, SolidColorQuads) {
 TEST_P(IntersectingQuadPixelTest, TexturedQuads) {
   this->SetupQuadStateAndRenderPass();
   CreateTestTwoColoredTextureDrawQuad(
-      !is_software_renderer(), this->quad_rect_, SkColorSetARGB(255, 0, 0, 0),
-      SkColorSetARGB(255, 0, 0, 255), SK_ColorTRANSPARENT,
-      true /* premultiplied_alpha */, false /* flipped_texture_quad */,
-      false /* half_and_half */, this->front_quad_state_,
-      this->resource_provider_.get(), this->child_resource_provider_.get(),
-      this->shared_bitmap_manager_.get(), this->child_context_provider_,
-      this->render_pass_.get());
+      !is_software_renderer(), this->quad_rect_, SkColors::kBlack,
+      SkColors::kBlue, SkColors::kTransparent, true /* premultiplied_alpha */,
+      false /* flipped_texture_quad */, false /* half_and_half */,
+      this->front_quad_state_, this->resource_provider_.get(),
+      this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
+      this->child_context_provider_, this->render_pass_.get());
   CreateTestTwoColoredTextureDrawQuad(
-      !is_software_renderer(), this->quad_rect_, SkColorSetARGB(255, 0, 255, 0),
-      SkColorSetARGB(255, 0, 0, 0), SK_ColorTRANSPARENT,
-      true /* premultiplied_alpha */, false /* flipped_texture_quad */,
-      false /* half_and_half */, this->back_quad_state_,
-      this->resource_provider_.get(), this->child_resource_provider_.get(),
-      this->shared_bitmap_manager_.get(), this->child_context_provider_,
-      this->render_pass_.get());
+      !is_software_renderer(), this->quad_rect_, SkColors::kGreen,
+      SkColors::kBlack, SkColors::kTransparent, true /* premultiplied_alpha */,
+      false /* flipped_texture_quad */, false /* half_and_half */,
+      this->back_quad_state_, this->resource_provider_.get(),
+      this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
+      this->child_context_provider_, this->render_pass_.get());
 
   this->AppendBackgroundAndRunTest(
       cc::FuzzyPixelComparator(false, 2.f, 0.f, 256.f, 256, 0.f),
@@ -1450,21 +1440,23 @@ TEST_P(IntersectingQuadPixelTest, TexturedQuads) {
 TEST_P(IntersectingQuadPixelTest, NonFlippedTexturedQuads) {
   this->SetupQuadStateAndRenderPass();
   CreateTestTwoColoredTextureDrawQuad(
-      !is_software_renderer(), this->quad_rect_, SkColorSetARGB(255, 0, 0, 0),
-      SkColorSetARGB(255, 0, 0, 255), SK_ColorTRANSPARENT,
-      true /* premultiplied_alpha */, false /* flipped_texture_quad */,
-      true /* half_and_half */, this->front_quad_state_,
-      this->resource_provider_.get(), this->child_resource_provider_.get(),
-      this->shared_bitmap_manager_.get(), this->child_context_provider_,
-      this->render_pass_.get());
+      !is_software_renderer(), this->quad_rect_,
+      SkColor4f::FromColor(SkColorSetARGB(255, 0, 0, 0)),
+      SkColor4f::FromColor(SkColorSetARGB(255, 0, 0, 255)),
+      SkColors::kTransparent, true /* premultiplied_alpha */,
+      false /* flipped_texture_quad */, true /* half_and_half */,
+      this->front_quad_state_, this->resource_provider_.get(),
+      this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
+      this->child_context_provider_, this->render_pass_.get());
   CreateTestTwoColoredTextureDrawQuad(
-      !is_software_renderer(), this->quad_rect_, SkColorSetARGB(255, 0, 255, 0),
-      SkColorSetARGB(255, 0, 0, 0), SK_ColorTRANSPARENT,
-      true /* premultiplied_alpha */, false /* flipped_texture_quad */,
-      true /* half_and_half */, this->back_quad_state_,
-      this->resource_provider_.get(), this->child_resource_provider_.get(),
-      this->shared_bitmap_manager_.get(), this->child_context_provider_,
-      this->render_pass_.get());
+      !is_software_renderer(), this->quad_rect_,
+      SkColor4f::FromColor(SkColorSetARGB(255, 0, 255, 0)),
+      SkColor4f::FromColor(SkColorSetARGB(255, 0, 0, 0)),
+      SkColors::kTransparent, true /* premultiplied_alpha */,
+      false /* flipped_texture_quad */, true /* half_and_half */,
+      this->back_quad_state_, this->resource_provider_.get(),
+      this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
+      this->child_context_provider_, this->render_pass_.get());
 
   this->AppendBackgroundAndRunTest(
       cc::FuzzyPixelComparator(false, 2.f, 0.f, 256.f, 256, 0.f),
@@ -1475,21 +1467,23 @@ TEST_P(IntersectingQuadPixelTest, NonFlippedTexturedQuads) {
 TEST_P(IntersectingQuadPixelTest, FlippedTexturedQuads) {
   this->SetupQuadStateAndRenderPass();
   CreateTestTwoColoredTextureDrawQuad(
-      !is_software_renderer(), this->quad_rect_, SkColorSetARGB(255, 0, 0, 0),
-      SkColorSetARGB(255, 0, 0, 255), SK_ColorTRANSPARENT,
-      true /* premultiplied_alpha */, true /* flipped_texture_quad */,
-      true /* half_and_half */, this->front_quad_state_,
-      this->resource_provider_.get(), this->child_resource_provider_.get(),
-      this->shared_bitmap_manager_.get(), this->child_context_provider_,
-      this->render_pass_.get());
+      !is_software_renderer(), this->quad_rect_,
+      SkColor4f::FromColor(SkColorSetARGB(255, 0, 0, 0)),
+      SkColor4f::FromColor(SkColorSetARGB(255, 0, 0, 255)),
+      SkColors::kTransparent, true /* premultiplied_alpha */,
+      true /* flipped_texture_quad */, true /* half_and_half */,
+      this->front_quad_state_, this->resource_provider_.get(),
+      this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
+      this->child_context_provider_, this->render_pass_.get());
   CreateTestTwoColoredTextureDrawQuad(
-      !is_software_renderer(), this->quad_rect_, SkColorSetARGB(255, 0, 255, 0),
-      SkColorSetARGB(255, 0, 0, 0), SK_ColorTRANSPARENT,
-      true /* premultiplied_alpha */, true /* flipped_texture_quad */,
-      true /* half_and_half */, this->back_quad_state_,
-      this->resource_provider_.get(), this->child_resource_provider_.get(),
-      this->shared_bitmap_manager_.get(), this->child_context_provider_,
-      this->render_pass_.get());
+      !is_software_renderer(), this->quad_rect_,
+      SkColor4f::FromColor(SkColorSetARGB(255, 0, 255, 0)),
+      SkColor4f::FromColor(SkColorSetARGB(255, 0, 0, 0)),
+      SkColors::kTransparent, true /* premultiplied_alpha */,
+      true /* flipped_texture_quad */, true /* half_and_half */,
+      this->back_quad_state_, this->resource_provider_.get(),
+      this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
+      this->child_context_provider_, this->render_pass_.get());
 
   this->AppendBackgroundAndRunTest(
       cc::FuzzyPixelComparator(false, 2.f, 0.f, 256.f, 256, 0.f),
@@ -1507,11 +1501,11 @@ TEST_P(IntersectingQuadSoftwareTest, PictureQuads) {
                        this->quad_rect_.height() / 2);
 
   cc::PaintFlags black_flags;
-  black_flags.setColor(SK_ColorBLACK);
+  black_flags.setColor(SkColors::kBlack);
   cc::PaintFlags blue_flags;
-  blue_flags.setColor(SK_ColorBLUE);
+  blue_flags.setColor(SkColors::kBlue);
   cc::PaintFlags green_flags;
-  green_flags.setColor(SK_ColorGREEN);
+  green_flags.setColor(SkColors::kGreen);
 
   std::unique_ptr<cc::FakeRecordingSource> blue_recording =
       cc::FakeRecordingSource::CreateFilledRecordingSource(
@@ -1564,21 +1558,23 @@ TEST_P(IntersectingQuadPixelTest, RenderPassQuads) {
   SharedQuadState* child2_quad_state = CreateTestSharedQuadState(
       gfx::Transform(), this->quad_rect_, child_pass2.get(), gfx::MaskFilterInfo());
   CreateTestTwoColoredTextureDrawQuad(
-      !is_software_renderer(), this->quad_rect_, SkColorSetARGB(255, 0, 0, 0),
-      SkColorSetARGB(255, 0, 0, 255), SK_ColorTRANSPARENT,
-      true /* premultiplied_alpha */, false /* flipped_texture_quad */,
-      false /* half_and_half */, child1_quad_state,
-      this->resource_provider_.get(), this->child_resource_provider_.get(),
-      this->shared_bitmap_manager_.get(), this->child_context_provider_,
-      child_pass1.get());
+      !is_software_renderer(), this->quad_rect_,
+      SkColor4f::FromColor(SkColorSetARGB(255, 0, 0, 0)),
+      SkColor4f::FromColor(SkColorSetARGB(255, 0, 0, 255)),
+      SkColors::kTransparent, true /* premultiplied_alpha */,
+      false /* flipped_texture_quad */, false /* half_and_half */,
+      child1_quad_state, this->resource_provider_.get(),
+      this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
+      this->child_context_provider_, child_pass1.get());
   CreateTestTwoColoredTextureDrawQuad(
-      !is_software_renderer(), this->quad_rect_, SkColorSetARGB(255, 0, 255, 0),
-      SkColorSetARGB(255, 0, 0, 0), SK_ColorTRANSPARENT,
-      true /* premultiplied_alpha */, false /* flipped_texture_quad */,
-      false /* half_and_half */, child2_quad_state,
-      this->resource_provider_.get(), this->child_resource_provider_.get(),
-      this->shared_bitmap_manager_.get(), this->child_context_provider_,
-      child_pass2.get());
+      !is_software_renderer(), this->quad_rect_,
+      SkColor4f::FromColor(SkColorSetARGB(255, 0, 255, 0)),
+      SkColor4f::FromColor(SkColorSetARGB(255, 0, 0, 0)),
+      SkColors::kTransparent, true /* premultiplied_alpha */,
+      false /* flipped_texture_quad */, false /* half_and_half */,
+      child2_quad_state, this->resource_provider_.get(),
+      this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
+      this->child_context_provider_, child_pass2.get());
 
   CreateTestRenderPassDrawQuad(this->front_quad_state_, this->quad_rect_,
                                child_pass_id1, this->render_pass_.get());
@@ -1660,15 +1656,15 @@ TEST_P(GPURendererPixelTest, NonPremultipliedTextureWithoutBackground) {
 
   CreateTestTextureDrawQuad(
       !is_software_renderer(), gfx::Rect(this->device_viewport_size_),
-      SkColorSetARGB(128, 0, 255, 0),  // Texel color.
-      SK_ColorTRANSPARENT,             // Background color.
-      false,                           // Premultiplied alpha.
+      {0.0f, 1.0f, 0.0f, 0.5f},  // Texel color.
+      SkColors::kTransparent,    // Background color.
+      false,                     // Premultiplied alpha.
       shared_state, this->resource_provider_.get(),
       this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
       this->child_context_provider_, pass.get());
 
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(shared_state, rect, rect, SK_ColorWHITE, false);
+  color_quad->SetNew(shared_state, rect, rect, SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -1691,9 +1687,9 @@ TEST_P(GPURendererPixelTest, NonPremultipliedTextureWithBackground) {
 
   CreateTestTextureDrawQuad(
       !is_software_renderer(), gfx::Rect(this->device_viewport_size_),
-      SkColorSetARGB(204, 120, 255, 120),  // Texel color.
-      SK_ColorGREEN,                       // Background color.
-      false,                               // Premultiplied alpha.
+      SkColor4f::FromColor(SkColorSetARGB(204, 120, 255, 120)),  // Texel color.
+      SkColors::kGreen,  // Background color.
+      false,             // Premultiplied alpha.
       texture_quad_state, this->resource_provider_.get(),
       this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
       this->child_context_provider_, pass.get());
@@ -1701,7 +1697,7 @@ TEST_P(GPURendererPixelTest, NonPremultipliedTextureWithBackground) {
   SharedQuadState* color_quad_state = CreateTestSharedQuadState(
       gfx::Transform(), rect, pass.get(), gfx::MaskFilterInfo());
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(color_quad_state, rect, rect, SK_ColorWHITE, false);
+  color_quad->SetNew(color_quad_state, rect, rect, SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -1781,25 +1777,16 @@ class VideoRendererPixelTestBase : public VizPixelTest {
 };
 
 #if BUILDFLAG(ENABLE_GL_BACKEND_TESTS)
-class VideoRendererPixelHiLoTest
-    : public VideoRendererPixelTestBase,
-      public testing::WithParamInterface<std::tuple<RendererType, bool>> {
+class VideoRendererPixelHiLoTest : public VideoRendererPixelTestBase,
+                                   public testing::WithParamInterface<bool> {
  public:
   VideoRendererPixelHiLoTest()
-      : VideoRendererPixelTestBase(std::get<0>(GetParam())) {}
+      : VideoRendererPixelTestBase(RendererType::kSkiaGL) {}
 
-  bool IsHighbit() const { return std::get<1>(GetParam()); }
+  bool IsHighbit() const { return GetParam(); }
 };
 
-INSTANTIATE_TEST_SUITE_P(,
-                         VideoRendererPixelHiLoTest,
-                         testing::Combine(testing::Values(
-#if BUILDFLAG(ENABLE_GL_RENDERER_TESTS)
-                                              RendererType::kGL,
-#endif
-                                              RendererType::kSkiaGL),
-                                          testing::Bool()),
-                         cc::PrintTupleToStringParamName());
+INSTANTIATE_TEST_SUITE_P(, VideoRendererPixelHiLoTest, testing::Bool());
 
 TEST_P(VideoRendererPixelHiLoTest, SimpleYUVRect) {
   gfx::Rect rect(this->device_viewport_size_);
@@ -2076,7 +2063,7 @@ TEST_P(VideoRendererPixelTest, SimpleYUVARect) {
       this->child_context_provider_.get());
 
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(shared_state, rect, rect, SK_ColorWHITE, false);
+  color_quad->SetNew(shared_state, rect, rect, SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -2105,7 +2092,7 @@ TEST_P(VideoRendererPixelTest, FullyTransparentYUVARect) {
       this->child_context_provider_.get());
 
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(shared_state, rect, rect, SK_ColorBLACK, false);
+  color_quad->SetNew(shared_state, rect, rect, SkColors::kBlack, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -2182,18 +2169,19 @@ TEST_P(RendererPixelTest, FastPassColorFilterAlpha) {
   gfx::Rect blue_rect(0, 0, this->device_viewport_size_.width(),
                       this->device_viewport_size_.height() / 2);
   auto* blue = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(shared_state, blue_rect, blue_rect, SK_ColorBLUE, false);
+  blue->SetNew(shared_state, blue_rect, blue_rect, SkColors::kBlue, false);
   gfx::Rect yellow_rect(0, this->device_viewport_size_.height() / 2,
                         this->device_viewport_size_.width(),
                         this->device_viewport_size_.height() / 2);
   auto* yellow = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SK_ColorYELLOW, false);
+  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SkColors::kYellow,
+                 false);
 
   SharedQuadState* blank_state = CreateTestSharedQuadState(
       quad_to_target_transform, viewport_rect, child_pass.get(), gfx::MaskFilterInfo());
 
   auto* white = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  white->SetNew(blank_state, viewport_rect, viewport_rect, SK_ColorWHITE,
+  white->SetNew(blank_state, viewport_rect, viewport_rect, SkColors::kWhite,
                 false);
 
   SharedQuadState* pass_shared_state =
@@ -2215,7 +2203,7 @@ TEST_P(RendererPixelTest, FastPassColorFilterAlpha) {
   // renderer so use a fuzzy comparator.
   EXPECT_TRUE(this->RunPixelTest(
       &pass_list, base::FilePath(FILE_PATH_LITERAL("blue_yellow_alpha.png")),
-      FuzzyForSkiaOnlyPixelComparator(renderer_type())));
+      cc::FuzzyPixelOffByOneComparator(false)));
 }
 
 TEST_P(RendererPixelTest, FastPassSaturateFilter) {
@@ -2242,18 +2230,19 @@ TEST_P(RendererPixelTest, FastPassSaturateFilter) {
   gfx::Rect blue_rect(0, 0, this->device_viewport_size_.width(),
                       this->device_viewport_size_.height() / 2);
   auto* blue = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(shared_state, blue_rect, blue_rect, SK_ColorBLUE, false);
+  blue->SetNew(shared_state, blue_rect, blue_rect, SkColors::kBlue, false);
   gfx::Rect yellow_rect(0, this->device_viewport_size_.height() / 2,
                         this->device_viewport_size_.width(),
                         this->device_viewport_size_.height() / 2);
   auto* yellow = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SK_ColorYELLOW, false);
+  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SkColors::kYellow,
+                 false);
 
   SharedQuadState* blank_state = CreateTestSharedQuadState(
       quad_to_target_transform, viewport_rect, child_pass.get(), gfx::MaskFilterInfo());
 
   auto* white = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  white->SetNew(blank_state, viewport_rect, viewport_rect, SK_ColorWHITE,
+  white->SetNew(blank_state, viewport_rect, viewport_rect, SkColors::kWhite,
                 false);
 
   SharedQuadState* pass_shared_state =
@@ -2275,7 +2264,7 @@ TEST_P(RendererPixelTest, FastPassSaturateFilter) {
   // renderer so use a fuzzy comparator.
   EXPECT_TRUE(this->RunPixelTest(
       &pass_list, base::FilePath(FILE_PATH_LITERAL("blue_yellow_alpha.png")),
-      FuzzyForSkiaOnlyPixelComparator(renderer_type())));
+      cc::FuzzyPixelOffByOneComparator(false)));
 }
 
 TEST_P(RendererPixelTest, FastPassFilterChain) {
@@ -2303,18 +2292,19 @@ TEST_P(RendererPixelTest, FastPassFilterChain) {
   gfx::Rect blue_rect(0, 0, this->device_viewport_size_.width(),
                       this->device_viewport_size_.height() / 2);
   auto* blue = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(shared_state, blue_rect, blue_rect, SK_ColorBLUE, false);
+  blue->SetNew(shared_state, blue_rect, blue_rect, SkColors::kBlue, false);
   gfx::Rect yellow_rect(0, this->device_viewport_size_.height() / 2,
                         this->device_viewport_size_.width(),
                         this->device_viewport_size_.height() / 2);
   auto* yellow = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SK_ColorYELLOW, false);
+  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SkColors::kYellow,
+                 false);
 
   SharedQuadState* blank_state = CreateTestSharedQuadState(
       quad_to_target_transform, viewport_rect, child_pass.get(), gfx::MaskFilterInfo());
 
   auto* white = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  white->SetNew(blank_state, viewport_rect, viewport_rect, SK_ColorWHITE,
+  white->SetNew(blank_state, viewport_rect, viewport_rect, SkColors::kWhite,
                 false);
 
   SharedQuadState* pass_shared_state =
@@ -2337,7 +2327,7 @@ TEST_P(RendererPixelTest, FastPassFilterChain) {
   EXPECT_TRUE(this->RunPixelTest(
       &pass_list,
       base::FilePath(FILE_PATH_LITERAL("blue_yellow_filter_chain.png")),
-      FuzzyForSkiaOnlyPixelComparator(renderer_type())));
+      cc::FuzzyPixelOffByOneComparator(false)));
 }
 
 TEST_P(RendererPixelTest, FastPassColorFilterAlphaTranslation) {
@@ -2385,18 +2375,19 @@ TEST_P(RendererPixelTest, FastPassColorFilterAlphaTranslation) {
   gfx::Rect blue_rect(0, 0, this->device_viewport_size_.width(),
                       this->device_viewport_size_.height() / 2);
   auto* blue = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(shared_state, blue_rect, blue_rect, SK_ColorBLUE, false);
+  blue->SetNew(shared_state, blue_rect, blue_rect, SkColors::kBlue, false);
   gfx::Rect yellow_rect(0, this->device_viewport_size_.height() / 2,
                         this->device_viewport_size_.width(),
                         this->device_viewport_size_.height() / 2);
   auto* yellow = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SK_ColorYELLOW, false);
+  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SkColors::kYellow,
+                 false);
 
   SharedQuadState* blank_state = CreateTestSharedQuadState(
       quad_to_target_transform, viewport_rect, child_pass.get(), gfx::MaskFilterInfo());
 
   auto* white = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  white->SetNew(blank_state, viewport_rect, viewport_rect, SK_ColorWHITE,
+  white->SetNew(blank_state, viewport_rect, viewport_rect, SkColors::kWhite,
                 false);
 
   SharedQuadState* pass_shared_state =
@@ -2420,7 +2411,7 @@ TEST_P(RendererPixelTest, FastPassColorFilterAlphaTranslation) {
   EXPECT_TRUE(this->RunPixelTest(
       &pass_list,
       base::FilePath(FILE_PATH_LITERAL("blue_yellow_alpha_translate.png")),
-      FuzzyForSkiaOnlyPixelComparator(renderer_type())));
+      cc::FuzzyPixelOffByOneComparator(false)));
 }
 
 TEST_P(RendererPixelTest, EnlargedRenderPassTexture) {
@@ -2442,12 +2433,13 @@ TEST_P(RendererPixelTest, EnlargedRenderPassTexture) {
   gfx::Rect blue_rect(0, 0, this->device_viewport_size_.width(),
                       this->device_viewport_size_.height() / 2);
   auto* blue = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(shared_state, blue_rect, blue_rect, SK_ColorBLUE, false);
+  blue->SetNew(shared_state, blue_rect, blue_rect, SkColors::kBlue, false);
   gfx::Rect yellow_rect(0, this->device_viewport_size_.height() / 2,
                         this->device_viewport_size_.width(),
                         this->device_viewport_size_.height() / 2);
   auto* yellow = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SK_ColorYELLOW, false);
+  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SkColors::kYellow,
+                 false);
 
   SharedQuadState* pass_shared_state =
       CreateTestSharedQuadState(gfx::Transform(), pass_rect, root_pass.get(),
@@ -2485,12 +2477,13 @@ TEST_P(RendererPixelTest, EnlargedRenderPassTextureWithAntiAliasing) {
   gfx::Rect blue_rect(0, 0, this->device_viewport_size_.width(),
                       this->device_viewport_size_.height() / 2);
   auto* blue = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(shared_state, blue_rect, blue_rect, SK_ColorBLUE, false);
+  blue->SetNew(shared_state, blue_rect, blue_rect, SkColors::kBlue, false);
   gfx::Rect yellow_rect(0, this->device_viewport_size_.height() / 2,
                         this->device_viewport_size_.width(),
                         this->device_viewport_size_.height() / 2);
   auto* yellow = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SK_ColorYELLOW, false);
+  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SkColors::kYellow,
+                 false);
 
   gfx::Transform aa_transform;
   aa_transform.Translate(0.5, 0.0);
@@ -2505,7 +2498,7 @@ TEST_P(RendererPixelTest, EnlargedRenderPassTextureWithAntiAliasing) {
       gfx::Transform(), viewport_rect, root_pass.get(), gfx::MaskFilterInfo());
   auto* background = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   background->SetNew(root_shared_state, gfx::Rect(this->device_viewport_size_),
-                     gfx::Rect(this->device_viewport_size_), SK_ColorWHITE,
+                     gfx::Rect(this->device_viewport_size_), SkColors::kWhite,
                      false);
 
   AggregatedRenderPassList pass_list;
@@ -2538,7 +2531,7 @@ TEST_P(RendererPixelTest, RenderPassAndMaskWithPartialQuad) {
       gfx::Transform(), viewport_rect, child_pass.get(), gfx::MaskFilterInfo());
 
   // The child render pass is just a green box.
-  static const SkColor kCSSGreen = 0xff008000;
+  static const SkColor4f kCSSGreen = SkColor4f::FromColor(0xff008000);
   auto* green = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   green->SetNew(child_pass_shared_state, viewport_rect, viewport_rect,
                 kCSSGreen, false);
@@ -2552,8 +2545,8 @@ TEST_P(RendererPixelTest, RenderPassAndMaskWithPartialQuad) {
   cc::PaintFlags flags;
   flags.setStyle(cc::PaintFlags::kStroke_Style);
   flags.setStrokeWidth(SkIntToScalar(4));
-  flags.setColor(SK_ColorWHITE);
-  canvas.clear(SK_ColorTRANSPARENT);
+  flags.setColor(SkColors::kWhite);
+  canvas.clear(SkColors::kTransparent);
   gfx::Rect rect = mask_rect;
   while (!rect.IsEmpty()) {
     rect.Inset(gfx::Insets::TLBR(6, 6, 4, 4));
@@ -2606,7 +2599,7 @@ TEST_P(RendererPixelTest, RenderPassAndMaskWithPartialQuad) {
   // White background behind the masked render pass.
   auto* white = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   white->SetNew(root_pass_shared_state, viewport_rect, viewport_rect,
-                SK_ColorWHITE, false);
+                SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(child_pass));
@@ -2635,7 +2628,7 @@ TEST_P(RendererPixelTest, RenderPassAndMaskWithPartialQuad2) {
       gfx::Transform(), viewport_rect, child_pass.get(), gfx::MaskFilterInfo());
 
   // The child render pass is just a green box.
-  static const SkColor kCSSGreen = 0xff008000;
+  static const SkColor4f kCSSGreen = SkColor4f::FromColor(0xff008000);
   auto* green = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   green->SetNew(child_pass_shared_state, viewport_rect, viewport_rect,
                 kCSSGreen, false);
@@ -2649,8 +2642,8 @@ TEST_P(RendererPixelTest, RenderPassAndMaskWithPartialQuad2) {
   cc::PaintFlags flags;
   flags.setStyle(cc::PaintFlags::kStroke_Style);
   flags.setStrokeWidth(SkIntToScalar(4));
-  flags.setColor(SK_ColorWHITE);
-  canvas.clear(SK_ColorTRANSPARENT);
+  flags.setColor(SkColors::kWhite);
+  canvas.clear(SkColors::kTransparent);
   gfx::Rect rect = mask_rect;
   while (!rect.IsEmpty()) {
     rect.Inset(gfx::Insets::TLBR(6, 6, 4, 4));
@@ -2703,7 +2696,7 @@ TEST_P(RendererPixelTest, RenderPassAndMaskWithPartialQuad2) {
   // White background behind the masked render pass.
   auto* white = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   white->SetNew(root_pass_shared_state, viewport_rect, viewport_rect,
-                SK_ColorWHITE, false);
+                SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(child_pass));
@@ -2734,7 +2727,7 @@ TEST_P(RendererPixelTest, RenderPassAndMaskForRoundedCorner) {
   // The child render pass is just a blue box.
   auto* blue = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   blue->SetNew(child_pass_shared_state, viewport_rect, viewport_rect,
-               SK_ColorBLUE, false);
+               SkColors::kBlue, false);
 
   // Make a mask.
   gfx::Rect mask_rect = viewport_rect;
@@ -2744,9 +2737,9 @@ TEST_P(RendererPixelTest, RenderPassAndMaskForRoundedCorner) {
   cc::SkiaPaintCanvas canvas(bitmap);
   cc::PaintFlags flags;
   flags.setStyle(cc::PaintFlags::kFill_Style);
-  flags.setColor(SK_ColorWHITE);
+  flags.setColor(SkColors::kWhite);
   flags.setAntiAlias(true);
-  canvas.clear(SK_ColorTRANSPARENT);
+  canvas.clear(SkColors::kTransparent);
   gfx::Rect rounded_corner_rect = mask_rect;
   rounded_corner_rect.Inset(kInset);
   SkRRect rounded_corner = SkRRect::MakeRectXY(
@@ -2788,7 +2781,7 @@ TEST_P(RendererPixelTest, RenderPassAndMaskForRoundedCorner) {
   // White background behind the masked render pass.
   auto* white = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   white->SetNew(root_pass_shared_state, viewport_rect, viewport_rect,
-                SK_ColorWHITE, false);
+                SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(child_pass));
@@ -2829,7 +2822,7 @@ TEST_P(RendererPixelTest, RenderPassAndMaskForRoundedCornerMultiRadii) {
   gfx::Rect blue_rect(0, 0, this->device_viewport_size_.width(),
                       this->device_viewport_size_.height() / 2);
   auto* blue = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(child_pass_shared_state, blue_rect, blue_rect, SK_ColorBLUE,
+  blue->SetNew(child_pass_shared_state, blue_rect, blue_rect, SkColors::kBlue,
                false);
 
   gfx::Rect yellow_rect(0, this->device_viewport_size_.height() / 2,
@@ -2837,7 +2830,7 @@ TEST_P(RendererPixelTest, RenderPassAndMaskForRoundedCornerMultiRadii) {
                         this->device_viewport_size_.height() / 2);
   auto* yellow = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   yellow->SetNew(child_pass_shared_state, yellow_rect, yellow_rect,
-                 SK_ColorYELLOW, false);
+                 SkColors::kYellow, false);
 
   // Make a mask.
   gfx::Rect mask_rect = viewport_rect;
@@ -2847,9 +2840,9 @@ TEST_P(RendererPixelTest, RenderPassAndMaskForRoundedCornerMultiRadii) {
   cc::SkiaPaintCanvas canvas(bitmap);
   cc::PaintFlags flags;
   flags.setStyle(cc::PaintFlags::kFill_Style);
-  flags.setColor(SK_ColorWHITE);
+  flags.setColor(SkColors::kWhite);
   flags.setAntiAlias(true);
-  canvas.clear(SK_ColorTRANSPARENT);
+  canvas.clear(SkColors::kTransparent);
   gfx::Rect rounded_corner_rect = mask_rect;
   rounded_corner_rect.Inset(kInset);
   SkRRect rounded_corner =
@@ -2892,7 +2885,7 @@ TEST_P(RendererPixelTest, RenderPassAndMaskForRoundedCornerMultiRadii) {
   // White background behind the masked render pass.
   auto* white = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   white->SetNew(root_pass_shared_state, viewport_rect, viewport_rect,
-                SK_ColorWHITE, false);
+                SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(child_pass));
@@ -2930,7 +2923,8 @@ class RendererPixelTestWithBackdropFilter : public VizPixelTestWithParam {
       auto* color_quad =
           filter_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
       color_quad->SetNew(shared_state, filter_pass_layer_rect_,
-                         filter_pass_layer_rect_, SK_ColorTRANSPARENT, false);
+                         filter_pass_layer_rect_, SkColors::kTransparent,
+                         false);
     }
 
     ResourceId mapped_mask_resource_id(0);
@@ -2953,9 +2947,9 @@ class RendererPixelTestWithBackdropFilter : public VizPixelTestWithParam {
       cc::SkiaPaintCanvas canvas(bitmap);
       cc::PaintFlags flags;
       flags.setStyle(cc::PaintFlags::kFill_Style);
-      flags.setColor(SK_ColorWHITE);
+      flags.setColor(SkColors::kWhite);
       flags.setAntiAlias(true);
-      canvas.clear(SK_ColorTRANSPARENT);
+      canvas.clear(SkColors::kTransparent);
       gfx::Rect rounded_corner_rect = mask_rect;
       rounded_corner_rect.Inset(kInset);
       SkRRect rounded_corner =
@@ -3014,7 +3008,7 @@ class RendererPixelTestWithBackdropFilter : public VizPixelTestWithParam {
           gfx::MaskFilterInfo());
       auto* color_quad =
           root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-      color_quad->SetNew(shared_state, left_rect, left_rect, SK_ColorGREEN,
+      color_quad->SetNew(shared_state, left_rect, left_rect, SkColors::kGreen,
                          false);
       left_rect += gfx::Vector2d(0, left_rect.height() + 1);
     }
@@ -3026,7 +3020,7 @@ class RendererPixelTestWithBackdropFilter : public VizPixelTestWithParam {
           gfx::MaskFilterInfo());
       auto* color_quad =
           root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-      color_quad->SetNew(shared_state, middle_rect, middle_rect, SK_ColorRED,
+      color_quad->SetNew(shared_state, middle_rect, middle_rect, SkColors::kRed,
                          false);
       middle_rect += gfx::Vector2d(0, middle_rect.height() + 1);
     }
@@ -3039,7 +3033,7 @@ class RendererPixelTestWithBackdropFilter : public VizPixelTestWithParam {
           gfx::MaskFilterInfo());
       auto* color_quad =
           root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-      color_quad->SetNew(shared_state, right_rect, right_rect, SK_ColorBLUE,
+      color_quad->SetNew(shared_state, right_rect, right_rect, SkColors::kBlue,
                          false);
       right_rect += gfx::Vector2d(0, right_rect.height() + 1);
     }
@@ -3050,7 +3044,7 @@ class RendererPixelTestWithBackdropFilter : public VizPixelTestWithParam {
     auto* background_quad =
         root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
     background_quad->SetNew(shared_state, device_viewport_rect,
-                            device_viewport_rect, SK_ColorWHITE, false);
+                            device_viewport_rect, SkColors::kWhite, false);
 
     pass_list_.push_back(std::move(filter_pass));
     pass_list_.push_back(std::move(root_pass));
@@ -3083,11 +3077,6 @@ TEST_P(RendererPixelTestWithBackdropFilter, InvertFilter) {
 }
 
 TEST_P(RendererPixelTestWithBackdropFilter, InvertFilterWithMask) {
-  // TODO(crbug.com/989312): Delete this condition with GLRendere. The mask
-  // appears to be offset from the correct location but this isn't relevant.
-  if (is_gl_renderer())
-    return;
-
   this->backdrop_filters_.Append(cc::FilterOperation::CreateInvertFilter(1.f));
   this->filter_pass_layer_rect_ = gfx::Rect(this->device_viewport_size_);
   this->filter_pass_layer_rect_.Inset(gfx::Insets::TLBR(14, 12, 18, 16));
@@ -3105,170 +3094,6 @@ TEST_P(RendererPixelTestWithBackdropFilter, InvertFilterWithMask) {
                                  cc::FuzzyPixelOffByOneComparator(false)));
 }
 
-#if BUILDFLAG(ENABLE_GL_RENDERER_TESTS)
-class GLRendererPixelTestWithBackdropFilter : public VizPixelTest {
- public:
-  GLRendererPixelTestWithBackdropFilter() : VizPixelTest(RendererType::kGL) {}
-
- protected:
-  void SetUpRenderPassList() {
-    pass_list_.clear();
-    gfx::Rect device_viewport_rect(this->device_viewport_size_);
-
-    AggregatedRenderPassId root_id{1};
-    auto root_pass = CreateTestRootRenderPass(root_id, device_viewport_rect);
-    root_pass->has_transparent_background = false;
-
-    gfx::Transform identity_quad_to_target_transform;
-
-    AggregatedRenderPassId filter_pass_id{2};
-    gfx::Transform transform_to_root;
-    auto filter_pass = CreateTestRenderPass(
-        filter_pass_id, filter_pass_layer_rect_, transform_to_root);
-    filter_pass->backdrop_filters = this->backdrop_filters_;
-    filter_pass->backdrop_filter_bounds = this->backdrop_filter_bounds_;
-
-    // A non-visible quad in the filtering render pass.
-    {
-      SharedQuadState* shared_state = CreateTestSharedQuadState(
-          identity_quad_to_target_transform, filter_pass_layer_rect_,
-          filter_pass.get(), gfx::MaskFilterInfo());
-      auto* color_quad =
-          filter_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-      color_quad->SetNew(shared_state, filter_pass_layer_rect_,
-                         filter_pass_layer_rect_, SK_ColorTRANSPARENT, false);
-    }
-
-    {
-      SharedQuadState* shared_state = CreateTestSharedQuadState(
-          filter_pass_to_target_transform_, filter_pass_layer_rect_,
-          filter_pass.get(), gfx::MaskFilterInfo());
-      auto* filter_pass_quad =
-          root_pass->CreateAndAppendDrawQuad<AggregatedRenderPassDrawQuad>();
-      filter_pass_quad->SetAll(
-          shared_state, filter_pass_layer_rect_, filter_pass_layer_rect_,
-          /*needs_blending=*/true, filter_pass_id, kInvalidResourceId,
-          gfx::RectF(), gfx::Size(),
-          gfx::Vector2dF(1.0f, 1.0f),  // filters_scale
-          gfx::PointF(),               // filters_origin
-          gfx::RectF(),                // tex_coord_rect
-          false,                       // force_anti_aliasing_off
-          backdrop_filter_quality_,    // backdrop_filter_quality
-          intersects_damage_under_);
-    }
-
-    const int kGridWidth = device_viewport_rect.width() / 3;
-    const int kGridHeight = device_viewport_rect.height() / 3;
-    gfx::Rect left_rect =
-        gfx::Rect(kGridWidth / 2, kGridHeight, kGridWidth, kGridHeight);
-
-    SharedQuadState* shared_state = CreateTestSharedQuadState(
-        identity_quad_to_target_transform, left_rect, root_pass.get(),
-        gfx::MaskFilterInfo());
-    auto* color_quad = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-    color_quad->SetNew(shared_state, left_rect, left_rect, SK_ColorGREEN,
-                       false);
-
-    gfx::Rect right_rect =
-        gfx::Rect(kGridWidth * 3 / 2, kGridHeight, kGridWidth, kGridHeight);
-    shared_state = CreateTestSharedQuadState(
-        identity_quad_to_target_transform, right_rect, root_pass.get(),
-        gfx::MaskFilterInfo());
-    color_quad = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-    color_quad->SetNew(shared_state, right_rect, right_rect, SK_ColorRED,
-                       false);
-
-    shared_state = CreateTestSharedQuadState(
-        identity_quad_to_target_transform, device_viewport_rect,
-        root_pass.get(), gfx::MaskFilterInfo());
-    auto* background_quad =
-        root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-    background_quad->SetNew(shared_state, device_viewport_rect,
-                            device_viewport_rect, SK_ColorWHITE, false);
-
-    pass_list_.push_back(std::move(filter_pass));
-    pass_list_.push_back(std::move(root_pass));
-  }
-
-  AggregatedRenderPassList pass_list_;
-  cc::FilterOperations backdrop_filters_;
-  absl::optional<gfx::RRectF> backdrop_filter_bounds_;
-  float backdrop_filter_quality_ = 1.0f;
-  bool intersects_damage_under_ = true;
-  gfx::Transform filter_pass_to_target_transform_;
-  gfx::Rect filter_pass_layer_rect_;
-};
-
-TEST_F(GLRendererPixelTestWithBackdropFilter, FilterQuality) {
-  this->backdrop_filters_.Append(cc::FilterOperation::CreateBlurFilter(2.0f));
-  this->filter_pass_layer_rect_ = gfx::Rect(this->device_viewport_size_);
-  this->backdrop_filter_bounds_ =
-      gfx::RRectF(gfx::RectF(this->filter_pass_layer_rect_));
-  this->backdrop_filter_quality_ = 1.0f;
-  this->SetUpRenderPassList();
-  EXPECT_TRUE(this->RunPixelTest(
-      &this->pass_list_,
-      base::FilePath(FILE_PATH_LITERAL("gl_backdrop_filter_1.png")),
-      cc::FuzzyPixelOffByOneComparator(true)));
-
-  if (this->context_provider()->ContextCapabilities().major_version < 3)
-    return;
-  this->backdrop_filter_quality_ = 0.33f;
-  this->SetUpRenderPassList();
-  EXPECT_TRUE(this->RunPixelTest(
-      &this->pass_list_,
-      base::FilePath(FILE_PATH_LITERAL("gl_backdrop_filter_2.png")),
-      cc::FuzzyPixelOffByOneComparator(true)));
-}
-
-TEST_F(GLRendererPixelTestWithBackdropFilter, CachedResultOfBackdropFilter) {
-  this->backdrop_filters_.Append(cc::FilterOperation::CreateBlurFilter(2.0f));
-  this->filter_pass_layer_rect_ = gfx::Rect(this->device_viewport_size_);
-  this->backdrop_filter_bounds_ =
-      gfx::RRectF(gfx::RectF(this->filter_pass_layer_rect_));
-  // Set the flag to use cached backdrop filtered texture. This makes the
-  // GLRenderer cache backdrop filtered result.
-  this->intersects_damage_under_ = false;
-  this->SetUpRenderPassList();
-
-  EXPECT_TRUE(this->RunPixelTest(
-      &this->pass_list_,
-      base::FilePath(FILE_PATH_LITERAL("gl_backdrop_filter_1.png")),
-      cc::FuzzyPixelOffByOneComparator(true)));
-
-  // Same render pass list makes the GLRenderer to skip backdrop filter
-  // calculation and use cached texture. This should correctly produce the
-  // same output image.
-  this->SetUpRenderPassList();
-  EXPECT_TRUE(this->RunPixelTest(
-      &this->pass_list_,
-      base::FilePath(FILE_PATH_LITERAL("gl_backdrop_filter_1.png")),
-      cc::FuzzyPixelOffByOneComparator(true)));
-
-  // To prove the cached texture is used, change a quad on the root pass which
-  // is beneath the backdrop filter. The output image should still be the same
-  // as before.
-  this->SetUpRenderPassList();
-  DrawQuad* background_quad = *pass_list_.back()->quad_list.rbegin();
-  static_cast<SolidColorDrawQuad*>(background_quad)->color = SK_ColorYELLOW;
-  EXPECT_TRUE(this->RunPixelTest(
-      &this->pass_list_,
-      base::FilePath(FILE_PATH_LITERAL("gl_backdrop_filter_1.png")),
-      cc::FuzzyPixelOffByOneComparator(true)));
-
-  // Set |intersects_damage_under_| to true to make GLRenderer re-run the
-  // backdrop filter calculation
-  this->intersects_damage_under_ = true;
-  this->SetUpRenderPassList();
-  background_quad = *pass_list_.back()->quad_list.rbegin();
-  static_cast<SolidColorDrawQuad*>(background_quad)->color = SK_ColorYELLOW;
-  EXPECT_TRUE(this->RunPixelTest(
-      &this->pass_list_,
-      base::FilePath(FILE_PATH_LITERAL("gl_backdrop_filter_3.png")),
-      cc::FuzzyPixelOffByOneComparator(true)));
-}
-#endif
-
 // Software renderer does not support anti-aliased edges.
 TEST_P(GPURendererPixelTest, AntiAliasing) {
   gfx::Rect rect(this->device_viewport_size_);
@@ -3283,7 +3108,7 @@ TEST_P(GPURendererPixelTest, AntiAliasing) {
                                 gfx::MaskFilterInfo());
 
   auto* red = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  red->SetNew(red_shared_state, rect, rect, SK_ColorRED, false);
+  red->SetNew(red_shared_state, rect, rect, SkColors::kRed, false);
 
   gfx::Transform yellow_quad_to_target_transform;
   yellow_quad_to_target_transform.Rotate(5);
@@ -3291,7 +3116,7 @@ TEST_P(GPURendererPixelTest, AntiAliasing) {
       yellow_quad_to_target_transform, rect, pass.get(), gfx::MaskFilterInfo());
 
   auto* yellow = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  yellow->SetNew(yellow_shared_state, rect, rect, SK_ColorYELLOW, false);
+  yellow->SetNew(yellow_shared_state, rect, rect, SkColors::kYellow, false);
 
   gfx::Transform blue_quad_to_target_transform;
   SharedQuadState* blue_shared_state =
@@ -3299,7 +3124,7 @@ TEST_P(GPURendererPixelTest, AntiAliasing) {
                                 gfx::MaskFilterInfo());
 
   auto* blue = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(blue_shared_state, rect, rect, SK_ColorBLUE, false);
+  blue->SetNew(blue_shared_state, rect, rect, SkColors::kBlue, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -3318,26 +3143,26 @@ TEST_P(GPURendererPixelTest, AntiAliasingPerspective) {
   auto pass = CreateTestRootRenderPass(AggregatedRenderPassId{1}, rect);
 
   gfx::Rect red_rect(0, 0, 180, 500);
-  gfx::Transform red_quad_to_target_transform(
+  auto red_quad_to_target_transform = gfx::Transform::RowMajor(
       1.0f, 2.4520f, 10.6206f, 19.0f, 0.0f, 0.3528f, 5.9737f, 9.5f, 0.0f,
       -0.2250f, -0.9744f, 0.0f, 0.0f, 0.0225f, 0.0974f, 1.0f);
   SharedQuadState* red_shared_state = CreateTestSharedQuadState(
       red_quad_to_target_transform, red_rect, pass.get(), gfx::MaskFilterInfo());
   auto* red = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  red->SetNew(red_shared_state, red_rect, red_rect, SK_ColorRED, false);
+  red->SetNew(red_shared_state, red_rect, red_rect, SkColors::kRed, false);
 
   gfx::Rect green_rect(19, 7, 180, 10);
   SharedQuadState* green_shared_state =
       CreateTestSharedQuadState(gfx::Transform(), green_rect, pass.get(),
                                 gfx::MaskFilterInfo());
   auto* green = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  green->SetNew(green_shared_state, green_rect, green_rect, SK_ColorGREEN,
+  green->SetNew(green_shared_state, green_rect, green_rect, SkColors::kGreen,
                 false);
 
   SharedQuadState* blue_shared_state = CreateTestSharedQuadState(
       gfx::Transform(), rect, pass.get(), gfx::MaskFilterInfo());
   auto* blue = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(blue_shared_state, rect, rect, SK_ColorBLUE, false);
+  blue->SetNew(blue_shared_state, rect, rect, SkColors::kBlue, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -3358,8 +3183,8 @@ TEST_P(GPURendererPixelTest, AxisAligned) {
   gfx::Transform transform_to_root;
   auto pass = CreateTestRenderPass(id, rect, transform_to_root);
 
-  CreateTestAxisAlignedQuads(rect, SK_ColorRED, SK_ColorYELLOW, false, false,
-                             pass.get());
+  CreateTestAxisAlignedQuads(rect, SkColors::kRed, SkColors::kYellow, false,
+                             false, pass.get());
 
   gfx::Transform blue_quad_to_target_transform;
   SharedQuadState* blue_shared_state =
@@ -3367,7 +3192,7 @@ TEST_P(GPURendererPixelTest, AxisAligned) {
                                 gfx::MaskFilterInfo());
 
   auto* blue = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(blue_shared_state, rect, rect, SK_ColorBLUE, false);
+  blue->SetNew(blue_shared_state, rect, rect, SkColors::kBlue, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -3397,14 +3222,15 @@ TEST_P(GPURendererPixelTest, SolidColorDrawQuadForceAntiAliasingOff) {
                                 gfx::MaskFilterInfo());
 
   auto* hole = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  hole->SetAll(hole_shared_state, rect, rect, false, SK_ColorTRANSPARENT, true);
+  hole->SetAll(hole_shared_state, rect, rect, false, SkColors::kTransparent,
+               true);
 
   gfx::Transform green_quad_to_target_transform;
   SharedQuadState* green_shared_state = CreateTestSharedQuadState(
       green_quad_to_target_transform, rect, pass.get(), gfx::MaskFilterInfo());
 
   auto* green = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  green->SetNew(green_shared_state, rect, rect, SK_ColorGREEN, false);
+  green->SetNew(green_shared_state, rect, rect, SkColors::kGreen, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -3435,7 +3261,7 @@ TEST_P(GPURendererPixelTest, RenderPassDrawQuadForceAntiAliasingOff) {
       quad_to_target_transform, rect, child_pass.get(), gfx::MaskFilterInfo());
   SolidColorDrawQuad* hole =
       child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  hole->SetAll(hole_shared_state, rect, rect, false, SK_ColorTRANSPARENT,
+  hole->SetAll(hole_shared_state, rect, rect, false, SkColors::kTransparent,
                false);
 
   bool needs_blending = false;
@@ -3462,7 +3288,7 @@ TEST_P(GPURendererPixelTest, RenderPassDrawQuadForceAntiAliasingOff) {
 
   SolidColorDrawQuad* green =
       root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  green->SetNew(green_shared_state, rect, rect, SK_ColorGREEN, false);
+  green->SetNew(green_shared_state, rect, rect, SkColors::kGreen, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(child_pass));
@@ -3483,7 +3309,7 @@ TEST_P(GPURendererPixelTest, TileDrawQuadForceAntiAliasingOff) {
   SkBitmap bitmap;
   bitmap.allocN32Pixels(32, 32);
   SkCanvas canvas(bitmap, SkSurfaceProps{});
-  canvas.clear(SK_ColorTRANSPARENT);
+  canvas.clear(SkColors::kTransparent);
 
   gfx::Size tile_size(32, 32);
   ResourceId resource;
@@ -3531,7 +3357,7 @@ TEST_P(GPURendererPixelTest, TileDrawQuadForceAntiAliasingOff) {
 
   SolidColorDrawQuad* green =
       pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  green->SetNew(green_shared_state, rect, rect, SK_ColorGREEN, false);
+  green->SetNew(green_shared_state, rect, rect, SkColors::kGreen, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -3553,13 +3379,14 @@ TEST_P(GPURendererPixelTest, BlendingWithoutAntiAliasing) {
   auto pass = CreateTestRenderPass(id, rect, transform_to_root);
   pass->has_transparent_background = false;
 
-  CreateTestAxisAlignedQuads(rect, 0x800000FF, 0x8000FF00, true, true,
+  CreateTestAxisAlignedQuads(rect, SkColor4f{0.0f, 0.0f, 1.0f, 0.5},
+                             SkColor4f{0.0f, 1.0f, 0.0f, 0.5f}, true, true,
                              pass.get());
 
   SharedQuadState* background_quad_state = CreateTestSharedQuadState(
       gfx::Transform(), rect, pass.get(), gfx::MaskFilterInfo());
   auto* background_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  background_quad->SetNew(background_quad_state, rect, rect, SK_ColorBLACK,
+  background_quad->SetNew(background_quad_state, rect, rect, SkColors::kBlack,
                           false);
 
   AggregatedRenderPassList pass_list;
@@ -3597,15 +3424,15 @@ TEST_P(GPURendererPixelTest, TrilinearFiltering) {
       CreateTestSharedQuadState(gfx::Transform(), red_rect, child_pass.get(),
                                 gfx::MaskFilterInfo());
   auto* red = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  red->SetNew(red_shared_state, red_rect, red_rect, SK_ColorRED, false);
+  red->SetNew(red_shared_state, red_rect, red_rect, SkColors::kRed, false);
 
   SharedQuadState* blue_shared_state = CreateTestSharedQuadState(
       gfx::Transform(), child_pass_rect, child_pass.get(), gfx::MaskFilterInfo());
   auto* blue = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   blue->SetNew(blue_shared_state, child_pass_rect, child_pass_rect,
-               SK_ColorBLUE, false);
+               SkColors::kBlue, false);
 
-  gfx::Transform child_to_root_transform(SkMatrix::RectToRect(
+  auto child_to_root_transform = gfx::SkMatrixToTransform(SkMatrix::RectToRect(
       RectToSkRect(child_pass_rect), RectToSkRect(viewport_rect)));
   SharedQuadState* child_pass_shared_state = CreateTestSharedQuadState(
       child_to_root_transform, child_pass_rect, root_pass.get(), gfx::MaskFilterInfo());
@@ -3659,10 +3486,10 @@ TEST_F(SoftwareRendererPixelTest, PictureDrawQuadIdentityScale) {
   std::unique_ptr<cc::FakeRecordingSource> blue_recording =
       cc::FakeRecordingSource::CreateFilledRecordingSource(blue_rect.size());
   cc::PaintFlags red_flags;
-  red_flags.setColor(SK_ColorRED);
+  red_flags.setColor(SkColors::kRed);
   blue_recording->add_draw_rect_with_flags(blue_rect, red_flags);
   cc::PaintFlags blue_flags;
-  blue_flags.setColor(SK_ColorBLUE);
+  blue_flags.setColor(SkColors::kBlue);
   blue_recording->add_draw_rect_with_flags(blue_clip_rect, blue_flags);
   blue_recording->Rerecord();
 
@@ -3691,7 +3518,7 @@ TEST_F(SoftwareRendererPixelTest, PictureDrawQuadIdentityScale) {
   std::unique_ptr<cc::FakeRecordingSource> green_recording =
       cc::FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
   cc::PaintFlags green_flags;
-  green_flags.setColor(SK_ColorGREEN);
+  green_flags.setColor(SkColors::kGreen);
   green_recording->add_draw_rect_with_flags(viewport, green_flags);
   green_recording->Rerecord();
   scoped_refptr<cc::RasterSource> green_raster_source =
@@ -3731,7 +3558,7 @@ TEST_F(SoftwareRendererPixelTest, PictureDrawQuadOpacity) {
   std::unique_ptr<cc::FakeRecordingSource> green_recording =
       cc::FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
   cc::PaintFlags green_flags;
-  green_flags.setColor(SK_ColorGREEN);
+  green_flags.setColor(SkColors::kGreen);
   green_recording->add_draw_rect_with_flags(viewport, green_flags);
   green_recording->Rerecord();
   scoped_refptr<cc::RasterSource> green_raster_source =
@@ -3752,7 +3579,7 @@ TEST_F(SoftwareRendererPixelTest, PictureDrawQuadOpacity) {
   std::unique_ptr<cc::FakeRecordingSource> white_recording =
       cc::FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
   cc::PaintFlags white_flags;
-  white_flags.setColor(SK_ColorWHITE);
+  white_flags.setColor(SkColors::kWhite);
   white_recording->add_draw_rect_with_flags(viewport, white_flags);
   white_recording->Rerecord();
   scoped_refptr<cc::RasterSource> white_raster_source =
@@ -3790,7 +3617,7 @@ TEST_F(SoftwareRendererPixelTest, PictureDrawQuadOpacityWithAlpha) {
   std::unique_ptr<cc::FakeRecordingSource> transparent_recording =
       cc::FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
   cc::PaintFlags transparent_flags;
-  transparent_flags.setColor(SK_ColorTRANSPARENT);
+  transparent_flags.setColor(SkColors::kTransparent);
   transparent_recording->add_draw_rect_with_flags(viewport, transparent_flags);
   transparent_recording->Rerecord();
   scoped_refptr<cc::RasterSource> transparent_raster_source =
@@ -3811,7 +3638,7 @@ TEST_F(SoftwareRendererPixelTest, PictureDrawQuadOpacityWithAlpha) {
   std::unique_ptr<cc::FakeRecordingSource> white_recording =
       cc::FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
   cc::PaintFlags white_flags;
-  white_flags.setColor(SK_ColorWHITE);
+  white_flags.setColor(SkColors::kWhite);
   white_recording->add_draw_rect_with_flags(viewport, white_flags);
   white_recording->Rerecord();
   scoped_refptr<cc::RasterSource> white_raster_source =
@@ -3835,9 +3662,12 @@ TEST_F(SoftwareRendererPixelTest, PictureDrawQuadOpacityWithAlpha) {
                                  cc::FuzzyPixelOffByOneComparator(true)));
 }
 
-void draw_point_color(SkCanvas* canvas, SkScalar x, SkScalar y, SkColor color) {
+void draw_point_color(SkCanvas* canvas,
+                      SkScalar x,
+                      SkScalar y,
+                      SkColor4f color) {
   SkPaint paint;
-  paint.setColor(color);
+  paint.setColor(color, nullptr /* SkColorSpace* colorSpace */);
   canvas->drawPoint(x, y, paint);
 }
 
@@ -3856,10 +3686,10 @@ TEST_F(SoftwareRendererPixelTest, PictureDrawQuadDisableImageFiltering) {
   sk_sp<SkSurface> surface = SkSurface::MakeRasterN32Premul(2, 2);
   ASSERT_NE(surface, nullptr);
   SkCanvas* canvas = surface->getCanvas();
-  draw_point_color(canvas, 0, 0, SK_ColorGREEN);
-  draw_point_color(canvas, 0, 1, SK_ColorBLUE);
-  draw_point_color(canvas, 1, 0, SK_ColorBLUE);
-  draw_point_color(canvas, 1, 1, SK_ColorGREEN);
+  draw_point_color(canvas, 0, 0, SkColors::kGreen);
+  draw_point_color(canvas, 0, 1, SkColors::kBlue);
+  draw_point_color(canvas, 1, 0, SkColors::kBlue);
+  draw_point_color(canvas, 1, 1, SkColors::kGreen);
 
   std::unique_ptr<cc::FakeRecordingSource> recording =
       cc::FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
@@ -3907,10 +3737,10 @@ TEST_F(SoftwareRendererPixelTest, PictureDrawQuadNearestNeighbor) {
   sk_sp<SkSurface> surface = SkSurface::MakeRasterN32Premul(2, 2);
   ASSERT_NE(surface, nullptr);
   SkCanvas* canvas = surface->getCanvas();
-  draw_point_color(canvas, 0, 0, SK_ColorGREEN);
-  draw_point_color(canvas, 0, 1, SK_ColorBLUE);
-  draw_point_color(canvas, 1, 0, SK_ColorBLUE);
-  draw_point_color(canvas, 1, 1, SK_ColorGREEN);
+  draw_point_color(canvas, 0, 0, SkColors::kGreen);
+  draw_point_color(canvas, 0, 1, SkColors::kBlue);
+  draw_point_color(canvas, 1, 0, SkColors::kBlue);
+  draw_point_color(canvas, 1, 1, SkColors::kGreen);
 
   std::unique_ptr<cc::FakeRecordingSource> recording =
       cc::FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
@@ -3957,10 +3787,10 @@ TEST_P(RendererPixelTest, TileDrawQuadNearestNeighbor) {
   SkBitmap bitmap;
   bitmap.allocPixels(info);
   SkCanvas canvas(bitmap, SkSurfaceProps{});
-  draw_point_color(&canvas, 0, 0, SK_ColorGREEN);
-  draw_point_color(&canvas, 0, 1, SK_ColorBLUE);
-  draw_point_color(&canvas, 1, 0, SK_ColorBLUE);
-  draw_point_color(&canvas, 1, 1, SK_ColorGREEN);
+  draw_point_color(&canvas, 0, 0, SkColors::kGreen);
+  draw_point_color(&canvas, 0, 1, SkColors::kBlue);
+  draw_point_color(&canvas, 1, 0, SkColors::kBlue);
+  draw_point_color(&canvas, 1, 1, SkColors::kGreen);
 
   gfx::Size tile_size(2, 2);
   ResourceId resource;
@@ -4013,10 +3843,10 @@ TEST_F(SoftwareRendererPixelTest, TextureDrawQuadNearestNeighbor) {
   SkBitmap bitmap;
   bitmap.allocN32Pixels(2, 2);
   SkCanvas canvas(bitmap, SkSurfaceProps{});
-  draw_point_color(&canvas, 0, 0, SK_ColorGREEN);
-  draw_point_color(&canvas, 0, 1, SK_ColorBLUE);
-  draw_point_color(&canvas, 1, 0, SK_ColorBLUE);
-  draw_point_color(&canvas, 1, 1, SK_ColorGREEN);
+  draw_point_color(&canvas, 0, 0, SkColors::kGreen);
+  draw_point_color(&canvas, 0, 1, SkColors::kBlue);
+  draw_point_color(&canvas, 1, 0, SkColors::kBlue);
+  draw_point_color(&canvas, 1, 1, SkColors::kGreen);
 
   gfx::Size tile_size(2, 2);
   ResourceId resource =
@@ -4043,7 +3873,7 @@ TEST_F(SoftwareRendererPixelTest, TextureDrawQuadNearestNeighbor) {
   auto* quad = pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
   quad->SetNew(shared_state, viewport, viewport, needs_blending,
                mapped_resource, false, gfx::PointF(0, 0), gfx::PointF(1, 1),
-               SK_ColorBLACK, vertex_opacity, false, nearest_neighbor,
+               SkColors::kBlack, vertex_opacity, false, nearest_neighbor,
                /*secure_output_only=*/false, gfx::ProtectedVideoType::kClear);
 
   AggregatedRenderPassList pass_list;
@@ -4066,10 +3896,10 @@ TEST_F(SoftwareRendererPixelTest, TextureDrawQuadLinear) {
   bitmap.allocN32Pixels(2, 2);
   {
     SkCanvas canvas(bitmap, SkSurfaceProps{});
-    draw_point_color(&canvas, 0, 0, SK_ColorGREEN);
-    draw_point_color(&canvas, 0, 1, SK_ColorBLUE);
-    draw_point_color(&canvas, 1, 0, SK_ColorBLUE);
-    draw_point_color(&canvas, 1, 1, SK_ColorGREEN);
+    draw_point_color(&canvas, 0, 0, SkColors::kGreen);
+    draw_point_color(&canvas, 0, 1, SkColors::kBlue);
+    draw_point_color(&canvas, 1, 0, SkColors::kBlue);
+    draw_point_color(&canvas, 1, 1, SkColors::kGreen);
   }
 
   gfx::Size tile_size(2, 2);
@@ -4097,7 +3927,7 @@ TEST_F(SoftwareRendererPixelTest, TextureDrawQuadLinear) {
   auto* quad = pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
   quad->SetNew(shared_state, viewport, viewport, needs_blending,
                mapped_resource, /*premultiplied=*/true, gfx::PointF(0, 0),
-               gfx::PointF(1, 1), SK_ColorBLACK, vertex_opacity, false,
+               gfx::PointF(1, 1), SkColors::kBlack, vertex_opacity, false,
                nearest_neighbor, /*secure_output=*/false,
                gfx::ProtectedVideoType::kClear);
 
@@ -4135,10 +3965,10 @@ TEST_F(SoftwareRendererPixelTest, PictureDrawQuadNonIdentityScale) {
       cc::FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
 
   cc::PaintFlags red_flags;
-  red_flags.setColor(SK_ColorRED);
+  red_flags.setColor(SkColors::kRed);
   green_recording->add_draw_rect_with_flags(viewport, red_flags);
   cc::PaintFlags green_flags;
-  green_flags.setColor(SK_ColorGREEN);
+  green_flags.setColor(SkColors::kGreen);
   green_recording->add_draw_rect_with_flags(green_rect1, green_flags);
   green_recording->add_draw_rect_with_flags(green_rect2, green_flags);
   green_recording->Rerecord();
@@ -4174,7 +4004,7 @@ TEST_F(SoftwareRendererPixelTest, PictureDrawQuadNonIdentityScale) {
   auto* bottom_right_color_quad =
       pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   bottom_right_color_quad->SetNew(bottom_right_green_shared_state, viewport,
-                                  viewport, SK_ColorGREEN, false);
+                                  viewport, SkColors::kGreen, false);
 
   // Add two blue checkerboards taking up the bottom left and top right,
   // but use content scales as content rects to make this happen.
@@ -4203,7 +4033,7 @@ TEST_F(SoftwareRendererPixelTest, PictureDrawQuadNonIdentityScale) {
   }
 
   cc::PaintFlags blue_flags;
-  blue_flags.setColor(SK_ColorBLUE);
+  blue_flags.setColor(SkColors::kBlue);
   recording->add_draw_rectf_with_flags(blue_layer_rect1, blue_flags);
   recording->add_draw_rectf_with_flags(blue_layer_rect2, blue_flags);
   recording->Rerecord();
@@ -4236,7 +4066,7 @@ TEST_F(SoftwareRendererPixelTest, PictureDrawQuadNonIdentityScale) {
       gfx::MaskFilterInfo());
   auto* half_color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   half_color_quad->SetNew(half_green_shared_state, half_green_rect,
-                          half_green_rect, SK_ColorGREEN, false);
+                          half_green_rect, SkColors::kGreen, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -4283,12 +4113,13 @@ TEST_P(RendererPixelTestWithFlippedOutputSurface, ExplicitFlipTest) {
   gfx::Rect blue_rect(0, 0, this->device_viewport_size_.width(),
                       this->device_viewport_size_.height() / 2);
   auto* blue = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(shared_state, blue_rect, blue_rect, SK_ColorBLUE, false);
+  blue->SetNew(shared_state, blue_rect, blue_rect, SkColors::kBlue, false);
   gfx::Rect yellow_rect(0, this->device_viewport_size_.height() / 2,
                         this->device_viewport_size_.width(),
                         this->device_viewport_size_.height() / 2);
   auto* yellow = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SK_ColorYELLOW, false);
+  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SkColors::kYellow,
+                 false);
 
   SharedQuadState* pass_shared_state =
       CreateTestSharedQuadState(gfx::Transform(), pass_rect, root_pass.get(),
@@ -4328,12 +4159,13 @@ TEST_P(RendererPixelTestWithFlippedOutputSurface, CheckChildPassUnflipped) {
   gfx::Rect blue_rect(0, 0, this->device_viewport_size_.width(),
                       this->device_viewport_size_.height() / 2);
   auto* blue = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(shared_state, blue_rect, blue_rect, SK_ColorBLUE, false);
+  blue->SetNew(shared_state, blue_rect, blue_rect, SkColors::kBlue, false);
   gfx::Rect yellow_rect(0, this->device_viewport_size_.height() / 2,
                         this->device_viewport_size_.width(),
                         this->device_viewport_size_.height() / 2);
   auto* yellow = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SK_ColorYELLOW, false);
+  yellow->SetNew(shared_state, yellow_rect, yellow_rect, SkColors::kYellow,
+                 false);
 
   SharedQuadState* pass_shared_state =
       CreateTestSharedQuadState(gfx::Transform(), pass_rect, root_pass.get(),
@@ -4374,11 +4206,11 @@ TEST_P(GPURendererPixelTest, CheckReadbackSubset) {
                       this->device_viewport_size_.width() * 3 / 4,
                       this->device_viewport_size_.height() * 3 / 4);
   auto* blue = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(shared_state, blue_rect, blue_rect, SK_ColorBLUE, false);
+  blue->SetNew(shared_state, blue_rect, blue_rect, SkColors::kBlue, false);
   gfx::Rect green_rect(0, 0, this->device_viewport_size_.width(),
                        this->device_viewport_size_.height());
   auto* green = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  green->SetNew(shared_state, green_rect, green_rect, SK_ColorGREEN, false);
+  green->SetNew(shared_state, green_rect, green_rect, SkColors::kGreen, false);
 
   SharedQuadState* pass_shared_state =
       CreateTestSharedQuadState(gfx::Transform(), pass_rect, root_pass.get(),
@@ -4404,7 +4236,7 @@ TEST_P(GPURendererPixelTest, CheckReadbackSubset) {
 TEST_P(GPURendererPixelTest, TextureQuadBatching) {
   // This test verifies that multiple texture quads using the same resource
   // get drawn correctly.  It implicitly is trying to test that the
-  // GLRenderer does the right thing with its draw quad cache.
+  // renderer does the right thing with its draw quad cache.
 
   gfx::Rect rect(this->device_viewport_size_);
   bool needs_blending = false;
@@ -4424,8 +4256,8 @@ TEST_P(GPURendererPixelTest, TextureQuadBatching) {
   SkPaint paint;
   paint.setStyle(SkPaint::kStroke_Style);
   paint.setStrokeWidth(SkIntToScalar(4));
-  paint.setColor(SK_ColorGREEN);
-  canvas.clear(SK_ColorWHITE);
+  paint.setColor(SkColors::kGreen);
+  canvas.clear(SkColors::kWhite);
   gfx::Rect inset_rect = rect;
   while (!inset_rect.IsEmpty()) {
     inset_rect.Inset(gfx::Insets::TLBR(6, 6, 4, 4));
@@ -4472,7 +4304,7 @@ TEST_P(GPURendererPixelTest, TextureQuadBatching) {
       auto* texture_quad = pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
       texture_quad->SetNew(
           shared_state, layer_rect, layer_rect, needs_blending, mapped_resource,
-          true, uv_rect.origin(), uv_rect.bottom_right(), SK_ColorWHITE,
+          true, uv_rect.origin(), uv_rect.bottom_right(), SkColors::kWhite,
           vertex_opacity, false, false, /*secure_output_only=*/false,
           gfx::ProtectedVideoType::kClear);
     }
@@ -4504,10 +4336,10 @@ TEST_P(GPURendererPixelTest, TileQuadClamping) {
   bitmap.allocN32Pixels(tile_size.width(), tile_size.height());
   SkCanvas canvas(bitmap, SkSurfaceProps{});
   SkPaint red;
-  red.setColor(SK_ColorRED);
+  red.setColor(SkColors::kRed);
   canvas.drawRect(SkRect::MakeWH(tile_size.width(), tile_size.height()), red);
   SkPaint green;
-  green.setColor(SK_ColorGREEN);
+  green.setColor(SkColors::kGreen);
   canvas.drawRect(SkRect::MakeWH(layer_size.width(), layer_size.height()),
                   green);
 
@@ -4548,7 +4380,7 @@ TEST_P(GPURendererPixelTest, TileQuadClamping) {
       CreateTestSharedQuadState(gfx::Transform(), viewport, pass.get(),
                                 gfx::MaskFilterInfo());
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(background_shared, viewport, viewport, SK_ColorGREEN,
+  color_quad->SetNew(background_shared, viewport, viewport, SkColors::kGreen,
                      false);
 
   AggregatedRenderPassList pass_list;
@@ -4576,35 +4408,26 @@ TEST_P(RendererPixelTest, RoundedCornerSimpleSolidDrawQuad) {
   gfx::RRectF rounded_corner_rrect(gfx::RectF(blue_rect), kCornerRadius);
   SharedQuadState* shared_state_rounded = CreateTestSharedQuadState(
       quad_to_target_transform, viewport_rect, root_pass.get(),
-      gfx::MaskFilterInfo(rounded_corner_rrect, gfx::LinearGradient()));
+      gfx::MaskFilterInfo(rounded_corner_rrect));
 
   auto* blue = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(shared_state_rounded, blue_rect, blue_rect, SK_ColorBLUE, false);
+  blue->SetNew(shared_state_rounded, blue_rect, blue_rect, SkColors::kBlue,
+               false);
 
   SharedQuadState* shared_state_normal = CreateTestSharedQuadState(
       quad_to_target_transform, viewport_rect, root_pass.get(), gfx::MaskFilterInfo());
 
   auto* white = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  white->SetNew(shared_state_normal, red_rect, red_rect, SK_ColorWHITE, false);
+  white->SetNew(shared_state_normal, red_rect, red_rect, SkColors::kWhite,
+                false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(root_pass));
 
-  if (is_gl_renderer()) {
-    // GL Renderer should have an exact match as that is the reference point.
-    EXPECT_TRUE(this->RunPixelTest(
-        &pass_list,
-        base::FilePath(FILE_PATH_LITERAL("rounded_corner_simple.png")),
-        cc::ExactPixelComparator(true)));
-  } else {
-    // Software/skia renderer uses skia rrect to create rounded corner clip.
-    // This results in a different corner path due to a different anti aliasing
-    // approach than the fragment shader in gl renderer.
-    EXPECT_TRUE(this->RunPixelTest(
-        &pass_list,
-        base::FilePath(FILE_PATH_LITERAL("rounded_corner_simple.png")),
-        cc::FuzzyPixelComparator(true, 0.55f, 0.f, 255.f, 255, 0)));
-  }
+  EXPECT_TRUE(this->RunPixelTest(
+      &pass_list,
+      base::FilePath(FILE_PATH_LITERAL("rounded_corner_simple.png")),
+      cc::FuzzyPixelComparator(true, 0.55f, 0.f, 255.f, 255, 0)));
 }
 
 TEST_P(GPURendererPixelTest, RoundedCornerSimpleTextureDrawQuad) {
@@ -4624,7 +4447,7 @@ TEST_P(GPURendererPixelTest, RoundedCornerSimpleTextureDrawQuad) {
   gfx::RRectF rounded_corner_rrect(gfx::RectF(blue_rect), kCornerRadius);
   SharedQuadState* shared_state_rounded = CreateTestSharedQuadState(
       quad_to_target_transform, viewport_rect, root_pass.get(),
-      gfx::MaskFilterInfo(rounded_corner_rrect, gfx::LinearGradient()));
+      gfx::MaskFilterInfo(rounded_corner_rrect));
 
   const uint8_t colors[] = {0, 0, 255, 255, 0, 0, 255, 255,
                             0, 0, 255, 255, 0, 0, 255, 255};
@@ -4647,33 +4470,23 @@ TEST_P(GPURendererPixelTest, RoundedCornerSimpleTextureDrawQuad) {
   float vertex_opacity[4] = {1.0f, 1.0f, 1.0f, 1.0f};
   blue->SetNew(shared_state_rounded, blue_rect, blue_rect, needs_blending,
                mapped_resource, true, uv_top_left, uv_bottom_right,
-               SK_ColorBLACK, vertex_opacity, flipped, nearest_neighbor,
+               SkColors::kBlack, vertex_opacity, flipped, nearest_neighbor,
                /*secure_output_only=*/false, gfx::ProtectedVideoType::kClear);
 
   SharedQuadState* shared_state_normal = CreateTestSharedQuadState(
       quad_to_target_transform, viewport_rect, root_pass.get(), gfx::MaskFilterInfo());
 
   auto* white = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  white->SetNew(shared_state_normal, red_rect, red_rect, SK_ColorWHITE, false);
+  white->SetNew(shared_state_normal, red_rect, red_rect, SkColors::kWhite,
+                false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(root_pass));
 
-  if (is_gl_renderer()) {
-    // GL Renderer should have an exact match as that is the reference point.
-    EXPECT_TRUE(this->RunPixelTest(
-        &pass_list,
-        base::FilePath(FILE_PATH_LITERAL("rounded_corner_simple.png")),
-        cc::ExactPixelComparator(true)));
-  } else {
-    // SkiaRenderer uses skia rrect to create rounded corner clip. This results
-    // in a different corner path due to a different anti aliasing approach than
-    // the fragment shader in gl renderer.
-    EXPECT_TRUE(this->RunPixelTest(
-        &pass_list,
-        base::FilePath(FILE_PATH_LITERAL("rounded_corner_simple.png")),
-        cc::FuzzyPixelComparator(true, 0.6f, 0.f, 255.f, 255, 0)));
-  }
+  EXPECT_TRUE(this->RunPixelTest(
+      &pass_list,
+      base::FilePath(FILE_PATH_LITERAL("rounded_corner_simple.png")),
+      cc::FuzzyPixelComparator(true, 0.6f, 0.f, 255.f, 255, 0)));
 }
 
 TEST_P(RendererPixelTest, RoundedCornerOnRenderPass) {
@@ -4702,9 +4515,9 @@ TEST_P(RendererPixelTest, RoundedCornerOnRenderPass) {
   quad_to_target_transform.Translate(blue_offset_from_target);
   SharedQuadState* shared_state_with_rrect = CreateTestSharedQuadState(
       quad_to_target_transform, child_pass_local_rect, child_pass.get(),
-      gfx::MaskFilterInfo(blue_rrect, gfx::LinearGradient()));
+      gfx::MaskFilterInfo(blue_rrect));
   auto* blue = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(shared_state_with_rrect, blue_rect, blue_rect, SK_ColorBLUE,
+  blue->SetNew(shared_state_with_rrect, blue_rect, blue_rect, SkColors::kBlue,
                false);
 
   SharedQuadState* shared_state_without_rrect = CreateTestSharedQuadState(
@@ -4713,17 +4526,17 @@ TEST_P(RendererPixelTest, RoundedCornerOnRenderPass) {
   yellow_rect.Offset(30, -60);
   auto* yellow = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   yellow->SetNew(shared_state_without_rrect, yellow_rect, yellow_rect,
-                 SK_ColorYELLOW, false);
+                 SkColors::kYellow, false);
 
   gfx::Rect white_rect = child_pass_local_rect;
   auto* white = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   white->SetNew(shared_state_without_rrect, white_rect, white_rect,
-                SK_ColorWHITE, false);
+                SkColors::kWhite, false);
 
   gfx::RRectF rounded_corner_bounds(gfx::RectF(pass_rect), kCornerRadius);
   SharedQuadState* pass_shared_state =
       CreateTestSharedQuadState(gfx::Transform(), pass_rect, root_pass.get(),
-                                gfx::MaskFilterInfo(rounded_corner_bounds, gfx::LinearGradient()));
+                                gfx::MaskFilterInfo(rounded_corner_bounds));
   CreateTestRenderPassDrawQuad(pass_shared_state, pass_rect, child_pass_id,
                                root_pass.get());
 
@@ -4735,6 +4548,125 @@ TEST_P(RendererPixelTest, RoundedCornerOnRenderPass) {
   path = path.InsertBeforeExtensionASCII(this->renderer_str());
   EXPECT_TRUE(this->RunPixelTest(&pass_list, path,
                                  cc::FuzzyPixelOffByOneComparator(true)));
+}
+
+TEST_P(GPURendererPixelTest, LinearGradientOnRenderPass) {
+  gfx::Rect viewport_rect(this->device_viewport_size_);
+  constexpr int kCornerRadius = 20;
+
+  AggregatedRenderPassId root_pass_id{1};
+  auto root_pass = CreateTestRootRenderPass(root_pass_id, viewport_rect);
+
+  AggregatedRenderPassId child_pass_id{2};
+  gfx::Rect pass_rect(this->device_viewport_size_);
+  gfx::Rect child_pass_local_rect = gfx::Rect(pass_rect.size());
+  gfx::Transform transform_to_root;
+  transform_to_root.Translate(pass_rect.OffsetFromOrigin());
+  auto child_pass = CreateTestRenderPass(child_pass_id, child_pass_local_rect,
+                                         transform_to_root);
+
+  gfx::Rect white_rect = child_pass_local_rect;
+  SharedQuadState* shared_state_without_rrect =
+      CreateTestSharedQuadState(gfx::Transform(), child_pass_local_rect,
+                                child_pass.get(), gfx::MaskFilterInfo());
+  auto* white = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
+  white->SetNew(shared_state_without_rrect, white_rect, white_rect,
+                SkColors::kWhite, false);
+
+  gfx::RRectF rounded_corner_bounds(gfx::RectF(pass_rect), kCornerRadius);
+  gfx::LinearGradient gradient_mask(330);
+  gradient_mask.AddStep(/*fraction=*/0, /*alpha=*/0);
+  gradient_mask.AddStep(.5, 255);
+  gradient_mask.AddStep(1, 255);
+  SharedQuadState* pass_shared_state = CreateTestSharedQuadState(
+      gfx::Transform(), pass_rect, root_pass.get(),
+      gfx::MaskFilterInfo(rounded_corner_bounds, gradient_mask));
+  CreateTestRenderPassDrawQuad(pass_shared_state, pass_rect, child_pass_id,
+                               root_pass.get());
+
+  AggregatedRenderPassList pass_list;
+  pass_list.push_back(std::move(child_pass));
+  pass_list.push_back(std::move(root_pass));
+
+  EXPECT_TRUE(this->RunPixelTest(
+      &pass_list,
+      base::FilePath(FILE_PATH_LITERAL("linear_gradient_render_pass.png")),
+      cc::FuzzyPixelComparator(/*discard_alpha=*/true,
+                               /*error_pixels_percentage_limit=*/0.6f,
+                               /*small_error_pixels_percentage_limit=*/0.f,
+                               /*avg_abs_error_limit=*/255.f,
+                               /*max_abs_error_limit=*/255,
+                               /*small_error_threshold=*/0)));
+}
+
+TEST_P(GPURendererPixelTest, MultiLinearGradientOnRenderPass) {
+  gfx::Rect viewport_rect(this->device_viewport_size_);
+  constexpr int kCornerRadius = 20;
+  constexpr int kInset = 20;
+  constexpr int kBlueCornerRadius = 10;
+
+  AggregatedRenderPassId root_pass_id{1};
+  auto root_pass = CreateTestRootRenderPass(root_pass_id, viewport_rect);
+
+  AggregatedRenderPassId child_pass_id{2};
+  gfx::Rect pass_rect(this->device_viewport_size_);
+  pass_rect.Inset(kInset);
+  gfx::Rect child_pass_local_rect = gfx::Rect(pass_rect.size());
+  gfx::Transform transform_to_root;
+  transform_to_root.Translate(pass_rect.OffsetFromOrigin());
+  auto child_pass = CreateTestRenderPass(child_pass_id, child_pass_local_rect,
+                                         transform_to_root);
+
+  gfx::Rect blue_rect = child_pass_local_rect;
+  gfx::Vector2dF blue_offset_from_target(-30, 40);
+  gfx::RRectF blue_rrect(gfx::RectF(blue_rect), kBlueCornerRadius);
+  blue_rrect.Offset(blue_offset_from_target);
+  gfx::LinearGradient blue_gradient(0);
+  blue_gradient.AddStep(/*fraction=*/0, /*alpha=*/255);
+  blue_gradient.AddStep(1, 0);
+
+  gfx::Transform quad_to_target_transform;
+  quad_to_target_transform.Translate(blue_offset_from_target);
+  SharedQuadState* shared_state_with_rrect = CreateTestSharedQuadState(
+      quad_to_target_transform, child_pass_local_rect, child_pass.get(),
+      gfx::MaskFilterInfo(blue_rrect, blue_gradient));
+  auto* blue = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
+  blue->SetNew(shared_state_with_rrect, blue_rect, blue_rect, SkColors::kBlue,
+               false);
+
+  gfx::Rect white_rect = child_pass_local_rect;
+  SharedQuadState* shared_state_without_rrect =
+      CreateTestSharedQuadState(gfx::Transform(), child_pass_local_rect,
+                                child_pass.get(), gfx::MaskFilterInfo());
+  auto* white = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
+  white->SetNew(shared_state_without_rrect, white_rect, white_rect,
+                SkColors::kWhite, false);
+
+  gfx::RRectF rounded_corner_bounds(gfx::RectF(pass_rect), kCornerRadius);
+  gfx::LinearGradient gradient_mask(-30);
+  gradient_mask.AddStep(/*fraction=*/0, /*alpha=*/0);
+  gradient_mask.AddStep(.5, 255);
+  gradient_mask.AddStep(1, 255);
+  SharedQuadState* pass_shared_state = CreateTestSharedQuadState(
+      gfx::Transform(), pass_rect, root_pass.get(),
+      gfx::MaskFilterInfo(rounded_corner_bounds, gradient_mask));
+  CreateTestRenderPassDrawQuad(pass_shared_state, pass_rect, child_pass_id,
+                               root_pass.get());
+
+  AggregatedRenderPassList pass_list;
+  pass_list.push_back(std::move(child_pass));
+  pass_list.push_back(std::move(root_pass));
+
+  EXPECT_TRUE(this->RunPixelTest(
+      &pass_list,
+      base::FilePath(
+          FILE_PATH_LITERAL("multi_linear_gradient_render_pass.png")),
+      cc::FuzzyPixelComparator(/*discard_alpha=*/true,
+                               /*error_pixels_percentage_limit=*/0.6f,
+                               /*small_error_pixels_percentage_limit=*/0.f,
+                               /*avg_abs_error_limit=*/255.f,
+                               /*max_abs_error_limit=*/255,
+                               /*small_error_threshold=*/0)));
 }
 
 TEST_P(RendererPixelTest, RoundedCornerMultiRadii) {
@@ -4754,41 +4686,34 @@ TEST_P(RendererPixelTest, RoundedCornerMultiRadii) {
   gfx::Transform quad_to_target_transform;
   SharedQuadState* shared_state_normal = CreateTestSharedQuadState(
       quad_to_target_transform, pass_rect, root_pass.get(),
-      gfx::MaskFilterInfo(rounded_corner_bounds, gfx::LinearGradient()));
+      gfx::MaskFilterInfo(rounded_corner_bounds));
   auto* blue = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  blue->SetNew(shared_state_normal, blue_rect, blue_rect, SK_ColorBLUE, false);
+  blue->SetNew(shared_state_normal, blue_rect, blue_rect, SkColors::kBlue,
+               false);
 
   gfx::Rect yellow_rect = blue_rect;
   yellow_rect.Offset(0, blue_rect.height());
 
   auto* yellow = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  yellow->SetNew(shared_state_normal, yellow_rect, yellow_rect, SK_ColorYELLOW,
-                 false);
+  yellow->SetNew(shared_state_normal, yellow_rect, yellow_rect,
+                 SkColors::kYellow, false);
 
   SharedQuadState* sqs_white = CreateTestSharedQuadState(
       quad_to_target_transform, viewport_rect, root_pass.get(), gfx::MaskFilterInfo());
   gfx::Rect white_rect = gfx::Rect(this->device_viewport_size_);
   auto* white = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  white->SetNew(sqs_white, white_rect, white_rect, SK_ColorWHITE, false);
+  white->SetNew(sqs_white, white_rect, white_rect, SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(root_pass));
 
-  if (is_gl_renderer()) {
-    // GL Renderer should have an exact match as that is the reference point.
-    EXPECT_TRUE(this->RunPixelTest(
-        &pass_list,
-        base::FilePath(FILE_PATH_LITERAL("rounded_corner_multi_radii.png")),
-        cc::ExactPixelComparator(true)));
-  } else {
-    // Software/skia renderer uses skia rrect to create rounded corner clip.
-    // This results in a different corner path due to a different anti aliasing
-    // approach than the fragment shader in gl renderer.
-    EXPECT_TRUE(this->RunPixelTest(
-        &pass_list,
-        base::FilePath(FILE_PATH_LITERAL("rounded_corner_multi_radii.png")),
-        cc::FuzzyPixelComparator(true, 0.55f, 0.f, 255.f, 255, 0)));
-  }
+  // Software/skia renderer uses skia rrect to create rounded corner clip.
+  // This results in a different corner path due to a different anti aliasing
+  // approach than the fragment shader in gl renderer.
+  EXPECT_TRUE(this->RunPixelTest(
+      &pass_list,
+      base::FilePath(FILE_PATH_LITERAL("rounded_corner_multi_radii.png")),
+      cc::FuzzyPixelComparator(true, 0.55f, 0.f, 255.f, 255, 0)));
 }
 
 TEST_P(RendererPixelTest, RoundedCornerMultipleQads) {
@@ -4829,59 +4754,47 @@ TEST_P(RendererPixelTest, RoundedCornerMultipleQads) {
   ll_rect.set_width(ul_rect.width());
   ll_rect.set_height(lr_rect.height());
 
-  SharedQuadState* shared_state_normal_ul = CreateTestSharedQuadState(
-      gfx::Transform(), pass_rect, root_pass.get(),
-      gfx::MaskFilterInfo(rounded_corner_bounds_ul, gfx::LinearGradient()));
+  SharedQuadState* shared_state_normal_ul =
+      CreateTestSharedQuadState(gfx::Transform(), pass_rect, root_pass.get(),
+                                gfx::MaskFilterInfo(rounded_corner_bounds_ul));
 
-  SharedQuadState* shared_state_normal_ur = CreateTestSharedQuadState(
-      gfx::Transform(), pass_rect, root_pass.get(),
-      gfx::MaskFilterInfo(rounded_corner_bounds_ur,
-      gfx::LinearGradient()));
+  SharedQuadState* shared_state_normal_ur =
+      CreateTestSharedQuadState(gfx::Transform(), pass_rect, root_pass.get(),
+                                gfx::MaskFilterInfo(rounded_corner_bounds_ur));
 
-  SharedQuadState* shared_state_normal_lr = CreateTestSharedQuadState(
-      gfx::Transform(), pass_rect, root_pass.get(),
-      gfx::MaskFilterInfo(rounded_corner_bounds_lr,
-      gfx::LinearGradient()));
+  SharedQuadState* shared_state_normal_lr =
+      CreateTestSharedQuadState(gfx::Transform(), pass_rect, root_pass.get(),
+                                gfx::MaskFilterInfo(rounded_corner_bounds_lr));
 
-  SharedQuadState* shared_state_normal_ll = CreateTestSharedQuadState(
-      gfx::Transform(), pass_rect, root_pass.get(),
-      gfx::MaskFilterInfo(rounded_corner_bounds_ll,
-      gfx::LinearGradient()));
+  SharedQuadState* shared_state_normal_ll =
+      CreateTestSharedQuadState(gfx::Transform(), pass_rect, root_pass.get(),
+                                gfx::MaskFilterInfo(rounded_corner_bounds_ll));
 
   auto* ul = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   auto* ur = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   auto* lr = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
   auto* ll = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
 
-  ul->SetNew(shared_state_normal_ul, ul_rect, ul_rect, SK_ColorRED, false);
-  ur->SetNew(shared_state_normal_ur, ur_rect, ur_rect, SK_ColorGREEN, false);
-  lr->SetNew(shared_state_normal_lr, lr_rect, lr_rect, SK_ColorBLUE, false);
-  ll->SetNew(shared_state_normal_ll, ll_rect, ll_rect, SK_ColorYELLOW, false);
+  ul->SetNew(shared_state_normal_ul, ul_rect, ul_rect, SkColors::kRed, false);
+  ur->SetNew(shared_state_normal_ur, ur_rect, ur_rect, SkColors::kGreen, false);
+  lr->SetNew(shared_state_normal_lr, lr_rect, lr_rect, SkColors::kBlue, false);
+  ll->SetNew(shared_state_normal_ll, ll_rect, ll_rect, SkColors::kYellow,
+             false);
 
   SharedQuadState* sqs_white = CreateTestSharedQuadState(
       gfx::Transform(), viewport_rect, root_pass.get(), gfx::MaskFilterInfo());
   gfx::Rect white_rect = gfx::Rect(this->device_viewport_size_);
   auto* white = root_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  white->SetNew(sqs_white, white_rect, white_rect, SK_ColorWHITE, false);
+  white->SetNew(sqs_white, white_rect, white_rect, SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(root_pass));
 
-  // GL Renderer should have an exact match as that is the reference point.
-  // Software/skia renderer use skia rrect to create rounded corner clip.
-  // This results in a different corner path due to a different anti aliasing
-  // approach than the fragment shader in gl renderer.
-  std::unique_ptr<cc::PixelComparator> comparator;
-  comparator.reset(
-      is_gl_renderer()
-          ? static_cast<cc::PixelComparator*>(
-                new cc::ExactPixelComparator(true))
-          : static_cast<cc::PixelComparator*>(
-                new cc::FuzzyPixelComparator(true, 0.55f, 0.f, 255.f, 255, 0)));
+  cc::FuzzyPixelComparator comparator(true, 0.55f, 0.f, 255.f, 255, 0);
   EXPECT_TRUE(this->RunPixelTest(
       &pass_list,
       base::FilePath(FILE_PATH_LITERAL("rounded_corner_multi_quad.png")),
-      *comparator));
+      comparator));
 }
 
 class RendererPixelTestWithOverdrawFeedback : public VizPixelTestWithParam {
@@ -4899,7 +4812,8 @@ TEST_P(RendererPixelTestWithOverdrawFeedback, TranslucentRectangles) {
   gfx::Transform transform_to_root;
   auto pass = CreateTestRenderPass(id, rect, transform_to_root);
 
-  CreateTestAxisAlignedQuads(rect, 0x10444444, 0x10CCCCCC, true, false,
+  CreateTestAxisAlignedQuads(rect, SkColor4f{0.267f, 0.267f, 0.267f, 0.063f},
+                             SkColor4f{0.8f, 0.8f, 0.8f, 0.063f}, true, false,
                              pass.get());
 
   gfx::Transform bg_quad_to_target_transform;
@@ -4908,24 +4822,17 @@ TEST_P(RendererPixelTestWithOverdrawFeedback, TranslucentRectangles) {
                                 gfx::MaskFilterInfo());
 
   auto* bg = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  bg->SetNew(bg_shared_state, rect, rect, SK_ColorBLACK, false);
+  bg->SetNew(bg_shared_state, rect, rect, SkColors::kBlack, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
 
-  if (is_gl_renderer()) {
-    EXPECT_TRUE(this->RunPixelTest(
-        &pass_list,
-        base::FilePath(FILE_PATH_LITERAL("translucent_rectangles.png")),
-        cc::ExactPixelComparator(true)));
-  } else {
-    // TODO(xing.xu): investigate why overdraw feedback has small difference
-    // (http://crbug.com/909971)
-    EXPECT_TRUE(this->RunPixelTest(
-        &pass_list,
-        base::FilePath(FILE_PATH_LITERAL("skia_translucent_rectangles.png")),
-        cc::FuzzyPixelComparator(false, 2.f, 0.f, 256.f, 256, 0.f)));
-  }
+  // TODO(xing.xu): investigate why overdraw feedback has small difference
+  // (http://crbug.com/909971)
+  EXPECT_TRUE(this->RunPixelTest(
+      &pass_list,
+      base::FilePath(FILE_PATH_LITERAL("translucent_rectangles.png")),
+      cc::FuzzyPixelComparator(false, 2.f, 0.f, 256.f, 256, 0.f)));
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -4962,28 +4869,13 @@ class ColorTransformPixelTest
     }
     this->display_color_spaces_ =
         gfx::DisplayColorSpaces(this->dst_color_space_);
-    float sdr_max_luminance_nits =
-        this->display_color_spaces_.GetSDRMaxLuminanceNits();
-    if (src_color_space_.GetSDRWhiteLevel(&sdr_max_luminance_nits)) {
-      this->display_color_spaces_.SetSDRMaxLuminanceNits(
-          sdr_max_luminance_nits);
-    }
     this->premultiplied_alpha_ = std::get<3>(GetParam());
   }
 
   void Basic() {
-    // Skip piecewise transfer functions because SkColorSpace (needed for
-    // CopyOutputResult::AsSkBitmap) doesn't support them..
-    if ((src_color_space_.GetTransferID() == TransferID::PIECEWISE_HDR ||
-         dst_color_space_.GetTransferID() == TransferID::PIECEWISE_HDR)) {
-      LOG(ERROR) << "Skipping piecewise HDR function";
-      return;
-    }
-
     if (src_color_space_.GetTransferID() == TransferID::PQ &&
         !dst_color_space_.IsHDR()) {
-      LOG(ERROR) << "Skipping tonemapped output";
-      return;
+      GTEST_SKIP() << "Skipping tonemapped output";
     }
 
     gfx::Rect rect(this->device_viewport_size_);
@@ -5018,8 +4910,8 @@ class ColorTransformPixelTest
     }
 
     gfx::ColorTransform::Options options;
-    options.sdr_max_luminance_nits =
-        display_color_spaces_.GetSDRMaxLuminanceNits();
+    options.tone_map_pq_and_hlg_to_dst = true;
+    options.sdr_max_luminance_nits = gfx::ColorSpace::kDefaultSDRWhiteLevel;
     std::unique_ptr<gfx::ColorTransform> transform =
         gfx::ColorTransform::NewColorTransform(this->src_color_space_,
                                                this->dst_color_space_, options);
@@ -5075,20 +4967,29 @@ class ColorTransformPixelTest
       float vertex_opacity[4] = {1.0f, 1.0f, 1.0f, 1.0f};
       quad->SetNew(shared_state, rect, rect, needs_blending, mapped_resource,
                    this->premultiplied_alpha_, uv_top_left, uv_bottom_right,
-                   SK_ColorBLACK, vertex_opacity, flipped, nearest_neighbor,
-                   /*secure_output_only=*/false,
-                   gfx::ProtectedVideoType::kClear);
+                   SkColors::kBlack, vertex_opacity, flipped, nearest_neighbor,
+                   /*secure_output=*/false, gfx::ProtectedVideoType::kClear);
 
       auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-      color_quad->SetNew(shared_state, rect, rect, SK_ColorBLACK, false);
+      color_quad->SetNew(shared_state, rect, rect, SkColors::kBlack, false);
     }
 
     AggregatedRenderPassList pass_list;
     pass_list.push_back(std::move(pass));
 
-    // Allow a difference of 2 bytes in comparison for shader-based transforms,
-    // and 4 bytes for LUT-based transforms (determined empirically).
-    cc::FuzzyPixelComparator comparator(false, 100.f, 0.f, 2.f, 2, 0);
+    // Allow a difference of 2 bytes in comparison for most cases.
+    float avg_abs_error_limit = 2.0f;
+    int max_abs_error_limit = 2;
+#if BUILDFLAG(IS_FUCHSIA)
+    if (src_color_space_.GetTransferID() == TransferID::PQ) {
+      // Fuchsia+SwiftShader/Vulkan has higher error on some pixels with HDR
+      // color spaces. See https://crbug.com/1312141.
+      max_abs_error_limit = 5;
+    }
+#endif
+
+    cc::FuzzyPixelComparator comparator(false, 100.f, 0.f, avg_abs_error_limit,
+                                        max_abs_error_limit, 0);
     EXPECT_TRUE(
         this->RunPixelTest(&pass_list, &expected_output_colors, comparator))
         << " src:" << src_color_space_ << ", dst:" << dst_color_space_;
@@ -5099,13 +5000,14 @@ class ColorTransformPixelTest
   bool premultiplied_alpha_ = false;
 };
 
-// crbug.com/1312043 Disable the test due to flaky.
-#if (BUILDFLAG(IS_LINUX) && defined(THREAD_SANITIZER)) || BUILDFLAG(IS_FUCHSIA)
-#define MAYBE_Basic DISABLED_Basic
-#else
-#define MAYBE_Basic Basic
+TEST_P(ColorTransformPixelTest, Basic) {
+#if BUILDFLAG(IS_LINUX) && defined(THREAD_SANITIZER)
+  // Test is flaking with failed large allocations under TSAN when using
+  // SkiaRenderer with GL backend. See https://crbug.com/1320955.
+  if (renderer_type() == RendererType::kSkiaGL)
+    return;
 #endif
-TEST_P(ColorTransformPixelTest, MAYBE_Basic) {
+
   Basic();
 }
 
@@ -5121,10 +5023,7 @@ gfx::ColorSpace src_color_spaces[] = {
     gfx::ColorSpace(PrimaryID::BT709, TransferID::SMPTEST428_1),
     gfx::ColorSpace(PrimaryID::BT709, TransferID::SRGB_HDR),
     gfx::ColorSpace(PrimaryID::BT709, TransferID::LINEAR_HDR),
-    // Piecewise HDR transfer functions skipped with SkiaRenderer.
-    gfx::ColorSpace::CreatePiecewiseHDR(PrimaryID::BT709, 0.5, 1.5),
-    gfx::ColorSpace::CreateHDR10(50.f),
-    gfx::ColorSpace::CreateHDR10(250.f),
+    gfx::ColorSpace::CreateHDR10(),
 };
 
 gfx::ColorSpace dst_color_spaces[] = {
@@ -5138,8 +5037,6 @@ gfx::ColorSpace dst_color_spaces[] = {
     gfx::ColorSpace(PrimaryID::BT709, TransferID::SRGB),
     gfx::ColorSpace(PrimaryID::BT709, TransferID::SRGB_HDR),
     gfx::ColorSpace(PrimaryID::BT709, TransferID::LINEAR_HDR),
-    // Piecewise HDR transfer functions are skipped with SkiaRenderer.
-    gfx::ColorSpace::CreatePiecewiseHDR(PrimaryID::BT709, 0.25, 2.5),
 };
 
 gfx::ColorSpace intermediate_color_spaces[] = {
@@ -5206,7 +5103,7 @@ class DelegatedInkTest : public VizPixelTestWithParam,
 
     SolidColorDrawQuad* color_quad =
         pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-    color_quad->SetNew(shared_state, rect, rect, SK_ColorWHITE, false);
+    color_quad->SetNew(shared_state, rect, rect, SkColors::kWhite, false);
 
     AggregatedRenderPassList pass_list;
     pass_list.push_back(std::move(pass));
@@ -5240,7 +5137,7 @@ TEST_P(DelegatedInkTest, DrawTrailWithPredictionDisabled) {
 
   // Provide the metadata required to draw the trail, matching the first
   // DelegatedInkPoint sent.
-  CreateAndSendMetadata(kFirstPoint, 3.5f, SK_ColorCYAN, kFirstTimestamp,
+  CreateAndSendMetadata(kFirstPoint, 3.5f, SkColors::kCyan, kFirstTimestamp,
                         gfx::RectF(0, 0, 200, 200));
 
   // Confirm that the trail was drawn without prediction.
@@ -5290,10 +5187,10 @@ TEST_P(DelegatedInkWithPredictionTest, DrawOneTrailAndErase) {
 
   // Provide the metadata required to draw the trail, matching the first
   // DelegatedInkPoint sent.
-  CreateAndSendMetadata(kFirstPoint, 3.5f, SK_ColorBLACK, kFirstTimestamp,
+  CreateAndSendMetadata(kFirstPoint, 3.5f, SkColors::kBlack, kFirstTimestamp,
                         gfx::RectF(0, 0, 175, 172));
-
-  // Confirm that the trail was drawn.
+  // Confirm that the trail was drawn. Test three times as
+  // the trail will persist for two more frames before being erased.
   EXPECT_TRUE(
       DrawAndTestTrail(FILE_PATH_LITERAL("delegated_ink_one_trail.png")));
 
@@ -5317,7 +5214,7 @@ TEST_P(DelegatedInkWithPredictionTest, DrawTwoTrailsAndErase) {
 
   // Provide the metadata required to draw the trail, numbers matching the first
   // DelegatedInkPoint sent.
-  CreateAndSendMetadata(kFirstPoint, 8.2f, SK_ColorMAGENTA, kFirstTimestamp,
+  CreateAndSendMetadata(kFirstPoint, 8.2f, SkColors::kMagenta, kFirstTimestamp,
                         gfx::RectF(0, 0, 200, 200));
 
   // Confirm that the trail was drawn correctly.
@@ -5361,7 +5258,7 @@ TEST_P(DelegatedInkWithPredictionTest, TrailExtendsBeyondPresentationArea) {
   CreateAndSendPointFromLastPoint(gfx::PointF(97, 36.9f));
 
   const gfx::RectF kPresentationArea(30, 30, 100, 100);
-  CreateAndSendMetadata(kFirstPoint, 15.22f, SK_ColorCYAN, kFirstTimestamp,
+  CreateAndSendMetadata(kFirstPoint, 15.22f, SkColors::kCyan, kFirstTimestamp,
                         kPresentationArea);
 
   EXPECT_TRUE(DrawAndTestTrail(FILE_PATH_LITERAL(
@@ -5381,15 +5278,15 @@ TEST_P(DelegatedInkWithPredictionTest, DelegatedInkTrailAfterBatchedQuads) {
 
   CreateTestTextureDrawQuad(
       !is_software_renderer(), gfx::Rect(this->device_viewport_size_),
-      SkColorSetARGB(128, 0, 255, 0),  // Texel color.
-      SK_ColorTRANSPARENT,             // Background color.
-      true,                            // Premultiplied alpha.
+      SkColor4f::FromColor(SkColorSetARGB(128, 0, 255, 0)),  // Texel color.
+      SkColors::kTransparent,  // Background color.
+      true,                    // Premultiplied alpha.
       shared_state, this->resource_provider_.get(),
       this->child_resource_provider_.get(), this->shared_bitmap_manager_.get(),
       this->child_context_provider_, pass.get());
 
   auto* color_quad = pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(shared_state, rect, rect, SK_ColorWHITE, false);
+  color_quad->SetNew(shared_state, rect, rect, SkColors::kWhite, false);
 
   AggregatedRenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -5401,7 +5298,7 @@ TEST_P(DelegatedInkWithPredictionTest, DelegatedInkTrailAfterBatchedQuads) {
   CreateAndSendPointFromLastPoint(gfx::PointF(134, 114));
 
   const gfx::RectF kPresentationArea(0, 0, 200, 200);
-  CreateAndSendMetadata(kFirstPoint, 7.77f, SK_ColorDKGRAY, kFirstTimestamp,
+  CreateAndSendMetadata(kFirstPoint, 7.77f, SkColors::kDkGray, kFirstTimestamp,
                         kPresentationArea);
 
   EXPECT_TRUE(this->RunPixelTest(
@@ -5422,7 +5319,7 @@ TEST_P(DelegatedInkWithPredictionTest, SimpleTrailNonRootRenderPass) {
       gfx::Transform(), rect, child_pass.get(), gfx::MaskFilterInfo());
 
   auto* color_quad = child_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-  color_quad->SetNew(child_shared_state, rect, rect, SK_ColorGREEN, false);
+  color_quad->SetNew(child_shared_state, rect, rect, SkColors::kGreen, false);
 
   AggregatedRenderPassId root_id{1};
   auto root_pass = CreateTestRootRenderPass(root_id, rect, rect);
@@ -5447,7 +5344,7 @@ TEST_P(DelegatedInkWithPredictionTest, SimpleTrailNonRootRenderPass) {
   CreateAndSendPointFromLastPoint(gfx::PointF(74.222f, 95.4f));
 
   const gfx::RectF kPresentationArea(0, 0, 200, 200);
-  CreateAndSendMetadata(kFirstPoint, 19.177f, SK_ColorRED, kFirstTimestamp,
+  CreateAndSendMetadata(kFirstPoint, 19.177f, SkColors::kRed, kFirstTimestamp,
                         kPresentationArea);
 
   // This will only check what was drawn in the child pass, which should never
@@ -5493,14 +5390,14 @@ TEST_P(DelegatedInkWithPredictionTest, DrawTrailsWithDifferentPointerIds) {
 
   // Now send a metadata to match the first point of the first pointer id to
   // confirm that only that trail is drawn.
-  CreateAndSendMetadata(kPointerId1StartPoint, 7, SK_ColorYELLOW,
+  CreateAndSendMetadata(kPointerId1StartPoint, 7, SkColors::kYellow,
                         kPointerId1StartTime, kPresentationArea);
   EXPECT_TRUE(
       DrawAndTestTrail(FILE_PATH_LITERAL("delegated_ink_pointer_id_1.png")));
 
   // Then send metadata that matches the first point of the other pointer id.
   // These points should not have been erased, so all 3 points should be drawn.
-  CreateAndSendMetadata(kPointerId2StartPoint, 2.4f, SK_ColorRED,
+  CreateAndSendMetadata(kPointerId2StartPoint, 2.4f, SkColors::kRed,
                         kPointerId2StartTime, kPresentationArea);
   EXPECT_TRUE(
       DrawAndTestTrail(FILE_PATH_LITERAL("delegated_ink_pointer_id_2.png")));
@@ -5509,6 +5406,39 @@ TEST_P(DelegatedInkWithPredictionTest, DrawTrailsWithDifferentPointerIds) {
   // is no trail after another draw.
   EXPECT_TRUE(DrawAndTestTrail(FILE_PATH_LITERAL("white.png")));
 }
+
+// Draw a single trail and erase it, making sure that no bits of trail are left
+// behind.
+TEST_P(DelegatedInkWithPredictionTest,
+       IdenticalTrailDrawnAfterSameMetadataReceived) {
+  // Send some DelegatedInkPoints, numbers arbitrary. This will predict no
+  // points, so a trail made of 3 points will be drawn.
+  const gfx::PointF kFirstPoint(10, 10);
+  const base::TimeTicks kFirstTimestamp = base::TimeTicks::Now();
+  CreateAndSendPoint(kFirstPoint, kFirstTimestamp);
+  CreateAndSendPointFromLastPoint(gfx::PointF(75, 62));
+  CreateAndSendPointFromLastPoint(gfx::PointF(124, 45));
+
+  // Provide the metadata required to draw the trail, matching the first
+  // DelegatedInkPoint sent.
+  CreateAndSendMetadata(kFirstPoint, 3.5f, SkColors::kBlack, kFirstTimestamp,
+                        gfx::RectF(0, 0, 175, 172));
+  // Confirm that the trail was drawn. Test three times as
+  // the trail will persist for two more frames before being erased.
+  EXPECT_TRUE(
+      DrawAndTestTrail(FILE_PATH_LITERAL("delegated_ink_one_trail.png")));
+
+  // Send metadata again and expect the same trail to be drawn.
+  CreateAndSendMetadata(kFirstPoint, 3.5f, SkColors::kBlack, kFirstTimestamp,
+                        gfx::RectF(0, 0, 175, 172));
+  EXPECT_TRUE(
+      DrawAndTestTrail(FILE_PATH_LITERAL("delegated_ink_one_trail.png")));
+
+  // The metadata should have been cleared after drawing, so confirm that there
+  // is no trail after another draw.
+  EXPECT_TRUE(DrawAndTestTrail(FILE_PATH_LITERAL("white.png")));
+}
+
 #endif  // !BUILDFLAG(IS_ANDROID)
 
 }  // namespace

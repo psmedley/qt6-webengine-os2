@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -206,7 +206,7 @@ class Rankings {
   void IncrementCounter(List list);
   void DecrementCounter(List list);
 
-  bool init_;
+  bool init_ = false;
   bool count_lists_;
   Addr heads_[LAST_ELEMENT];
   Addr tails_[LAST_ELEMENT];

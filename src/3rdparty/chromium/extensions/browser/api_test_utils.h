@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,8 +53,9 @@ class SendResponseHelper {
  private:
   // Response handler.
   void OnResponse(ExtensionFunction::ResponseType response,
-                  base::Value results,
-                  const std::string& error);
+                  base::Value::List results,
+                  const std::string& error,
+                  mojom::ExtraResponseDataPtr);
 
   base::RunLoop run_loop_;
   std::unique_ptr<bool> response_;
@@ -69,14 +70,11 @@ std::unique_ptr<base::DictionaryValue> ParseDictionary(const std::string& data);
 // Get |key| from |val| as the specified type. If |key| does not exist, or is
 // not of the specified type, adds a failure to the current test and returns
 // false, 0, empty string, etc.
-bool GetBoolean(const base::Value::DictStorage& val, const std::string& key);
-int GetInteger(const base::Value::DictStorage& val, const std::string& key);
-std::string GetString(const base::Value::DictStorage& val,
-                      const std::string& key);
-std::unique_ptr<base::ListValue> GetList(const base::Value::DictStorage& val,
-                                         const std::string& key);
-base::Value::DictStorage GetDict(const base::Value::DictStorage& val,
-                                 const std::string& key);
+bool GetBoolean(const base::Value::Dict& val, const std::string& key);
+int GetInteger(const base::Value::Dict& val, const std::string& key);
+std::string GetString(const base::Value::Dict& val, const std::string& key);
+base::Value::List GetList(const base::Value::Dict& val, const std::string& key);
+base::Value::Dict GetDict(const base::Value::Dict& val, const std::string& key);
 
 // Run |function| with |args| and return the result. Adds an error to the
 // current test if |function| returns an error. Takes ownership of

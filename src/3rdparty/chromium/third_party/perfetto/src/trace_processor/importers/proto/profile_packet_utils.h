@@ -113,6 +113,14 @@ class ProfilePacketUtils {
         return "thread_timeout";
       case Profiling::UNWIND_ERROR_THREAD_DOES_NOT_EXIST:
         return "thread_does_not_exist";
+      case Profiling::UNWIND_ERROR_BAD_ARCH:
+        return "bad_arch";
+      case Profiling::UNWIND_ERROR_MAPS_PARSE:
+        return "maps_parse";
+      case Profiling::UNWIND_ERROR_INVALID_PARAMETER:
+        return "invalid_parameter";
+      case Profiling::UNWIND_ERROR_PTRACE_CALL:
+        return "ptrace_call";
     }
     return "unknown";  // switch should be complete, but gcc needs a hint
   }

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/web_applications/preinstalled_web_app_manager.h"
 #include "chrome/browser/web_applications/web_app.h"
+#include "chrome/browser/web_applications/web_app_command_manager.h"
 #include "chrome/browser/web_applications/web_app_icon_manager.h"
 #include "chrome/browser/web_applications/web_app_install_manager.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
@@ -35,7 +36,10 @@ namespace {
 // New fields must be added to BuildIndexJson().
 constexpr char kInstalledWebApps[] = "InstalledWebApps";
 constexpr char kPreinstalledWebAppConfigs[] = "PreinstalledWebAppConfigs";
+constexpr char kUserUninstalledPreinstalledWebAppPrefs[] =
+    "UserUninstalledPreinstalledWebAppPrefs";
 constexpr char kExternallyManagedWebAppPrefs[] = "ExternallyManagedWebAppPrefs";
+constexpr char kCommandManager[] = "CommandManager";
 constexpr char kIconErrorLog[] = "IconErrorLog";
 constexpr char kInstallationProcessErrorLog[] = "InstallationProcessErrorLog";
 #if BUILDFLAG(IS_MAC)
@@ -61,7 +65,9 @@ base::Value BuildIndexJson() {
 
   index.Append(kInstalledWebApps);
   index.Append(kPreinstalledWebAppConfigs);
+  index.Append(kUserUninstalledPreinstalledWebAppPrefs);
   index.Append(kExternallyManagedWebAppPrefs);
+  index.Append(kCommandManager);
   index.Append(kIconErrorLog);
   index.Append(kInstallationProcessErrorLog);
 #if BUILDFLAG(IS_MAC)
@@ -183,7 +189,23 @@ base::Value BuildExternallyManagedWebAppPrefsJson(Profile* profile) {
   base::Value root(base::Value::Type::DICTIONARY);
   root.SetKey(
       kExternallyManagedWebAppPrefs,
-      profile->GetPrefs()->GetDictionary(prefs::kWebAppsExtensionIDs)->Clone());
+      base::Value(
+          profile->GetPrefs()->GetDict(prefs::kWebAppsExtensionIDs).Clone()));
+  return root;
+}
+
+base::Value BuildUserUninstalledPreinstalledWebAppPrefsJson(Profile* profile) {
+  base::Value::Dict root;
+  root.Set(kUserUninstalledPreinstalledWebAppPrefs,
+           profile->GetPrefs()
+               ->GetDict(prefs::kUserUninstalledPreinstalledWebAppPref)
+               .Clone());
+  return base::Value(std::move(root));
+}
+
+base::Value BuildCommandManagerJson(web_app::WebAppProvider& provider) {
+  base::Value root(base::Value::Type::DICTIONARY);
+  root.SetKey(kCommandManager, provider.command_manager().ToDebugValue());
   return root;
 }
 
@@ -227,10 +249,10 @@ base::Value BuildInstallProcessErrorLogJson(web_app::WebAppProvider& provider) {
 }
 
 #if BUILDFLAG(IS_MAC)
-base::Value BuildAppShimRegistryLocalStorageJson() {
-  base::Value root(base::Value::Type::DICTIONARY);
-  root.SetKey(kAppShimRegistryLocalStorage,
-              AppShimRegistry::Get()->AsDebugValue());
+base::Value::Dict BuildAppShimRegistryLocalStorageJson() {
+  base::Value::Dict root;
+  root.Set(kAppShimRegistryLocalStorage,
+           AppShimRegistry::Get()->AsDebugDict().Clone());
   return root;
 }
 #endif
@@ -247,7 +269,7 @@ void BuildDirectoryState(base::FilePath file_or_folder,
   // reference.
   if (!info.is_directory) {
     folder->Set(file_or_folder.AsUTF8Unsafe(),
-                base::StrCat({base::NumberToString(info.size / 1024), "kb"}));
+                base::StrCat({base::NumberToString(info.size), " bytes"}));
     return;
   }
 
@@ -273,29 +295,6 @@ base::Value BuildWebAppDiskStateJson(base::FilePath root_directory,
   return root;
 }
 
-void BuildWebAppInternalsJson(
-    Profile* profile,
-    base::OnceCallback<void(base::Value root)> callback) {
-  auto* provider = web_app::WebAppProvider::GetForLocalAppsUnchecked(profile);
-
-  base::Value root(base::Value::Type::LIST);
-  root.Append(BuildIndexJson());
-  root.Append(BuildInstalledWebAppsJson(*provider));
-  root.Append(BuildPreinstalledWebAppConfigsJson(*provider));
-  root.Append(BuildExternallyManagedWebAppPrefsJson(profile));
-  root.Append(BuildIconErrorLogJson(*provider));
-  root.Append(BuildInstallProcessErrorLogJson(*provider));
-#if BUILDFLAG(IS_MAC)
-  root.Append(BuildAppShimRegistryLocalStorageJson());
-#endif
-  base::ThreadPool::PostTaskAndReplyWithResult(
-      FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
-      base::BindOnce(&BuildWebAppDiskStateJson,
-                     web_app::GetWebAppsRootDirectory(profile),
-                     std::move(root)),
-      std::move(callback));
-}
-
 void BuildResponse(Profile* profile,
                    base::OnceCallback<void(base::Value root)> callback) {
   auto* provider = web_app::WebAppProvider::GetForLocalAppsUnchecked(profile);
@@ -306,7 +305,8 @@ void BuildResponse(Profile* profile,
 
   provider->on_registry_ready().Post(
       FROM_HERE,
-      base::BindOnce(&BuildWebAppInternalsJson, profile, std::move(callback)));
+      base::BindOnce(&WebAppInternalsSource::BuildWebAppInternalsJson, profile,
+                     std::move(callback)));
 }
 
 void ConvertValueToJsonData(content::URLDataSource::GotDataCallback callback,
@@ -317,6 +317,33 @@ void ConvertValueToJsonData(content::URLDataSource::GotDataCallback callback,
 
 }  // namespace
 
+// static
+void WebAppInternalsSource::BuildWebAppInternalsJson(
+    Profile* profile,
+    base::OnceCallback<void(base::Value root)> callback) {
+  auto* provider = web_app::WebAppProvider::GetForLocalAppsUnchecked(profile);
+
+  base::Value::List root;
+  root.Append(BuildIndexJson());
+  root.Append(BuildInstalledWebAppsJson(*provider));
+  root.Append(BuildPreinstalledWebAppConfigsJson(*provider));
+  root.Append(BuildUserUninstalledPreinstalledWebAppPrefsJson(profile));
+  root.Append(BuildExternallyManagedWebAppPrefsJson(profile));
+  root.Append(BuildCommandManagerJson(*provider));
+  root.Append(BuildIconErrorLogJson(*provider));
+  root.Append(BuildInstallProcessErrorLogJson(*provider));
+#if BUILDFLAG(IS_MAC)
+  root.Append(BuildAppShimRegistryLocalStorageJson());
+#endif
+  root.Append(BuildInstallProcessErrorLogJson(*provider));
+  base::ThreadPool::PostTaskAndReplyWithResult(
+      FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
+      base::BindOnce(&BuildWebAppDiskStateJson,
+                     web_app::GetWebAppsRootDirectory(profile),
+                     base::Value(std::move(root))),
+      std::move(callback));
+}
+
 WebAppInternalsSource::WebAppInternalsSource(Profile* profile)
     : profile_(profile) {}
 
@@ -326,7 +353,7 @@ std::string WebAppInternalsSource::GetSource() {
   return chrome::kChromeUIWebAppInternalsHost;
 }
 
-std::string WebAppInternalsSource::GetMimeType(const std::string& path) {
+std::string WebAppInternalsSource::GetMimeType(const GURL& url) {
   return "application/json";
 }
 

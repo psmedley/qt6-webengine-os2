@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,7 @@
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_cpu_throttler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/virtual_time_controller.h"
+#include "third_party/blink/renderer/platform/theme/web_theme_engine_helper.h"
 
 namespace blink {
 using protocol::Maybe;
@@ -51,6 +52,7 @@ InspectorEmulationAgent::InspectorEmulationAgent(
                                   /*default_value=*/WTF::String()),
       navigator_platform_override_(&agent_state_,
                                    /*default_value=*/WTF::String()),
+      hardware_concurrency_override_(&agent_state_, /*default_value=*/0),
       user_agent_override_(&agent_state_, /*default_value=*/WTF::String()),
       serialized_ua_metadata_override_(
           &agent_state_,
@@ -92,7 +94,10 @@ void InspectorEmulationAgent::Restore() {
   serialized_ua_metadata_override_.Set(save_serialized_ua_metadata_override);
   setCPUThrottlingRate(cpu_throttling_rate_.Get());
 
-  if (!locale_override_.Get().IsEmpty())
+  if (int concurrency = hardware_concurrency_override_.Get())
+    setHardwareConcurrencyOverride(concurrency);
+
+  if (!locale_override_.Get().empty())
     setLocaleOverride(locale_override_.Get());
   if (!web_local_frame_)
     return;
@@ -159,10 +164,11 @@ Response InspectorEmulationAgent::disable() {
     enabled_ = false;
   }
 
+  hardware_concurrency_override_.Clear();
   setUserAgentOverride(
       String(), protocol::Maybe<String>(), protocol::Maybe<String>(),
       protocol::Maybe<protocol::Emulation::UserAgentMetadata>());
-  if (!locale_override_.Get().IsEmpty())
+  if (!locale_override_.Get().empty())
     setLocaleOverride(String());
   if (!web_local_frame_)
     return Response::Success();
@@ -292,11 +298,11 @@ Response InspectorEmulationAgent::setEmulatedMedia(
     if (forced_colors_value == "active") {
       if (!forced_colors_override_) {
         initial_system_color_info_state_ =
-            Platform::Current()->ThemeEngine()->GetSystemColorInfo();
+            WebThemeEngineHelper::GetNativeThemeEngine()->GetSystemColorInfo();
       }
       forced_colors_override_ = true;
       bool is_dark_mode = false;
-      if (prefers_color_scheme_value.IsEmpty()) {
+      if (prefers_color_scheme_value.empty()) {
         is_dark_mode = GetWebViewImpl()
                            ->GetPage()
                            ->GetSettings()
@@ -305,17 +311,18 @@ Response InspectorEmulationAgent::setEmulatedMedia(
       } else {
         is_dark_mode = prefers_color_scheme_value == "dark";
       }
-      Platform::Current()->ThemeEngine()->OverrideForcedColorsTheme(
+      WebThemeEngineHelper::GetNativeThemeEngine()->OverrideForcedColorsTheme(
           is_dark_mode);
     } else if (forced_colors_value == "none") {
       if (!forced_colors_override_) {
         initial_system_color_info_state_ =
-            Platform::Current()->ThemeEngine()->GetSystemColorInfo();
+            WebThemeEngineHelper::GetNativeThemeEngine()->GetSystemColorInfo();
       }
       forced_colors_override_ = true;
-      Platform::Current()->ThemeEngine()->SetForcedColors(ForcedColors::kNone);
+      WebThemeEngineHelper::GetNativeThemeEngine()->SetForcedColors(
+          ForcedColors::kNone);
     } else if (forced_colors_override_) {
-      Platform::Current()->ThemeEngine()->ResetToSystemColors(
+      WebThemeEngineHelper::GetNativeThemeEngine()->ResetToSystemColors(
           initial_system_color_info_state_);
     }
 
@@ -467,8 +474,8 @@ Response InspectorEmulationAgent::setVirtualTimePolicy(
         base::Milliseconds(virtual_time_budget_ms.fromJust());
     virtual_time_controller->GrantVirtualTimeBudget(
         budget_amount,
-        WTF::Bind(&InspectorEmulationAgent::VirtualTimeBudgetExpired,
-                  WrapWeakPersistent(this)));
+        WTF::BindOnce(&InspectorEmulationAgent::VirtualTimeBudgetExpired,
+                      WrapWeakPersistent(this)));
     for (DocumentLoader* loader : pending_document_loaders_)
       loader->SetDefersLoading(LoaderFreezeMode::kNone);
     pending_document_loaders_.clear();
@@ -505,8 +512,8 @@ void InspectorEmulationAgent::PrepareRequest(DocumentLoader* loader,
                                              ResourceRequest& request,
                                              ResourceLoaderOptions& options,
                                              ResourceType resource_type) {
-  if (!accept_language_override_.Get().IsEmpty() &&
-      request.HttpHeaderField("Accept-Language").IsEmpty()) {
+  if (!accept_language_override_.Get().empty() &&
+      request.HttpHeaderField("Accept-Language").empty()) {
     request.SetHttpHeaderField(
         "Accept-Language",
         AtomicString(network_utils::GenerateAcceptLanguageHeader(
@@ -607,13 +614,25 @@ Response InspectorEmulationAgent::clearDeviceMetricsOverride() {
   return AssertPage();
 }
 
+Response InspectorEmulationAgent::setHardwareConcurrencyOverride(
+    int hardware_concurrency) {
+  if (hardware_concurrency <= 0) {
+    return Response::InvalidParams(
+        "HardwareConcurrency must be a positive number");
+  }
+  InnerEnable();
+  hardware_concurrency_override_.Set(hardware_concurrency);
+
+  return Response::Success();
+}
+
 Response InspectorEmulationAgent::setUserAgentOverride(
     const String& user_agent,
     protocol::Maybe<String> accept_language,
     protocol::Maybe<String> platform,
     protocol::Maybe<protocol::Emulation::UserAgentMetadata>
         ua_metadata_override) {
-  if (!user_agent.IsEmpty() || accept_language.isJust() || platform.isJust())
+  if (!user_agent.empty() || accept_language.isJust() || platform.isJust())
     InnerEnable();
   user_agent_override_.Set(user_agent);
   accept_language_override_.Set(accept_language.fromMaybe(String()));
@@ -627,7 +646,7 @@ Response InspectorEmulationAgent::setUserAgentOverride(
     blink::UserAgentMetadata default_ua_metadata =
         Platform::Current()->UserAgentMetadata();
 
-    if (user_agent.IsEmpty()) {
+    if (user_agent.empty()) {
       ua_metadata_override_ = absl::nullopt;
       serialized_ua_metadata_override_.Set(std::vector<uint8_t>());
       return Response::InvalidParams(
@@ -675,6 +694,18 @@ Response InspectorEmulationAgent::setUserAgentOverride(
         ua_metadata->getArchitecture().Ascii();
     ua_metadata_override_->model = ua_metadata->getModel().Ascii();
     ua_metadata_override_->mobile = ua_metadata->getMobile();
+
+    if (ua_metadata->hasBitness()) {
+      ua_metadata_override_->bitness = ua_metadata->getBitness("").Ascii();
+    } else {
+      ua_metadata_override_->bitness = std::move(default_ua_metadata.bitness);
+    }
+    if (ua_metadata->hasWow64()) {
+      ua_metadata_override_->wow64 = ua_metadata->getWow64(false);
+    } else {
+      ua_metadata_override_->wow64 = default_ua_metadata.wow64;
+    }
+
   } else {
     ua_metadata_override_ = absl::nullopt;
   }
@@ -693,14 +724,14 @@ Response InspectorEmulationAgent::setUserAgentOverride(
 Response InspectorEmulationAgent::setLocaleOverride(
     protocol::Maybe<String> maybe_locale) {
   // Only allow resetting overrides set by the same agent.
-  if (locale_override_.Get().IsEmpty() &&
+  if (locale_override_.Get().empty() &&
       LocaleController::instance().has_locale_override()) {
     return Response::ServerError(
         "Another locale override is already in effect");
   }
   String locale = maybe_locale.fromMaybe(String());
   String error = LocaleController::instance().SetLocaleOverride(locale);
-  if (!error.IsEmpty())
+  if (!error.empty())
     return Response::ServerError(error.Utf8());
   locale_override_.Set(locale);
   return Response::Success();
@@ -708,7 +739,7 @@ Response InspectorEmulationAgent::setLocaleOverride(
 
 Response InspectorEmulationAgent::setTimezoneOverride(
     const String& timezone_id) {
-  if (timezone_id.IsEmpty()) {
+  if (timezone_id.empty()) {
     timezone_override_.reset();
   } else {
     if (timezone_override_) {
@@ -755,19 +786,25 @@ void InspectorEmulationAgent::WillCreateDocumentParser(
 }
 
 void InspectorEmulationAgent::ApplyAcceptLanguageOverride(String* accept_lang) {
-  if (!accept_language_override_.Get().IsEmpty())
+  if (!accept_language_override_.Get().empty())
     *accept_lang = accept_language_override_.Get();
 }
 
+void InspectorEmulationAgent::ApplyHardwareConcurrencyOverride(
+    unsigned int& hardware_concurrency) {
+  if (int concurrency = hardware_concurrency_override_.Get())
+    hardware_concurrency = concurrency;
+}
+
 void InspectorEmulationAgent::ApplyUserAgentOverride(String* user_agent) {
-  if (!user_agent_override_.Get().IsEmpty())
+  if (!user_agent_override_.Get().empty())
     *user_agent = user_agent_override_.Get();
 }
 
 void InspectorEmulationAgent::ApplyUserAgentMetadataOverride(
     absl::optional<blink::UserAgentMetadata>* ua_metadata) {
   // This applies when UA override is set.
-  if (!user_agent_override_.Get().IsEmpty()) {
+  if (!user_agent_override_.Get().empty()) {
     *ua_metadata = ua_metadata_override_;
   }
 }

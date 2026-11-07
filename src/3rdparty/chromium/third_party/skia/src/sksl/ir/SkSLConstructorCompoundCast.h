@@ -8,13 +8,17 @@
 #ifndef SKSL_CONSTRUCTOR_COMPOUND_CAST
 #define SKSL_CONSTRUCTOR_COMPOUND_CAST
 
-#include "src/sksl/SkSLContext.h"
+#include "include/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLConstructor.h"
 #include "src/sksl/ir/SkSLExpression.h"
 
 #include <memory>
+#include <utility>
 
 namespace SkSL {
+
+class Context;
+class Type;
 
 /**
  * Represents the construction of a vector/matrix typecast, such as `half3(myInt3)` or
@@ -34,14 +38,8 @@ public:
                                             const Type& type,
                                             std::unique_ptr<Expression> arg);
 
-    bool isCompileTimeConstant() const override {
-        // If this were a compile-time constant, we would have made a ConstructorCompound instead.
-        return false;
-    }
-
-    std::unique_ptr<Expression> clone() const override {
-        return std::make_unique<ConstructorCompoundCast>(fPosition, this->type(),
-                argument()->clone());
+    std::unique_ptr<Expression> clone(Position pos) const override {
+        return std::make_unique<ConstructorCompoundCast>(pos, this->type(), argument()->clone());
     }
 
 private:

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,12 +32,11 @@ constexpr uint8_t kMinQP = 4;
 // resolution (180p).
 constexpr uint8_t kMaxQP = 117;
 
-// The upper limitation of the quantization parameter for the software rate
-// controller. This is larger than |kMaxQP| because a driver might ignore the
-// specified maximum quantization parameter when the driver determines the
-// value, but it doesn't ignore the quantization parameter by the software rate
-// controller.
-constexpr uint8_t kMaxQPForSoftwareRateCtrl = 127;
+// WebRTC's default qp values are 15 and 106 for screen sharing, respectively,
+// Set smaller qp values for zero hertz tab sharing, which is triggered when qp
+// values are consecutively less than or equal to 15.
+constexpr uint8_t kScreenMinQP = 8;
+constexpr uint8_t kScreenMaxQP = 106;
 
 // Convert Qindex, whose range is 0-127, to the quantizer parameter used in
 // libvpx vp8 rate control, whose range is 0-63.
@@ -274,11 +273,8 @@ bool VP8VaapiVideoEncoderDelegate::Initialize(
     return false;
   }
 
-  // Even though VP8VaapiVideoEncoderDelegate might support other bitrate
-  // control modes, only the kConstantQuantizationParameter is used.
-  if (ave_config.bitrate_control != VaapiVideoEncoderDelegate::BitrateControl::
-                                        kConstantQuantizationParameter) {
-    DVLOGF(1) << "Only CQ bitrate control is supported";
+  if (config.bitrate.mode() == Bitrate::Mode::kVariable) {
+    DVLOGF(1) << "Invalid configuraiton. VBR is not supported for VP8.";
     return false;
   }
 
@@ -310,8 +306,6 @@ bool VP8VaapiVideoEncoderDelegate::Initialize(
     }
   }
 
-  native_input_mode_ = ave_config.native_input_mode;
-
   visible_size_ = config.input_visible_size;
   coded_size_ = gfx::Size(base::bits::AlignUp(visible_size_.width(), 16),
                           base::bits::AlignUp(visible_size_.height(), 16));
@@ -324,7 +318,11 @@ bool VP8VaapiVideoEncoderDelegate::Initialize(
   else
     initial_bitrate_allocation.SetBitrate(0, 0, config.bitrate.target_bps());
 
-  current_params_.max_qp = kMaxQPForSoftwareRateCtrl;
+  if (config.content_type ==
+      VideoEncodeAccelerator::Config::ContentType::kDisplay) {
+    current_params_.min_qp = kScreenMinQP;
+    current_params_.max_qp = kScreenMaxQP;
+  }
 
   // |rate_ctrl_| might be injected for tests.
   if (!rate_ctrl_) {
@@ -423,6 +421,11 @@ bool VP8VaapiVideoEncoderDelegate::UpdateRates(
     const VideoBitrateAllocation& bitrate_allocation,
     uint32_t framerate) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (bitrate_allocation.GetMode() != Bitrate::Mode::kConstant) {
+    DLOG(ERROR) << "VBR is not supported for VP8 but was requested.";
+    return false;
+  }
 
   uint32_t bitrate = bitrate_allocation.GetSumBps();
   if (bitrate == 0 || framerate == 0)
@@ -624,10 +627,9 @@ bool VP8VaapiVideoEncoderDelegate::SubmitFrameParameters(
   qmatrix_buf.quantization_index_delta[4] =
       frame_header->quantization_hdr.uv_ac_delta;
 
-  return vaapi_wrapper_->SubmitBuffer(VAEncSequenceParameterBufferType,
-                                      &seq_param) &&
-         vaapi_wrapper_->SubmitBuffer(VAEncPictureParameterBufferType,
-                                      &pic_param) &&
-         vaapi_wrapper_->SubmitBuffer(VAQMatrixBufferType, &qmatrix_buf);
+  return vaapi_wrapper_->SubmitBuffers(
+      {{VAEncSequenceParameterBufferType, sizeof(seq_param), &seq_param},
+       {VAEncPictureParameterBufferType, sizeof(pic_param), &pic_param},
+       {VAQMatrixBufferType, sizeof(qmatrix_buf), &qmatrix_buf}});
 }
 }  // namespace media

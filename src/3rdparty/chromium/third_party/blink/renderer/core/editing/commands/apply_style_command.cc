@@ -51,6 +51,7 @@
 #include "third_party/blink/renderer/core/editing/visible_position.h"
 #include "third_party/blink/renderer/core/editing/visible_selection.h"
 #include "third_party/blink/renderer/core/editing/visible_units.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/html/html_font_element.h"
 #include "third_party/blink/renderer/core/html/html_span_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
@@ -908,14 +909,14 @@ void ApplyStyleCommand::FixRangeAndApplyInlineStyle(
 }
 
 static bool ContainsNonEditableRegion(Node& node) {
-  if (!HasEditableStyle(node))
+  if (!IsEditable(node))
     return true;
 
   Node* sibling = NodeTraversal::NextSkippingChildren(node);
   for (Node* descendent = node.firstChild();
        descendent && descendent != sibling;
        descendent = NodeTraversal::Next(*descendent)) {
-    if (!HasEditableStyle(*descendent))
+    if (!IsEditable(*descendent))
       return true;
   }
 
@@ -975,11 +976,11 @@ void ApplyStyleCommand::ApplyInlineStyleToNodeRange(
   for (Node* next; node && node != past_end_node; node = next) {
     next = NodeTraversal::Next(*node);
 
-    if (!node->GetLayoutObject() || !HasEditableStyle(*node))
+    if (!node->GetLayoutObject() || !IsEditable(*node))
       continue;
 
     auto* element = DynamicTo<HTMLElement>(node);
-    if (!HasRichlyEditableStyle(*node) && element) {
+    if (!IsRichlyEditable(*node) && element) {
       // This is a plaintext-only region. Only proceed if it's fully selected.
       // pastEndNode is the node after the last fully selected node, so if it's
       // inside node then node isn't fully selected.
@@ -1002,7 +1003,7 @@ void ApplyStyleCommand::ApplyInlineStyleToNodeRange(
 
     if (node->hasChildren()) {
       if (node->contains(past_end_node) || ContainsNonEditableRegion(*node) ||
-          !HasEditableStyle(*node->parentNode()))
+          !IsEditable(*node->parentNode()))
         continue;
       if (EditingIgnoresContent(*node)) {
         next = NodeTraversal::NextSkippingChildren(*node);
@@ -1145,7 +1146,7 @@ bool ApplyStyleCommand::RemoveInlineStyleFromElement(
     EditingStyle* extracted_style) {
   DCHECK(element);
   GetDocument().UpdateStyleAndLayoutTree();
-  if (!element->parentNode() || !HasEditableStyle(*element->parentNode()))
+  if (!element->parentNode() || !IsEditable(*element->parentNode()))
     return false;
 
   if (IsStyledInlineElementToRemove(element)) {
@@ -1775,7 +1776,7 @@ void ApplyStyleCommand::SurroundNodeRangeWithElement(
   GetDocument().UpdateStyleAndLayoutTree();
   while (node) {
     Node* next = node->nextSibling();
-    if (HasEditableStyle(*node)) {
+    if (IsEditable(*node)) {
       RemoveNode(node, editing_state);
       if (editing_state->IsAborted())
         return;
@@ -1791,7 +1792,7 @@ void ApplyStyleCommand::SurroundNodeRangeWithElement(
   Node* next_sibling = element->nextSibling();
   Node* previous_sibling = element->previousSibling();
   auto* next_sibling_element = DynamicTo<Element>(next_sibling);
-  if (next_sibling_element && HasEditableStyle(*next_sibling) &&
+  if (next_sibling_element && IsEditable(*next_sibling) &&
       AreIdenticalElements(*element, *next_sibling_element)) {
     MergeIdenticalElements(element, next_sibling_element, editing_state);
     if (editing_state->IsAborted())
@@ -1799,10 +1800,9 @@ void ApplyStyleCommand::SurroundNodeRangeWithElement(
   }
 
   auto* previous_sibling_element = DynamicTo<Element>(previous_sibling);
-  if (previous_sibling_element && HasEditableStyle(*previous_sibling)) {
+  if (previous_sibling_element && IsEditable(*previous_sibling)) {
     auto* merged_element = DynamicTo<Element>(previous_sibling->nextSibling());
-    if (merged_element &&
-        HasEditableStyle(*(previous_sibling->nextSibling())) &&
+    if (merged_element && IsEditable(*(previous_sibling->nextSibling())) &&
         AreIdenticalElements(*previous_sibling_element, *merged_element)) {
       MergeIdenticalElements(previous_sibling_element, merged_element,
                              editing_state);
@@ -1827,7 +1827,7 @@ void ApplyStyleCommand::AddBlockStyle(const StyleChange& style_change,
   StringBuilder css_text;
   css_text.Append(css_style);
   if (const CSSPropertyValueSet* decl = block->InlineStyle()) {
-    if (!css_style.IsEmpty())
+    if (!css_style.empty())
       css_text.Append(' ');
     css_text.Append(decl->AsText());
   }
@@ -1948,7 +1948,7 @@ void ApplyStyleCommand::ApplyInlineStyleChange(
         String existing_text = existing_style->AsText();
         StringBuilder css_text;
         css_text.Append(existing_text);
-        if (!existing_text.IsEmpty())
+        if (!existing_text.empty())
           css_text.Append(' ');
         css_text.Append(style_change.CssStyle());
         SetNodeAttribute(style_container, html_names::kStyleAttr,

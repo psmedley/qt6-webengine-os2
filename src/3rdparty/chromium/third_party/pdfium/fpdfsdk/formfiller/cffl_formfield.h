@@ -17,8 +17,9 @@
 #include "fpdfsdk/formfiller/cffl_fieldaction.h"
 #include "fpdfsdk/formfiller/cffl_interactiveformfiller.h"
 #include "fpdfsdk/pwl/cpwl_wnd.h"
-#include "fpdfsdk/pwl/ipwl_systemhandler.h"
+#include "fpdfsdk/pwl/ipwl_fillernotify.h"
 
+class CFFL_PerWindowData;
 class CPDFSDK_PageView;
 class CPDFSDK_Widget;
 
@@ -93,7 +94,8 @@ class CFFL_FormField : public CPWL_Wnd::ProviderIface,
 
   // CPWL_Wnd::ProviderIface:
   CFX_Matrix GetWindowMatrix(
-      const IPWL_SystemHandler::PerWindowData* pAttached) override;
+      const IPWL_FillerNotify::PerWindowData* pAttached) override;
+  void OnSetFocusForEdit(CPWL_Edit* pEdit) override;
 
   virtual void GetActionData(const CPDFSDK_PageView* pPageView,
                              CPDF_AAction::AActionType type,
@@ -104,7 +106,7 @@ class CFFL_FormField : public CPWL_Wnd::ProviderIface,
   virtual CPWL_Wnd::CreateParams GetCreateParam();
   virtual std::unique_ptr<CPWL_Wnd> NewPWLWindow(
       const CPWL_Wnd::CreateParams& cp,
-      std::unique_ptr<IPWL_SystemHandler::PerWindowData> pAttachedData) = 0;
+      std::unique_ptr<IPWL_FillerNotify::PerWindowData> pAttachedData) = 0;
   virtual void SavePWLWindowState(const CPDFSDK_PageView* pPageView);
   virtual void RecreatePWLWindowFromSavedState(
       const CPDFSDK_PageView* pPageView);
@@ -121,11 +123,6 @@ class CFFL_FormField : public CPWL_Wnd::ProviderIface,
   CFX_PointF FFLtoPWL(const CFX_PointF& point);
   CFX_PointF PWLtoFFL(const CFX_PointF& point);
   bool CommitData(const CPDFSDK_PageView* pPageView, Mask<FWL_EVENTFLAG> nFlag);
-  CPWL_Wnd* ResetPWLWindowForValueAge(const CPDFSDK_PageView* pPageView,
-                                      CPDFSDK_Widget* pWidget,
-                                      uint32_t nValueAge);
-  CPWL_Wnd* GetPWLWindow(const CPDFSDK_PageView* pPageView) const;
-  CPWL_Wnd* CreateOrUpdatePWLWindow(const CPDFSDK_PageView* pPageView);
   void DestroyPWLWindow(const CPDFSDK_PageView* pPageView);
   void EscapeFiller(CPDFSDK_PageView* pPageView, bool bDestroyPWLWindow);
 
@@ -137,9 +134,24 @@ class CFFL_FormField : public CPWL_Wnd::ProviderIface,
 
   CPDFSDK_Widget* GetSDKWidget() const { return m_pWidget.Get(); }
 
+  CFFL_PerWindowData* GetPerPWLWindowData(const CPDFSDK_PageView* pPageView);
+  void ResetPWLWindowForValueAge(const CPDFSDK_PageView* pPageView,
+                                 CPDFSDK_Widget* pWidget,
+                                 uint32_t nValueAge);
+
  protected:
+  friend class CPWLComboBoxEditEmbedderTest;
+  friend class CPWLEditEmbedderTest;
+  friend class CPWLSpecialButtonEmbedderTest;
+
   virtual CPWL_Wnd* ResetPWLWindow(const CPDFSDK_PageView* pPageView);
   virtual CPWL_Wnd* RestorePWLWindow(const CPDFSDK_PageView* pPageView);
+
+  CPWL_Wnd* GetPWLWindow(const CPDFSDK_PageView* pPageView) const;
+  CPWL_Wnd* CreateOrUpdatePWLWindow(const CPDFSDK_PageView* pPageView);
+  CPWL_Wnd* ResetPWLWindowForValueAgeInternal(const CPDFSDK_PageView* pPageView,
+                                              CPDFSDK_Widget* pWidget,
+                                              uint32_t nValueAge);
 
   // If the inheriting widget has its own fontmap and a PWL_Edit widget that
   // access that fontmap then you have to call DestroyWindows before destroying

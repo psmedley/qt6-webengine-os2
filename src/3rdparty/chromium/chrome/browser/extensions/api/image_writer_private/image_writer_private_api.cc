@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,16 @@
 
 #include "base/bind.h"
 #include "build/build_config.h"
-#include "chrome/browser/extensions/api/image_writer_private/error_messages.h"
+#include "chrome/browser/extensions/api/image_writer_private/error_constants.h"
 #include "chrome/browser/extensions/api/image_writer_private/operation_manager.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/api/file_handlers/app_file_handler_util.h"
+
+#if BUILDFLAG(IS_CHROMEOS)
+#include "chromeos/components/disks/disks_prefs.h"
+#endif
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
 #include "chrome/browser/extensions/api/image_writer_private/image_writer_controller_lacros.h"
@@ -73,8 +76,8 @@ ExtensionFunction::ResponseAction
 ImageWriterPrivateWriteFromUrlFunction::Run() {
 #if BUILDFLAG(IS_CHROMEOS)
   Profile* profile = Profile::FromBrowserContext(browser_context());
-  if (profile->GetPrefs()->GetBoolean(prefs::kExternalStorageDisabled) ||
-      profile->GetPrefs()->GetBoolean(prefs::kExternalStorageReadOnly)) {
+  if (profile->GetPrefs()->GetBoolean(disks::prefs::kExternalStorageDisabled) ||
+      profile->GetPrefs()->GetBoolean(disks::prefs::kExternalStorageReadOnly)) {
     return RespondNow(Error(image_writer::error::kDeviceWriteError));
   }
 #endif
@@ -87,7 +90,7 @@ ImageWriterPrivateWriteFromUrlFunction::Run() {
     return RespondNow(Error(image_writer::error::kUrlInvalid));
 
   std::string hash;
-  if (params->options.get() && params->options->image_hash.get()) {
+  if (params->options && params->options->image_hash) {
     hash = *params->options->image_hash;
   }
 
@@ -118,8 +121,8 @@ ExtensionFunction::ResponseAction
 ImageWriterPrivateWriteFromFileFunction::Run() {
 #if BUILDFLAG(IS_CHROMEOS)
   Profile* profile = Profile::FromBrowserContext(browser_context());
-  if (profile->GetPrefs()->GetBoolean(prefs::kExternalStorageDisabled) ||
-      profile->GetPrefs()->GetBoolean(prefs::kExternalStorageReadOnly)) {
+  if (profile->GetPrefs()->GetBoolean(disks::prefs::kExternalStorageDisabled) ||
+      profile->GetPrefs()->GetBoolean(disks::prefs::kExternalStorageReadOnly)) {
     return RespondNow(Error(image_writer::error::kDeviceWriteError));
   }
 #endif
@@ -190,8 +193,8 @@ ExtensionFunction::ResponseAction
 ImageWriterPrivateDestroyPartitionsFunction::Run() {
 #if BUILDFLAG(IS_CHROMEOS)
   Profile* profile = Profile::FromBrowserContext(browser_context());
-  if (profile->GetPrefs()->GetBoolean(prefs::kExternalStorageDisabled) ||
-      profile->GetPrefs()->GetBoolean(prefs::kExternalStorageReadOnly)) {
+  if (profile->GetPrefs()->GetBoolean(disks::prefs::kExternalStorageDisabled) ||
+      profile->GetPrefs()->GetBoolean(disks::prefs::kExternalStorageReadOnly)) {
     return RespondNow(Error(image_writer::error::kDeviceWriteError));
   }
 #endif
@@ -226,7 +229,7 @@ ExtensionFunction::ResponseAction
 ImageWriterPrivateListRemovableStorageDevicesFunction::Run() {
 #if BUILDFLAG(IS_CHROMEOS)
   Profile* profile = Profile::FromBrowserContext(browser_context());
-  if (profile->GetPrefs()->GetBoolean(prefs::kExternalStorageDisabled)) {
+  if (profile->GetPrefs()->GetBoolean(disks::prefs::kExternalStorageDisabled)) {
     // Return an empty device list.
     OnDeviceListReady(base::MakeRefCounted<StorageDeviceList>());
     return AlreadyResponded();

@@ -1,16 +1,24 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_POPUP_DATA_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_POPUP_DATA_H_
 
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/popup_animation_finished_event_listener.h"
 #include "third_party/blink/renderer/core/html/forms/html_select_menu_element.h"
 #include "third_party/blink/renderer/core/html_element_type_helpers.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
+
+enum class PopupVisibilityState {
+  kHidden,
+  kTransitioning,
+  kShowing,
+};
 
 class PopupData final : public GarbageCollected<PopupData> {
  public:
@@ -18,14 +26,14 @@ class PopupData final : public GarbageCollected<PopupData> {
   PopupData(const PopupData&) = delete;
   PopupData& operator=(const PopupData&) = delete;
 
-  bool open() const { return open_; }
-  void setOpen(bool open) { open_ = open; }
-
-  bool hadInitiallyOpenWhenParsed() const {
-    return had_initiallyopen_when_parsed_;
+  bool hadDefaultOpenWhenParsed() const { return had_defaultopen_when_parsed_; }
+  void setHadDefaultOpenWhenParsed(bool value) {
+    had_defaultopen_when_parsed_ = value;
   }
-  void setHadInitiallyOpenWhenParsed(bool value) {
-    had_initiallyopen_when_parsed_ = value;
+
+  PopupVisibilityState visibilityState() const { return visibility_state_; }
+  void setVisibilityState(PopupVisibilityState visibility_state) {
+    visibility_state_ = visibility_state;
   }
 
   PopupValueType type() const { return type_; }
@@ -45,6 +53,29 @@ class PopupData final : public GarbageCollected<PopupData> {
     return needs_repositioning_for_select_menu_;
   }
 
+  Element* previouslyFocusedElement() const {
+    return previously_focused_element_;
+  }
+  void setPreviouslyFocusedElement(Element* element) {
+    previously_focused_element_ = element;
+  }
+
+  PopupAnimationFinishedEventListener* animationFinishedListener() const {
+    return animation_finished_listener_;
+  }
+  void setAnimationFinishedListener(
+      PopupAnimationFinishedEventListener* listener) {
+    if (animation_finished_listener_ &&
+        !animation_finished_listener_->IsFinished()) {
+      // If we're clearing the listener, dispose it, to prevent listeners from
+      // firing later.
+      animation_finished_listener_->Dispose();
+    }
+    DCHECK(!animation_finished_listener_ ||
+           animation_finished_listener_->IsFinished());
+    animation_finished_listener_ = listener;
+  }
+
   HTMLSelectMenuElement* ownerSelectMenuElement() const {
     return owner_select_menu_element_;
   }
@@ -54,14 +85,20 @@ class PopupData final : public GarbageCollected<PopupData> {
 
   void Trace(Visitor* visitor) const {
     visitor->Trace(invoker_);
+    visitor->Trace(previously_focused_element_);
+    visitor->Trace(animation_finished_listener_);
     visitor->Trace(owner_select_menu_element_);
   }
 
  private:
-  bool open_ = false;
-  bool had_initiallyopen_when_parsed_ = false;
+  bool had_defaultopen_when_parsed_ = false;
+  PopupVisibilityState visibility_state_ = PopupVisibilityState::kHidden;
   PopupValueType type_ = PopupValueType::kNone;
   WeakMember<Element> invoker_;
+  WeakMember<Element> previously_focused_element_;
+  // We hold a strong reference to the animation finished listener, so that we
+  // can confirm that the listeners get removed before cleanup.
+  Member<PopupAnimationFinishedEventListener> animation_finished_listener_;
 
   // TODO(crbug.com/1197720): The popup position should be provided by the new
   // anchored positioning scheme.

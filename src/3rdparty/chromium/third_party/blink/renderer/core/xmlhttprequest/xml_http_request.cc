@@ -30,6 +30,7 @@
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
+#include "services/network/public/cpp/header_util.h"
 #include "services/network/public/mojom/trust_tokens.mojom-shared.h"
 #include "third_party/blink/public/common/blob/blob_utils.h"
 #include "third_party/blink/public/common/features.h"
@@ -328,15 +329,6 @@ v8::Local<v8::String> XMLHttpRequest::responseText(
 
 v8::Local<v8::String> XMLHttpRequest::ResponseJSONSource() {
   DCHECK_EQ(response_type_code_, kResponseTypeJSON);
-
-  const auto& head = response_body_head_;
-  if (state_ == kDone && !error_ && head.size() >= 2) {
-    if ((head[0] == 0xfe && head[1] == 0xff) ||
-        (head[0] == 0xff && head[1] == 0xfe)) {
-      Deprecation::CountDeprecation(GetExecutionContext(),
-                                    WebFeature::kXHRJSONEncodingDetection);
-    }
-  }
 
   if (error_ || state_ != kDone)
     return v8::Local<v8::String>();
@@ -765,8 +757,13 @@ bool XMLHttpRequest::InitSend(ExceptionState& exception_state) {
         return false;
       }
     }
-    v8::Isolate* isolate = v8::Isolate::GetCurrent();
-    if (isolate && v8::MicrotasksScope::IsRunningMicrotasks(isolate)) {
+    v8::Isolate* isolate = GetExecutionContext()->GetIsolate();
+    v8::MicrotaskQueue* microtask_queue =
+        ToMicrotaskQueue(GetExecutionContext());
+    if (isolate &&
+        ((microtask_queue && microtask_queue->IsRunningMicrotasks()) ||
+         (!microtask_queue &&
+          v8::MicrotasksScope::IsRunningMicrotasks(isolate)))) {
       UseCounter::Count(GetExecutionContext(),
                         WebFeature::kDuring_Microtask_SyncXHR);
     }
@@ -862,7 +859,7 @@ void XMLHttpRequest::send(Blob* body, ExceptionState& exception_state) {
   if (AreMethodAndURLValidForSend()) {
     if (!HasContentTypeRequestHeader()) {
       const String& blob_type = FetchUtils::NormalizeHeaderValue(body->type());
-      if (!blob_type.IsEmpty() && ParsedContentType(blob_type).IsValid()) {
+      if (!blob_type.empty() && ParsedContentType(blob_type).IsValid()) {
         SetRequestHeaderInternal(http_names::kContentType,
                                  AtomicString(blob_type));
       }
@@ -872,7 +869,7 @@ void XMLHttpRequest::send(Blob* body, ExceptionState& exception_state) {
     http_body = EncodedFormData::Create();
     if (body->HasBackingFile()) {
       auto* file = To<File>(body);
-      if (!file->GetPath().IsEmpty())
+      if (!file->GetPath().empty())
         http_body->AppendFile(file->GetPath(), file->LastModifiedTime());
       else
         NOTREACHED();
@@ -1058,6 +1055,7 @@ void XMLHttpRequest::CreateRequest(scoped_refptr<EncodedFormData> http_body,
   request.SetMode(upload_events
                       ? network::mojom::RequestMode::kCorsWithForcedPreflight
                       : network::mojom::RequestMode::kCors);
+  request.SetTargetAddressSpace(network::mojom::IPAddressSpace::kUnknown);
   request.SetCredentialsMode(
       with_credentials_ ? network::mojom::CredentialsMode::kInclude
                         : network::mojom::CredentialsMode::kSameOrigin);
@@ -1115,13 +1113,13 @@ void XMLHttpRequest::CreateRequest(scoped_refptr<EncodedFormData> http_body,
     UseCounter::Count(&execution_context, WebFeature::kXMLHttpRequestSynchronous);
     if (auto* window = DynamicTo<LocalDOMWindow>(GetExecutionContext())) {
       if (Frame* frame = window->GetFrame()) {
-        if (frame->IsMainFrame()) {
-          UseCounter::Count(&execution_context,
-                            WebFeature::kXMLHttpRequestSynchronousInMainFrame);
-        } else if (frame->IsCrossOriginToMainFrame()) {
+        if (frame->IsCrossOriginToOutermostMainFrame()) {
           UseCounter::Count(
               &execution_context,
               WebFeature::kXMLHttpRequestSynchronousInCrossOriginSubframe);
+        } else if (frame->IsMainFrame()) {
+          UseCounter::Count(&execution_context,
+                            WebFeature::kXMLHttpRequestSynchronousInMainFrame);
         } else {
           UseCounter::Count(
               &execution_context,
@@ -1314,8 +1312,8 @@ void XMLHttpRequest::HandleDidCancel() {
 
   pending_abort_event_ = PostCancellableTask(
       *GetExecutionContext()->GetTaskRunner(TaskType::kNetworking), FROM_HERE,
-      WTF::Bind(&XMLHttpRequest::HandleRequestError, WrapPersistent(this),
-                DOMExceptionCode::kAbortError, event_type_names::kAbort));
+      WTF::BindOnce(&XMLHttpRequest::HandleRequestError, WrapPersistent(this),
+                    DOMExceptionCode::kAbortError, event_type_names::kAbort));
 }
 
 void XMLHttpRequest::HandleRequestError(DOMExceptionCode exception_code,
@@ -1490,11 +1488,7 @@ String XMLHttpRequest::getAllResponseHeaders() const {
        it != response_.HttpHeaderFields().end(); ++it) {
     // Hide any headers whose name is a forbidden response-header name.
     // This is required for all kinds of filtered responses.
-    //
-    // TODO: Consider removing canLoadLocalResources() call.
-    // crbug.com/567527
-    if (FetchUtils::IsForbiddenResponseHeaderName(it->key) &&
-        !GetExecutionContext()->GetSecurityOrigin()->CanLoadLocalResources()) {
+    if (FetchUtils::IsForbiddenResponseHeaderName(it->key)) {
       continue;
     }
 
@@ -1529,9 +1523,7 @@ const AtomicString& XMLHttpRequest::getResponseHeader(
   if (state_ < kHeadersReceived || error_)
     return g_null_atom;
 
-  // See comment in getAllResponseHeaders above.
-  if (FetchUtils::IsForbiddenResponseHeaderName(name) &&
-      !GetExecutionContext()->GetSecurityOrigin()->CanLoadLocalResources()) {
+  if (FetchUtils::IsForbiddenResponseHeaderName(name)) {
     LogConsoleError(GetExecutionContext(),
                     "Refused to get unsafe header \"" + name + "\"");
     return g_null_atom;
@@ -1557,7 +1549,7 @@ const AtomicString& XMLHttpRequest::getResponseHeader(
 AtomicString XMLHttpRequest::FinalResponseMIMEType() const {
   AtomicString overridden_type =
       ExtractMIMETypeFromMediaType(mime_type_override_);
-  if (!overridden_type.IsEmpty())
+  if (!overridden_type.empty())
     return overridden_type;
 
   if (response_.IsHTTP()) {
@@ -1570,7 +1562,7 @@ AtomicString XMLHttpRequest::FinalResponseMIMEType() const {
 
 AtomicString XMLHttpRequest::FinalResponseMIMETypeWithFallback() const {
   AtomicString final_type = FinalResponseMIMEType();
-  if (!final_type.IsEmpty())
+  if (!final_type.empty())
     return final_type;
 
   return AtomicString("text/xml");
@@ -1588,7 +1580,7 @@ WTF::TextEncoding XMLHttpRequest::FinalResponseCharset() const {
   // it. [spec text]
   String override_response_charset =
       ExtractCharsetFromMediaType(mime_type_override_);
-  if (!override_response_charset.IsEmpty())
+  if (!override_response_charset.empty())
     label = override_response_charset;
 
   // 4. If label is null, then return null. [spec text]
@@ -1730,7 +1722,7 @@ void XMLHttpRequest::DidFinishLoadingInternal() {
   if (decoder_) {
     auto text = decoder_->Flush();
 
-    if (!text.IsEmpty() && !response_text_overflow_) {
+    if (!text.empty() && !response_text_overflow_) {
       response_text_.Concat(isolate_, text);
       response_text_overflow_ = response_text_.IsEmpty();
     }
@@ -1792,7 +1784,7 @@ void XMLHttpRequest::EndLoading() {
 
   if (auto* window = DynamicTo<LocalDOMWindow>(GetExecutionContext())) {
     LocalFrame* frame = window->GetFrame();
-    if (frame && cors::IsOkStatus(status()))
+    if (frame && network::IsSuccessfulStatus(status()))
       frame->GetPage()->GetChromeClient().AjaxSucceeded(frame);
   }
 }
@@ -1912,13 +1904,6 @@ void XMLHttpRequest::DidReceiveData(const char* data, unsigned len) {
   if (!len)
     return;
 
-  // Store the first few bytes of the response body so that we can check the BOM
-  // later.
-  for (wtf_size_t i = 0;
-       i < len && response_body_head_.size() < kResponseBodyHeadSize; ++i) {
-    response_body_head_.push_back(static_cast<uint8_t>(data[i]));
-  }
-
   if (response_type_code_ == kResponseTypeDocument && ResponseIsHTML()) {
     ParseDocumentChunk(data, len);
   } else if (response_type_code_ == kResponseTypeDefault ||
@@ -1929,7 +1914,7 @@ void XMLHttpRequest::DidReceiveData(const char* data, unsigned len) {
       decoder_ = CreateDecoder();
 
     auto text = decoder_->Decode(data, len);
-    if (!text.IsEmpty() && !response_text_overflow_) {
+    if (!text.empty() && !response_text_overflow_) {
       response_text_.Concat(isolate_, text);
       response_text_overflow_ = response_text_.IsEmpty();
     }
@@ -2076,6 +2061,10 @@ void XMLHttpRequest::Trace(Visitor* visitor) const {
   ThreadableLoaderClient::Trace(visitor);
   DocumentParserClient::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);
+}
+
+bool XMLHttpRequest::HasRequestHeaderForTesting(AtomicString name) const {
+  return request_headers_.Contains(name);
 }
 
 std::ostream& operator<<(std::ostream& ostream, const XMLHttpRequest* xhr) {

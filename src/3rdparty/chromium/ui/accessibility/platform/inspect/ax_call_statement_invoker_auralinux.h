@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define UI_ACCESSIBILITY_PLATFORM_INSPECT_AX_CALL_STATEMENT_INVOKER_AURALINUX_H_
 
 #include <atspi/atspi.h>
-#include <variant>
 
 #include "base/memory/raw_ptr.h"
 #include "third_party/abseil-cpp/absl/types/variant.h"
@@ -19,7 +18,7 @@ namespace ui {
 class AXPropertyNode;
 
 using Target =
-    absl::variant<std::monostate, std::string, int, const AtspiAccessible*>;
+    absl::variant<absl::monostate, std::string, int, const AtspiAccessible*>;
 
 // Optional tri-state object.
 using AXOptionalObject = ui::AXOptional<Target>;

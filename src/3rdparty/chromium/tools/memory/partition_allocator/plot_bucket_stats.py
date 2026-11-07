@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2022 The Chromium Authors. All rights reserved.
+# Copyright 2022 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Plots the distribution of allocated and unallocated slots in SlotSpans.
@@ -90,7 +90,7 @@ def main():
 
   args = parser.parse_args()
   data = ParseJson(args.json)
-  PlotData(data, args.output)
+  PlotData(data, args.output_prefix)
 
 
 if __name__ == '__main__':

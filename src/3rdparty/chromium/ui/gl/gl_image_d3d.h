@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,6 +69,7 @@ class GL_EXPORT GLImageD3D : public GLImage {
   const Microsoft::WRL::ComPtr<IDXGISwapChain1>& swap_chain() const {
     return swap_chain_;
   }
+  HANDLE& shared_handle() { return shared_handle_; }
   size_t array_slice() const { return array_slice_; }
   size_t plane_index() const { return plane_index_; }
 
@@ -80,6 +81,7 @@ class GL_EXPORT GLImageD3D : public GLImage {
   Microsoft::WRL::ComPtr<ID3D11Texture2D> texture_;
   const size_t array_slice_;
   const size_t plane_index_;
+  HANDLE shared_handle_ = NULL;
 
   Microsoft::WRL::ComPtr<IDXGISwapChain1> swap_chain_;
 

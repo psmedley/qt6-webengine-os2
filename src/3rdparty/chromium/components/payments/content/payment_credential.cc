@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/feature_list.h"
 #include "base/memory/ref_counted_memory.h"
 #include "components/payments/content/payment_manifest_web_data_service.h"
+#include "components/payments/core/features.h"
 #include "components/payments/core/secure_payment_confirmation_credential.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
@@ -24,14 +25,14 @@ bool PaymentCredential::IsFrameAllowedToUseSecurePaymentConfirmation(
   return rfh && rfh->IsActive() &&
          rfh->IsFeatureEnabled(
              blink::mojom::PermissionsPolicyFeature::kPayment) &&
-         base::FeatureList::IsEnabled(features::kSecurePaymentConfirmation);
+         base::FeatureList::IsEnabled(::features::kSecurePaymentConfirmation);
 }
 
 PaymentCredential::PaymentCredential(
     content::RenderFrameHost& render_frame_host,
     mojo::PendingReceiver<mojom::PaymentCredential> receiver,
     scoped_refptr<PaymentManifestWebDataService> web_data_service)
-    : DocumentService(&render_frame_host, std::move(receiver)),
+    : DocumentService(render_frame_host, std::move(receiver)),
       web_data_service_(web_data_service) {}
 
 PaymentCredential::~PaymentCredential() {
@@ -53,6 +54,15 @@ void PaymentCredential::StorePaymentCredential(
 
   RecordFirstSystemPromptResult(
       SecurePaymentConfirmationEnrollSystemPromptResult::kAccepted);
+
+  // If credential-store level APIs are available, the credential information
+  // will already have been stored during creation.
+  if (base::FeatureList::IsEnabled(
+          features::kSecurePaymentConfirmationUseCredentialStoreAPIs)) {
+    Reset();
+    std::move(callback).Run(mojom::PaymentCredentialStorageStatus::SUCCESS);
+    return;
+  }
 
   storage_callback_ = std::move(callback);
   state_ = State::kStoringCredential;
@@ -82,7 +92,7 @@ void PaymentCredential::OnWebDataServiceRequestDone(
 }
 
 bool PaymentCredential::IsCurrentStateValid() const {
-  if (!IsFrameAllowedToUseSecurePaymentConfirmation(render_frame_host()) ||
+  if (!IsFrameAllowedToUseSecurePaymentConfirmation(&render_frame_host()) ||
       !web_data_service_) {
     return false;
   }

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,13 +16,19 @@ namespace {
 // in other locations in the code base (e.g. content_features.h), and must be
 // replicated in the same order in PhotoPickerFeatures.java.
 const base::Feature* kFeaturesExposedToJava[] = {
+    &kAndroidMediaPickerSupport,
     &kPhotoPickerVideoSupport,
 };
 
 }  // namespace
 
-const base::Feature kPhotoPickerVideoSupport{"PhotoPickerVideoSupport",
-                                             base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kAndroidMediaPickerSupport,
+             "AndroidMediaPickerSupport",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kPhotoPickerVideoSupport,
+             "PhotoPickerVideoSupport",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 static jlong JNI_PhotoPickerFeatures_GetFeature(JNIEnv* env, jint ordinal) {
   return reinterpret_cast<jlong>(kFeaturesExposedToJava[ordinal]);

@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -24,10 +24,6 @@ source_set("formats") {
     "common/offset_byte_queue.h",
     "common/opus_constants.cc",
     "common/opus_constants.h",
-    "dts/dts_stream_parser.cc",
-    "dts/dts_stream_parser.h",
-    "dts/dts_util.cc",
-    "dts/dts_util.h",
     "mp4/bitstream_converter.cc",
     "mp4/bitstream_converter.h",
     "mp4/box_definitions.cc",
@@ -128,8 +124,12 @@ source_set("formats") {
     ]
   }
 
-  if (proprietary_codecs && enable_platform_dts_audio) {
+  if (enable_platform_dts_audio) {
     sources += [
+      "dts/dts_stream_parser.cc",
+      "dts/dts_stream_parser.h",
+      "dts/dts_util.cc",
+      "dts/dts_util.h",
       "mp4/dts.cc",
       "mp4/dts.h",
       "mp4/dtsx.cc",
@@ -191,6 +191,8 @@ source_set("formats") {
     "hls/media_playlist.h",
     "hls/media_segment.cc",
     "hls/media_segment.h",
+    "hls/multivariant_playlist.cc",
+    "hls/multivariant_playlist.h",
     "hls/parse_status.cc",
     "hls/parse_status.h",
     "hls/playlist.cc",
@@ -207,6 +209,8 @@ source_set("formats") {
     "hls/types.h",
     "hls/variable_dictionary.cc",
     "hls/variable_dictionary.h",
+    "hls/variant_stream.cc",
+    "hls/variant_stream.h",
   ]
   deps += [ "//third_party/re2" ]
   public_deps = [
@@ -258,7 +262,6 @@ source_set("unit_tests") {
   sources = [
     "ac3/ac3_util_unittest.cc",
     "common/offset_byte_queue_unittest.cc",
-    "dts/dts_util_unittest.cc",
     "mpeg/mpeg1_audio_stream_parser_unittest.cc",
     "webm/webm_cluster_parser_unittest.cc",
     "webm/webm_content_encodings_client_unittest.cc",
@@ -295,6 +298,7 @@ source_set("unit_tests") {
 
     if (enable_platform_dts_audio) {
       sources += [
+        "dts/dts_util_unittest.cc",
         "mp4/dts_unittest.cc",
         "mp4/dtsx_unittest.cc",
       ]
@@ -322,9 +326,18 @@ source_set("unit_tests") {
 
   # TODO(https://crbug.com/1266991): This should be gated behind `enable_hls_demuxer`, once that's enabled by default.
   sources += [
+    "hls/common_playlist_unittest.cc",
     "hls/items_unittest.cc",
+    "hls/media_playlist_test_builder.cc",
+    "hls/media_playlist_test_builder.h",
     "hls/media_playlist_unittest.cc",
+    "hls/multivariant_playlist_test_builder.cc",
+    "hls/multivariant_playlist_test_builder.h",
+    "hls/multivariant_playlist_unittest.cc",
+    "hls/playlist_test_builder.h",
+    "hls/playlist_unittest.cc",
     "hls/tags_unittest.cc",
+    "hls/test_util.h",
     "hls/types_unittest.cc",
     "hls/variable_dictionary_unittest.cc",
   ]
@@ -358,6 +371,16 @@ fuzzer_test("hls_media_playlist_fuzzer") {
   ]
 }
 
+# TODO(https://crbug.com/1266991): This should be gated behind `enable_hls_demuxer`, once that's enabled by default.
+fuzzer_test("hls_multivariant_playlist_fuzzer") {
+  sources = [ "hls/multivariant_playlist_fuzzer.cc" ]
+  deps = [
+    "//base",
+    "//base:i18n",
+    "//media",
+  ]
+}
+
 if (proprietary_codecs) {
   fuzzer_test("h264_annex_b_converter_fuzzer") {
     sources = [ "mp4/h264_annex_b_to_avc_bitstream_converter_fuzztest.cc" ]
@@ -366,6 +389,16 @@ if (proprietary_codecs) {
       "//base",
       "//media",
       "//ui/gfx/geometry",
+    ]
+  }
+}
+
+if (enable_platform_dts_audio) {
+  fuzzer_test("dts_util_fuzzer") {
+    sources = [ "dts/dts_util_fuzzer.cc" ]
+    deps = [
+      "//media",
+      "//base",
     ]
   }
 }

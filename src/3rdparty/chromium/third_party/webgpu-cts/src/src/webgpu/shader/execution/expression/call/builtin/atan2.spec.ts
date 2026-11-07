@@ -1,63 +1,63 @@
 export const description = `
-Execution Tests for the 'atan2' builtin function
+Execution tests for the 'atan2' builtin function
+
+S is AbstractFloat, f32, f16
+T is S or vecN<S>
+@const fn atan2(e1: T ,e2: T ) -> T
+Returns the arc tangent of e1 over e2. Component-wise when T is a vector.
 `;
 
 import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
-import { assert } from '../../../../../../common/util/util.js';
 import { GPUTest } from '../../../../../gpu_test.js';
-import { ulpThreshold } from '../../../../../util/compare.js';
-import { kValue } from '../../../../../util/constants.js';
-import { f32, TypeF32 } from '../../../../../util/conversion.js';
-import { biasedRange, linearRange } from '../../../../../util/math.js';
-import { Case, Config, run } from '../../expression.js';
+import { TypeF32 } from '../../../../../util/conversion.js';
+import { atan2Interval } from '../../../../../util/f32_interval.js';
+import { fullF32Range } from '../../../../../util/math.js';
+import { allInputSources, Case, makeBinaryToF32IntervalCase, run } from '../../expression.js';
 
 import { builtin } from './builtin.js';
 
 export const g = makeTestGroup(GPUTest);
 
+g.test('abstract_float')
+  .specURL('https://www.w3.org/TR/WGSL/#float-builtin-functions')
+  .desc(`abstract float tests`)
+  .params(u =>
+    u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
+  )
+  .unimplemented();
+
 g.test('f32')
-  .uniqueId('cc85953f226ac95c')
-  .specURL('https://www.w3.org/TR/2021/WD-WGSL-20210929/#float-builtin-functions')
+  .specURL('https://www.w3.org/TR/WGSL/#float-builtin-functions')
   .desc(
     `
-atan2:
-T is f32 or vecN<f32> atan2(e1: T ,e2: T ) -> T Returns the arc tangent of e1 over e2. Component-wise when T is a vector. (GLSLstd450Atan2)
+f32 tests
 
 TODO(#792): Decide what the ground-truth is for these tests. [1]
 `
   )
   .params(u =>
-    u
-      .combine('storageClass', ['uniform', 'storage_r', 'storage_rw'] as const)
-      .combine('vectorize', [undefined, 2, 3, 4] as const)
+    u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
   )
   .fn(async t => {
-    // [1]: Need to decide what the ground-truth is.
     const makeCase = (y: number, x: number): Case => {
-      assert(x !== 0, 'atan2 is undefined for x = 0');
-      return { input: [f32(y), f32(x)], expected: f32(Math.atan2(y, x)) };
+      return makeBinaryToF32IntervalCase(y, x, atan2Interval);
     };
 
-    const numeric_range = [
-      //  -2^32 < x <= -1, biased towards -1
-      ...biasedRange(-1.0, -(2 ** 32), 50),
-      // -1 <= x < 0, linearly spread
-      ...linearRange(-1.0, kValue.f32.negative.max, 20),
-      // 0 < x < -1, linearly spread
-      ...linearRange(kValue.f32.positive.min, 1.0, 20),
-      // 1 <= x < 2^32, biased towards 1
-      ...biasedRange(1.0, 2 ** 32, 20),
-    ];
-
-    const cases: Array<Case> = numeric_range.map(x => makeCase(0.0, x));
-    numeric_range.forEach((y, y_idx) => {
-      numeric_range.forEach((x, x_idx) => {
-        if (x_idx >= y_idx) {
-          cases.push(makeCase(y, x));
-        }
+    const numeric_range = fullF32Range();
+    const cases: Array<Case> = [];
+    numeric_range.forEach(y => {
+      numeric_range.forEach(x => {
+        cases.push(makeCase(y, x));
       });
     });
-    const cfg: Config = t.params;
-    cfg.cmpFloats = ulpThreshold(4096);
-    run(t, builtin('atan2'), [TypeF32, TypeF32], TypeF32, cfg, cases);
+
+    await run(t, builtin('atan2'), [TypeF32, TypeF32], TypeF32, t.params, cases);
   });
+
+g.test('f16')
+  .specURL('https://www.w3.org/TR/WGSL/#float-builtin-functions')
+  .desc(`f16 tests`)
+  .params(u =>
+    u.combine('inputSource', allInputSources).combine('vectorize', [undefined, 2, 3, 4] as const)
+  )
+  .unimplemented();

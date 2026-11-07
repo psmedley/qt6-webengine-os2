@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,6 +34,7 @@
 #include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
 #include "third_party/blink/public/common/input/web_pointer_event.h"
 #include "third_party/blink/public/common/input/web_touch_event.h"
+#include "third_party/blink/public/mojom/input/input_handler.mojom-blink.h"
 #include "third_party/blink/renderer/platform/widget/input/compositor_thread_event_queue.h"
 #include "third_party/blink/renderer/platform/widget/input/cursor_control_handler.h"
 #include "third_party/blink/renderer/platform/widget/input/elastic_overscroll_controller.h"
@@ -218,6 +219,7 @@ InputHandlerProxy::InputHandlerProxy(cc::InputHandler& input_handler,
       handling_gesture_on_impl_thread_(false),
       scroll_sequence_ignored_(false),
       current_overscroll_params_(nullptr),
+      current_scroll_result_data_(nullptr),
       has_seen_first_gesture_scroll_update_after_begin_(false),
       last_injected_gesture_was_begin_(false),
       tick_clock_(base::DefaultTickClock::GetInstance()),
@@ -229,7 +231,8 @@ InputHandlerProxy::InputHandlerProxy(cc::InputHandler& input_handler,
   UpdateElasticOverscroll();
   compositor_event_queue_ = std::make_unique<CompositorThreadEventQueue>();
   scroll_predictor_ =
-      base::FeatureList::IsEnabled(blink::features::kResamplingScrollEvents)
+      (base::FeatureList::IsEnabled(blink::features::kResamplingScrollEvents) &&
+       client->AllowsScrollResampling())
           ? std::make_unique<ScrollPredictor>()
           : nullptr;
 
@@ -423,7 +426,7 @@ void InputHandlerProxy::ContinueScrollBeginAfterMainThreadHitTest(
     // RecordScrollBegin and RecordScrollEnd but we should probably be avoiding
     // this if the scroll never starts. https://crbug.com/1082601.
     RecordMainThreadScrollingReasons(gesture_event->SourceDevice(), 0, false,
-                                     false);
+                                     0);
 
     // If the main thread failed to return a scroller for whatever reason,
     // consider the ScrollBegin to be dropped.
@@ -432,7 +435,7 @@ void InputHandlerProxy::ContinueScrollBeginAfterMainThreadHitTest(
         PerformEventAttribution(event->Event());
     std::move(callback).Run(DROP_EVENT, std::move(event),
                             /*overscroll_params=*/nullptr, attribution,
-                            std::move(metrics));
+                            std::move(metrics), /*scroll_result_data=*/nullptr);
   }
 
   // We blocked the compositor gesture event queue while the hit test was
@@ -515,7 +518,8 @@ void InputHandlerProxy::DispatchSingleInputEvent(
   // Will run callback for every original events.
   event_with_callback->RunCallbacks(disposition, monitored_latency_info,
                                     std::move(current_overscroll_params_),
-                                    attribution);
+                                    attribution,
+                                    std::move(current_scroll_result_data_));
 }
 
 bool InputHandlerProxy::HasQueuedEventsReadyForDispatch() {
@@ -850,7 +854,7 @@ void InputHandlerProxy::RecordMainThreadScrollingReasons(
     WebGestureDevice device,
     uint32_t reasons_from_scroll_begin,
     bool was_main_thread_hit_tested,
-    bool needs_main_thread_repaint) {
+    uint32_t main_thread_repaint_reasons) {
   if (device != WebGestureDevice::kTouchpad &&
       device != WebGestureDevice::kScrollbar &&
       device != WebGestureDevice::kTouchscreen) {
@@ -868,7 +872,8 @@ void InputHandlerProxy::RecordMainThreadScrollingReasons(
   const bool is_compositor_scroll =
       reasons_from_scroll_begin ==
           cc::MainThreadScrollingReason::kNotScrollingOnMain &&
-      !needs_main_thread_repaint;
+      main_thread_repaint_reasons ==
+          cc::MainThreadScrollingReason::kNotScrollingOnMain;
 
   absl::optional<EventDisposition> disposition =
       (device == WebGestureDevice::kTouchpad ? mouse_wheel_result_
@@ -901,24 +906,11 @@ void InputHandlerProxy::RecordMainThreadScrollingReasons(
     reportable_reasons |= cc::MainThreadScrollingReason::kFailedHitTest;
   }
 
-  if (needs_main_thread_repaint) {
-    // With scroll unification, most of the values in MainThreadScrollingReason
-    // aren't reflected in reasons_from_scroll_begin, since we are not scrolling
-    // "on main" from ThreadedInputHandler's perspective. But we still want to
-    // log a reason to UMA if the user will not see new pixels until the next
-    // BeginMainFrame. We use kNoScrollingLayer here to cover scenarios that
-    // were reported pre-unification as one of:
-    //
-    //   kHasBackgroundAttachmentFixedObjects
-    //   kThreadedScrollingDisabled
-    //   kNonFastScrollableRegion
-    //   kNotOpaqueForTextAndLCDText
-    //   kCantPaintScrollingBackgroundAndLCDText
-    //
-    // TODO(crbug.com/1082590): Add new plumbing to distinguish between these in
-    // the post-unification world?
-    reportable_reasons |= cc::MainThreadScrollingReason::kNoScrollingLayer;
-  }
+  // With scroll unification, we never scroll "on main" from the perspective
+  // of cc::InputHandler, but we still want to log reasons if the user will not
+  // see new pixels until the next BeginMainFrame. These reasons are passed as
+  // main_thread_repaint_reasons instead of reasons_from_scroll_begin.
+  reportable_reasons |= main_thread_repaint_reasons;
 
   RecordScrollReasonsMetric(device, reportable_reasons);
 }
@@ -1018,7 +1010,7 @@ InputHandlerProxy::EventDisposition InputHandlerProxy::HandleGestureScrollBegin(
   RecordMainThreadScrollingReasons(gesture_event.SourceDevice(),
                                    scroll_status.main_thread_scrolling_reasons,
                                    scroll_state.is_main_thread_hit_tested(),
-                                   scroll_status.needs_main_thread_repaint);
+                                   scroll_status.main_thread_repaint_reasons);
 
   InputHandlerProxy::EventDisposition result = DID_NOT_HANDLE;
   scroll_sequence_ignored_ = false;
@@ -1064,7 +1056,7 @@ InputHandlerProxy::EventDisposition
 InputHandlerProxy::HandleGestureScrollUpdate(
     const WebGestureEvent& gesture_event,
     const WebInputEventAttribution& original_attribution,
-    const cc::EventMetrics* original_metrics) {
+    cc::EventMetrics* metrics) {
   TRACE_EVENT2("input", "InputHandlerProxy::HandleGestureScrollUpdate", "dx",
                -gesture_event.data.scroll_update.delta_x, "dy",
                -gesture_event.data.scroll_update.delta_y);
@@ -1098,7 +1090,7 @@ InputHandlerProxy::HandleGestureScrollUpdate(
     handling_gesture_on_impl_thread_ = false;
     currently_active_gesture_device_ = absl::nullopt;
     client_->GenerateScrollBeginAndSendToMainThread(
-        gesture_event, original_attribution, original_metrics);
+        gesture_event, original_attribution, metrics);
 
     // TODO(bokan): |!gesture_pinch_in_progress_| was put here by
     // https://crrev.com/2720903005 but it's not clear to me how this is
@@ -1120,6 +1112,17 @@ InputHandlerProxy::HandleGestureScrollUpdate(
 
   if (elastic_overscroll_controller_)
     HandleScrollElasticityOverscroll(gesture_event, scroll_result);
+
+  if (metrics && scroll_result.needs_main_thread_repaint)
+    metrics->set_requires_main_thread_update();
+
+  if (scroll_result.did_scroll) {
+    current_scroll_result_data_ = mojom::blink::ScrollResultData::New();
+    if (input_handler_->IsCurrentlyScrollingViewport()) {
+      current_scroll_result_data_->root_scroll_offset =
+          scroll_result.current_visual_offset;
+    }
+  }
 
   return scroll_result.did_scroll ? DID_HANDLE : DROP_EVENT;
 }
@@ -1509,6 +1512,14 @@ void InputHandlerProxy::RequestAnimationForSnapFling() {
   RequestAnimation();
 }
 
+void InputHandlerProxy::UpdateBrowserControlsState(
+    cc::BrowserControlsState constraints,
+    cc::BrowserControlsState current,
+    bool animate) {
+  DCHECK(input_handler_);
+  input_handler_->UpdateBrowserControlsState(constraints, current, animate);
+}
+
 void InputHandlerProxy::HandleOverscroll(
     const gfx::PointF& causal_event_viewport_point,
     const cc::InputHandlerScrollResult& scroll_result) {
@@ -1662,6 +1673,11 @@ const cc::InputHandlerPointerResult InputHandlerProxy::HandlePointerUp(
     }
   }
   return pointer_result;
+}
+
+void InputHandlerProxy::SetDeferBeginMainFrame(
+    bool defer_begin_main_frame) const {
+  input_handler_->SetDeferBeginMainFrame(defer_begin_main_frame);
 }
 
 }  // namespace blink

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/metrics/field_trial.h"
@@ -215,13 +216,13 @@ SettingsEnforcementGroup GetSettingsEnforcementGroup() {
 #if BUILDFLAG(IS_WIN)
   if (!g_disable_domain_check_for_testing) {
     static bool first_call = true;
-    static const bool is_managed = base::IsMachineExternallyManaged();
+    static const bool is_domain_joined = base::IsEnterpriseDevice();
     if (first_call) {
       UMA_HISTOGRAM_BOOLEAN("Settings.TrackedPreferencesNoEnforcementOnDomain",
-                            is_managed);
+                            is_domain_joined);
       first_call = false;
     }
-    if (is_managed)
+    if (is_domain_joined)
       return GROUP_NO_ENFORCEMENT;
   }
 #endif
@@ -276,12 +277,9 @@ std::unique_ptr<ProfilePrefStoreManager> CreateProfilePrefStoreManager(
     const base::FilePath& profile_path) {
   std::string legacy_device_id;
 #if BUILDFLAG(IS_WIN) && BUILDFLAG(ENABLE_RLZ)
-  // This is used by
-  // chrome/browser/apps/platform_apps/api/music_manager_private/device_id_win.cc
-  // but that API is private (http://crbug.com/276485) and other platforms are
-  // not available synchronously.
-  // As part of improving pref metrics on other platforms we may want to find
-  // ways to defer preference loading until the device ID can be used.
+  // This was used by the musicManagerPrivate API, and remains here for backward
+  // compatibility so ProfilePrefStoreManager can continue to calculate the same
+  // hashes as before.
   rlz_lib::GetMachineId(&legacy_device_id);
 #endif
   std::string seed;
@@ -357,20 +355,6 @@ class ResetOnLoadObserverImpl : public prefs::mojom::ResetOnLoadObserver {
 }  // namespace
 
 namespace chrome_prefs {
-
-namespace internals {
-
-// Group modifications should be reflected in first_run_browsertest.cc and
-// pref_hash_browsertest.cc.
-const char kSettingsEnforcementTrialName[] = "SettingsEnforcement";
-const char kSettingsEnforcementGroupNoEnforcement[] = "no_enforcement";
-const char kSettingsEnforcementGroupEnforceAlways[] = "enforce_always";
-const char kSettingsEnforcementGroupEnforceAlwaysWithDSE[] =
-    "enforce_always_with_dse";
-const char kSettingsEnforcementGroupEnforceAlwaysWithExtensionsAndDSE[] =
-    "enforce_always_with_extensions_and_dse";
-
-}  // namespace internals
 
 std::unique_ptr<PrefService> CreateLocalState(
     const base::FilePath& pref_filename,

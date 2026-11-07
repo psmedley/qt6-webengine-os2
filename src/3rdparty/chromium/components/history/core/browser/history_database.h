@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,12 @@
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/history/core/browser/download_database.h"
 #include "components/history/core/browser/history_types.h"
 #if !defined(TOOLKIT_QT)
+#include "components/history/core/browser/sync/history_sync_metadata_database.h"
 #include "components/history/core/browser/sync/typed_url_sync_metadata_database.h"
 #endif
 #include "components/history/core/browser/url_database.h"
@@ -47,9 +47,6 @@ class HistoryDatabase : public DownloadDatabase,
 #if BUILDFLAG(IS_ANDROID)
                         public AndroidURLsDatabase,
                         public AndroidCacheDatabase,
-#endif
-#if !defined(TOOLKIT_QT)
-                        public TypedURLSyncMetadataDatabase,
 #endif
                         public URLDatabase,
                         public VisitDatabase,
@@ -143,7 +140,11 @@ class HistoryDatabase : public DownloadDatabase,
   // Razes the database. Returns true if successful.
   bool Raze();
 
-  std::string GetDiagnosticInfo(int extended_error, sql::Statement* statement);
+  // A simple passthrough to `sql::Database::GetDiagnosticInfo()`.
+  std::string GetDiagnosticInfo(
+      int extended_error,
+      sql::Statement* statement,
+      sql::DatabaseDiagnostics* diagnostics = nullptr);
 
   // Visit table functions ----------------------------------------------------
 
@@ -160,6 +161,16 @@ class HistoryDatabase : public DownloadDatabase,
   virtual base::Time GetEarlyExpirationThreshold();
   virtual void UpdateEarlyExpirationThreshold(base::Time threshold);
 
+  // Sync metadata storage ----------------------------------------------------
+
+#if !defined(TOOLKIT_QT)
+  // Returns the sub-database used for storing Sync metadata for Typed URLs.
+  TypedURLSyncMetadataDatabase* GetTypedURLMetadataDB();
+
+  // Returns the sub-database used for storing Sync metadata for History.
+  HistorySyncMetadataDatabase* GetHistoryMetadataDB();
+#endif  // !defined(TOOLKIT_QT)
+
  private:
 #if BUILDFLAG(IS_ANDROID)
   // AndroidProviderBackend uses the `db_`.
@@ -168,16 +179,9 @@ class HistoryDatabase : public DownloadDatabase,
 #endif
   friend class ::InMemoryURLIndexTest;
 
-  // Overridden from URLDatabase, DownloadDatabase, VisitDatabase,
-  // VisitSegmentDatabase and TypedURLSyncMetadataDatabase.
+  // Overridden from URLDatabase, DownloadDatabase, VisitDatabase, and
+  // VisitSegmentDatabase.
   sql::Database& GetDB() override;
-
-  // Overridden from TypedURLSyncMetadataDatabase.
-#if !defined(TOOLKIT_QT)
-  sql::MetaTable& GetMetaTable() override;
-#else
-  sql::MetaTable& GetMetaTable();
-#endif
 
   // Migration -----------------------------------------------------------------
 
@@ -199,6 +203,15 @@ class HistoryDatabase : public DownloadDatabase,
 
   sql::Database db_;
   sql::MetaTable meta_table_;
+
+#if !defined(TOOLKIT_QT)
+  // Most of the sub-DBs (URLDatabase etc.) are integrated into HistoryDatabase
+  // via inheritance. However, that can lead to "diamond inheritance" issues
+  // when multiple of these base classes define the same methods. Therefore the
+  // Sync metadata DBs are integrated via composition instead.
+  TypedURLSyncMetadataDatabase typed_url_metadata_db_;
+  HistorySyncMetadataDatabase history_metadata_db_;
+#endif  // !defined(TOOLKIT_QT)
 
   base::Time cached_early_expiration_threshold_;
 };

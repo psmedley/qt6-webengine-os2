@@ -42,6 +42,8 @@
 #include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/service_worker/controller_service_worker.mojom-blink.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker.mojom-blink.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_ancestor_frame_type.mojom-blink.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_fetch_handler_type.mojom-blink.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_stream_handle.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
@@ -60,6 +62,7 @@
 
 namespace blink {
 
+class InterfaceRegistry;
 class ExceptionState;
 class FetchEvent;
 class RespondWithObserver;
@@ -101,18 +104,21 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
       std::unique_ptr<ServiceWorkerInstalledScriptsManager>,
       mojo::PendingRemote<mojom::blink::CacheStorage>,
       base::TimeTicks time_origin,
-      const ServiceWorkerToken& service_worker_token);
+      const ServiceWorkerToken& service_worker_token,
+      InterfaceRegistry* interface_registry);
   ~ServiceWorkerGlobalScope() override;
+
+  InterfaceRegistry& GetInterfaceRegistry() { return *interface_registry_; }
 
   // ExecutionContext overrides:
   bool IsServiceWorkerGlobalScope() const override { return true; }
   bool ShouldInstallV8Extensions() const final;
+  bool IsInFencedFrame() const override;
 
   // Implements WorkerGlobalScope:
   void Initialize(
       const KURL& response_url,
       network::mojom::ReferrerPolicy response_referrer_policy,
-      network::mojom::IPAddressSpace response_address_space,
       Vector<network::mojom::blink::ContentSecurityPolicyPtr> response_csp,
       const Vector<String>* response_origin_trial_tokens) override;
   // Fetches and runs the top-level classic worker script.
@@ -120,6 +126,7 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
       const KURL& script_url,
       std::unique_ptr<WorkerMainScriptLoadParameters>
           worker_main_script_load_params,
+      std::unique_ptr<PolicyContainer> policy_container,
       const FetchClientSettingsObjectSnapshot& outside_settings_object,
       WorkerResourceTimingNotifier& outside_resource_timing_notifier,
       const v8_inspector::V8StackTraceId& stack_id) override;
@@ -128,6 +135,7 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
       const KURL& module_url_record,
       std::unique_ptr<WorkerMainScriptLoadParameters>
           worker_main_script_load_params,
+      std::unique_ptr<PolicyContainer> policy_container,
       const FetchClientSettingsObjectSnapshot& outside_settings_object,
       WorkerResourceTimingNotifier& outside_resource_timing_notifier,
       network::mojom::CredentialsMode,
@@ -216,6 +224,7 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
       int fetch_event_id,
       const KURL& request_url,
       bool range_request,
+      absl::optional<network::DataElementChunkedDataPipe> request_body,
       base::TimeTicks event_dispatch_time,
       base::TimeTicks respond_with_settled_time);
   // Responds to the fetch event with |response|.
@@ -306,10 +315,17 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
   const ServiceWorkerToken& GetServiceWorkerToken() const { return token_; }
   WorkerToken GetWorkerToken() const final { return token_; }
   bool CrossOriginIsolatedCapability() const final;
-  bool DirectSocketCapability() const final;
+  bool IsolatedApplicationCapability() const final;
   ExecutionContextToken GetExecutionContextToken() const final {
     return token_;
   }
+
+  mojom::blink::AncestorFrameType GetAncestorFrameType() const {
+    DCHECK(global_scope_initialized_);
+    return ancestor_frame_type_;
+  }
+
+  mojom::blink::ServiceWorkerFetchHandlerType FetchHandlerType();
 
  protected:
   // EventTarget
@@ -330,7 +346,7 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
 
  private:
   void importScripts(const Vector<String>& urls) override;
-  SingleCachedMetadataHandler* CreateWorkerScriptCachedMetadataHandler(
+  CachedMetadataHandler* CreateWorkerScriptCachedMetadataHandler(
       const KURL& script_url,
       std::unique_ptr<Vector<uint8_t>> meta_data) override;
   void ExceptionThrown(ErrorEvent*) override;
@@ -349,7 +365,6 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
   void RunClassicScript(
       const KURL& response_url,
       network::mojom::ReferrerPolicy response_referrer_policy,
-      network::mojom::IPAddressSpace response_address_space,
       Vector<network::mojom::blink::ContentSecurityPolicyPtr> response_csp,
       const Vector<String>* response_origin_trial_tokens,
       const String& source_code,
@@ -407,7 +422,8 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
       mojom::blink::ServiceWorkerRegistrationObjectInfoPtr registration_info,
       mojom::blink::ServiceWorkerObjectInfoPtr service_worker_info,
       mojom::blink::FetchHandlerExistence fetch_handler_existence,
-      mojo::PendingReceiver<mojom::blink::ReportingObserver>) override;
+      mojo::PendingReceiver<mojom::blink::ReportingObserver>,
+      mojom::blink::AncestorFrameType ancestor_frame_type) override;
   void DispatchInstallEvent(DispatchInstallEventCallback callback) override;
   void AbortInstallEvent(int event_id,
                          mojom::blink::ServiceWorkerEventStatus status);
@@ -569,6 +585,9 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
   Member<ServiceWorkerRegistration> registration_;
   Member<::blink::ServiceWorker> service_worker_;
 
+  // Registry of interfaces exposed to the browser from Service Workers.
+  InterfaceRegistry* const interface_registry_;
+
   // Map from service worker version id to JavaScript ServiceWorker object in
   // current execution context.
   HeapHashMap<int64_t,
@@ -700,6 +719,11 @@ class MODULES_EXPORT ServiceWorkerGlobalScope final
   // same value in the browser representation of this object. This is not
   // persistent across worker restarts.
   const ServiceWorkerToken token_;
+
+  // Ancestor frame type when the service worker was registered. This type is
+  // used to check if the service worker is registered in a fenced frame or not
+  // in order to block powerful API call in fenced frames.
+  mojom::blink::AncestorFrameType ancestor_frame_type_;
 };
 
 template <>

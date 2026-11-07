@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -79,9 +79,7 @@ ElementFragmentAnchor* ElementFragmentAnchor::TryCreate(const KURL& url,
   if (!should_scroll)
     return nullptr;
 
-  if (RuntimeEnabledFeatures::AutoExpandDetailsElementEnabled()) {
-    HTMLDetailsElement::ExpandDetailsAncestors(*anchor_node);
-  }
+  HTMLDetailsElement::ExpandDetailsAncestors(*anchor_node);
 
   if (RuntimeEnabledFeatures::BeforeMatchEventEnabled(
           frame.GetDocument()->GetExecutionContext())) {
@@ -161,7 +159,7 @@ void ElementFragmentAnchor::Trace(Visitor* visitor) const {
   FragmentAnchor::Trace(visitor);
 }
 
-void ElementFragmentAnchor::PerformPreRafActions() {
+void ElementFragmentAnchor::PerformScriptableActions() {
   ApplyFocusIfNeeded();
 }
 
@@ -204,17 +202,13 @@ void ElementFragmentAnchor::ApplyFocusIfNeeded() {
   // clear focus, which matches the behavior of other browsers.
   auto* element = DynamicTo<Element>(anchor_node_.Get());
   if (element && element->IsFocusable()) {
-    element->focus(FocusParams(/*gate_on_user_activation=*/true)); 
+    element->Focus(FocusParams(/*gate_on_user_activation=*/true));
   } else {
     frame_->GetDocument()->SetSequentialFocusNavigationStartingPoint(
         anchor_node_);
     frame_->GetDocument()->ClearFocusedElement();
   }
   needs_focus_ = false;
-}
-
-bool ElementFragmentAnchor::Dismiss() {
-  return false;
 }
 
 }  // namespace blink

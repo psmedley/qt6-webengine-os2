@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,8 +55,6 @@
 // it via construction to synchronously fulfill this read request.
 
 namespace audio {
-class OutputStreamActivityMonitor;
-
 class OutputController : public media::AudioOutputStream::AudioSourceCallback,
                          public LoopbackGroupMember {
  public:
@@ -90,9 +88,10 @@ class OutputController : public media::AudioOutputStream::AudioSourceCallback,
                                  base::TimeTicks delay_timestamp,
                                  int prior_frames_skipped) = 0;
 
-    // Attempts to completely fill |dest|, zeroing |dest| if the request can not
-    // be fulfilled (due to timeout).
-    virtual void Read(media::AudioBus* dest) = 0;
+    // Attempts to completely fill `dest`, zeroing `dest` if the request can not
+    // be fulfilled (due to timeout). If `is_mixing` is set, the SyncReader
+    // might use a mixing-specific timeout.
+    virtual void Read(media::AudioBus* dest, bool is_mixing) = 0;
 
     // Close this synchronous reader.
     virtual void Close() = 0;
@@ -117,15 +116,14 @@ class OutputController : public media::AudioOutputStream::AudioSourceCallback,
           const media::AudioParameters&,
           base::OnceClosure on_device_change_callback)>;
 
-  // |audio_manager| and |handler| must outlive OutputController.  The
-  // |output_device_id| can be either empty (default device) or specify a
+  // `audio_manager` and `handler` must outlive OutputController.  The
+  // `output_device_id` can be either empty (default device) or specify a
   // specific hardware device for audio output.
-  // If |managed_device_output_stream_create_callback| is provided, it will be
+  // If `managed_device_output_stream_create_callback` is provided, it will be
   // used to create a device stream under control; otherwise the stream will be
-  // created using |audio_manager|.
+  // created using `audio_manager`.
   OutputController(media::AudioManager* audio_manager,
                    EventHandler* handler,
-                   OutputStreamActivityMonitor* activity_monitor,
                    const media::AudioParameters& params,
                    const std::string& output_device_id,
                    SyncReader* sync_reader,
@@ -177,6 +175,11 @@ class OutputController : public media::AudioOutputStream::AudioSourceCallback,
                  base::TimeTicks delay_timestamp,
                  int prior_frames_skipped,
                  media::AudioBus* dest) override;
+  int OnMoreData(base::TimeDelta delay,
+                 base::TimeTicks delay_timestamp,
+                 int prior_frames_skipped,
+                 media::AudioBus* dest,
+                 bool is_mixing) override;
   void OnError(ErrorType type) override;
 
   // LoopbackGroupMember implementation.
@@ -277,10 +280,6 @@ class OutputController : public media::AudioOutputStream::AudioSourceCallback,
   // Log the current average power level measured by power_monitor_.
   void LogAudioPowerLevel(const char* call_name);
 
-  // Returns whether the output stream is considered active to the
-  // |activity_monitor_|.
-  bool StreamIsActive();
-
   // Helper called by StartMuting() and StopMuting() to execute the stream
   // change.
   void ToggleLocalOutput();
@@ -303,9 +302,6 @@ class OutputController : public media::AudioOutputStream::AudioSourceCallback,
   // It is safe to use a raw pointer here since the OS will always outlive
   // the OC object.
   EventHandler* const handler_;
-
-  // Notified when the stream starts/stops playing audio without muting.
-  OutputStreamActivityMonitor* const activity_monitor_;
 
   // The task runner for the audio manager. All control methods should be called
   // via tasks run by this TaskRunner.

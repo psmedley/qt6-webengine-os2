@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -368,7 +368,7 @@ bool AXSelection::Select(const AXSelectionBehavior selection_behavior) {
     // TextControl::SetSelectionRange deliberately does not set focus. But if
     // we're updating the selection, the text control should be focused.
     ScheduleSelectEvent(text_control);
-    text_control.focus();
+    text_control.Focus();
     return true;
   }
 

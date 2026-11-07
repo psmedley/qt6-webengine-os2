@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,6 +67,7 @@ std::unique_ptr<ServiceImpl> ServiceImpl::Create(
       client, std::move(request_sender),
       url_fetcher.GetSupportsScriptEndpoint(),
       url_fetcher.GetNextActionsEndpoint(), url_fetcher.GetUserDataEndpoint(),
+      url_fetcher.GetReportProgressEndpoint(),
       std::make_unique<ClientContextImpl>(client));
 }
 
@@ -75,12 +76,14 @@ ServiceImpl::ServiceImpl(Client* client,
                          const GURL& script_server_url,
                          const GURL& action_server_url,
                          const GURL& user_data_url,
+                         const GURL& report_progress_url,
                          std::unique_ptr<ClientContext> client_context)
     : client_(client),
       request_sender_(std::move(request_sender)),
       script_server_url_(script_server_url),
       script_action_server_url_(action_server_url),
       user_data_url_(user_data_url),
+      report_progress_url_(report_progress_url),
       client_context_(std::move(client_context)) {
   DCHECK(script_server_url.is_valid());
   DCHECK(action_server_url.is_valid());
@@ -144,7 +147,24 @@ void ServiceImpl::GetNextActions(
 
 void ServiceImpl::GetUserData(const CollectUserDataOptions& options,
                               uint64_t run_id,
+                              const UserData* user_data,
                               ServiceRequestSender::ResponseCallback callback) {
+  std::vector<std::string> preexisting_address_ids;
+  std::vector<std::string> preexisting_payment_instrument_ids;
+  if (user_data) {
+    for (const auto& address : user_data->available_addresses_) {
+      if (address->identifier.has_value()) {
+        preexisting_address_ids.emplace_back(*address->identifier);
+      }
+    }
+    for (const auto& instrument : user_data->available_payment_instruments_) {
+      if (instrument->identifier.has_value()) {
+        preexisting_payment_instrument_ids.emplace_back(
+            *instrument->identifier);
+      }
+    }
+  }
+
   if (options.request_payment_method) {
     // We do not cache the payments client token. It could go stale (in practice
     // it currently doesn't). Getting the token is little overhead.
@@ -152,17 +172,18 @@ void ServiceImpl::GetUserData(const CollectUserDataOptions& options,
         &ServiceImpl::SendUserDataRequest, weak_ptr_factory_.GetWeakPtr(),
         run_id, options.request_payer_name, options.request_payer_email,
         options.request_payer_phone || options.request_phone_number_separately,
-        options.request_shipping, options.request_payment_method,
-        options.supported_basic_card_networks, std::move(callback)));
+        options.request_shipping, preexisting_address_ids,
+        options.request_payment_method, options.supported_basic_card_networks,
+        preexisting_payment_instrument_ids, std::move(callback)));
     return;
   }
 
   SendUserDataRequest(
       run_id, options.request_payer_name, options.request_payer_email,
       options.request_payer_phone || options.request_phone_number_separately,
-      options.request_shipping, options.request_payment_method,
-      options.supported_basic_card_networks, std::move(callback),
-      std::string());
+      options.request_shipping, preexisting_address_ids,
+      options.request_payment_method, options.supported_basic_card_networks,
+      preexisting_payment_instrument_ids, std::move(callback), std::string());
 }
 
 void ServiceImpl::SendUserDataRequest(
@@ -171,17 +192,47 @@ void ServiceImpl::SendUserDataRequest(
     bool request_email,
     bool request_phone,
     bool request_shipping,
+    const std::vector<std::string>& preexisting_address_ids,
     bool request_payment_methods,
     const std::vector<std::string>& supported_card_networks,
+    const std::vector<std::string>& preexisting_payment_instrument_ids,
     ServiceRequestSender::ResponseCallback callback,
     const std::string& client_token) {
   request_sender_->SendRequest(
       user_data_url_,
       ProtocolUtils::CreateGetUserDataRequest(
           run_id, request_name, request_email, request_phone, request_shipping,
-          request_payment_methods, supported_card_networks, client_token),
+          preexisting_address_ids, request_payment_methods,
+          supported_card_networks, preexisting_payment_instrument_ids,
+          client_token),
       ServiceRequestSender::AuthMode::OAUTH_STRICT, std::move(callback),
       RpcType::GET_USER_DATA);
+}
+
+void ServiceImpl::SetDisableRpcSigning(bool disable_rpc_signing) {
+  request_sender_->SetDisableRpcSigning(disable_rpc_signing);
+}
+
+void ServiceImpl::UpdateAnnotateDomModelContext(int64_t model_version) {
+  client_context_->UpdateAnnotateDomModelContext(model_version);
+}
+
+void ServiceImpl::UpdateJsFlowLibraryLoaded(const bool js_flow_library_loaded) {
+  client_context_->UpdateJsFlowLibraryLoaded(js_flow_library_loaded);
+}
+
+void ServiceImpl::ReportProgress(
+    const std::string& token,
+    const std::string& payload,
+    ServiceRequestSender::ResponseCallback callback) {
+  if (!client_->GetMakeSearchesAndBrowsingBetterEnabled() ||
+      !client_->GetMetricsReportingEnabled()) {
+    return;
+  }
+  request_sender_->SendRequest(
+      report_progress_url_,
+      ProtocolUtils::CreateReportProgressRequest(token, payload),
+      GetDefaultAuthMode(), std::move(callback), RpcType::REPORT_PROGRESS);
 }
 
 }  // namespace autofill_assistant

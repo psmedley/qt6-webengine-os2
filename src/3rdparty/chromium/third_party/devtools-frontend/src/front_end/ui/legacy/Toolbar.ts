@@ -31,18 +31,19 @@
 import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
+import * as Platform from '../../core/platform/platform.js';
 import * as Root from '../../core/root/root.js';
+
 import * as Utils from './utils/utils.js';
 
-import type {Action} from './ActionRegistration.js';
-import {Events as ActionEvents} from './ActionRegistration.js';
+import {Events as ActionEvents, type Action} from './ActionRegistration.js';
 import {ActionRegistry} from './ActionRegistry.js';
 import * as ARIAUtils from './ARIAUtils.js';
 import {ContextMenu} from './ContextMenu.js';
 import {GlassPane, PointerEventsBehavior} from './GlassPane.js';
 import {Icon} from './Icon.js';
 import {bindCheckbox} from './SettingsUI.js';
-import type {Suggestion} from './SuggestBox.js';
+import {type Suggestion} from './SuggestBox.js';
 import {Events as TextPromptEvents, TextPrompt} from './TextPrompt.js';
 import {Tooltip} from './Tooltip.js';
 import {CheckboxLabel, LongClickController} from './UIUtils.js';
@@ -57,6 +58,10 @@ const UIStrings = {
   *@description Announced screen reader message for ToolbarSettingToggle when the setting is toggled off.
   */
   notPressed: 'not pressed',
+  /**
+  *@description Tooltip shown when the user hovers over the clear icon to empty the text input.
+  */
+  clearInput: 'Clear input',
 };
 const str_ = i18n.i18n.registerUIStrings('ui/legacy/Toolbar.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
@@ -685,7 +690,7 @@ export class ToolbarInput extends ToolbarItem<ToolbarInput.EventTypes> {
     this.prompt = new TextPrompt();
     this.proxyElement = this.prompt.attach(internalPromptElement);
     this.proxyElement.classList.add('toolbar-prompt-proxy');
-    this.proxyElement.addEventListener('keydown', (event: Event) => this.onKeydownCallback(event));
+    this.proxyElement.addEventListener('keydown', (event: Event) => this.onKeydownCallback(event as KeyboardEvent));
     this.prompt.initialize(completions || ((): Promise<never[]> => Promise.resolve([])), ' ', dynamicCompletions);
     if (tooltip) {
       this.prompt.setTitle(tooltip);
@@ -701,6 +706,7 @@ export class ToolbarInput extends ToolbarItem<ToolbarInput.EventTypes> {
     }
 
     const clearButton = this.element.createChild('div', 'toolbar-input-clear-button');
+    clearButton.title = UIStrings.clearInput;
     clearButton.appendChild(Icon.create('mediumicon-gray-cross-active', 'search-cancel-button'));
     clearButton.addEventListener('click', () => {
       this.setValue('', true);
@@ -726,11 +732,11 @@ export class ToolbarInput extends ToolbarItem<ToolbarInput.EventTypes> {
     return this.prompt.textWithCurrentSuggestion();
   }
 
-  private onKeydownCallback(event: Event): void {
-    if ((event as KeyboardEvent).key === 'Enter' && this.prompt.text()) {
+  private onKeydownCallback(event: KeyboardEvent): void {
+    if (event.key === 'Enter' && this.prompt.text()) {
       this.dispatchEventToListeners(ToolbarInput.Event.EnterPressed, this.prompt.text());
     }
-    if (!isEscKey(event) || !this.prompt.text()) {
+    if (!Platform.KeyboardUtilities.isEscKey(event) || !this.prompt.text()) {
       return;
     }
     this.setValue('', true);
@@ -1078,6 +1084,10 @@ export class ToolbarCheckbox extends ToolbarItem<void> {
   applyEnabledState(enabled: boolean): void {
     super.applyEnabledState(enabled);
     this.inputElement.disabled = !enabled;
+  }
+
+  setIndeterminate(indeterminate: boolean): void {
+    this.inputElement.indeterminate = indeterminate;
   }
 }
 

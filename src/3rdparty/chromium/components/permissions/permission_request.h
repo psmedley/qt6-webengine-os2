@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/callback.h"
+#include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
@@ -57,6 +58,15 @@ class PermissionRequest {
   PermissionRequest(const PermissionRequest&) = delete;
   PermissionRequest& operator=(const PermissionRequest&) = delete;
 
+  enum ChipTextType {
+    LOUD_REQUEST,
+    QUIET_REQUEST,
+    ALLOW_CONFIRMATION,
+    BLOCKED_CONFIRMATION,
+    ACCESSIBILITY_ALLOWED_CONFIRMATION,
+    ACCESSIBILITY_BLOCKED_CONFIRMATION
+  };
+
   virtual ~PermissionRequest();
 
   GURL requesting_origin() const { return requesting_origin_; }
@@ -66,12 +76,19 @@ class PermissionRequest {
   // need to be shown in the UI.
   virtual bool IsDuplicateOf(PermissionRequest* other_request) const;
 
+  // Returns a weak pointer to this instance.
+  base::WeakPtr<PermissionRequest> GetWeakPtr();
+
 #if BUILDFLAG(IS_ANDROID)
   // Returns prompt text appropriate for displaying in an Android dialog.
   virtual std::u16string GetDialogMessageText() const;
 #endif
 
 #if !BUILDFLAG(IS_ANDROID)
+  // Returns whether displaying a confirmation chip for the request is
+  // supported.
+  bool IsConfirmationChipSupported();
+
   // Returns prompt icon appropriate for displaying on the chip button in the
   // location bar.
   IconId GetIconForChip();
@@ -82,11 +99,7 @@ class PermissionRequest {
 
   // Returns prompt text appropriate for displaying on the chip button in the
   // location bar.
-  absl::optional<std::u16string> GetRequestChipText() const;
-
-  // Returns prompt text appropriate for displaying on the quiet chip button in
-  // the location bar.
-  absl::optional<std::u16string> GetQuietChipText() const;
+  absl::optional<std::u16string> GetRequestChipText(ChipTextType type) const;
 
   // Returns prompt text appropriate for displaying under the dialog title
   // "[domain] wants to:".
@@ -141,6 +154,8 @@ class PermissionRequest {
   // Called when the request is no longer in use so it can be deleted by the
   // caller.
   base::OnceClosure delete_callback_;
+
+  base::WeakPtrFactory<PermissionRequest> weak_factory_{this};
 };
 
 }  // namespace permissions

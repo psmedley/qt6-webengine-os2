@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import threading
 import traceback
 from queue import Empty
@@ -259,7 +261,7 @@ class TestRunnerManager(threading.Thread):
     def __init__(self, suite_name, index, test_type, test_queue, test_source_cls, browser_cls,
                  browser_kwargs, executor_cls, executor_kwargs, stop_flag, rerun=1,
                  pause_after_test=False, pause_on_unexpected=False, restart_on_unexpected=True,
-                 debug_info=None, capture_stdio=True, recording=None):
+                 debug_info=None, capture_stdio=True, restart_on_new_group=True, recording=None):
         """Thread that owns a single TestRunner process and any processes required
         by the TestRunner (e.g. the Firefox binary).
 
@@ -319,6 +321,7 @@ class TestRunnerManager(threading.Thread):
         self.test_count = 0
         self.unexpected_count = 0
         self.unexpected_pass_count = 0
+        self.unexpected_tests = set()
 
         # This may not really be what we want
         self.daemon = True
@@ -330,6 +333,7 @@ class TestRunnerManager(threading.Thread):
         self.browser = None
 
         self.capture_stdio = capture_stdio
+        self.restart_on_new_group = restart_on_new_group
 
     def run(self):
         """Main loop for the TestRunnerManager.
@@ -648,7 +652,7 @@ class TestRunnerManager(threading.Thread):
                 self.logger.info("Found a crash dump file; changing status to CRASH")
                 status = "CRASH"
             else:
-                self.logger.warning("Found a crash dump; should change status from %s to CRASH but this causes instability" % (status,))
+                self.logger.warning(f"Found a crash dump; should change status from {status} to CRASH but this causes instability")
 
         # We have a couple of status codes that are used internally, but not exposed to the
         # user. These are used to indicate that some possibly-broken state was reached
@@ -669,6 +673,9 @@ class TestRunnerManager(threading.Thread):
         is_unexpected_pass = is_unexpected and status == "OK"
         if is_unexpected_pass:
             self.unexpected_pass_count += 1
+
+        if is_unexpected or subtest_unexpected:
+            self.unexpected_tests.add(test.id)
 
         if "assertion_count" in file_result.extra:
             assertion_count = file_result.extra["assertion_count"]
@@ -720,13 +727,13 @@ class TestRunnerManager(threading.Thread):
             test, test_group, group_metadata = self.get_next_test()
             if test is None:
                 return RunnerManagerState.stop(force_stop)
-            if test_group is not self.state.test_group:
-                # We are starting a new group of tests, so force a restart
+            if self.restart_on_new_group and test_group is not self.state.test_group:
                 self.logger.info("Restarting browser for new test group")
                 restart = True
         else:
             test_group = self.state.test_group
             group_metadata = self.state.group_metadata
+
         if restart:
             return RunnerManagerState.restarting(test, test_group, group_metadata, force_stop)
         else:
@@ -830,11 +837,11 @@ class TestRunnerManager(threading.Thread):
                     # to stop the TestRunner in `stop_runner`.
                     pass
                 else:
-                    self.logger.warning("Command left in command_queue during cleanup: %r, %r" % (cmd, data))
+                    self.logger.warning(f"Command left in command_queue during cleanup: {cmd!r}, {data!r}")
         while True:
             try:
                 cmd, data = self.remote_queue.get_nowait()
-                self.logger.warning("Command left in remote_queue during cleanup: %r, %r" % (cmd, data))
+                self.logger.warning(f"Command left in remote_queue during cleanup: {cmd!r}, {data!r}")
             except Empty:
                 break
 
@@ -861,6 +868,7 @@ class ManagerGroup:
                  restart_on_unexpected=True,
                  debug_info=None,
                  capture_stdio=True,
+                 restart_on_new_group=True,
                  recording=None):
         self.suite_name = suite_name
         self.size = size
@@ -876,6 +884,7 @@ class ManagerGroup:
         self.debug_info = debug_info
         self.rerun = rerun
         self.capture_stdio = capture_stdio
+        self.restart_on_new_group = restart_on_new_group
         self.recording = recording
         assert recording is not None
 
@@ -894,12 +903,11 @@ class ManagerGroup:
     def run(self, test_type, tests):
         """Start all managers in the group"""
         self.logger.debug("Using %i processes" % self.size)
-        type_tests = tests[test_type]
-        if not type_tests:
+        if not tests:
             self.logger.info("No %s tests to run" % test_type)
             return
 
-        test_queue = make_test_queue(type_tests, self.test_source_cls, **self.test_source_kwargs)
+        test_queue = make_test_queue(tests, self.test_source_cls, **self.test_source_kwargs)
 
         for idx in range(self.size):
             manager = TestRunnerManager(self.suite_name,
@@ -918,6 +926,7 @@ class ManagerGroup:
                                         self.restart_on_unexpected,
                                         self.debug_info,
                                         self.capture_stdio,
+                                        self.restart_on_new_group,
                                         recording=self.recording)
             manager.start()
             self.pool.add(manager)
@@ -942,3 +951,6 @@ class ManagerGroup:
 
     def unexpected_pass_count(self):
         return sum(manager.unexpected_pass_count for manager in self.pool)
+
+    def unexpected_tests(self):
+        return set().union(*(manager.unexpected_tests for manager in self.pool))

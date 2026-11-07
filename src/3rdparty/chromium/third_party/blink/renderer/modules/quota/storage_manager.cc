@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include "third_party/blink/public/mojom/quota/quota_types.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_storage_estimate.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_storage_usage_details.h"
@@ -45,14 +44,6 @@ void QueryStorageUsageAndQuotaCallback(
     int64_t usage_in_bytes,
     int64_t quota_in_bytes,
     UsageBreakdownPtr usage_breakdown) {
-  // Avoid crash on shutdown. crbug.com/971594
-  if (!resolver ||
-      !IsInParallelAlgorithmRunnable(resolver->GetExecutionContext(),
-                                     resolver->GetScriptState()))
-    return;
-
-  ScriptState::Scope script_state_scope(resolver->GetScriptState());
-
   if (status_code != mojom::blink::QuotaStatusCode::kOk) {
     // TODO(sashab): Replace this with a switch statement, and remove the enum
     // values from QuotaStatusCode.
@@ -100,50 +91,51 @@ StorageManager::StorageManager(ExecutionContext* execution_context)
 
 StorageManager::~StorageManager() = default;
 
-ScriptPromise StorageManager::persist(ScriptState* script_state) {
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise promise = resolver->Promise();
+ScriptPromise StorageManager::persist(ScriptState* script_state,
+                                      ExceptionState& exception_state) {
   LocalDOMWindow* window = LocalDOMWindow::From(script_state);
   DCHECK(window->IsSecureContext());  // [SecureContext] in IDL
   if (window->GetSecurityOrigin()->IsOpaque()) {
-    resolver->Reject(V8ThrowException::CreateTypeError(
-        script_state->GetIsolate(), kUniqueOriginErrorMessage));
-    return promise;
+    exception_state.ThrowTypeError(kUniqueOriginErrorMessage);
+    return ScriptPromise();
   }
+
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  ScriptPromise promise = resolver->Promise();
 
   GetPermissionService(window)->RequestPermission(
       CreatePermissionDescriptor(PermissionName::DURABLE_STORAGE),
       LocalFrame::HasTransientUserActivation(window->GetFrame()),
-      WTF::Bind(&StorageManager::PermissionRequestComplete,
-                WrapPersistent(this), WrapPersistent(resolver)));
+      WTF::BindOnce(&StorageManager::PermissionRequestComplete,
+                    WrapPersistent(this), WrapPersistent(resolver)));
 
   return promise;
 }
 
-ScriptPromise StorageManager::persisted(ScriptState* script_state) {
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise promise = resolver->Promise();
+ScriptPromise StorageManager::persisted(ScriptState* script_state,
+                                        ExceptionState& exception_state) {
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
   DCHECK(execution_context->IsSecureContext());  // [SecureContext] in IDL
   const SecurityOrigin* security_origin =
       execution_context->GetSecurityOrigin();
   if (security_origin->IsOpaque()) {
-    resolver->Reject(V8ThrowException::CreateTypeError(
-        script_state->GetIsolate(), kUniqueOriginErrorMessage));
-    return promise;
+    exception_state.ThrowTypeError(kUniqueOriginErrorMessage);
+    return ScriptPromise();
   }
+
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  ScriptPromise promise = resolver->Promise();
 
   GetPermissionService(ExecutionContext::From(script_state))
       ->HasPermission(
           CreatePermissionDescriptor(PermissionName::DURABLE_STORAGE),
-          WTF::Bind(&StorageManager::PermissionRequestComplete,
-                    WrapPersistent(this), WrapPersistent(resolver)));
+          WTF::BindOnce(&StorageManager::PermissionRequestComplete,
+                        WrapPersistent(this), WrapPersistent(resolver)));
   return promise;
 }
 
-ScriptPromise StorageManager::estimate(ScriptState* script_state) {
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise promise = resolver->Promise();
+ScriptPromise StorageManager::estimate(ScriptState* script_state,
+                                       ExceptionState& exception_state) {
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
   DCHECK(execution_context->IsSecureContext());  // [SecureContext] in IDL
 
@@ -154,13 +146,15 @@ ScriptPromise StorageManager::estimate(ScriptState* script_state) {
   const SecurityOrigin* security_origin =
       execution_context->GetSecurityOrigin();
   if (security_origin->IsOpaque()) {
-    resolver->Reject(V8ThrowException::CreateTypeError(
-        script_state->GetIsolate(), kUniqueOriginErrorMessage));
-    return promise;
+    exception_state.ThrowTypeError(kUniqueOriginErrorMessage);
+    return ScriptPromise();
   }
 
-  auto callback =
-      WTF::Bind(&QueryStorageUsageAndQuotaCallback, WrapPersistent(resolver));
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  ScriptPromise promise = resolver->Promise();
+
+  auto callback = resolver->WrapCallbackInScriptScope(
+      WTF::BindOnce(&QueryStorageUsageAndQuotaCallback));
   GetQuotaHost(execution_context)
       ->QueryStorageUsageAndQuota(
           mojom::blink::StorageType::kTemporary,
@@ -224,8 +218,8 @@ PermissionService* StorageManager::GetPermissionService(
         permission_service_.BindNewPipeAndPassReceiver(
             execution_context->GetTaskRunner(TaskType::kMiscPlatformAPI)));
     permission_service_.set_disconnect_handler(
-        WTF::Bind(&StorageManager::PermissionServiceConnectionError,
-                  WrapWeakPersistent(this)));
+        WTF::BindOnce(&StorageManager::PermissionServiceConnectionError,
+                      WrapWeakPersistent(this)));
   }
   return permission_service_.get();
 }

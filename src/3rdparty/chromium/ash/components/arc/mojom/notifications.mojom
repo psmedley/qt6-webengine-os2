@@ -1,8 +1,8 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// Next MinVersion: 26
+// Next MinVersion: 28
 
 module arc.mojom;
 
@@ -57,21 +57,21 @@ struct DeprecatedArcNotificationButton {
   string label;
 };
 
-[Extensible, MinVersion=10]
+[Extensible]
 enum ArcNotificationExpandState {
   FIXED_SIZE = 0,
   COLLAPSED = 1,
   EXPANDED = 2,
 };
 
-[Extensible, MinVersion=12]
+[Extensible]
 enum ArcNotificationRemoteInputState {
   CLOSED = 0,
   OPENED = 1,
 };
 
 // These values represent what shows in an ARC custom notification.
-[Extensible, MinVersion=11]
+[Extensible]
 enum ArcNotificationShownContents {
   // The normal notification contents are shown.
   CONTENTS_SHOWN = 0,
@@ -83,13 +83,27 @@ enum ArcNotificationShownContents {
 };
 
 // Flag for various feature of ARC notifications.
-[MinVersion=17]
 struct ArcNotificationFlags {
   // Bits for features.
   const uint32 SUPPORT_SNOOZE = 1;  // 1 << 0
 
   // Bit-masked value.
   uint32 value;
+};
+
+// These values represent the styles for large-format notifications.
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+[Extensible]
+enum ArcNotificationStyle {
+  NO_STYLE = 0,
+  BIG_PICTURE_STYLE = 1,
+  BIG_TEXT_STYLE = 2,
+  MESSAGING_STYLE = 3,
+  INBOX_STYLE = 4,
+  MEDIA_STYLE = 5,
+  DECORATED_CUSTOM_VIEW_STYLE = 6,
+  DECORATED_MEDIA_CUSTOM_VIEW_STYLE = 7,
 };
 
 struct ArcNotificationData {
@@ -165,14 +179,21 @@ struct ArcNotificationData {
   ArcBitmap? snapshot_image_public;
   [MinVersion=23]
   bool is_media_notification;
+  [MinVersion=26]
+  ArcNotificationStyle style;
+  // True if there's at least one action button enabled for the notification.
+  [MinVersion=26]
+  bool is_action_enabled;
+  // True if there's at least one action button on the notification that's
+  // available for the user to trigger remote input.
+  [MinVersion=27]
+  bool is_inline_reply_enabled;
 };
 
-[MinVersion=18]
 struct ArcDoNotDisturbStatus {
   bool enabled;
 };
 
-[MinVersion=21]
 struct ArcNotificationUserActionData {
   // Unique action id for this user action.
   uint32 action_id;
@@ -186,7 +207,6 @@ struct ArcNotificationUserActionData {
   bool to_be_focused_after_unlock;
 };
 
-[MinVersion=21]
 struct ArcLockScreenNotificationSetting {
   // Flag whether to show the notifications on the lock screen.
   bool show_notification;
@@ -194,7 +214,6 @@ struct ArcLockScreenNotificationSetting {
   bool show_private_notification;
 };
 
-[MinVersion=22]
 struct NotificationConfiguration {
   // Flag to enable notification expansion animations on arc.
   // See b/35786193.
@@ -202,7 +221,7 @@ struct NotificationConfiguration {
 };
 
 // These values represent an visibility of MessageCenter on Chrome OS.
-[Extensible, MinVersion=25]
+[Extensible]
 enum MessageCenterVisibility {
   // When nothing or just toast popups are being displayed.
   VISIBILITY_TRANSIENT = 0,
@@ -210,7 +229,7 @@ enum MessageCenterVisibility {
   VISIBILITY_MESSAGE_CENTER = 1,
 };
 
-// Next Method ID: 11
+// Next Method ID: 12
 interface NotificationsHost {
   // Set the Do-Not-Disturb status on Chrome side from Android side.
   [MinVersion=18]
@@ -246,6 +265,10 @@ interface NotificationsHost {
   // Sets the lock screen setting on Chrome side from Android side. Usually
   // invoked when the setting on Android side is chagned.
   OnLockScreenSettingUpdated@10(ArcLockScreenNotificationSetting setting);
+
+  [MinVersion=27]
+  // Triggers Chrome to log that inline reply is sent for a notification.
+  LogInlineReplySent@11(string key);
 };
 
 // Deprecated method IDs: 0

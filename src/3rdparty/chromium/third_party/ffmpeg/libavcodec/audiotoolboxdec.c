@@ -28,7 +28,7 @@
 #include "ac3_parser_internal.h"
 #include "bytestream.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include "mpegaudiodecheader.h"
 #include "libavutil/avassert.h"
 #include "libavutil/channel_layout.h"
@@ -375,6 +375,11 @@ static av_cold int ffat_create_decoder(AVCodecContext *avctx,
     avctx->ch_layout.order       = AV_CHANNEL_ORDER_UNSPEC;
     avctx->ch_layout.nb_channels = out_format.mChannelsPerFrame = in_format.mChannelsPerFrame;
 
+    out_format.mBytesPerFrame =
+        out_format.mChannelsPerFrame * (out_format.mBitsPerChannel / 8);
+    out_format.mBytesPerPacket =
+        out_format.mBytesPerFrame * out_format.mFramesPerPacket;
+
     if (avctx->codec_id == AV_CODEC_ID_ADPCM_IMA_QT)
         in_format.mFramesPerPacket = 64;
 
@@ -478,11 +483,10 @@ static void ffat_copy_samples(AVCodecContext *avctx, AVFrame *frame)
     }
 }
 
-static int ffat_decode(AVCodecContext *avctx, void *data,
+static int ffat_decode(AVCodecContext *avctx, AVFrame *frame,
                        int *got_frame_ptr, AVPacket *avpkt)
 {
     ATDecodeContext *at = avctx->priv_data;
-    AVFrame *frame = data;
     int pkt_size = avpkt->size;
     OSStatus ret;
     AudioBufferList out_buffers;
@@ -587,18 +591,18 @@ static av_cold int ffat_close_decoder(AVCodecContext *avctx)
     FFAT_DEC_CLASS(NAME) \
     const FFCodec ff_##NAME##_at_decoder = { \
         .p.name         = #NAME "_at", \
-        .p.long_name    = NULL_IF_CONFIG_SMALL(#NAME " (AudioToolbox)"), \
+        CODEC_LONG_NAME(#NAME " (AudioToolbox)"), \
         .p.type         = AVMEDIA_TYPE_AUDIO, \
         .p.id           = ID, \
         .priv_data_size = sizeof(ATDecodeContext), \
         .init           = ffat_init_decoder, \
         .close          = ffat_close_decoder, \
-        .decode         = ffat_decode, \
+        FF_CODEC_DECODE_CB(ffat_decode), \
         .flush          = ffat_decode_flush, \
         .p.priv_class   = &ffat_##NAME##_dec_class, \
         .bsfs           = bsf_name, \
         .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_CHANNEL_CONF, \
-        .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP, \
+        .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP, \
         .p.wrapper_name = "at", \
     };
 

@@ -74,6 +74,7 @@ LayoutFlexibleBox::~LayoutFlexibleBox() = default;
 void LayoutFlexibleBox::Trace(Visitor* visitor) const {
   visitor->Trace(intrinsic_size_along_main_axis_);
   visitor->Trace(relaid_out_children_);
+  visitor->Trace(order_iterator_);
   LayoutBlock::Trace(visitor);
 }
 
@@ -350,9 +351,9 @@ bool LayoutFlexibleBox::HitTestChildren(
     HitTestResult& result,
     const HitTestLocation& hit_test_location,
     const PhysicalOffset& accumulated_offset,
-    HitTestAction hit_test_action) {
+    HitTestPhase phase) {
   NOT_DESTROYED();
-  if (hit_test_action != kHitTestForeground)
+  if (phase != HitTestPhase::kForeground)
     return false;
 
   PhysicalOffset scrolled_offset = accumulated_offset;
@@ -479,13 +480,13 @@ void LayoutFlexibleBox::RepositionLogicalHeightDependentFlexItems(
     FlexLayoutAlgorithm& algorithm) {
   NOT_DESTROYED();
   Vector<FlexLine>& line_contexts = algorithm.FlexLines();
-  LayoutUnit cross_axis_start_edge = line_contexts.IsEmpty()
+  LayoutUnit cross_axis_start_edge = line_contexts.empty()
                                          ? LayoutUnit()
                                          : line_contexts[0].cross_axis_offset_;
   // If we have a single line flexbox, the line height is all the available
   // space. For flex-direction: row, this means we need to use the height, so
   // we do this after calling updateLogicalHeight.
-  if (!IsMultiline() && !line_contexts.IsEmpty()) {
+  if (!IsMultiline() && !line_contexts.empty()) {
     line_contexts[0].cross_axis_extent_ = CrossAxisContentExtent();
   }
 
@@ -838,8 +839,7 @@ LayoutUnit LayoutFlexibleBox::ComputeMainSizeFromAspectRatioUsing(
   LayoutUnit border_and_padding;
   if (ar_type == EAspectRatioType::kRatio ||
       (ar_type == EAspectRatioType::kAutoAndRatio && aspect_ratio.IsEmpty())) {
-    gfx::SizeF int_ratio = child.StyleRef().AspectRatio().GetRatio();
-    aspect_ratio = LayoutSize{int_ratio.width(), int_ratio.height()};
+    aspect_ratio = LayoutSize(child.StyleRef().AspectRatio().GetRatio());
     if (child.StyleRef().BoxSizingForAspectRatio() == EBoxSizing::kContentBox) {
       cross_size -= cross_axis_border_and_padding;
       border_and_padding = main_axis_border_and_padding;
@@ -962,7 +962,8 @@ bool LayoutFlexibleBox::CanAvoidLayoutForNGChild(const LayoutBox& child) const {
   // If the last layout was done with a different override size, or different
   // definite-ness, we need to force-relayout so that percentage sizes are
   // resolved correctly.
-  const NGLayoutResult* cached_layout_result = child.GetCachedLayoutResult();
+  const NGLayoutResult* cached_layout_result =
+      child.GetSingleCachedLayoutResult();
   if (!cached_layout_result)
     return false;
 
@@ -1374,7 +1375,8 @@ void LayoutFlexibleBox::ConstructAndAppendFlexItem(
   algorithm->emplace_back(
       &child, child.StyleRef(), child_inner_flex_base_size, sizes,
       /* min_max_cross_sizes */ absl::nullopt, main_axis_border_padding,
-      cross_axis_border_padding, physical_margins, /* unused */ NGBoxStrut());
+      cross_axis_border_padding, physical_margins, /* unused */ NGBoxStrut(),
+      StyleRef().GetWritingMode());
 }
 
 void LayoutFlexibleBox::SetOverrideMainAxisContentSizeForChild(FlexItem& item) {
@@ -1416,8 +1418,7 @@ LayoutUnit CrossAxisStaticPositionCommon(const LayoutBox& child,
       available_space,
       FlexLayoutAlgorithm::AlignmentForChild(parent->StyleRef(),
                                              child.StyleRef()),
-      LayoutUnit(), LayoutUnit(),
-      parent->StyleRef().FlexWrap() == EFlexWrap::kWrapReverse,
+      LayoutUnit(), parent->StyleRef().FlexWrap() == EFlexWrap::kWrapReverse,
       parent->StyleRef().IsDeprecatedWebkitBox());
 }
 
@@ -1783,7 +1784,7 @@ void LayoutFlexibleBox::AlignFlexLines(FlexLayoutAlgorithm& algorithm) {
     return;
   }
 
-  if (IsMultiline() && !line_contexts.IsEmpty()) {
+  if (IsMultiline() && !line_contexts.empty()) {
     UseCounter::Count(GetDocument(),
                       WebFeature::kFlexboxSingleLineAlignContent);
   }

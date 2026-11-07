@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -373,12 +373,11 @@ void PageTextObserver::DidFinishNavigation(content::NavigationHandle* handle) {
 }
 
 bool PageTextObserver::IsOOPIF(content::RenderFrameHost* rfh) const {
-  return rfh->GetProcess()->GetID() !=
-         rfh->GetMainFrame()->GetProcess()->GetID();
+  return rfh->IsCrossProcessSubframe();
 }
 
 void PageTextObserver::RenderFrameCreated(content::RenderFrameHost* rfh) {
-  if (!IsOOPIF(rfh)) {
+  if (!IsOOPIF(rfh) || !rfh->GetPage().IsPrimary()) {
     return;
   }
 

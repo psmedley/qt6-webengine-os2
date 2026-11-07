@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 
 #include <memory>
 #include <queue>
+
+#include "base/task/common/lazy_now.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/task_environment.h"
 #include "base/time/time.h"
@@ -63,7 +65,7 @@ class TimerTest : public testing::Test {
   // to the delay in seconds till the next pending delayed task is scheduled to
   // fire.
   bool TimeTillNextDelayedTask(base::TimeDelta* time) const {
-    base::sequence_manager::LazyNow lazy_now(platform_->NowTicks());
+    base::LazyNow lazy_now(platform_->NowTicks());
     auto* scheduler_helper =
         platform_->GetMainThreadScheduler()->GetSchedulerHelperForTesting();
     scheduler_helper->ReclaimMemory();
@@ -547,11 +549,14 @@ TEST_F(TimerTest, RepeatingTimerDoesNotDrift) {
   platform_->RunForPeriod(base::Milliseconds(2100));
   // Next scheduled task to run at |start_time_| + 10s
   platform_->RunForPeriod(base::Milliseconds(2900));
-  // Next scheduled task to run at |start_time_| + 14s (skips a beat)
-  platform_->AdvanceClock(base::Milliseconds(3100));
+  // Next scheduled task to run at |start_time_| + 12s
+  platform_->AdvanceClock(base::Milliseconds(1800));
+  platform_->RunUntilIdle();
+  // Next scheduled task to run at |start_time_| + 14s
+  platform_->AdvanceClock(base::Milliseconds(1900));
   platform_->RunUntilIdle();
   // Next scheduled task to run at |start_time_| + 18s (skips a beat)
-  platform_->AdvanceClock(base::Seconds(4));
+  platform_->AdvanceClock(base::Milliseconds(50));
   platform_->RunUntilIdle();
   // Next scheduled task to run at |start_time_| + 28s (skips 5 beats)
   platform_->AdvanceClock(base::Seconds(10));
@@ -562,8 +567,8 @@ TEST_F(TimerTest, RepeatingTimerDoesNotDrift) {
       ElementsAre(
           start_time_ + base::Seconds(2), start_time_ + base::Seconds(4),
           start_time_ + base::Seconds(6), start_time_ + base::Seconds(8),
-          start_time_ + base::Seconds(10), start_time_ + base::Seconds(14),
-          start_time_ + base::Seconds(18), start_time_ + base::Seconds(28)));
+          start_time_ + base::Seconds(10), start_time_ + base::Seconds(12),
+          start_time_ + base::Seconds(14), start_time_ + base::Seconds(24)));
 }
 
 template <typename TimerFiredClass>

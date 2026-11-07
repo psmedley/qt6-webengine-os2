@@ -22,14 +22,15 @@
 
 #include "fxbarcode/datamatrix/BC_ErrorCorrection.h"
 
+#include <stdint.h>
+
 #include <algorithm>
 #include <vector>
 
-#include "core/fxcrt/fx_memory_wrappers.h"
+#include "core/fxcrt/fixed_zeroed_data_vector.h"
 #include "fxbarcode/datamatrix/BC_Encoder.h"
 #include "fxbarcode/datamatrix/BC_SymbolInfo.h"
 #include "third_party/base/check.h"
-#include "third_party/base/cxx17_backports.h"
 
 namespace {
 
@@ -147,7 +148,7 @@ WideString CreateECCBlock(const WideString& codewords, size_t numECWords) {
   DCHECK(numECWords > 0);
 
   const size_t len = codewords.GetLength();
-  static constexpr size_t kFactorTableNum = pdfium::size(FACTOR_SETS);
+  static constexpr size_t kFactorTableNum = std::size(FACTOR_SETS);
   size_t table = 0;
   while (table < kFactorTableNum && FACTOR_SETS[table] != numECWords)
     ++table;
@@ -155,28 +156,29 @@ WideString CreateECCBlock(const WideString& codewords, size_t numECWords) {
   if (table >= kFactorTableNum)
     return WideString();
 
-  std::vector<uint16_t, FxAllocAllocator<uint16_t>> ecc(numECWords);
+  FixedZeroedDataVector<uint16_t> ecc(numECWords);
+  pdfium::span<uint16_t> ecc_span = ecc.writable_span();
   for (size_t i = 0; i < len; ++i) {
-    uint16_t m = ecc[numECWords - 1] ^ codewords[i];
+    uint16_t m = ecc_span[numECWords - 1] ^ codewords[i];
     for (int32_t j = numECWords - 1; j > 0; --j) {
       if (m != 0 && FACTORS[table][j] != 0) {
-        ecc[j] = static_cast<uint16_t>(
-            ecc[j - 1] ^ ALOG[(LOG[m] + LOG[FACTORS[table][j]]) % 255]);
+        ecc_span[j] = static_cast<uint16_t>(
+            ecc_span[j - 1] ^ ALOG[(LOG[m] + LOG[FACTORS[table][j]]) % 255]);
       } else {
-        ecc[j] = ecc[j - 1];
+        ecc_span[j] = ecc_span[j - 1];
       }
     }
     if (m != 0 && FACTORS[table][0] != 0) {
-      ecc[0] =
+      ecc_span[0] =
           static_cast<uint16_t>(ALOG[(LOG[m] + LOG[FACTORS[table][0]]) % 255]);
     } else {
-      ecc[0] = 0;
+      ecc_span[0] = 0;
     }
   }
   WideString strecc;
   strecc.Reserve(numECWords);
   for (size_t i = 0; i < numECWords; ++i)
-    strecc.InsertAtBack(static_cast<wchar_t>(ecc[numECWords - i - 1]));
+    strecc.InsertAtBack(static_cast<wchar_t>(ecc_span[numECWords - i - 1]));
 
   DCHECK(!strecc.IsEmpty());
   return strecc;

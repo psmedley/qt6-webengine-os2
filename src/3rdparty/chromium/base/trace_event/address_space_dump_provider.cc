@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,7 +98,7 @@ AddressSpaceDumpProvider* AddressSpaceDumpProvider::GetInstance() {
 bool AddressSpaceDumpProvider::OnMemoryDump(const MemoryDumpArgs& args,
                                             ProcessMemoryDump* pmd) {
   AddressSpaceStatsDumperImpl stats_dumper(pmd);
-  partition_alloc::internal::AddressPoolManager::GetInstance()->DumpStats(
+  partition_alloc::internal::AddressPoolManager::GetInstance().DumpStats(
       &stats_dumper);
   return true;
 }

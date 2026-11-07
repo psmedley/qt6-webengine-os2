@@ -1,9 +1,9 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import {assert} from 'chrome://resources/js/assert_ts.js';
-import {isRTL} from 'chrome://resources/js/util.m.js';
+import {isRTL} from 'chrome://resources/js/util.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {Viewport} from '../viewport.js';
@@ -25,7 +25,7 @@ export class ViewerPageIndicatorElement extends PolymerElement {
 
       index: {type: Number, observer: 'indexChanged'},
 
-      pageLabels: {type: Array, value: null, observer: 'pageLabelsChanged'}
+      pageLabels: {type: Array, value: null, observer: 'pageLabelsChanged'},
     };
   }
 

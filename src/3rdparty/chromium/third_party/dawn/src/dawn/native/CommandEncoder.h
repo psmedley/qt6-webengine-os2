@@ -15,6 +15,9 @@
 #ifndef SRC_DAWN_NATIVE_COMMANDENCODER_H_
 #define SRC_DAWN_NATIVE_COMMANDENCODER_H_
 
+#include <set>
+#include <string>
+
 #include "dawn/native/dawn_platform.h"
 
 #include "dawn/native/EncodingContext.h"
@@ -22,100 +25,102 @@
 #include "dawn/native/ObjectBase.h"
 #include "dawn/native/PassResourceUsage.h"
 
-#include <string>
-
 namespace dawn::native {
 
-    enum class UsageValidationMode;
+enum class UsageValidationMode;
 
-    MaybeError ValidateCommandEncoderDescriptor(const DeviceBase* device,
-                                                const CommandEncoderDescriptor* descriptor);
+bool HasDeprecatedColor(const RenderPassColorAttachment& attachment);
 
-    class CommandEncoder final : public ApiObjectBase {
-      public:
-        static Ref<CommandEncoder> Create(DeviceBase* device,
-                                          const CommandEncoderDescriptor* descriptor);
-        static CommandEncoder* MakeError(DeviceBase* device);
+Color ClampClearColorValueToLegalRange(const Color& originalColor, const Format& format);
 
-        ObjectType GetType() const override;
+MaybeError ValidateCommandEncoderDescriptor(const DeviceBase* device,
+                                            const CommandEncoderDescriptor* descriptor);
 
-        CommandIterator AcquireCommands();
-        CommandBufferResourceUsage AcquireResourceUsages();
+class CommandEncoder final : public ApiObjectBase {
+  public:
+    static Ref<CommandEncoder> Create(DeviceBase* device,
+                                      const CommandEncoderDescriptor* descriptor);
+    static CommandEncoder* MakeError(DeviceBase* device);
 
-        void TrackUsedQuerySet(QuerySetBase* querySet);
-        void TrackQueryAvailability(QuerySetBase* querySet, uint32_t queryIndex);
+    ObjectType GetType() const override;
 
-        // Dawn API
-        ComputePassEncoder* APIBeginComputePass(const ComputePassDescriptor* descriptor);
-        RenderPassEncoder* APIBeginRenderPass(const RenderPassDescriptor* descriptor);
+    CommandIterator AcquireCommands();
+    CommandBufferResourceUsage AcquireResourceUsages();
 
-        void APICopyBufferToBuffer(BufferBase* source,
-                                   uint64_t sourceOffset,
-                                   BufferBase* destination,
-                                   uint64_t destinationOffset,
-                                   uint64_t size);
-        void APICopyBufferToTexture(const ImageCopyBuffer* source,
-                                    const ImageCopyTexture* destination,
-                                    const Extent3D* copySize);
-        void APICopyTextureToBuffer(const ImageCopyTexture* source,
-                                    const ImageCopyBuffer* destination,
-                                    const Extent3D* copySize);
-        void APICopyTextureToTexture(const ImageCopyTexture* source,
-                                     const ImageCopyTexture* destination,
-                                     const Extent3D* copySize);
-        void APICopyTextureToTextureInternal(const ImageCopyTexture* source,
-                                             const ImageCopyTexture* destination,
-                                             const Extent3D* copySize);
-        void APIClearBuffer(BufferBase* destination, uint64_t destinationOffset, uint64_t size);
+    void TrackUsedQuerySet(QuerySetBase* querySet);
+    void TrackQueryAvailability(QuerySetBase* querySet, uint32_t queryIndex);
 
-        void APIInjectValidationError(const char* message);
-        void APIInsertDebugMarker(const char* groupLabel);
-        void APIPopDebugGroup();
-        void APIPushDebugGroup(const char* groupLabel);
+    // Dawn API
+    ComputePassEncoder* APIBeginComputePass(const ComputePassDescriptor* descriptor);
+    RenderPassEncoder* APIBeginRenderPass(const RenderPassDescriptor* descriptor);
 
-        void APIResolveQuerySet(QuerySetBase* querySet,
-                                uint32_t firstQuery,
-                                uint32_t queryCount,
-                                BufferBase* destination,
-                                uint64_t destinationOffset);
-        void APIWriteBuffer(BufferBase* buffer,
-                            uint64_t bufferOffset,
-                            const uint8_t* data,
-                            uint64_t size);
-        void APIWriteTimestamp(QuerySetBase* querySet, uint32_t queryIndex);
+    void APICopyBufferToBuffer(BufferBase* source,
+                               uint64_t sourceOffset,
+                               BufferBase* destination,
+                               uint64_t destinationOffset,
+                               uint64_t size);
+    void APICopyBufferToTexture(const ImageCopyBuffer* source,
+                                const ImageCopyTexture* destination,
+                                const Extent3D* copySize);
+    void APICopyTextureToBuffer(const ImageCopyTexture* source,
+                                const ImageCopyBuffer* destination,
+                                const Extent3D* copySize);
+    void APICopyTextureToTexture(const ImageCopyTexture* source,
+                                 const ImageCopyTexture* destination,
+                                 const Extent3D* copySize);
+    void APICopyTextureToTextureInternal(const ImageCopyTexture* source,
+                                         const ImageCopyTexture* destination,
+                                         const Extent3D* copySize);
+    void APIClearBuffer(BufferBase* destination, uint64_t destinationOffset, uint64_t size);
 
-        CommandBufferBase* APIFinish(const CommandBufferDescriptor* descriptor = nullptr);
+    void APIInjectValidationError(const char* message);
+    void APIInsertDebugMarker(const char* groupLabel);
+    void APIPopDebugGroup();
+    void APIPushDebugGroup(const char* groupLabel);
 
-        Ref<ComputePassEncoder> BeginComputePass(const ComputePassDescriptor* descriptor = nullptr);
-        Ref<RenderPassEncoder> BeginRenderPass(const RenderPassDescriptor* descriptor);
-        ResultOrError<Ref<CommandBufferBase>> Finish(
-            const CommandBufferDescriptor* descriptor = nullptr);
+    void APIResolveQuerySet(QuerySetBase* querySet,
+                            uint32_t firstQuery,
+                            uint32_t queryCount,
+                            BufferBase* destination,
+                            uint64_t destinationOffset);
+    void APIWriteBuffer(BufferBase* buffer,
+                        uint64_t bufferOffset,
+                        const uint8_t* data,
+                        uint64_t size);
+    void APIWriteTimestamp(QuerySetBase* querySet, uint32_t queryIndex);
 
-      private:
-        CommandEncoder(DeviceBase* device, const CommandEncoderDescriptor* descriptor);
-        CommandEncoder(DeviceBase* device, ObjectBase::ErrorTag tag);
+    CommandBufferBase* APIFinish(const CommandBufferDescriptor* descriptor = nullptr);
 
-        void DestroyImpl() override;
+    Ref<ComputePassEncoder> BeginComputePass(const ComputePassDescriptor* descriptor = nullptr);
+    Ref<RenderPassEncoder> BeginRenderPass(const RenderPassDescriptor* descriptor);
+    ResultOrError<Ref<CommandBufferBase>> Finish(
+        const CommandBufferDescriptor* descriptor = nullptr);
 
-        // Helper to be able to implement both APICopyTextureToTexture and
-        // APICopyTextureToTextureInternal. The only difference between both
-        // copies, is that the Internal one will also check internal usage.
-        template <bool Internal>
-        void APICopyTextureToTextureHelper(const ImageCopyTexture* source,
-                                           const ImageCopyTexture* destination,
-                                           const Extent3D* copySize);
+  private:
+    CommandEncoder(DeviceBase* device, const CommandEncoderDescriptor* descriptor);
+    CommandEncoder(DeviceBase* device, ObjectBase::ErrorTag tag);
 
-        MaybeError ValidateFinish() const;
+    void DestroyImpl() override;
 
-        EncodingContext mEncodingContext;
-        std::set<BufferBase*> mTopLevelBuffers;
-        std::set<TextureBase*> mTopLevelTextures;
-        std::set<QuerySetBase*> mUsedQuerySets;
+    // Helper to be able to implement both APICopyTextureToTexture and
+    // APICopyTextureToTextureInternal. The only difference between both
+    // copies, is that the Internal one will also check internal usage.
+    template <bool Internal>
+    void APICopyTextureToTextureHelper(const ImageCopyTexture* source,
+                                       const ImageCopyTexture* destination,
+                                       const Extent3D* copySize);
 
-        uint64_t mDebugGroupStackSize = 0;
+    MaybeError ValidateFinish() const;
 
-        UsageValidationMode mUsageValidationMode;
-    };
+    EncodingContext mEncodingContext;
+    std::set<BufferBase*> mTopLevelBuffers;
+    std::set<TextureBase*> mTopLevelTextures;
+    std::set<QuerySetBase*> mUsedQuerySets;
+
+    uint64_t mDebugGroupStackSize = 0;
+
+    UsageValidationMode mUsageValidationMode;
+};
 
 }  // namespace dawn::native
 

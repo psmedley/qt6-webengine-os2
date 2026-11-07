@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "third_party/sqlite/sqlite3.h"
 
 namespace sql {
@@ -109,7 +110,7 @@ struct SandboxedVfsFileSqliteBridge {
   // `sandboxed_vfs_file` is not a raw_ptr<SandboxedVfsFile>, because
   // reinterpret_cast of uninitialized memory to raw_ptr can cause ref-counting
   // mismatch.
-  SandboxedVfsFile* sandboxed_vfs_file;
+  RAW_PTR_EXCLUSION SandboxedVfsFile* sandboxed_vfs_file;
 
   static SandboxedVfsFileSqliteBridge& FromSqliteFile(
       sqlite3_file& sqlite_file);

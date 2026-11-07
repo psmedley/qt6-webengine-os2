@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 #include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/read_only_shared_memory_region.h"
+#include "base/memory/shared_memory_mapping.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "mojo/public/cpp/bindings/receiver.h"
@@ -18,6 +20,7 @@
 #include "services/device/generic_sensor/platform_sensor_provider.h"
 #include "services/device/public/cpp/device_features.h"
 #include "services/device/public/cpp/generic_sensor/sensor_reading.h"
+#include "services/device/public/cpp/generic_sensor/sensor_reading_shared_buffer_reader.h"
 #include "services/device/public/cpp/generic_sensor/sensor_traits.h"
 
 using ::testing::_;
@@ -49,7 +52,10 @@ class TestSensorClient : public mojom::SensorClient {
 
   // Implements mojom::SensorClient:
   void SensorReadingChanged() override {
-    UpdateReadingData();
+    if (!shared_buffer_reader_->GetReading(&reading_data_)) {
+      ADD_FAILURE() << "Failed to get readings from shared buffer";
+      return;
+    }
     if (check_value_)
       std::move(check_value_).Run(reading_data_.als.value);
     if (quit_closure_)
@@ -63,7 +69,7 @@ class TestSensorClient : public mojom::SensorClient {
                        mojom::SensorInitParamsPtr params) {
     ASSERT_TRUE(params);
     EXPECT_EQ(mojom::SensorCreationResult::SUCCESS, result);
-    EXPECT_TRUE(params->memory.is_valid());
+    EXPECT_TRUE(params->memory.IsValid());
     const double expected_default_frequency =
         std::min(30.0, GetSensorMaxAllowedFrequency(type_));
     EXPECT_DOUBLE_EQ(expected_default_frequency,
@@ -73,10 +79,9 @@ class TestSensorClient : public mojom::SensorClient {
     EXPECT_DOUBLE_EQ(expected_maximum_frequency, params->maximum_frequency);
     EXPECT_DOUBLE_EQ(1.0, params->minimum_frequency);
 
-    shared_buffer_ = params->memory->MapAtOffset(
-        mojom::SensorInitParams::kReadBufferSizeForTests,
-        params->buffer_offset);
-    ASSERT_TRUE(shared_buffer_);
+    shared_buffer_reader_ = device::SensorReadingSharedBufferReader::Create(
+        std::move(params->memory), params->buffer_offset);
+    ASSERT_TRUE(shared_buffer_reader_);
 
     sensor_.Bind(std::move(params->sensor));
     client_receiver_.Bind(std::move(params->client_receiver));
@@ -107,33 +112,10 @@ class TestSensorClient : public mojom::SensorClient {
   void ResetSensor() { sensor_.reset(); }
 
  private:
-  void UpdateReadingData() {
-    memset(&reading_data_, 0, sizeof(SensorReading));
-    int read_attempts = 0;
-    const int kMaxReadAttemptsCount = 10;
-    while (!TryReadFromBuffer(reading_data_)) {
-      if (++read_attempts == kMaxReadAttemptsCount) {
-        ADD_FAILURE() << "Maximum read attempts reached.";
-        return;
-      }
-    }
-  }
-
-  bool TryReadFromBuffer(SensorReading& result) {
-    const SensorReadingSharedBuffer* buffer =
-        static_cast<const SensorReadingSharedBuffer*>(shared_buffer_.get());
-    const OneWriterSeqLock& seqlock = buffer->seqlock.value();
-    auto version = seqlock.ReadBegin();
-    auto reading_data = buffer->reading;
-    if (seqlock.ReadRetry(version))
-      return false;
-    result = reading_data;
-    return true;
-  }
-
   mojo::Remote<mojom::Sensor> sensor_;
   mojo::Receiver<mojom::SensorClient> client_receiver_{this};
-  mojo::ScopedSharedBufferMapping shared_buffer_;
+  std::unique_ptr<device::SensorReadingSharedBufferReader>
+      shared_buffer_reader_;
   SensorReading reading_data_;
 
   // Test Clients set |quit_closure_| and start a RunLoop in main thread, then

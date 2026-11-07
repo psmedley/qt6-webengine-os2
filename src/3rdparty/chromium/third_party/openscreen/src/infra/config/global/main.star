@@ -56,7 +56,7 @@ luci.logdog(gs_bucket = "chromium-luci-logdog")
 
 # Gitiles pollers are used for triggering CI builders.
 luci.gitiles_poller(
-    name = "master-gitiles-trigger",
+    name = "main-gitiles-trigger",
     bucket = "ci",
     repo = REPO_URL,
 )
@@ -156,6 +156,7 @@ def get_properties(
         properties["$build/goma"] = {
             "server_host": "goma.chromium.org",
             "rpc_extra_params": "?prod",
+            "use_luci_auth": True,
         }
         if use_ats:
             properties["$build/goma"]["enable_ats"] = True
@@ -189,7 +190,7 @@ def builder(builder_type, name, properties, os, cpu):
 
     triggers = None
     if builder_type == "ci":
-        triggers = ["chromium-trigger" if recipe_id == "chromium" else "master-gitiles-trigger"]
+        triggers = ["chromium-trigger" if recipe_id == "chromium" else "main-gitiles-trigger"]
 
     luci.builder(
         name = name,
@@ -199,7 +200,7 @@ def builder(builder_type, name, properties, os, cpu):
             recipe = recipe_id,
             cipd_package =
                 "infra/recipe_bundles/chromium.googlesource.com/chromium/tools/build",
-            cipd_version = "refs/heads/master",
+            cipd_version = "refs/heads/main",
             use_bbagent = True,
             use_python3 = use_python3,
         ),

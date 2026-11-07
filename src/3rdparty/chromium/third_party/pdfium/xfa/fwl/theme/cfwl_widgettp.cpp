@@ -20,7 +20,6 @@
 #include "xfa/fwl/cfwl_widget.h"
 #include "xfa/fwl/cfwl_widgetmgr.h"
 #include "xfa/fwl/ifwl_themeprovider.h"
-#include "xfa/fwl/theme/cfwl_fontmanager.h"
 
 CFWL_WidgetTP::CFWL_WidgetTP() = default;
 
@@ -31,7 +30,7 @@ void CFWL_WidgetTP::Trace(cppgc::Visitor* visitor) const {}
 void CFWL_WidgetTP::DrawBackground(const CFWL_ThemeBackground& pParams) {}
 
 void CFWL_WidgetTP::DrawText(const CFWL_ThemeText& pParams) {
-  EnsureTTOInitialized();
+  EnsureTTOInitialized(pParams.GetWidget()->GetThemeProvider());
   if (pParams.m_wsText.IsEmpty())
     return;
 
@@ -42,13 +41,8 @@ void CFWL_WidgetTP::DrawText(const CFWL_ThemeText& pParams) {
   CFX_Matrix matrix = pParams.m_matrix;
   matrix.Concat(*pGraphics->GetMatrix());
   m_pTextOut->SetMatrix(matrix);
-  m_pTextOut->DrawLogicText(pGraphics->GetRenderDevice(),
-                            pParams.m_wsText.AsStringView(),
+  m_pTextOut->DrawLogicText(pGraphics->GetRenderDevice(), pParams.m_wsText,
                             pParams.m_PartRect);
-}
-
-const RetainPtr<CFGAS_GEFont>& CFWL_WidgetTP::GetFont() const {
-  return m_pFGASFont;
 }
 
 void CFWL_WidgetTP::InitializeArrowColorData() {
@@ -74,14 +68,12 @@ void CFWL_WidgetTP::InitializeArrowColorData() {
   m_pColorData->clrSign[3] = ArgbEncode(255, 128, 128, 128);
 }
 
-void CFWL_WidgetTP::EnsureTTOInitialized() {
+void CFWL_WidgetTP::EnsureTTOInitialized(IFWL_ThemeProvider* pProvider) {
   if (m_pTextOut)
     return;
 
-  m_pFGASFont = CFWL_FontManager::GetInstance()->FindFont(
-      L"Helvetica", 0, FX_CodePage::kDefANSI);
   m_pTextOut = std::make_unique<CFDE_TextOut>();
-  m_pTextOut->SetFont(m_pFGASFont);
+  m_pTextOut->SetFont(pProvider->GetFWLFont());
   m_pTextOut->SetFontSize(FWLTHEME_CAPACITY_FontSize);
   m_pTextOut->SetTextColor(FWLTHEME_CAPACITY_TextColor);
 }
@@ -96,10 +88,10 @@ void CFWL_WidgetTP::DrawBorder(CFGAS_GEGraphics* pGraphics,
   path.AddRectangle(rect.left, rect.top, rect.width, rect.height);
   path.AddRectangle(rect.left + 1, rect.top + 1, rect.width - 2,
                     rect.height - 2);
-  pGraphics->SaveGraphState();
+
+  CFGAS_GEGraphics::StateRestorer restorer(pGraphics);
   pGraphics->SetFillColor(CFGAS_GEColor(ArgbEncode(255, 0, 0, 0)));
   pGraphics->FillPath(path, CFX_FillRenderOptions::FillType::kEvenOdd, matrix);
-  pGraphics->RestoreGraphState();
 }
 
 void CFWL_WidgetTP::FillBackground(CFGAS_GEGraphics* pGraphics,
@@ -117,10 +109,10 @@ void CFWL_WidgetTP::FillSolidRect(CFGAS_GEGraphics* pGraphics,
 
   CFGAS_GEPath path;
   path.AddRectangle(rect.left, rect.top, rect.width, rect.height);
-  pGraphics->SaveGraphState();
+
+  CFGAS_GEGraphics::StateRestorer restorer(pGraphics);
   pGraphics->SetFillColor(CFGAS_GEColor(fillColor));
   pGraphics->FillPath(path, CFX_FillRenderOptions::FillType::kWinding, matrix);
-  pGraphics->RestoreGraphState();
 }
 
 void CFWL_WidgetTP::DrawFocus(CFGAS_GEGraphics* pGraphics,
@@ -131,12 +123,12 @@ void CFWL_WidgetTP::DrawFocus(CFGAS_GEGraphics* pGraphics,
 
   CFGAS_GEPath path;
   path.AddRectangle(rect.left, rect.top, rect.width, rect.height);
-  pGraphics->SaveGraphState();
+
+  CFGAS_GEGraphics::StateRestorer restorer(pGraphics);
   pGraphics->SetStrokeColor(CFGAS_GEColor(0xFF000000));
   static constexpr float kDashPattern[2] = {1, 1};
   pGraphics->SetLineDash(0.0f, kDashPattern);
   pGraphics->StrokePath(path, matrix);
-  pGraphics->RestoreGraphState();
 }
 
 void CFWL_WidgetTP::DrawArrow(CFGAS_GEGraphics* pGraphics,

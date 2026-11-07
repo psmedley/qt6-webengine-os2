@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,7 @@ class WebString;
 //
 // Also note that this utility is resource-intensive, consuming significant
 // memory and CPU during a text capture.
-class WebFrameContentDumper {
+class BLINK_EXPORT WebFrameContentDumper {
  public:
   // Returns HTML text for the contents of this frame, generated
   // from the DOM.
@@ -41,8 +41,7 @@ class WebFrameContentDumper {
 
   // Returns the contents of this frame's local subtree as a string.  If the
   // text is longer than |max_chars|, it will be clipped to that length.
-  BLINK_EXPORT static WebString DumpFrameTreeAsText(WebLocalFrame* frame,
-                                                    size_t max_chars);
+  static WebString DumpFrameTreeAsText(WebLocalFrame* frame, size_t max_chars);
 };
 
 }  // namespace blink

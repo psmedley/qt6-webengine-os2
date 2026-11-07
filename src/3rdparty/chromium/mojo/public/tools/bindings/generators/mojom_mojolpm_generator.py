@@ -1,4 +1,4 @@
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Generates C++ source files from a mojom.Module."""
@@ -128,7 +128,7 @@ class Generator(CppGenerator):
         AddKind(kind.key_kind)
         AddKind(kind.value_kind)
       elif (mojom.IsStructKind(kind) or mojom.IsUnionKind(kind)
-            or mojom.IsEnumKind(kind) or mojom.IsInterfaceKind(kind)):
+            or mojom.IsEnumKind(kind)):
         name = self._GetFullMojomNameForKind(kind)
         if name in seen_types:
           return

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -128,7 +128,7 @@ class GPU_GLES2_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
     bool oes_rgb8_rgba8 = false;
     bool angle_robust_resource_initialization = false;
     bool nv_fence = false;
-    bool chromium_texture_storage_image = false;
+    bool texture_storage_image = false;
     bool ext_window_rectangles = false;
     bool chromium_gpu_fence = false;
     bool separate_stencil_ref_mask_writemask = false;
@@ -208,7 +208,7 @@ class GPU_GLES2_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
   bool IsWebGL2OrES3OrHigherContext() const;
   bool IsES31ForTestingContext() const;
 
-  void EnableCHROMIUMTextureStorageImage();
+  void EnableTextureStorageImage();
   void EnableCHROMIUMColorBufferFloatRGBA();
   void EnableCHROMIUMColorBufferFloatRGB();
   void EnableEXTFloatBlend();

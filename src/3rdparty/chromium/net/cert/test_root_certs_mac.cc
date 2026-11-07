@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 #include <Security/Security.h>
 
 #include "build/build_config.h"
-#include "net/cert/internal/cert_errors.h"
+#include "net/cert/pki/cert_errors.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
-#include "net/cert/x509_util_ios_and_mac.h"
+#include "net/cert/x509_util_apple.h"
 
 namespace net {
 
@@ -44,7 +44,7 @@ OSStatus TestRootCerts::FixupSecTrustRef(SecTrustRef trust_ref) const {
   return SecTrustSetAnchorCertificatesOnly(trust_ref, false);
 }
 
-TestRootCerts::~TestRootCerts() {}
+TestRootCerts::~TestRootCerts() = default;
 
 void TestRootCerts::Init() {
   temporary_roots_.reset(

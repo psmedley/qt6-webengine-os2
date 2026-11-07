@@ -15,54 +15,54 @@
 #ifndef SRC_DAWN_NATIVE_D3D12_SHADERMODULED3D12_H_
 #define SRC_DAWN_NATIVE_D3D12_SHADERMODULED3D12_H_
 
-#include "dawn/native/PersistentCache.h"
-#include "dawn/native/ShaderModule.h"
+#include <string>
 
+#include "dawn/native/Blob.h"
+#include "dawn/native/Serializable.h"
+#include "dawn/native/ShaderModule.h"
 #include "dawn/native/d3d12/d3d12_platform.h"
 
 namespace dawn::native {
-    struct ProgrammableStage;
+struct ProgrammableStage;
 }  // namespace dawn::native
 
 namespace dawn::native::d3d12 {
 
-    class Device;
-    class PipelineLayout;
+class Device;
+class PipelineLayout;
 
-    struct FirstOffsetInfo {
-        bool usesVertexIndex;
-        uint32_t vertexIndexOffset;
-        bool usesInstanceIndex;
-        uint32_t instanceIndexOffset;
-    };
+#define COMPILED_SHADER_MEMBERS(X) \
+    X(Blob, shaderBlob)            \
+    X(std::string, hlslSource)     \
+    X(bool, usesVertexOrInstanceIndex)
 
-    // Manages a ref to one of the various representations of shader blobs and information used to
-    // emulate vertex/instance index starts
-    struct CompiledShader {
-        ScopedCachedBlob cachedShader;
-        ComPtr<ID3DBlob> compiledFXCShader;
-        ComPtr<IDxcBlob> compiledDXCShader;
-        D3D12_SHADER_BYTECODE GetD3D12ShaderBytecode() const;
+// `CompiledShader` holds a ref to one of the various representations of shader blobs and
+// information used to emulate vertex/instance index starts. It also holds the `hlslSource` for the
+// shader compilation, which is only transiently available during Compile, and cleared before it
+// returns. It is not written to or loaded from the cache unless Toggle dump_shaders is true.
+DAWN_SERIALIZABLE(struct, CompiledShader, COMPILED_SHADER_MEMBERS) {
+    D3D12_SHADER_BYTECODE GetD3D12ShaderBytecode() const;
+};
+#undef COMPILED_SHADER_MEMBERS
 
-        FirstOffsetInfo firstOffsetInfo;
-    };
+class ShaderModule final : public ShaderModuleBase {
+  public:
+    static ResultOrError<Ref<ShaderModule>> Create(Device* device,
+                                                   const ShaderModuleDescriptor* descriptor,
+                                                   ShaderModuleParseResult* parseResult,
+                                                   OwnedCompilationMessages* compilationMessages);
 
-    class ShaderModule final : public ShaderModuleBase {
-      public:
-        static ResultOrError<Ref<ShaderModule>> Create(Device* device,
-                                                       const ShaderModuleDescriptor* descriptor,
-                                                       ShaderModuleParseResult* parseResult);
+    ResultOrError<CompiledShader> Compile(const ProgrammableStage& programmableStage,
+                                          SingleShaderStage stage,
+                                          const PipelineLayout* layout,
+                                          uint32_t compileFlags);
 
-        ResultOrError<CompiledShader> Compile(const ProgrammableStage& programmableStage,
-                                              SingleShaderStage stage,
-                                              const PipelineLayout* layout,
-                                              uint32_t compileFlags);
-
-      private:
-        ShaderModule(Device* device, const ShaderModuleDescriptor* descriptor);
-        ~ShaderModule() override = default;
-        MaybeError Initialize(ShaderModuleParseResult* parseResult);
-    };
+  private:
+    ShaderModule(Device* device, const ShaderModuleDescriptor* descriptor);
+    ~ShaderModule() override = default;
+    MaybeError Initialize(ShaderModuleParseResult* parseResult,
+                          OwnedCompilationMessages* compilationMessages);
+};
 
 }  // namespace dawn::native::d3d12
 

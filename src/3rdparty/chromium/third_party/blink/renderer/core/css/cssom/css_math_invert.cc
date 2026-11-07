@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,9 +18,7 @@ V8CSSNumberish* CSSMathInvert::value() {
 
 absl::optional<CSSNumericSumValue> CSSMathInvert::SumValue() const {
   auto sum = value_->SumValue();
-  if (!sum.has_value() || sum->terms.size() != 1 ||
-      (!RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled() &&
-       sum->terms[0].value == 0))
+  if (!sum.has_value() || sum->terms.size() != 1)
     return absl::nullopt;
 
   for (auto& unit_exponent : sum->terms[0].units)

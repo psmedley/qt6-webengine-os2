@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,25 +7,28 @@
 #include <stddef.h>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "base/base_switches.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
+#include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_entropy_provider.h"
-#include "base/test/scoped_field_trial_list_resetter.h"
 #include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "base/version.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
+#include "components/metrics/clean_exit_beacon.h"
 #include "components/metrics/client_info.h"
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/metrics_state_manager.h"
@@ -38,7 +41,6 @@
 #include "components/variations/scoped_variations_ids_provider.h"
 #include "components/variations/service/buildflags.h"
 #include "components/variations/service/safe_seed_manager.h"
-#include "components/variations/service/variations_safe_mode_constants.h"
 #include "components/variations/service/variations_service.h"
 #include "components/variations/service/variations_service_client.h"
 #include "components/variations/variations_seed_store.h"
@@ -147,7 +149,7 @@ class TestPlatformFieldTrials : public PlatformFieldTrials {
   void SetUpFieldTrials() override {}
   void SetUpFeatureControllingFieldTrials(
       bool has_seed,
-      const base::FieldTrial::EntropyProvider* low_entropy_provider,
+      const variations::EntropyProviders& entropy_providers,
       base::FeatureList* feature_list) override {}
 };
 
@@ -267,7 +269,6 @@ class TestVariationsFieldTrialCreator : public VariationsFieldTrialCreator {
       PrefService* local_state,
       TestVariationsServiceClient* client,
       SafeSeedManager* safe_seed_manager,
-      version_info::Channel channel = version_info::Channel::UNKNOWN,
       const base::FilePath user_data_dir = base::FilePath(),
       metrics::StartupVisibility startup_visibility =
           metrics::StartupVisibility::kUnknown)
@@ -281,7 +282,7 @@ class TestVariationsFieldTrialCreator : public VariationsFieldTrialCreator {
         build_time_(base::Time::Now()) {
     metrics_state_manager_ = metrics::MetricsStateManager::Create(
         local_state, &enabled_state_provider_, std::wstring(), user_data_dir,
-        startup_visibility, channel);
+        startup_visibility);
     metrics_state_manager_->InstantiateFieldTrialList();
   }
 
@@ -298,26 +299,18 @@ class TestVariationsFieldTrialCreator : public VariationsFieldTrialCreator {
     TestPlatformFieldTrials platform_field_trials;
     return VariationsFieldTrialCreator::SetUpFieldTrials(
         /*variation_ids=*/std::vector<std::string>(),
+        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+            switches::kForceVariationIds),
         std::vector<base::FeatureList::FeatureOverrideInfo>(),
-        /*low_entropy_provider=*/nullptr, std::make_unique<base::FeatureList>(),
-        metrics_state_manager_.get(), &platform_field_trials,
-        safe_seed_manager_, /*low_entropy_source_value=*/absl::nullopt);
+        std::make_unique<base::FeatureList>(), metrics_state_manager_.get(),
+        &platform_field_trials, safe_seed_manager_,
+        metrics_state_manager_->GetLowEntropySource());
   }
 
   TestVariationsSeedStore* seed_store() { return &seed_store_; }
   void SetBuildTime(const base::Time& time) { build_time_ = time; }
-  bool was_maybe_extend_variations_safe_mode_called() {
-    return was_maybe_extend_variations_safe_mode_called_;
-  }
 
  protected:
-  void MaybeExtendVariationsSafeMode(
-      metrics::MetricsStateManager* metrics_state_manager) override {
-    was_maybe_extend_variations_safe_mode_called_ = true;
-    VariationsFieldTrialCreator::MaybeExtendVariationsSafeMode(
-        metrics_state_manager);
-  }
-
 #if BUILDFLAG(FIELDTRIAL_TESTING_ENABLED)
   // We override this method so that a mock testing config is used instead of
   // the one defined in fieldtrial_testing_config.json.
@@ -339,7 +332,6 @@ class TestVariationsFieldTrialCreator : public VariationsFieldTrialCreator {
   const raw_ptr<SafeSeedManager> safe_seed_manager_;
   base::Time build_time_;
   std::unique_ptr<metrics::MetricsStateManager> metrics_state_manager_;
-  bool was_maybe_extend_variations_safe_mode_called_ = false;
 };
 
 }  // namespace
@@ -356,12 +348,14 @@ class FieldTrialCreatorTest : public ::testing::Test {
   FieldTrialCreatorTest& operator=(const FieldTrialCreatorTest&) = delete;
 
   ~FieldTrialCreatorTest() override {
-    // Clear out any features created by tests in this suite, and restore the
+    // Clear out any features created by tests in this suite and restore the
     // global feature list.
     base::FeatureList::ClearInstanceForTesting();
     base::FeatureList::RestoreInstanceForTesting(
         std::move(global_feature_list_));
   }
+
+  void SetUp() override { ASSERT_TRUE(temp_dir_.CreateUniqueTempDir()); }
 
   void ResetFeatureList() {
     base::FeatureList::ClearInstanceForTesting();
@@ -372,36 +366,17 @@ class FieldTrialCreatorTest : public ::testing::Test {
 
   PrefService* local_state() { return &local_state_; }
 
- protected:
-  TestingPrefServiceSimple local_state_;
-
- private:
-  variations::ScopedVariationsIdsProvider scoped_variations_ids_provider_{
-      variations::VariationsIdsProvider::Mode::kUseSignedInState};
-  // The global feature list, which is ignored by tests in this suite.
-  std::unique_ptr<base::FeatureList> global_feature_list_;
-};
-
-class FieldTrialCreatorSafeModeExperimentTest : public FieldTrialCreatorTest {
- public:
-  FieldTrialCreatorSafeModeExperimentTest()
-      : field_trial_list_(std::make_unique<base::MockEntropyProvider>(0.1)) {}
-  ~FieldTrialCreatorSafeModeExperimentTest() override = default;
-
-  void SetUp() override {
-    DisableTestingConfig();
-    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-  }
-
   const base::FilePath user_data_dir_path() const {
     return temp_dir_.GetPath();
   }
 
  private:
-  base::test::TaskEnvironment task_environment_;
+  TestingPrefServiceSimple local_state_;
   base::ScopedTempDir temp_dir_;
-  base::test::ScopedFieldTrialListResetter trial_list_resetter_;
-  base::FieldTrialList field_trial_list_;
+  variations::ScopedVariationsIdsProvider scoped_variations_ids_provider_{
+      variations::VariationsIdsProvider::Mode::kUseSignedInState};
+  // The global feature list, which is ignored by tests in this suite.
+  std::unique_ptr<base::FeatureList> global_feature_list_;
 };
 
 struct StartupVisibilityTestParams {
@@ -411,12 +386,8 @@ struct StartupVisibilityTestParams {
 };
 
 class FieldTrialCreatorTestWithStartupVisibility
-    : public FieldTrialCreatorSafeModeExperimentTest,
+    : public FieldTrialCreatorTest,
       public ::testing::WithParamInterface<StartupVisibilityTestParams> {};
-
-class SafeModeExperimentTestByChannel
-    : public FieldTrialCreatorSafeModeExperimentTest,
-      public ::testing::WithParamInterface<version_info::Channel> {};
 
 // Verify that unexpired seeds are used.
 TEST_F(FieldTrialCreatorTest, SetUpFieldTrials_ValidSeed_NotExpired) {
@@ -810,6 +781,55 @@ TEST_F(FieldTrialCreatorTest, SetUpFieldTrials_SafeSeedForFutureMilestone) {
       "Variations.SeedUsage", SeedUsage::kSafeSeedForFutureMilestoneNotUsed, 1);
 }
 
+TEST_F(FieldTrialCreatorTest, LoadSeedFromTestSeedPath) {
+  DisableTestingConfig();
+
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  const base::FilePath test_seed_file =
+      temp_dir.GetPath().Append(FILE_PATH_LITERAL("TEST SEED"));
+
+  // This seed contains the data for a test experiment.
+  base::WriteFile(test_seed_file,
+                  base::StringPrintf("{\"variations_compressed_seed\": \"%s\","
+                                     "\"variations_seed_signature\": \"%s\"}",
+                                     kTestSeedData.base64_compressed_data,
+                                     kTestSeedData.base64_signature));
+
+  base::CommandLine::ForCurrentProcess()->AppendSwitchPath(
+      variations::switches::kVariationsTestSeedPath, test_seed_file);
+
+  // Use a real VariationsFieldTrialCreator and VariationsSeedStore to exercise
+  // the VariationsSeedStore::LoadSeed() logic.
+  TestVariationsServiceClient variations_service_client;
+  auto seed_store = std::make_unique<VariationsSeedStore>(local_state());
+  VariationsFieldTrialCreator field_trial_creator(
+      &variations_service_client, std::move(seed_store), UIStringOverrider());
+  metrics::TestEnabledStateProvider enabled_state_provider(
+      /*consent=*/true,
+      /*enabled=*/true);
+  auto metrics_state_manager = metrics::MetricsStateManager::Create(
+      local_state(), &enabled_state_provider, std::wstring(), base::FilePath());
+
+  TestPlatformFieldTrials platform_field_trials;
+  NiceMock<MockSafeSeedManager> safe_seed_manager(local_state());
+
+  ASSERT_FALSE(base::FieldTrialList::TrialExists(kTestSeedData.study_names[0]));
+
+  EXPECT_TRUE(field_trial_creator.SetUpFieldTrials(
+      /*variation_ids=*/{},
+      /*command_line_variation_ids=*/std::string(),
+      std::vector<base::FeatureList::FeatureOverrideInfo>(),
+      std::make_unique<base::FeatureList>(), metrics_state_manager.get(),
+      &platform_field_trials, &safe_seed_manager,
+      metrics_state_manager->GetLowEntropySource()));
+
+  EXPECT_TRUE(base::FieldTrialList::TrialExists(kTestSeedData.study_names[0]));
+  EXPECT_EQ(
+      local_state()->GetInteger(prefs::kVariationsFailedToFetchSeedStreak), 0);
+  EXPECT_EQ(local_state()->GetInteger(prefs::kVariationsCrashStreak), 0);
+}
+
 #if BUILDFLAG(IS_ANDROID)
 // This is a regression test for crbug/829527.
 TEST_F(FieldTrialCreatorTest, SetUpFieldTrials_LoadsCountryOnFirstRun) {
@@ -847,10 +867,12 @@ TEST_F(FieldTrialCreatorTest, SetUpFieldTrials_LoadsCountryOnFirstRun) {
   // active.
   EXPECT_TRUE(field_trial_creator.SetUpFieldTrials(
       /*variation_ids=*/std::vector<std::string>(),
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kForceVariationIds),
       std::vector<base::FeatureList::FeatureOverrideInfo>(),
-      /*low_entropy_provider=*/nullptr, std::make_unique<base::FeatureList>(),
-      metrics_state_manager.get(), &platform_field_trials, &safe_seed_manager,
-      /*low_entropy_source_value=*/absl::nullopt));
+      std::make_unique<base::FeatureList>(), metrics_state_manager.get(),
+      &platform_field_trials, &safe_seed_manager,
+      metrics_state_manager->GetLowEntropySource()));
 
   EXPECT_EQ(kTestSeedExperimentName,
             base::FieldTrialList::FindFullName(kTestSeedStudyName));
@@ -956,8 +978,8 @@ TEST_F(FieldTrialCreatorTest, SetUpFieldTrialConfig_ValidSeed) {
   EXPECT_EQ("1", params["x"]);
 
   // Verify that the |UnitTestEnabled| feature is active.
-  const base::Feature kFeature1{"UnitTestEnabled",
-                                base::FEATURE_DISABLED_BY_DEFAULT};
+  static BASE_FEATURE(kFeature1, "UnitTestEnabled",
+                      base::FEATURE_DISABLED_BY_DEFAULT);
   EXPECT_TRUE(base::FeatureList::IsEnabled(kFeature1));
 
   ResetVariations();
@@ -1013,11 +1035,11 @@ TEST_F(FieldTrialCreatorTest, SetUpFieldTrialConfig_ForceFieldTrials) {
 
   // Verify that the |UnitTestEnabled| and |UnitTestEnabled2| features are
   // active.
-  const base::Feature kFeature1{"UnitTestEnabled",
-                                base::FEATURE_DISABLED_BY_DEFAULT};
+  static BASE_FEATURE(kFeature1, "UnitTestEnabled",
+                      base::FEATURE_DISABLED_BY_DEFAULT);
   EXPECT_TRUE(base::FeatureList::IsEnabled(kFeature1));
-  const base::Feature kFeature2{"UnitTest2Enabled",
-                                base::FEATURE_DISABLED_BY_DEFAULT};
+  static BASE_FEATURE(kFeature2, "UnitTest2Enabled",
+                      base::FEATURE_DISABLED_BY_DEFAULT);
   EXPECT_TRUE(base::FeatureList::IsEnabled(kFeature2));
 
   ResetVariations();
@@ -1060,8 +1082,8 @@ TEST_F(FieldTrialCreatorTest, SetUpFieldTrialConfig_ForceFieldTrialsOverride) {
 
   // Verify that the |UnitTestEnabled| feature from the testing config is not
   // active.
-  const base::Feature kFeature1{"UnitTestEnabled",
-                                base::FEATURE_DISABLED_BY_DEFAULT};
+  static BASE_FEATURE(kFeature1, "UnitTestEnabled",
+                      base::FEATURE_DISABLED_BY_DEFAULT);
   EXPECT_FALSE(base::FeatureList::IsEnabled(kFeature1));
 
   ResetVariations();
@@ -1106,8 +1128,8 @@ TEST_F(FieldTrialCreatorTest, SetUpFieldTrialConfig_ForceFieldTrialParams) {
   EXPECT_EQ("2", params["y"]);
 
   // Verify that the |UnitTestEnabled| feature is still active.
-  const base::Feature kFeature1{"UnitTestEnabled",
-                                base::FEATURE_DISABLED_BY_DEFAULT};
+  static BASE_FEATURE(kFeature1, "UnitTestEnabled",
+                      base::FEATURE_DISABLED_BY_DEFAULT);
   EXPECT_TRUE(base::FeatureList::IsEnabled(kFeature1));
 
   ResetVariations();
@@ -1156,8 +1178,8 @@ TEST_P(FieldTrialCreatorTestWithFeatures,
 
   // Verify that the |UnitTestEnabled| feature is enabled or disabled depending
   // on whether we passed it in |--enable-features| or |--disable-features|.
-  const base::Feature kFeature1{"UnitTestEnabled",
-                                base::FEATURE_DISABLED_BY_DEFAULT};
+  static BASE_FEATURE(kFeature1, "UnitTestEnabled",
+                      base::FEATURE_DISABLED_BY_DEFAULT);
   EXPECT_EQ(GetParam() == ::switches::kEnableFeatures,
             base::FeatureList::IsEnabled(kFeature1));
 
@@ -1165,33 +1187,25 @@ TEST_P(FieldTrialCreatorTestWithFeatures,
 }
 #endif  // BUILDFLAG(FIELDTRIAL_TESTING_ENABLED)
 
-// Verify that providing an empty user data directory opts the client out of the
-// Extended Variations Safe Mode experiment.
-TEST_F(FieldTrialCreatorSafeModeExperimentTest, OptOutOfExperiment) {
-  // Ensure that variations safe mode is not triggered.
+// Verify that a beacon file is not written when passing an empty user data
+// directory path. Some platforms deliberately pass an empty path.
+TEST_F(FieldTrialCreatorTest, DoNotWriteBeaconFile) {
+  DisableTestingConfig();
+  TestVariationsServiceClient variations_service_client;
+  // Ensure that Variations Safe Mode is not triggered.
   NiceMock<MockSafeSeedManager> safe_seed_manager(local_state());
-
-  // Specify a channel on which the Extended Variations Safe Mode experiment is
-  // running.
-  version_info::Channel channel = version_info::Channel::DEV;
-  NiceMock<MockVariationsServiceClient> variations_service_client;
-  ON_CALL(variations_service_client, GetChannel())
-      .WillByDefault(Return(channel));
-
+  // Pass an empty path instead of a path to the user data dir.
   TestVariationsFieldTrialCreator field_trial_creator(
-      local_state(), &variations_service_client, &safe_seed_manager, channel,
+      local_state(), &variations_service_client, &safe_seed_manager,
       base::FilePath());
 
   base::HistogramTester histogram_tester;
   ASSERT_TRUE(field_trial_creator.SetUpFieldTrials());
 
-  // Verify that the experiment is not active and that Variations Safe Mode was
-  // not extended.
-  EXPECT_FALSE(base::FieldTrialList::IsTrialActive(kExtendedSafeModeTrial));
-  EXPECT_FALSE(
-      field_trial_creator.was_maybe_extend_variations_safe_mode_called());
+  EXPECT_FALSE(base::PathExists(
+      user_data_dir_path().Append(metrics::kCleanExitBeaconFilename)));
   histogram_tester.ExpectTotalCount(
-      "Variations.ExtendedSafeMode.WritePrefsTime", 0);
+      "Variations.ExtendedSafeMode.BeaconFileWrite", 0);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -1214,141 +1228,54 @@ INSTANTIATE_TEST_SUITE_P(
       return params.param.test_name;
     });
 
+// Verify that Chrome starts watching for crashes for unknown and foreground
+// startup visibilities. Verify that Chrome does not start watching for crashes
+// in background sessions.
 TEST_P(FieldTrialCreatorTestWithStartupVisibility,
-       SkipExperimentInBackgroundSessions) {
+       StartupVisibilityAffectsBrowserCrashMonitoring) {
+  DisableTestingConfig();
+  TestVariationsServiceClient variations_service_client;
   // Ensure that Variations Safe Mode is not triggered.
   NiceMock<MockSafeSeedManager> safe_seed_manager(local_state());
-
-  NiceMock<MockVariationsServiceClient> variations_service_client;
-  version_info::Channel channel = version_info::Channel::DEV;
-  ON_CALL(variations_service_client, GetChannel())
-      .WillByDefault(Return(channel));
-
   StartupVisibilityTestParams params = GetParam();
   TestVariationsFieldTrialCreator field_trial_creator(
-      local_state(), &variations_service_client, &safe_seed_manager, channel,
+      local_state(), &variations_service_client, &safe_seed_manager,
       user_data_dir_path(), params.startup_visibility);
 
-  // Verify that the Extended Variations Safe Mode experiment is active to be
-  // certain that Safe Mode is (or isn't) extended due to the StartupVisibility.
-  ASSERT_TRUE(base::FieldTrialList::IsTrialActive(kExtendedSafeModeTrial));
-
   ASSERT_TRUE(field_trial_creator.SetUpFieldTrials());
-  // Verify that MaybeExtendVariationsSafeMode() was (or wasn't) called.
-  EXPECT_EQ(field_trial_creator.was_maybe_extend_variations_safe_mode_called(),
+
+  // Verify that Chrome did (or did not) start watching for crashes.
+  EXPECT_EQ(base::PathExists(
+                user_data_dir_path().Append(metrics::kCleanExitBeaconFilename)),
             params.extend_safe_mode);
-
-  base::FeatureList::ClearInstanceForTesting();
 }
 
-INSTANTIATE_TEST_SUITE_P(All,
-                         SafeModeExperimentTestByChannel,
-                         ::testing::Values(version_info::Channel::UNKNOWN,
-                                           version_info::Channel::CANARY,
-                                           version_info::Channel::DEV,
-                                           version_info::Channel::BETA,
-                                           version_info::Channel::STABLE));
-
-// Verify that the Extended Variations Safe Mode experiment is active on all
-// channels.
-TEST_P(SafeModeExperimentTestByChannel, FieldTrialActivationIsValid) {
+// Verify that the beacon file contents are as expected when Chrome starts
+// watching for browser crashes before setting up field trials.
+TEST_F(FieldTrialCreatorTest, WriteBeaconFile) {
+  DisableTestingConfig();
+  TestVariationsServiceClient variations_service_client;
   // Ensure that Variations Safe Mode is not triggered.
   NiceMock<MockSafeSeedManager> safe_seed_manager(local_state());
-
-  version_info::Channel channel = GetParam();
-  NiceMock<MockVariationsServiceClient> variations_service_client;
-  ON_CALL(variations_service_client, GetChannel())
-      .WillByDefault(Return(channel));
-
   TestVariationsFieldTrialCreator field_trial_creator(
-      local_state(), &variations_service_client, &safe_seed_manager, channel,
-      user_data_dir_path());
-
-  ASSERT_TRUE(field_trial_creator.SetUpFieldTrials());
-  // Verify that the experiment is (or is not) active.
-  EXPECT_TRUE(base::FieldTrialList::IsTrialActive(kExtendedSafeModeTrial));
-  EXPECT_TRUE(
-      field_trial_creator.was_maybe_extend_variations_safe_mode_called());
-}
-
-TEST_F(FieldTrialCreatorSafeModeExperimentTest,
-       ControlGroupDoesNotWriteBeaconFile) {
-  NiceMock<MockVariationsServiceClient> variations_service_client;
-  version_info::Channel channel = version_info::Channel::BETA;
-  ON_CALL(variations_service_client, GetChannel())
-      .WillByDefault(Return(channel));
-
-  // Ensure that Variations Safe Mode is not triggered.
-  NiceMock<MockSafeSeedManager> safe_seed_manager(local_state());
-
-  // Assign the client to a specific experiment group before creating the
-  // TestVariationsFieldTrialCreator so that the CleanExitBeacon uses the
-  // desired group.
-  int active_group = SetUpExtendedSafeModeExperiment(kControlGroup);
-  TestVariationsFieldTrialCreator field_trial_creator(
-      local_state(), &variations_service_client, &safe_seed_manager, channel,
+      local_state(), &variations_service_client, &safe_seed_manager,
       user_data_dir_path());
 
   base::HistogramTester histogram_tester;
   ASSERT_TRUE(field_trial_creator.SetUpFieldTrials());
-
-  // Verify that the field trial is active and that the client is in the
-  // control group.
-  EXPECT_TRUE(base::FieldTrialList::IsTrialActive(kExtendedSafeModeTrial));
-  EXPECT_EQ(active_group,
-            base::FieldTrialList::FindValue(kExtendedSafeModeTrial));
-
-  // Check metrics.
-  histogram_tester.ExpectTotalCount(
-      "Variations.ExtendedSafeMode.WritePrefsTime", 1);
-
-  // Verify that the beacon file does not exist.
-  EXPECT_FALSE(base::PathExists(
-      user_data_dir_path().Append(variations::kVariationsFilename)));
-}
-
-TEST_F(FieldTrialCreatorSafeModeExperimentTest,
-       ExperimentGroupWritesBeaconFile) {
-  NiceMock<MockVariationsServiceClient> variations_service_client;
-  version_info::Channel channel = version_info::Channel::BETA;
-  ON_CALL(variations_service_client, GetChannel())
-      .WillByDefault(Return(channel));
-
-  // Ensure that Variations Safe Mode is not triggered.
-  NiceMock<MockSafeSeedManager> safe_seed_manager(local_state());
-
-  // Assign the client to a specific experiment group before creating the
-  // TestVariationsFieldTrialCreator so that the CleanExitBeacon uses the
-  // desired group.
-  int active_group = SetUpExtendedSafeModeExperiment(kEnabledGroup);
-  TestVariationsFieldTrialCreator field_trial_creator(
-      local_state(), &variations_service_client, &safe_seed_manager, channel,
-      user_data_dir_path());
-
-  base::HistogramTester histogram_tester;
-  ASSERT_TRUE(field_trial_creator.SetUpFieldTrials());
-
-  // Verify that the field trial is active and that the client is in the
-  // SignalAndWriteViaFileUtil group.
-  EXPECT_TRUE(base::FieldTrialList::IsTrialActive(kExtendedSafeModeTrial));
-  EXPECT_EQ(active_group,
-            base::FieldTrialList::FindValue(kExtendedSafeModeTrial));
 
   // Verify that the beacon file was written and that the contents are correct.
   const base::FilePath variations_file_path =
-      user_data_dir_path().Append(variations::kVariationsFilename);
+      user_data_dir_path().Append(metrics::kCleanExitBeaconFilename);
   EXPECT_TRUE(base::PathExists(variations_file_path));
   std::string beacon_file_contents;
   ASSERT_TRUE(
       base::ReadFileToString(variations_file_path, &beacon_file_contents));
   EXPECT_EQ(beacon_file_contents,
-            "{\"monitoring_stage\":2,"
-            "\"user_experience_metrics.stability.exited_cleanly\":false,"
+            "{\"user_experience_metrics.stability.exited_cleanly\":false,"
             "\"variations_crash_streak\":0}");
 
   // Verify metrics.
-  histogram_tester.ExpectTotalCount(
-      "Variations.ExtendedSafeMode.WritePrefsTime", 1);
   histogram_tester.ExpectUniqueSample(
       "Variations.ExtendedSafeMode.BeaconFileWrite", 1, 1);
 }

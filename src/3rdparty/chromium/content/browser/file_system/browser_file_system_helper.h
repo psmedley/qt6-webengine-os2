@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,7 +38,6 @@ CONTENT_EXPORT scoped_refptr<storage::FileSystemContext>
 CreateFileSystemContext(
     BrowserContext* browser_context,
     const base::FilePath& profile_path,
-    const base::FilePath& bucket_base_path,
     bool is_incognito,
     scoped_refptr<storage::QuotaManagerProxy> quota_manager_proxy);
 

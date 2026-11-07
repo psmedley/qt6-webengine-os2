@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,12 +35,6 @@ class COMPONENT_EXPORT(UI_BASE) BaseWindow {
   // Returns true if the window is fully restored (not Fullscreen, Maximized,
   // Minimized).
   static bool IsRestored(const BaseWindow& window);
-
-  // IsFullscreenFakedForTesting is set by tests that are not written robustly
-  // to asynchronous transitions to fullscreen (e.g, by using
-  // ScopedFakeNSWindowFullscreen on macOS).
-  static void SetFullscreenFakedForTesting(bool);
-  static bool IsFullscreenFakedForTesting();
 
   // Return a platform dependent identifier for this window.
   virtual gfx::NativeWindow GetNativeWindow() const = 0;

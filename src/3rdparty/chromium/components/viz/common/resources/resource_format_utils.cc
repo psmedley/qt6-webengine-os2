@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include <ostream>
 
 #include "base/check_op.h"
+#include "base/logging.h"
 #include "base/notreached.h"
 #include "build/chromeos_buildflags.h"
 #include "ui/gfx/buffer_types.h"
@@ -46,6 +47,10 @@ SkColorType ResourceFormatToClosestSkColorType(bool gpu_compositing,
     case ETC1:
       return kRGB_888x_SkColorType;
     case P010:
+#if BUILDFLAG(IS_MAC)
+      DLOG(ERROR) << "Sampling of P010 resources must be done per-plane.";
+#endif
+      return kRGBA_1010102_SkColorType;
     case RGBA_1010102:
       return kRGBA_1010102_SkColorType;
     case BGRA_1010102:
@@ -54,8 +59,10 @@ SkColorType ResourceFormatToClosestSkColorType(bool gpu_compositing,
     // YUV images are sampled as RGB.
     case YVU_420:
     case YUV_420_BIPLANAR:
+#if BUILDFLAG(IS_MAC)
+      DLOG(ERROR) << "Sampling of YUV_420 resources must be done per-plane.";
+#endif
       return kRGB_888x_SkColorType;
-
     case RED_8:
       return kAlpha_8_SkColorType;
     case R16_EXT:
@@ -266,44 +273,6 @@ unsigned int GLInternalFormat(ResourceFormat format) {
   }
 }
 
-unsigned int GLCopyTextureInternalFormat(ResourceFormat format) {
-  // In GLES2, valid formats for glCopyTexImage2D are: GL_ALPHA, GL_LUMINANCE,
-  // GL_LUMINANCE_ALPHA, GL_RGB, or GL_RGBA.
-  // Extensions typically used for glTexImage2D do not also work for
-  // glCopyTexImage2D. For instance GL_BGRA_EXT may not be used for
-  // anything but gl(Sub)TexImage2D:
-  // https://www.khronos.org/registry/gles/extensions/EXT/EXT_texture_format_BGRA8888.txt
-  DCHECK_LE(format, RESOURCE_FORMAT_MAX);
-  static const GLenum format_gl_data_format[] = {
-      GL_RGBA,       // RGBA_8888
-      GL_RGBA,       // RGBA_4444
-      GL_RGBA,       // BGRA_8888
-      GL_ALPHA,      // ALPHA_8
-      GL_LUMINANCE,  // LUMINANCE_8
-      GL_RGB,        // RGB_565
-      GL_RGB,        // BGR_565
-      GL_RGB,        // ETC1
-      GL_LUMINANCE,  // RED_8
-      GL_RGBA,       // RG_88
-      GL_LUMINANCE,  // LUMINANCE_F16
-      GL_RGBA,       // RGBA_F16
-      GL_LUMINANCE,  // R16_EXT
-      GL_RGBA,       // RG16_EXT
-      GL_RGB,        // RGBX_8888
-      GL_RGB,        // BGRX_8888
-      GL_ZERO,       // RGBA_1010102
-      GL_ZERO,       // BGRA_1010102
-      GL_ZERO,       // YVU_420
-      GL_ZERO,       // YUV_420_BIPLANAR
-      GL_ZERO,       // P010
-  };
-
-  static_assert(std::size(format_gl_data_format) == (RESOURCE_FORMAT_MAX + 1),
-                "format_gl_data_format does not handle all cases.");
-
-  return format_gl_data_format[format];
-}
-
 gfx::BufferFormat BufferFormat(ResourceFormat format) {
   switch (format) {
     case BGRA_8888:
@@ -388,11 +357,18 @@ unsigned int TextureStorageFormat(ResourceFormat format,
     case ETC1:
       return GL_ETC1_RGB8_OES;
     case P010:
+#if BUILDFLAG(IS_MAC)
+      DLOG(ERROR) << "Sampling of P010 resources must be done per-plane.";
+#endif
+      return GL_RGB10_A2_EXT;
     case RGBA_1010102:
     case BGRA_1010102:
       return GL_RGB10_A2_EXT;
     case YVU_420:
     case YUV_420_BIPLANAR:
+#if BUILDFLAG(IS_MAC)
+      DLOG(ERROR) << "Sampling of YUV_420 resources must be done per-plane.";
+#endif
       return GL_RGB8_OES;
     default:
       break;
@@ -411,6 +387,10 @@ bool IsGpuMemoryBufferFormatSupported(ResourceFormat format) {
     // candidate.
     case RED_8:
 #endif
+#if BUILDFLAG(IS_MAC)
+    case BGRX_8888:
+    case RGBX_8888:
+#endif
     case R16_EXT:
     case RGBA_4444:
     case RGBA_8888:
@@ -426,13 +406,15 @@ bool IsGpuMemoryBufferFormatSupported(ResourceFormat format) {
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
     case RED_8:
 #endif
+#if !BUILDFLAG(IS_MAC)
+    case BGRX_8888:
+    case RGBX_8888:
+#endif
     case RGB_565:
     case LUMINANCE_F16:
     case BGR_565:
     case RG_88:
     case RG16_EXT:
-    case RGBX_8888:
-    case BGRX_8888:
     case YVU_420:
     case YUV_420_BIPLANAR:
     case P010:
@@ -514,7 +496,6 @@ ResourceFormat GetResourceFormat(gfx::BufferFormat format) {
 bool GLSupportsFormat(ResourceFormat format) {
   switch (format) {
     case BGR_565:
-    case BGRX_8888:
     case YVU_420:
     case YUV_420_BIPLANAR:
     case P010:
@@ -625,52 +606,70 @@ WGPUTextureFormat ToWGPUFormat(ResourceFormat format) {
   return static_cast<WGPUTextureFormat>(ToDawnFormat(format));
 }
 
-size_t AlphaBitsForSkColorType(SkColorType color_type) {
-  switch (color_type) {
-    case kAlpha_8_SkColorType:
-      return 8;
-    case kRGB_565_SkColorType:
-      return 0;
-    case kARGB_4444_SkColorType:
-      return 4;
-    case kRGBA_8888_SkColorType:
-      return 8;
-    case kRGB_888x_SkColorType:
-      return 0;
-    case kBGRA_8888_SkColorType:
-      return 8;
-    case kRGBA_1010102_SkColorType:
-    case kBGRA_1010102_SkColorType:
-      return 2;
-    case kRGB_101010x_SkColorType:
-    case kBGR_101010x_SkColorType:
-    case kGray_8_SkColorType:
-      return 0;
-    case kRGBA_F16Norm_SkColorType:
-    case kRGBA_F16_SkColorType:
-      return 16;
-    case kRGBA_F32_SkColorType:
-      return 32;
-    case kR8G8_unorm_SkColorType:
-      return 0;
-    case kA16_float_SkColorType:
-      return 16;
-    case kR16G16_float_SkColorType:
-      return 0;
-    case kA16_unorm_SkColorType:
-      return 16;
-    case kR16G16_unorm_SkColorType:
-      return 0;
-    case kR16G16B16A16_unorm_SkColorType:
-      return 16;
-    case kSRGBA_8888_SkColorType:
-      return 8;
-    case kR8_unorm_SkColorType:
-      return 0;
-    case kUnknown_SkColorType:
-    default:
-      return 0;
-  }
+// TODO (hitawala): Add support for multiplanar formats.
+SkColorType ResourceFormatToClosestSkColorType(bool gpu_compositing,
+                                               SharedImageFormat format) {
+  return ResourceFormatToClosestSkColorType(gpu_compositing,
+                                            format.resource_format());
+}
+
+int BitsPerPixel(SharedImageFormat format) {
+  return BitsPerPixel(format.resource_format());
+}
+
+bool HasAlpha(SharedImageFormat format) {
+  return HasAlpha(format.resource_format());
+}
+
+unsigned int GLDataType(SharedImageFormat format) {
+  return GLDataType(format.resource_format());
+}
+
+unsigned int GLDataFormat(SharedImageFormat format) {
+  return GLDataFormat(format.resource_format());
+}
+
+unsigned int GLInternalFormat(SharedImageFormat format) {
+  return GLInternalFormat(format.resource_format());
+}
+
+gfx::BufferFormat BufferFormat(SharedImageFormat format) {
+  return BufferFormat(format.resource_format());
+}
+
+bool IsResourceFormatCompressed(SharedImageFormat format) {
+  return IsResourceFormatCompressed(format.resource_format());
+}
+
+unsigned int TextureStorageFormat(SharedImageFormat format,
+                                  bool use_angle_rgbx_format) {
+  return TextureStorageFormat(format.resource_format(), use_angle_rgbx_format);
+}
+
+bool IsGpuMemoryBufferFormatSupported(SharedImageFormat format) {
+  return IsGpuMemoryBufferFormatSupported(format.resource_format());
+}
+
+bool GLSupportsFormat(SharedImageFormat format) {
+  return GLSupportsFormat(format.resource_format());
+}
+
+#if BUILDFLAG(ENABLE_VULKAN)
+bool HasVkFormat(SharedImageFormat format) {
+  return HasVkFormat(format.resource_format());
+}
+
+VkFormat ToVkFormat(SharedImageFormat format) {
+  return ToVkFormat(format.resource_format());
+}
+#endif
+
+wgpu::TextureFormat ToDawnFormat(SharedImageFormat format) {
+  return ToDawnFormat(format.resource_format());
+}
+
+WGPUTextureFormat ToWGPUFormat(SharedImageFormat format) {
+  return ToWGPUFormat(format.resource_format());
 }
 
 }  // namespace viz

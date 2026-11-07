@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/memory/singleton.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 // A signleton that provides all the URLs that are used for connecting to GAIA.
 //
@@ -23,7 +24,8 @@ class GaiaUrls {
   // The URLs for different calls in the Google Accounts programmatic login API.
   const GURL& google_url() const;
   const GURL& secure_google_url() const;
-  const GURL& gaia_url() const;
+  const url::Origin& gaia_origin() const;
+  GURL gaia_url() const;
   const GURL& client_login_url() const;
   const GURL& service_login_url() const;
   const GURL& embedded_setup_chromeos_url(unsigned version) const;
@@ -36,7 +38,6 @@ class GaiaUrls {
   const GURL& signin_chrome_sync_keys_recoverability_degraded_url() const;
   const GURL& service_login_auth_url() const;
   const GURL& service_logout_url() const;
-  const GURL& get_user_info_url() const;
   const GURL& token_auth_url() const;
   const GURL& merge_session_url() const;
   const GURL& get_oauth_token_url() const;
@@ -79,7 +80,7 @@ class GaiaUrls {
 
   GURL google_url_;
   GURL secure_google_url_;
-  GURL gaia_url_;
+  url::Origin gaia_origin_;
 
   GURL lso_origin_url_;
   GURL google_apis_origin_url_;
@@ -99,7 +100,6 @@ class GaiaUrls {
   GURL service_login_auth_url_;
   GURL service_logout_url_;
   GURL continue_url_for_logout_;
-  GURL get_user_info_url_;
   GURL token_auth_url_;
   GURL merge_session_url_;
   GURL get_oauth_token_url_;

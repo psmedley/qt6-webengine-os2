@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include <stddef.h>
 
-#include <algorithm>
 #include <memory>
 #include <numeric>
 #include <utility>
@@ -17,9 +16,11 @@
 #include "base/containers/contains.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/ranges/algorithm.h"
 #include "services/device/public/cpp/usb/usb_utils.h"
 #include "services/device/usb/usb_descriptors.h"
 #include "services/device/usb/usb_device.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace device {
 
@@ -90,6 +91,20 @@ bool IsAndroidSecurityKeyRequest(
          memcmp(data.data(), magic, strlen(magic)) == 0;
 }
 
+// Returns the sum of `packet_lengths`, or nullopt if the sum would overflow.
+absl::optional<uint32_t> TotalPacketLength(
+    base::span<const uint32_t> packet_lengths) {
+  uint32_t total_bytes = 0;
+  for (const uint32_t packet_length : packet_lengths) {
+    // Check for overflow.
+    if (std::numeric_limits<uint32_t>::max() - total_bytes < packet_length) {
+      return absl::nullopt;
+    }
+    total_bytes += packet_length;
+  }
+  return total_bytes;
+}
+
 }  // namespace
 
 // static
@@ -155,10 +170,8 @@ bool DeviceImpl::HasControlTransferPermission(
     interface = device_handle_->FindInterfaceByEndpoint(index & 0xff);
   } else {
     auto interface_it =
-        std::find_if(config->interfaces.begin(), config->interfaces.end(),
-                     [index](const mojom::UsbInterfaceInfoPtr& this_iface) {
-                       return this_iface->interface_number == (index & 0xff);
-                     });
+        base::ranges::find(config->interfaces, index & 0xff,
+                           &mojom::UsbInterfaceInfo::interface_number);
     if (interface_it != config->interfaces.end())
       interface = interface_it->get();
   }
@@ -244,11 +257,9 @@ void DeviceImpl::ClaimInterface(uint8_t interface_number,
     return;
   }
 
-  auto interface_it = std::find_if(
-      config->interfaces.begin(), config->interfaces.end(),
-      [interface_number](const mojom::UsbInterfaceInfoPtr& interface) {
-        return interface->interface_number == interface_number;
-      });
+  auto interface_it =
+      base::ranges::find(config->interfaces, interface_number,
+                         &mojom::UsbInterfaceInfo::interface_number);
   if (interface_it == config->interfaces.end()) {
     std::move(callback).Run(mojom::UsbClaimInterfaceResult::kFailure);
     return;
@@ -396,6 +407,15 @@ void DeviceImpl::IsochronousTransferIn(
     return;
   }
 
+  absl::optional<uint32_t> total_bytes = TotalPacketLength(packet_lengths);
+  if (!total_bytes.has_value()) {
+    mojo::ReportBadMessage("Invalid isochronous packet lengths.");
+    std::move(callback).Run(
+        {}, BuildIsochronousPacketArray(
+                packet_lengths, mojom::UsbTransferStatus::TRANSFER_ERROR));
+    return;
+  }
+
   uint8_t endpoint_address = endpoint_number | 0x80;
   device_handle_->IsochronousTransferIn(
       endpoint_address, packet_lengths, timeout,
@@ -409,6 +429,14 @@ void DeviceImpl::IsochronousTransferOut(
     uint32_t timeout,
     IsochronousTransferOutCallback callback) {
   if (!device_handle_) {
+    std::move(callback).Run(BuildIsochronousPacketArray(
+        packet_lengths, mojom::UsbTransferStatus::TRANSFER_ERROR));
+    return;
+  }
+
+  absl::optional<uint32_t> total_bytes = TotalPacketLength(packet_lengths);
+  if (!total_bytes.has_value() || total_bytes.value() != data.size()) {
+    mojo::ReportBadMessage("Invalid isochronous packet lengths.");
     std::move(callback).Run(BuildIsochronousPacketArray(
         packet_lengths, mojom::UsbTransferStatus::TRANSFER_ERROR));
     return;

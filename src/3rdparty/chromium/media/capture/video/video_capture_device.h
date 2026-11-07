@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -107,9 +107,6 @@ class CAPTURE_EXPORT VideoCaptureDevice
 
         // Duplicate as an writable (unsafe) shared memory region.
         virtual base::UnsafeSharedMemoryRegion DuplicateAsUnsafeRegion() = 0;
-
-        // Duplicate as a writable (unsafe) mojo buffer.
-        virtual mojo::ScopedSharedBufferHandle DuplicateAsMojoBuffer() = 0;
 
         // Access a |VideoCaptureBufferHandle| for local, writable memory.
         virtual std::unique_ptr<VideoCaptureBufferHandle>
@@ -321,7 +318,9 @@ class CAPTURE_EXPORT VideoCaptureDevice
   // By including it in frame's metadata, Viz informs Blink what was the
   // latest invocation of cropTo() before a given frame was produced.
   //
-  // The callback reports success/failure.
+  // The callback reports success/failure. It is called on an unspecified
+  // thread, it's the caller's responsibility to wrap it (i.e. via BindPostTask)
+  // as needed.
   virtual void Crop(
       const base::Token& crop_id,
       uint32_t crop_version,

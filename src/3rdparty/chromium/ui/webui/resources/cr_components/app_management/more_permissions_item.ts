@@ -1,15 +1,16 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import './shared_style.js';
-import '//resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
+import './app_management_shared_style.css.js';
+import '//resources/cr_elements/cr_icon_button/cr_icon_button.js';
 
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {App} from './app_management.mojom-webui.js';
 import {BrowserProxy} from './browser_proxy.js';
 import {AppManagementUserAction} from './constants.js';
+import {getTemplate} from './more_permissions_item.html.js';
 import {recordAppManagementUserAction} from './util.js';
 
 export class AppManagementMorePermissionsItemElement extends PolymerElement {
@@ -18,7 +19,7 @@ export class AppManagementMorePermissionsItemElement extends PolymerElement {
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   static get properties() {
@@ -36,7 +37,7 @@ export class AppManagementMorePermissionsItemElement extends PolymerElement {
     this.addEventListener('click', this.onClick_);
   }
 
-  onClick_() {
+  private onClick_() {
     BrowserProxy.getInstance().handler.openNativeSettings(this.app.id);
     recordAppManagementUserAction(
         this.app.type, AppManagementUserAction.NATIVE_SETTINGS_OPENED);

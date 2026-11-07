@@ -10,6 +10,11 @@ await ComponentHelpers.ComponentServerSetup.setup();
 await FrontendHelpers.initializeGlobalVars();
 
 const testIcon = '/front_end/Images/ic_file_image.svg';
+const fileIcon = '/front_end/Images/file_icon.svg';
+const plusIcon = '/front_end/Images/plus_icon.svg';
+const minusIcon = '/front_end/Images/minus_icon.svg';
+const trashBinIcon = '/front_end/Images/trash_bin_icon.svg';
+const closeIcon = '/front_end/Images/close-icon.svg';
 
 function appendButton(button: Buttons.Button.Button): void {
   document.querySelector('#container')?.appendChild(button);
@@ -32,6 +37,16 @@ primaryButton.innerText = 'Click me';
 primaryButton.title = 'Custom title';
 primaryButton.onclick = () => alert('clicked');
 appendButton(primaryButton);
+
+const primaryButtonWithoutRightBorderRadius = new Buttons.Button.Button();
+primaryButtonWithoutRightBorderRadius.data = {
+  variant: Buttons.Button.Variant.PRIMARY,
+};
+primaryButtonWithoutRightBorderRadius.style.setProperty('--override-button-no-right-border-radius', '1');
+primaryButtonWithoutRightBorderRadius.innerText = 'No right border radius';
+primaryButtonWithoutRightBorderRadius.title = 'Custom title';
+primaryButtonWithoutRightBorderRadius.onclick = () => alert('clicked');
+appendButton(primaryButtonWithoutRightBorderRadius);
 
 // Primary (forced active)
 const forcedActive = new Buttons.Button.Button();
@@ -223,16 +238,26 @@ roundButtonDisabled.title = 'Disabled Round Button';
 roundButtonDisabled.onclick = () => alert('clicked');
 appendButton(roundButtonDisabled);
 
-// Small Round Button
-const smallRoundButton = new Buttons.Button.Button();
-smallRoundButton.data = {
-  variant: Buttons.Button.Variant.ROUND,
-  iconUrl: testIcon,
-  size: Buttons.Button.Size.SMALL,
-};
-smallRoundButton.title = 'Small Round Button';
-smallRoundButton.onclick = () => alert('clicked');
-appendButton(smallRoundButton);
+// Small Round Buttons
+const roundIcons = [
+  {iconUrl: testIcon},
+  {iconUrl: fileIcon, iconWidth: '16px', iconHeight: '16px'},
+  {iconUrl: plusIcon},
+  {iconUrl: minusIcon},
+  {iconUrl: trashBinIcon, iconWidth: '10px', iconHeight: '14px'},
+  {iconUrl: closeIcon, iconWidth: '10px', iconHeight: '10px'},
+];
+for (const roundIcon of roundIcons) {
+  const smallRoundButton = new Buttons.Button.Button();
+  smallRoundButton.data = {
+    variant: Buttons.Button.Variant.ROUND,
+    size: Buttons.Button.Size.SMALL,
+    ...roundIcon,
+  };
+  smallRoundButton.title = 'Small Round Button';
+  smallRoundButton.onclick = () => alert('clicked');
+  appendButton(smallRoundButton);
+}
 
 // Small Disabled Round Button
 const smallRoundButtonDisabled = new Buttons.Button.Button();
@@ -288,6 +313,13 @@ for (let i = 0; i < 6; i++) {
     appendToSmallToolbar(sep);
   }
 }
+
+const unifiedToolbarButton = new Buttons.Button.Button();
+unifiedToolbarButton.data = {
+  variant: Buttons.Button.Variant.UNIFIED_TOOLBAR_2022,
+  iconUrl: testIcon,
+};
+document.querySelector('#unified-toolbar')?.appendChild(unifiedToolbarButton);
 
 // Submit Button
 const submitButton = new Buttons.Button.Button();

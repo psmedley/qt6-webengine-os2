@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -157,6 +157,10 @@ class PrintViewManager : public PrintViewManagerBase,
       content::GlobalRenderFrameHostId rfh_id,
       base::OnceCallback<void(bool should_proceed)> callback);
 #endif  // BUILDFLAG(ENABLE_PRINT_CONTENT_ANALYSIS)
+
+  // Virtual method that tests can override, in order to avoid actually
+  // displaying a system print dialog.
+  virtual void PrintForSystemDialogImpl();
 
   // Virtual method to be overridden in tests, in order to be notified whether
   // the print preview is shown or not due to policies or user actions.

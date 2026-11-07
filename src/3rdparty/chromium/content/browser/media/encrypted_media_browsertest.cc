@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -273,7 +273,16 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoAudio_WebM_Opus) {
   TestSimplePlayback("bear-320x240-opus-av_enc-av.webm");
 }
 
-IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoClearAudio_WebM_Opus) {
+// TODO(crbug.com/1360765): Flaky on Android.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_Playback_VideoClearAudio_WebM_Opus \
+  DISABLED_Playback_VideoClearAudio_WebM_Opus
+#else
+#define MAYBE_Playback_VideoClearAudio_WebM_Opus \
+  Playback_VideoClearAudio_WebM_Opus
+#endif
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
+                       MAYBE_Playback_VideoClearAudio_WebM_Opus) {
 #if BUILDFLAG(IS_ANDROID)
   if (!media::MediaCodecUtil::IsOpusDecoderAvailable())
     GTEST_SKIP() << "Opus decoder not available";
@@ -305,8 +314,8 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_MP4_VP9) {
 #if !BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(IS_MAC) || (BUILDFLAG(IS_FUCHSIA) && defined(ARCH_CPU_ARM_FAMILY))
-// https://crbug.com/1222685
-// https://crbug.com/1280308
+// TODO(https://crbug.com/1222685): Failing on Mac.
+// TODO(https://crbug.com/1280308): Failing on Fuchsia arm.
 #define MAYBE_Playback_VideoOnly_WebM_VP9Profile2 \
   DISABLED_Playback_VideoOnly_WebM_VP9Profile2
 #else
@@ -318,8 +327,9 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
   TestSimplePlayback("bear-320x240-v-vp9_profile2_subsample_cenc-v.webm");
 }
 
-#if BUILDFLAG(IS_MAC)
-// https://crbug.com/1270792
+#if BUILDFLAG(IS_MAC) || (BUILDFLAG(IS_FUCHSIA) && defined(ARCH_CPU_ARM_FAMILY))
+// TODO(https://crbug.com/1270792): Failing on Mac.
+// TODO(https://crbug.com/1280308): Failing on Fuchsia arm.
 #define MAYBE_Playback_VideoOnly_MP4_VP9Profile2 \
   DISABLED_Playback_VideoOnly_MP4_VP9Profile2
 #else
@@ -341,7 +351,16 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_WebM_AV1) {
   TestSimplePlayback("bear-av1-cenc.webm");
 }
 
-IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_WebM_AV1_10bit) {
+// TODO(crbug.com/1360665): Flaky on Android.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_Playback_VideoOnly_WebM_AV1_10bit \
+  DISABLED_Playback_VideoOnly_WebM_AV1_10bit
+#else
+#define MAYBE_Playback_VideoOnly_WebM_AV1_10bit \
+  Playback_VideoOnly_WebM_AV1_10bit
+#endif
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
+                       MAYBE_Playback_VideoOnly_WebM_AV1_10bit) {
   TestSimplePlayback("bear-av1-320x180-10bit-cenc.webm");
 }
 
@@ -411,7 +430,13 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_Encryption_CBC1) {
                       media::kErrorTitle);
 }
 
-IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_Encryption_CENS) {
+// TODO(crbug.com/1360698): Flaky on Android.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_Playback_Encryption_CENS DISABLED_Playback_Encryption_CENS
+#else
+#define MAYBE_Playback_Encryption_CENS Playback_Encryption_CENS
+#endif
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, MAYBE_Playback_Encryption_CENS) {
   RunMultipleFileTest("bear-640x360-v_frag-cens.mp4", std::string(),
                       media::kErrorTitle);
 }

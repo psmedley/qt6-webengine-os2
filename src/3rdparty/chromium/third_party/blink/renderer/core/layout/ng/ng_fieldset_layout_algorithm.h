@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,9 +65,6 @@ class CORE_EXPORT NGFieldsetLayoutAlgorithm
   void ConsumeRemainingFragmentainerSpace();
 
   const WritingDirectionMode writing_direction_;
-
-  NGBoxStrut borders_;
-  NGBoxStrut padding_;
 
   LayoutUnit intrinsic_block_size_;
   const LayoutUnit consumed_block_size_;

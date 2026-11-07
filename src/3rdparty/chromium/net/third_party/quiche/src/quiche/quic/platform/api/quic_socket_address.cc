@@ -85,9 +85,7 @@ bool operator!=(const QuicSocketAddress& lhs, const QuicSocketAddress& rhs) {
   return !(lhs == rhs);
 }
 
-bool QuicSocketAddress::IsInitialized() const {
-  return host_.IsInitialized();
-}
+bool QuicSocketAddress::IsInitialized() const { return host_.IsInitialized(); }
 
 std::string QuicSocketAddress::ToString() const {
   switch (host_.address_family()) {
@@ -118,13 +116,9 @@ QuicSocketAddress QuicSocketAddress::Normalized() const {
   return QuicSocketAddress(host_.Normalized(), port_);
 }
 
-QuicIpAddress QuicSocketAddress::host() const {
-  return host_;
-}
+QuicIpAddress QuicSocketAddress::host() const { return host_; }
 
-uint16_t QuicSocketAddress::port() const {
-  return port_;
-}
+uint16_t QuicSocketAddress::port() const { return port_; }
 
 sockaddr_storage QuicSocketAddress::generic_address() const {
   union {

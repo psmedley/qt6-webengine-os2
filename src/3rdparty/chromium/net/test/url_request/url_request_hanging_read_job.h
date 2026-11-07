@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,7 @@ class URLRequestHangingReadJob : public URLRequestJob {
 
   void StartAsync();
 
-  const int content_length_;
+  const int content_length_ = 10;  // non-zero content-length
   base::WeakPtrFactory<URLRequestHangingReadJob> weak_factory_{this};
 };
 

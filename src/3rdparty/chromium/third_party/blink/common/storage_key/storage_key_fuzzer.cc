@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include "base/at_exit.h"
 #include "base/i18n/icu_util.h"
 #include "base/test/scoped_feature_list.h"
+#include "net/base/features.h"
 #include "third_party/blink/common/storage_key/storage_key_fuzzer.pb.h"
-#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/common/storage_key/storage_key_proto_converter.h"
 
@@ -24,7 +24,7 @@ DEFINE_PROTO_FUZZER(
     const storage_key_proto::StorageKeyFuzzer& storage_key_fuzzer) {
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitAndEnableFeature(
-      blink::features::kThirdPartyStoragePartitioning);
+      net::features::kThirdPartyStoragePartitioning);
 
   blink::StorageKey storage_key = Convert(storage_key_fuzzer.storage_key());
 

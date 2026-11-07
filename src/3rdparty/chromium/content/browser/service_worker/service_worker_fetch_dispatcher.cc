@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -130,17 +130,16 @@ class DelegatingURLLoaderClient final : public network::mojom::URLLoaderClient {
     client_->OnUploadProgress(current_position, total_size,
                               std::move(ack_callback));
   }
-  void OnReceiveCachedMetadata(mojo_base::BigBuffer data) override {
-    client_->OnReceiveCachedMetadata(std::move(data));
-  }
   void OnTransferSizeUpdated(int32_t transfer_size_diff) override {
     client_->OnTransferSizeUpdated(transfer_size_diff);
   }
   void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override {
     client_->OnReceiveEarlyHints(std::move(early_hints));
   }
-  void OnReceiveResponse(network::mojom::URLResponseHeadPtr head,
-                         mojo::ScopedDataPipeConsumerHandle body) override {
+  void OnReceiveResponse(
+      network::mojom::URLResponseHeadPtr head,
+      mojo::ScopedDataPipeConsumerHandle body,
+      absl::optional<mojo_base::BigBuffer> cached_metadata) override {
     if (devtools_enabled_) {
       // Make a deep copy of URLResponseHead before posting it to a task.
       auto deep_copied_response = head.Clone();
@@ -153,7 +152,8 @@ class DelegatingURLLoaderClient final : public network::mojom::URLLoaderClient {
           base::BindOnce(&NotifyNavigationPreloadResponseReceived, url_,
                          std::move(deep_copied_response)));
     }
-    client_->OnReceiveResponse(std::move(head), std::move(body));
+    client_->OnReceiveResponse(std::move(head), std::move(body),
+                               std::move(cached_metadata));
   }
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
                          network::mojom::URLResponseHeadPtr head) override {
@@ -177,10 +177,6 @@ class DelegatingURLLoaderClient final : public network::mojom::URLLoaderClient {
     // OnReceiveRedirect IPC and don't send OnComplete IPC. The service worker
     // will clean up the preload request when OnReceiveRedirect() is called.
     client_->OnReceiveRedirect(redirect_info, std::move(head));
-  }
-  void OnStartLoadingResponseBody(
-      mojo::ScopedDataPipeConsumerHandle body) override {
-    client_->OnStartLoadingResponseBody(std::move(body));
   }
   void OnComplete(const network::URLLoaderCompletionStatus& status) override {
     if (completed_)
@@ -405,6 +401,7 @@ class ServiceWorkerFetchDispatcher::ResponseCallback
                    FetchEventResult::kGotResponse, std::move(timing));
   }
   void OnFallback(
+      absl::optional<network::DataElementChunkedDataPipe> request_body,
       blink::mojom::ServiceWorkerFetchEventTimingPtr timing) override {
     HandleResponse(fetch_dispatcher_, version_, fetch_event_id_,
                    blink::mojom::FetchAPIResponse::New(),
@@ -650,9 +647,6 @@ void ServiceWorkerFetchDispatcher::DispatchFetchEvent() {
       std::move(preload_url_loader_client_receiver_);
   params->is_offline_capability_check = is_offline_capability_check_;
 
-  // TODO(https://crbug.com/900700): Make the remote connected to a receiver
-  // which is passed to blink::PerformanceResourceTiming.
-  params->worker_timing_remote = mojo::NullRemote();
   // |endpoint()| is owned by |version_|. So it is safe to pass the
   // unretained raw pointer of |version_| to OnFetchEventFinished callback.
   // Pass |url_loader_assets_| to the callback to keep the URL loader related
@@ -715,6 +709,22 @@ void ServiceWorkerFetchDispatcher::RunCallback(
   std::move(fetch_callback_)
       .Run(status, fetch_result, std::move(response), std::move(body_as_stream),
            std::move(timing), version_);
+}
+
+// static
+const char* ServiceWorkerFetchDispatcher::FetchEventResultToSuffix(
+    FetchEventResult result) {
+  // Don't change these returned strings. They are written (in hashed form) into
+  // logs.
+  switch (result) {
+    case ServiceWorkerFetchDispatcher::FetchEventResult::kShouldFallback:
+      return "_SHOULD_FALLBACK";
+    case ServiceWorkerFetchDispatcher::FetchEventResult::kGotResponse:
+      return "_GOT_RESPONSE";
+  }
+  NOTREACHED() << "Got unexpected fetch event result:"
+               << static_cast<int>(result);
+  return "error";
 }
 
 bool ServiceWorkerFetchDispatcher::MaybeStartNavigationPreload(

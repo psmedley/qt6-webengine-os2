@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -297,7 +297,8 @@ PDFiumPage::~PDFiumPage() {
 }
 
 void PDFiumPage::Unload() {
-  // Do not unload while in the middle of a load.
+  // Do not unload while in the middle of a load, or if some external source
+  // expects `this` to stay loaded.
   if (preventing_unload_count_)
     return;
 
@@ -560,6 +561,19 @@ gfx::RectF PDFiumPage::GetCroppedRect() {
                   raw_rect.right - raw_rect.left,
                   raw_rect.top - raw_rect.bottom);
   return FloatPageRectToPixelRect(page, rect);
+}
+
+bool PDFiumPage::IsCharInPageBounds(int char_index,
+                                    const gfx::RectF& page_bounds) {
+  gfx::RectF char_bounds = GetCharBounds(char_index);
+
+  // Make sure `char_bounds` has a minimum size so Intersects() works correctly.
+  if (char_bounds.IsEmpty()) {
+    static constexpr gfx::SizeF kMinimumSize(0.0001f, 0.0001f);
+    char_bounds.set_size(kMinimumSize);
+  }
+
+  return page_bounds.Intersects(char_bounds);
 }
 
 std::vector<AccessibilityLinkInfo> PDFiumPage::GetLinkInfo(
@@ -1553,6 +1567,20 @@ void PDFiumPage::MarkAvailable() {
 PDFiumPage::ScopedUnloadPreventer::ScopedUnloadPreventer(PDFiumPage* page)
     : page_(page) {
   page_->preventing_unload_count_++;
+}
+
+PDFiumPage::ScopedUnloadPreventer::ScopedUnloadPreventer(
+    const ScopedUnloadPreventer& that)
+    : ScopedUnloadPreventer(that.page_) {}
+
+PDFiumPage::ScopedUnloadPreventer& PDFiumPage::ScopedUnloadPreventer::operator=(
+    const ScopedUnloadPreventer& that) {
+  if (page_ != that.page_) {
+    page_->preventing_unload_count_--;
+    page_ = that.page_;
+    page_->preventing_unload_count_++;
+  }
+  return *this;
 }
 
 PDFiumPage::ScopedUnloadPreventer::~ScopedUnloadPreventer() {

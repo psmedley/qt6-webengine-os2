@@ -157,19 +157,32 @@ source_set("native_mocks_sources") {
   configs += [ "${dawn_root}/src/dawn/native:internal" ]
 
   sources = [
+    "unittests/native/mocks/BindGroupLayoutMock.cpp",
     "unittests/native/mocks/BindGroupLayoutMock.h",
+    "unittests/native/mocks/BindGroupMock.cpp",
     "unittests/native/mocks/BindGroupMock.h",
+    "unittests/native/mocks/BufferMock.cpp",
+    "unittests/native/mocks/BufferMock.h",
+    "unittests/native/mocks/CommandBufferMock.cpp",
     "unittests/native/mocks/CommandBufferMock.h",
+    "unittests/native/mocks/ComputePipelineMock.cpp",
     "unittests/native/mocks/ComputePipelineMock.h",
     "unittests/native/mocks/DeviceMock.h",
+    "unittests/native/mocks/ExternalTextureMock.cpp",
     "unittests/native/mocks/ExternalTextureMock.h",
+    "unittests/native/mocks/PipelineLayoutMock.cpp",
     "unittests/native/mocks/PipelineLayoutMock.h",
+    "unittests/native/mocks/QuerySetMock.cpp",
     "unittests/native/mocks/QuerySetMock.h",
+    "unittests/native/mocks/RenderPipelineMock.cpp",
     "unittests/native/mocks/RenderPipelineMock.h",
+    "unittests/native/mocks/SamplerMock.cpp",
     "unittests/native/mocks/SamplerMock.h",
     "unittests/native/mocks/ShaderModuleMock.cpp",
     "unittests/native/mocks/ShaderModuleMock.h",
+    "unittests/native/mocks/SwapChainMock.cpp",
     "unittests/native/mocks/SwapChainMock.h",
+    "unittests/native/mocks/TextureMock.cpp",
     "unittests/native/mocks/TextureMock.h",
   ]
 }
@@ -179,6 +192,7 @@ dawn_test("dawn_unittests") {
     ":gmock_and_gtest",
     ":mock_webgpu_gen",
     ":native_mocks_sources",
+    ":platform_mocks_sources",
     "${dawn_root}/src/dawn:cpp",
     "${dawn_root}/src/dawn:proc",
     "${dawn_root}/src/dawn/common",
@@ -190,6 +204,13 @@ dawn_test("dawn_unittests") {
 
   # Add internal dawn native config for internal unittests.
   configs = [ "${dawn_root}/src/dawn/native:internal" ]
+
+  # Add Tint public+common configs so <tint/tint.h> can be included to test
+  # the Dawn/Tint boundary.
+  configs += [
+    "${dawn_root}/src/tint:tint_public_config",
+    "${dawn_root}/src/tint:tint_common_config",
+  ]
 
   sources = get_target_outputs(":mock_webgpu_gen")
   sources += [
@@ -238,12 +259,14 @@ dawn_test("dawn_unittests") {
     "unittests/SystemUtilsTests.cpp",
     "unittests/ToBackendTests.cpp",
     "unittests/TypedIntegerTests.cpp",
-    "unittests/VersionTests.cpp",
-    "unittests/native/CacheKeyTests.cpp",
+    "unittests/native/BlobTests.cpp",
+    "unittests/native/CacheRequestTests.cpp",
     "unittests/native/CommandBufferEncodingTests.cpp",
     "unittests/native/CreatePipelineAsyncTaskTests.cpp",
     "unittests/native/DestroyObjectTests.cpp",
     "unittests/native/DeviceCreationTests.cpp",
+    "unittests/native/ObjectContentHasherTests.cpp",
+    "unittests/native/StreamTests.cpp",
     "unittests/validation/BindGroupValidationTests.cpp",
     "unittests/validation/BufferValidationTests.cpp",
     "unittests/validation/CommandBufferValidationTests.cpp",
@@ -294,7 +317,6 @@ dawn_test("dawn_unittests") {
     "unittests/wire/WireBasicTests.cpp",
     "unittests/wire/WireBufferMappingTests.cpp",
     "unittests/wire/WireCreatePipelineAsyncTests.cpp",
-    "unittests/wire/WireDestroyObjectTests.cpp",
     "unittests/wire/WireDisconnectTests.cpp",
     "unittests/wire/WireErrorCallbackTests.cpp",
     "unittests/wire/WireExtensionTests.cpp",
@@ -309,7 +331,6 @@ dawn_test("dawn_unittests") {
     "unittests/wire/WireShaderModuleTests.cpp",
     "unittests/wire/WireTest.cpp",
     "unittests/wire/WireTest.h",
-    "unittests/wire/WireWGPUDevicePropertiesTests.cpp",
   ]
 
   if (is_win) {
@@ -330,31 +351,79 @@ dawn_test("dawn_unittests") {
 }
 
 ###############################################################################
-# Dawn end2end tests targets
+# Dawn test infrastructure targets
 ###############################################################################
 
-source_set("end2end_tests_sources") {
-  configs += [ "${dawn_root}/src/dawn/common:internal_config" ]
+source_set("test_infra_sources") {
+  configs += [ "${dawn_root}/src/dawn/native:internal" ]
   testonly = true
 
   deps = [
-    ":gmock_and_gtest",
     "${dawn_root}/src/dawn:cpp",
     "${dawn_root}/src/dawn:proc",
     "${dawn_root}/src/dawn/common",
-
-    # Statically linked because the end2end white_box tests use Dawn internals.
+    "${dawn_root}/src/dawn/native:sources",
     "${dawn_root}/src/dawn/native:static",
     "${dawn_root}/src/dawn/utils",
     "${dawn_root}/src/dawn/wire",
   ]
 
+  public_deps = [ ":gmock_and_gtest" ]
+
+  if (dawn_supports_glfw_for_windowing || dawn_enable_opengl) {
+    assert(dawn_supports_glfw_for_windowing)
+    public_deps += [ "${dawn_root}/src/dawn/glfw" ]
+  }
+
   sources = [
+    "AdapterTestConfig.cpp",
+    "AdapterTestConfig.h",
+    "DawnTest.cpp",
     "DawnTest.h",
     "MockCallback.h",
     "ParamGenerator.h",
     "ToggleParser.cpp",
     "ToggleParser.h",
+  ]
+}
+
+###############################################################################
+# Dawn end2end tests targets
+###############################################################################
+
+# Source code for mocks used for platform testing are separated from the rest of
+# sources so that they aren't included in non-test builds.
+source_set("platform_mocks_sources") {
+  configs += [ "${dawn_root}/src/dawn/native:internal" ]
+  testonly = true
+
+  deps = [
+    ":gmock_and_gtest",
+    "${dawn_root}/src/dawn/common",
+    "${dawn_root}/src/dawn/platform",
+  ]
+
+  sources = [
+    "mocks/platform/CachingInterfaceMock.cpp",
+    "mocks/platform/CachingInterfaceMock.h",
+  ]
+}
+
+source_set("end2end_tests_sources") {
+  testonly = true
+
+  deps = [
+    ":platform_mocks_sources",
+    ":test_infra_sources",
+    "${dawn_root}/src/dawn:cpp",
+    "${dawn_root}/src/dawn:proc",
+    "${dawn_root}/src/dawn/common",
+    "${dawn_root}/src/dawn/native:headers",
+    "${dawn_root}/src/dawn/utils",
+    "${dawn_root}/src/dawn/wire",
+  ]
+
+  sources = [
     "end2end/AdapterDiscoveryTests.cpp",
     "end2end/BasicTests.cpp",
     "end2end/BindGroupTests.cpp",
@@ -382,6 +451,7 @@ source_set("end2end_tests_sources") {
     "end2end/DepthStencilStateTests.cpp",
     "end2end/DestroyTests.cpp",
     "end2end/DeviceInitializationTests.cpp",
+    "end2end/DeviceLifetimeTests.cpp",
     "end2end/DeviceLostTests.cpp",
     "end2end/DrawIndexedIndirectTests.cpp",
     "end2end/DrawIndexedTests.cpp",
@@ -389,6 +459,7 @@ source_set("end2end_tests_sources") {
     "end2end/DrawTests.cpp",
     "end2end/DynamicBufferOffsetTests.cpp",
     "end2end/EntryPointTests.cpp",
+    "end2end/ExperimentalDP4aTests.cpp",
     "end2end/ExternalTextureTests.cpp",
     "end2end/FirstIndexOffsetTests.cpp",
     "end2end/GpuMemorySynchronizationTests.cpp",
@@ -401,6 +472,7 @@ source_set("end2end_tests_sources") {
     "end2end/NonzeroTextureCreationTests.cpp",
     "end2end/ObjectCachingTests.cpp",
     "end2end/OpArrayLengthTests.cpp",
+    "end2end/PipelineCachingTests.cpp",
     "end2end/PipelineLayoutTests.cpp",
     "end2end/PrimitiveStateTests.cpp",
     "end2end/PrimitiveTopologyTests.cpp",
@@ -416,11 +488,13 @@ source_set("end2end_tests_sources") {
     "end2end/SamplerFilterAnisotropicTests.cpp",
     "end2end/SamplerTests.cpp",
     "end2end/ScissorTests.cpp",
-    "end2end/ShaderFloat16Tests.cpp",
+    "end2end/ShaderF16Tests.cpp",
     "end2end/ShaderTests.cpp",
+    "end2end/ShaderValidationTests.cpp",
     "end2end/StorageTextureTests.cpp",
     "end2end/SubresourceRenderAttachmentTests.cpp",
     "end2end/Texture3DTests.cpp",
+    "end2end/TextureCorruptionTests.cpp",
     "end2end/TextureFormatTests.cpp",
     "end2end/TextureSubresourceTests.cpp",
     "end2end/TextureViewTests.cpp",
@@ -430,12 +504,6 @@ source_set("end2end_tests_sources") {
     "end2end/VertexStateTests.cpp",
     "end2end/ViewportOrientationTests.cpp",
     "end2end/ViewportTests.cpp",
-  ]
-
-  # Validation tests that need OS windows live in end2end tests.
-  sources += [
-    "unittests/validation/ValidationTest.cpp",
-    "unittests/validation/ValidationTest.h",
   ]
 
   libs = []
@@ -460,17 +528,12 @@ source_set("end2end_tests_sources") {
     frameworks = [ "IOSurface.framework" ]
   }
 
-  if (dawn_enable_opengl) {
-    assert(dawn_supports_glfw_for_windowing)
-  }
-
   if (dawn_supports_glfw_for_windowing) {
     sources += [
       "end2end/SwapChainTests.cpp",
       "end2end/SwapChainValidationTests.cpp",
       "end2end/WindowSurfaceTests.cpp",
     ]
-    deps += [ "${dawn_root}/src/dawn/utils:glfw" ]
   }
 
   if (dawn_enable_d3d12 || (dawn_enable_vulkan && is_chromeos) ||
@@ -491,23 +554,19 @@ source_set("white_box_tests_sources") {
   testonly = true
 
   deps = [
-    ":gmock_and_gtest",
+    ":test_infra_sources",
     "${dawn_root}/src/dawn:cpp",
     "${dawn_root}/src/dawn:proc",
     "${dawn_root}/src/dawn/common",
-    "${dawn_root}/src/dawn/native:sources",
 
-    # Statically linked because the end2end white_box tests use Dawn internals.
+    # Statically linked and with sources because the end2end white_box tests use Dawn internals.
+    "${dawn_root}/src/dawn/native:sources",
     "${dawn_root}/src/dawn/native:static",
     "${dawn_root}/src/dawn/utils",
     "${dawn_root}/src/dawn/wire",
   ]
 
-  sources = [
-    "DawnTest.h",
-    "ParamGenerator.h",
-    "ToggleParser.h",
-  ]
+  sources = []
 
   if (dawn_enable_vulkan) {
     deps += [ "${dawn_vulkan_headers_dir}:vulkan_headers" ]
@@ -551,13 +610,9 @@ source_set("white_box_tests_sources") {
     sources += [ "white_box/MetalAutoreleasePoolTests.mm" ]
   }
 
-  if (dawn_enable_opengl) {
-    deps += [ "${dawn_root}/src/dawn/utils:glfw" ]
-  }
-
-  if (dawn_enable_opengles && defined(dawn_angle_dir)) {
+  if (dawn_enable_opengles) {
     sources += [ "white_box/EGLImageWrappingTests.cpp" ]
-    deps += [ "${dawn_angle_dir}:libEGL" ]
+    include_dirs = [ "//third_party/khronos" ]
   }
 
   libs = []
@@ -566,21 +621,11 @@ source_set("white_box_tests_sources") {
 dawn_test("dawn_end2end_tests") {
   deps = [
     ":end2end_tests_sources",
-    ":gmock_and_gtest",
+    ":test_infra_sources",
     ":white_box_tests_sources",
-    "${dawn_root}/src/dawn:cpp",
-    "${dawn_root}/src/dawn:proc",
-    "${dawn_root}/src/dawn/common",
-    "${dawn_root}/src/dawn/native:static",
-    "${dawn_root}/src/dawn/utils",
-    "${dawn_root}/src/dawn/wire",
   ]
 
-  sources = [
-    "DawnTest.cpp",
-    "DawnTest.h",
-  ]
-
+  sources = []
   libs = []
 
   # When building inside Chromium, use their gtest main function because it is
@@ -589,10 +634,6 @@ dawn_test("dawn_end2end_tests") {
     deps += [ ":end2end_tests_main" ]
   } else {
     sources += [ "End2EndTestsMain.cpp" ]
-  }
-
-  if (dawn_enable_opengl) {
-    deps += [ "${dawn_root}/src/dawn/utils:glfw" ]
   }
 
   if (is_chromeos) {
@@ -606,22 +647,16 @@ dawn_test("dawn_end2end_tests") {
 
 dawn_test("dawn_perf_tests") {
   deps = [
-    ":gmock_and_gtest",
+    ":test_infra_sources",
     "${dawn_root}/src/dawn:cpp",
     "${dawn_root}/src/dawn:proc",
     "${dawn_root}/src/dawn/common",
-    "${dawn_root}/src/dawn/native",
     "${dawn_root}/src/dawn/platform",
     "${dawn_root}/src/dawn/utils",
     "${dawn_root}/src/dawn/wire",
   ]
 
   sources = [
-    "DawnTest.cpp",
-    "DawnTest.h",
-    "ParamGenerator.h",
-    "ToggleParser.cpp",
-    "ToggleParser.h",
     "perf_tests/BufferUploadPerf.cpp",
     "perf_tests/DawnPerfTest.cpp",
     "perf_tests/DawnPerfTest.h",
@@ -645,9 +680,5 @@ dawn_test("dawn_perf_tests") {
 
   if (dawn_enable_metal) {
     frameworks = [ "IOSurface.framework" ]
-  }
-
-  if (dawn_enable_opengl) {
-    deps += [ "${dawn_root}/src/dawn/utils:glfw" ]
   }
 }

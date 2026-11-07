@@ -412,7 +412,7 @@ class VRegister : public CPURegister {
   unsigned LaneSizeInBits() const { return LaneSizeInBytes() * 8; }
 
   static constexpr int kMaxNumRegisters = kNumberOfVRegisters;
-  STATIC_ASSERT(kMaxNumRegisters == kDoubleAfterLast);
+  static_assert(kMaxNumRegisters == kDoubleAfterLast);
 
   static constexpr VRegister from_code(int code) {
     // Always return a D register.
@@ -507,6 +507,12 @@ ALIAS_REGISTER(VRegister, fp_scratch1, d30);
 ALIAS_REGISTER(VRegister, fp_scratch2, d31);
 
 #undef ALIAS_REGISTER
+
+// Arm64 calling convention
+constexpr Register arg_reg_1 = x0;
+constexpr Register arg_reg_2 = x1;
+constexpr Register arg_reg_3 = x2;
+constexpr Register arg_reg_4 = x3;
 
 // AreAliased returns true if any of the named registers overlap. Arguments set
 // to NoReg are ignored. The system stack pointer may be specified.

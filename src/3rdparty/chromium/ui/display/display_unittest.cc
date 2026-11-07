@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -79,6 +79,16 @@ TEST(DisplayTest, DisplayFrequency) {
 
   display.set_display_frequency(120);
   EXPECT_EQ(120, display.display_frequency());
+}
+
+TEST(DisplayTest, DisplayLabel) {
+  Display display(0, gfx::Rect(0, 0, 100, 100));
+
+  display.set_label("Display 1");
+  EXPECT_EQ("Display 1", display.label());
+
+  display.set_label("Display 2");
+  EXPECT_EQ("Display 2", display.label());
 }
 
 }  // namespace display

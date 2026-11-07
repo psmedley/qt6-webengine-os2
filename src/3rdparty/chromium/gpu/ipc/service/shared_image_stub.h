@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/trace_event/memory_dump_provider.h"
 #include "build/build_config.h"
 #include "components/viz/common/resources/resource_format.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
@@ -23,9 +22,7 @@ struct Mailbox;
 class GpuChannel;
 class SharedImageFactory;
 
-class GPU_IPC_SERVICE_EXPORT SharedImageStub
-    : public MemoryTracker,
-      public base::trace_event::MemoryDumpProvider {
+class GPU_IPC_SERVICE_EXPORT SharedImageStub : public MemoryTracker {
  public:
   ~SharedImageStub() override;
 
@@ -45,10 +42,6 @@ class GPU_IPC_SERVICE_EXPORT SharedImageStub
   int ClientId() const override;
   uint64_t ContextGroupTracingId() const override;
 
-  // base::trace_event::MemoryDumpProvider implementation:
-  bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
-                    base::trace_event::ProcessMemoryDump* pmd) override;
-
   SequenceId sequence() const { return sequence_; }
   SharedImageFactory* factory() const { return factory_.get(); }
   GpuChannel* channel() const { return channel_; }
@@ -67,12 +60,6 @@ class GPU_IPC_SERVICE_EXPORT SharedImageStub
                          GrSurfaceOrigin surface_origin,
                          SkAlphaType alpha_type,
                          uint32_t usage);
-
-#if BUILDFLAG(IS_ANDROID)
-  bool CreateSharedImageWithAHB(const Mailbox& out_mailbox,
-                                const Mailbox& in_mailbox,
-                                uint32_t usage);
-#endif
 
   bool UpdateSharedImage(const Mailbox& mailbox,
                          gfx::GpuFenceHandle in_fence_handle);
@@ -96,17 +83,9 @@ class GPU_IPC_SERVICE_EXPORT SharedImageStub
   void OnUpdateSharedImage(const Mailbox& mailbox,
                            uint32_t release_id,
                            gfx::GpuFenceHandle in_fence_handle);
-#if BUILDFLAG(IS_ANDROID)
-  void OnCreateSharedImageWithAHB(const Mailbox& out_mailbox,
-                                  const Mailbox& in_mailbox,
-                                  uint32_t usage,
-                                  uint32_t release_id);
-#endif
   void OnDestroySharedImage(const Mailbox& mailbox);
   void OnRegisterSharedImageUploadBuffer(base::ReadOnlySharedMemoryRegion shm);
 #if BUILDFLAG(IS_WIN)
-  void OnCreateSharedImageVideoPlanes(
-      mojom::CreateSharedImageVideoPlanesParamsPtr params);
   void OnCopyToGpuMemoryBuffer(const Mailbox& mailbox, uint32_t release_id);
   void OnCreateSwapChain(mojom::CreateSwapChainParamsPtr params);
   void OnPresentSwapChain(const Mailbox& mailbox, uint32_t release_id);

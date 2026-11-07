@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,7 @@ class CORE_EXPORT LayoutNGGrid : public LayoutNGBlock,
 
   const LayoutNGGridInterface* ToLayoutNGGridInterface() const final;
 
+  bool HasCachedPlacementData() const;
   const NGGridPlacementData& CachedPlacementData() const;
   void SetCachedPlacementData(NGGridPlacementData&& placement_data);
 
@@ -46,6 +47,8 @@ class CORE_EXPORT LayoutNGGrid : public LayoutNGBlock,
   Vector<LayoutUnit> RowPositions() const final;
   Vector<LayoutUnit> ColumnPositions() const final;
 
+  const NGGridLayoutData* GridLayoutData() const;
+
  protected:
   bool IsOfType(LayoutObjectType type) const override {
     NOT_DESTROYED();
@@ -54,8 +57,6 @@ class CORE_EXPORT LayoutNGGrid : public LayoutNGBlock,
   }
 
  private:
-  const NGGridLayoutData* GridLayoutData() const;
-
   Vector<LayoutUnit> ComputeTrackSizeRepeaterForRange(
       const NGGridLayoutTrackCollection& track_collection,
       wtf_size_t range_index) const;
@@ -68,7 +69,7 @@ class CORE_EXPORT LayoutNGGrid : public LayoutNGBlock,
   void StyleDidChange(StyleDifference diff,
                       const ComputedStyle* old_style) override;
 
-  NGGridPlacementData cached_placement_data_;
+  std::unique_ptr<NGGridPlacementData> cached_placement_data_;
 };
 
 // wtf/casting.h helper.

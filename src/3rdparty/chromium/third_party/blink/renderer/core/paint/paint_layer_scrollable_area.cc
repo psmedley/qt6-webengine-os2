@@ -48,6 +48,7 @@
 
 #include "base/numerics/checked_math.h"
 #include "base/task/single_thread_task_runner.h"
+#include "cc/animation/animation_timeline.h"
 #include "cc/input/main_thread_scrolling_reason.h"
 #include "cc/input/snap_selection_strategy.h"
 #include "cc/layers/picture_layer.h"
@@ -92,6 +93,7 @@
 #include "third_party/blink/renderer/core/page/scrolling/root_scroller_controller.h"
 #include "third_party/blink/renderer/core/page/scrolling/scrolling_coordinator.h"
 #include "third_party/blink/renderer/core/page/scrolling/snap_coordinator.h"
+#include "third_party/blink/renderer/core/page/scrolling/sticky_position_scrolling_constraints.h"
 #include "third_party/blink/renderer/core/page/scrolling/top_document_root_scroller_controller.h"
 #include "third_party/blink/renderer/core/paint/compositing/compositing_reason_finder.h"
 #include "third_party/blink/renderer/core/paint/object_paint_invalidator.h"
@@ -121,7 +123,8 @@ static const int kDefaultMinimumHeightForResizing = 15;
 PaintLayerScrollableAreaRareData::PaintLayerScrollableAreaRareData() = default;
 
 void PaintLayerScrollableAreaRareData::Trace(Visitor* visitor) const {
-  visitor->Trace(sticky_constraints_map_);
+  visitor->Trace(sticky_layers_);
+  visitor->Trace(anchor_positioned_layers_);
 }
 
 const int kResizerControlExpandRatioForTouch = 2;
@@ -203,9 +206,6 @@ void PaintLayerScrollableArea::DisposeImpl() {
 
   non_composited_main_thread_scrolling_reasons_ = 0;
 
-  if (ScrollingCoordinator* scrolling_coordinator = GetScrollingCoordinator())
-    scrolling_coordinator->WillDestroyScrollableArea(this);
-
   if (!GetLayoutBox()->DocumentBeingDestroyed()) {
     if (auto* element = DynamicTo<Element>(GetLayoutBox()->GetNode()))
       element->SetSavedLayerScrollOffset(scroll_offset_);
@@ -249,8 +249,7 @@ void PaintLayerScrollableArea::ApplyPendingHistoryRestoreScrollOffset() {
   // Anchor-based restore should allow for earlier restoration.
   bool did_restore = RestoreScrollAnchor(
       {pending_view_state_->scroll_anchor_data_.selector_,
-       LayoutPoint(pending_view_state_->scroll_anchor_data_.offset_.x(),
-                   pending_view_state_->scroll_anchor_data_.offset_.y()),
+       LayoutPoint(pending_view_state_->scroll_anchor_data_.offset_),
        pending_view_state_->scroll_anchor_data_.simhash_});
   if (!did_restore) {
     SetScrollOffset(pending_view_state_->scroll_offset_,
@@ -468,8 +467,11 @@ void PaintLayerScrollableArea::UpdateScrollOffset(
   }
 
   if (auto* scrolling_coordinator = GetScrollingCoordinator()) {
-    if (!scrolling_coordinator->UpdateCompositorScrollOffset(*frame, *this))
-      GetLayoutBox()->GetFrameView()->SetPaintArtifactCompositorNeedsUpdate();
+    if (!scrolling_coordinator->UpdateCompositorScrollOffset(*frame, *this)) {
+      GetLayoutBox()->GetFrameView()->SetPaintArtifactCompositorNeedsUpdate(
+          PaintArtifactCompositorUpdateReason::
+              kPaintLayerScrollableAreaUpdateScrollOffset);
+    }
   }
 
   // The ScrollOffsetTranslation paint property depends on the scroll offset.
@@ -537,21 +539,11 @@ void PaintLayerScrollableArea::UpdateScrollOffset(
 
 void PaintLayerScrollableArea::InvalidatePaintForScrollOffsetChange() {
   InvalidatePaintForStickyDescendants();
+  InvalidatePaintForAnchorPositionedLayers();
 
   auto* box = GetLayoutBox();
   auto* frame_view = box->GetFrameView();
   frame_view->InvalidateBackgroundAttachmentFixedDescendantsOnScroll(*box);
-
-  // The feature |kOptimizeViewportConstrainedPaintInvalidation| is for testing
-  // the performance of removing the paint invalidation of viewport constrained
-  // objects after scrolling.
-  if (IsA<LayoutView>(box) && frame_view->HasViewportConstrainedObjects() &&
-      !base::FeatureList::IsEnabled(
-          features::kOptimizeViewportConstrainedPaintInvalidation) &&
-      !frame_view->InvalidateViewportConstrainedObjects()) {
-    box->SetShouldDoFullPaintInvalidation();
-    box->SetSubtreeShouldCheckForPaintInvalidation();
-  }
 
   // TODO(chrishtr): remove this slow path once crbug.com/906885 is fixed.
   // See also https://bugs.chromium.org/p/chromium/issues/detail?id=903287#c10.
@@ -701,9 +693,9 @@ PhysicalRect PaintLayerScrollableArea::VisibleScrollSnapportRect(
 }
 
 gfx::Size PaintLayerScrollableArea::ContentsSize() const {
-  PhysicalOffset offset(
-      GetLayoutBox()->ClientLeft() + GetLayoutBox()->Location().X(),
-      GetLayoutBox()->ClientTop() + GetLayoutBox()->Location().Y());
+  LayoutPoint location = GetLayoutBox()->Location();
+  PhysicalOffset offset(GetLayoutBox()->ClientLeft() + location.X(),
+                        GetLayoutBox()->ClientTop() + location.Y());
   // TODO(crbug.com/962299): The pixel snapping is incorrect in some cases.
   return PixelSnappedContentsSize(offset);
 }
@@ -953,6 +945,9 @@ void PaintLayerScrollableArea::SetScrollOffsetUnconditionally(
 }
 
 void PaintLayerScrollableArea::UpdateAfterLayout() {
+  InvalidateAllStickyConstraints();
+  InvalidateAllAnchorPositionedLayers();
+
   bool is_horizontal_scrollbar_frozen;
   bool is_vertical_scrollbar_frozen;
   if (in_overflow_relayout_ && !allow_second_overflow_relayout_) {
@@ -1012,12 +1007,11 @@ void PaintLayerScrollableArea::UpdateAfterLayout() {
     // needs to update paint properties to account for the correct
     // scrollbounds.
     if (LocalFrameView* frame_view = GetLayoutBox()->GetFrameView()) {
-      if (this == frame_view->LayoutViewport()) {
-        GetLayoutBox()
-            ->GetFrame()
-            ->GetPage()
-            ->GetVisualViewport()
-            .SetNeedsPaintPropertyUpdate();
+      VisualViewport& visual_viewport =
+          GetLayoutBox()->GetFrame()->GetPage()->GetVisualViewport();
+      if (this == frame_view->LayoutViewport() &&
+          visual_viewport.IsActiveViewport()) {
+        visual_viewport.SetNeedsPaintPropertyUpdate();
       }
     }
 
@@ -1089,7 +1083,7 @@ void PaintLayerScrollableArea::UpdateAfterLayout() {
     UpdateScrollbarProportions();
   }
 
-  ClampScrollOffsetAfterOverflowChange();
+  DelayableClampScrollOffsetAfterOverflowChange();
 
   if (!is_horizontal_scrollbar_frozen || !is_vertical_scrollbar_frozen)
     UpdateScrollableAreaSet();
@@ -1097,7 +1091,25 @@ void PaintLayerScrollableArea::UpdateAfterLayout() {
   PositionOverflowControls();
 }
 
+void PaintLayerScrollableArea::DelayableClampScrollOffsetAfterOverflowChange() {
+  if (HasBeenDisposed())
+    return;
+  if (DelayScrollOffsetClampScope::ClampingIsDelayed()) {
+    DelayScrollOffsetClampScope::SetNeedsClamp(this);
+    return;
+  }
+  ClampScrollOffsetAfterOverflowChangeInternal();
+}
+
 void PaintLayerScrollableArea::ClampScrollOffsetAfterOverflowChange() {
+  if (!RuntimeEnabledFeatures::LayoutNGDelayScrollOffsetClampingEnabled()) {
+    DelayableClampScrollOffsetAfterOverflowChange();
+    return;
+  }
+  ClampScrollOffsetAfterOverflowChangeInternal();
+}
+
+void PaintLayerScrollableArea::ClampScrollOffsetAfterOverflowChangeInternal() {
   if (HasBeenDisposed())
     return;
 
@@ -1105,11 +1117,6 @@ void PaintLayerScrollableArea::ClampScrollOffsetAfterOverflowChange() {
   // changed, so the scroll offsets needs to be clamped.  If the scroll offset
   // did not change, but the scroll origin *did* change, we still need to notify
   // the scrollbars to update their dimensions.
-
-  if (DelayScrollOffsetClampScope::ClampingIsDelayed()) {
-    DelayScrollOffsetClampScope::SetNeedsClamp(this);
-    return;
-  }
 
   const Document& document = GetLayoutBox()->GetDocument();
   if (document.IsPrintingOrPaintingPreview()) {
@@ -1140,8 +1147,7 @@ void PaintLayerScrollableArea::DidChangeGlobalRootScroller() {
   // Being the global root scroller will affect clipping size due to browser
   // controls behavior so we need to update compositing based on updated clip
   // geometry.
-  if (auto* element = DynamicTo<Element>(GetLayoutBox()->GetNode()))
-    element->SetNeedsCompositingUpdate();
+  Layer()->SetNeedsCompositingInputsUpdate();
   GetLayoutBox()->SetNeedsPaintPropertyUpdate();
 
   // On Android, where the VisualViewport supplies scrollbars, we need to
@@ -1400,9 +1406,15 @@ static inline const LayoutObject& ScrollbarStyleSource(
       return *doc_element->GetLayoutObject();
 
     if (Settings* settings = doc.GetSettings()) {
+      LocalFrame* frame = layout_box.GetFrame();
+      DCHECK(frame);
+      DCHECK(frame->GetPage());
+
+      VisualViewport& viewport = frame->GetPage()->GetVisualViewport();
       if (!settings->GetAllowCustomScrollbarInMainFrame() &&
-          layout_box.GetFrame() && layout_box.GetFrame()->IsMainFrame())
+          frame->IsMainFrame() && viewport.IsActiveViewport()) {
         return layout_box;
+      }
     }
 
     // Try the <body> element as a scrollbar source, but only if the body
@@ -1495,6 +1507,7 @@ void PaintLayerScrollableArea::ComputeScrollbarExistence(
       !CanHaveOverflowScrollbars(*GetLayoutBox()) ||
       GetLayoutBox()->GetFrame()->GetSettings()->GetHideScrollbars() ||
       GetLayoutBox()->IsLayoutNGFieldset() ||
+      GetLayoutBox()->IsLayoutNGFrameSet() ||
       GetLayoutBox()->StyleRef().ScrollbarWidth() == EScrollbarWidth::kNone) {
     needs_horizontal_scrollbar = false;
     needs_vertical_scrollbar = false;
@@ -1862,9 +1875,8 @@ bool PaintLayerScrollableArea::ShouldOverflowControlsPaintAsOverlay() const {
 
   // The global root scrollbars and corner also paint as overlay so that they
   // appear on top of all content within the viewport. This is important since
-  // these scrollbar's transform parent is the 'overscroll elasticity'
-  // transform node of the visual viewport, i.e. they don't move during elastic
-  // overscroll or on pinch zoom.
+  // these scrollbar's transform state is
+  // VisualViewport::TransformNodeForViewportScrollbars().
   return GetLayoutBox() && GetLayoutBox()->IsGlobalRootScroller();
 }
 
@@ -2036,29 +2048,6 @@ bool PaintLayerScrollableArea::IsLocalPointInResizeControl(
   return ResizerCornerRect(resizer_hit_test_type).Contains(local_point);
 }
 
-bool PaintLayerScrollableArea::HitTestResizerInFragments(
-    const PaintLayerFragments& layer_fragments,
-    const HitTestLocation& hit_test_location) const {
-  if (GetLayoutBox()->StyleRef().Visibility() != EVisibility::kVisible ||
-      !GetLayoutBox()->CanResize())
-    return false;
-
-  if (layer_fragments.IsEmpty())
-    return false;
-
-  for (int i = layer_fragments.size() - 1; i >= 0; --i) {
-    const PaintLayerFragment& fragment = layer_fragments.at(i);
-    if (fragment.background_rect.Intersects(hit_test_location)) {
-      gfx::Rect resizer_corner_rect = ResizerCornerRect(kResizerForPointer);
-      resizer_corner_rect.Offset(ToRoundedVector2d(fragment.layer_offset));
-      if (resizer_corner_rect.Contains(hit_test_location.RoundedPoint()))
-        return true;
-    }
-  }
-
-  return false;
-}
-
 void PaintLayerScrollableArea::UpdateResizerStyle(
     const ComputedStyle* old_style) {
   // Change of resizer status affects HasOverlayOverflowControls(). Invalid
@@ -2090,49 +2079,64 @@ void PaintLayerScrollableArea::UpdateResizerStyle(
   }
 }
 
-StickyPositionScrollingConstraints*
-PaintLayerScrollableArea::GetStickyConstraints(PaintLayer* layer) {
-  auto it = EnsureRareData().sticky_constraints_map_.find(layer);
-  if (it == EnsureRareData().sticky_constraints_map_.end())
-    return nullptr;
-  return it->value;
+void PaintLayerScrollableArea::AddStickyLayer(PaintLayer* layer) {
+  UseCounter::Count(GetLayoutBox()->GetDocument(), WebFeature::kPositionSticky);
+  EnsureRareData().sticky_layers_.insert(layer);
 }
 
-void PaintLayerScrollableArea::AddStickyConstraints(
-    PaintLayer* layer,
-    StickyPositionScrollingConstraints* constraints) {
-  UseCounter::Count(GetLayoutBox()->GetDocument(), WebFeature::kPositionSticky);
-  EnsureRareData().sticky_constraints_map_.Set(layer, constraints);
+void PaintLayerScrollableArea::RemoveStickyLayer(PaintLayer* layer) {
+  if (rare_data_)
+    rare_data_->sticky_layers_.erase(layer);
 }
 
 void PaintLayerScrollableArea::InvalidateAllStickyConstraints() {
-  if (PaintLayerScrollableAreaRareData* d = RareData()) {
-    for (PaintLayer* sticky_layer : d->sticky_constraints_map_.Keys()) {
-      if (sticky_layer->GetLayoutObject().StyleRef().GetPosition() ==
-          EPosition::kSticky) {
-        sticky_layer->SetNeedsCompositingInputsUpdate();
-        sticky_layer->GetLayoutObject().SetNeedsPaintPropertyUpdate();
-      }
-    }
-    d->sticky_constraints_map_.clear();
-  }
-}
-
-void PaintLayerScrollableArea::InvalidateStickyConstraintsFor(
-    PaintLayer* layer) {
-  if (PaintLayerScrollableAreaRareData* d = RareData()) {
-    d->sticky_constraints_map_.erase(layer);
-    if (layer->GetLayoutObject().StyleRef().HasStickyConstrainedPosition()) {
-      layer->SetNeedsCompositingInputsUpdate();
-      layer->GetLayoutObject().SetNeedsPaintPropertyUpdate();
-    }
-  }
+  // Don't clear StickyConstraints for each LayoutObject of each layer in
+  // sticky_layers_ because sticky_layers_ may contain stale pointers.
+  // LayoutBoxModelObject::UpdateStickyPositionConstraints() will check both
+  // HasStickyLayer() of its containing scrollable area and its
+  // StickyConstraints() to see if its sticky constraints need update.
+  if (rare_data_)
+    rare_data_->sticky_layers_.clear();
 }
 
 void PaintLayerScrollableArea::InvalidatePaintForStickyDescendants() {
+  // If this is called during layout, sticky_layers_ may contain stale pointers.
+  // Return because we'll InvalidateAllStickyConstraints(), and we'll
+  // SetNeedsPaintPropertyUpdate() when updating sticky constraints.
+  if (GetLayoutBox()->NeedsLayout())
+    return;
+
   if (PaintLayerScrollableAreaRareData* d = RareData()) {
-    for (PaintLayer* sticky_layer : d->sticky_constraints_map_.Keys())
-      sticky_layer->GetLayoutObject().SetNeedsPaintPropertyUpdate();
+    for (PaintLayer* sticky_layer : d->sticky_layers_) {
+      auto& object = sticky_layer->GetLayoutObject();
+      object.SetNeedsPaintPropertyUpdate();
+      DCHECK(object.StickyConstraints());
+      object.StickyConstraints()->ComputeStickyOffset(ScrollPosition());
+    }
+  }
+}
+
+bool PaintLayerScrollableArea::AddAnchorPositionedLayer(PaintLayer* layer) {
+  auto add_result = EnsureRareData().anchor_positioned_layers_.insert(layer);
+  return add_result.is_new_entry;
+}
+
+void PaintLayerScrollableArea::InvalidateAllAnchorPositionedLayers() {
+  if (rare_data_)
+    rare_data_->anchor_positioned_layers_.clear();
+}
+
+void PaintLayerScrollableArea::InvalidatePaintForAnchorPositionedLayers() {
+  // If this is called during layout, anchor_positioned_layers_ may contain
+  // stale pointers. Return because we'll InvalidateAllAnchorPositionedLayers(),
+  // and we'll SetNeedsPaintPropertyUpdate() when updating anchor positioned
+  // layers.
+  if (GetLayoutBox()->NeedsLayout())
+    return;
+
+  if (PaintLayerScrollableAreaRareData* d = RareData()) {
+    for (PaintLayer* anchor_positioned_layer : d->anchor_positioned_layers_)
+      anchor_positioned_layer->GetLayoutObject().SetNeedsPaintPropertyUpdate();
   }
 }
 
@@ -2187,8 +2191,7 @@ void PaintLayerScrollableArea::Resize(const gfx::Point& pos,
   LayoutSize current_size = GetLayoutBox()->Size();
   current_size.Scale(1 / zoom_factor);
 
-  LayoutSize adjusted_old_offset = LayoutSize(
-      old_offset.Width() / zoom_factor, old_offset.Height() / zoom_factor);
+  LayoutSize adjusted_old_offset = old_offset * (1.f / zoom_factor);
   if (GetLayoutBox()->ShouldPlaceBlockDirectionScrollbarOnLogicalLeft()) {
     new_offset.set_x(-new_offset.x());
     adjusted_old_offset.SetWidth(-adjusted_old_offset.Width());
@@ -2321,14 +2324,16 @@ void PaintLayerScrollableArea::UpdateScrollableAreaSet() {
   if (!frame_view)
     return;
 
+  const bool has_horizontal_overflow = HasHorizontalOverflow();
+  const bool has_vertical_overflow = HasVerticalOverflow();
   bool has_overflow =
       !GetLayoutBox()->Size().IsZero() &&
-      ((HasHorizontalOverflow() && GetLayoutBox()->ScrollsOverflowX()) ||
-       (HasVerticalOverflow() && GetLayoutBox()->ScrollsOverflowY()));
+      ((has_horizontal_overflow && GetLayoutBox()->ScrollsOverflowX()) ||
+       (has_vertical_overflow && GetLayoutBox()->ScrollsOverflowY()));
 
   bool overflows_in_block_direction = GetLayoutBox()->IsHorizontalWritingMode()
-                                          ? HasVerticalOverflow()
-                                          : HasHorizontalOverflow();
+                                          ? has_vertical_overflow
+                                          : has_horizontal_overflow;
 
   if (overflows_in_block_direction) {
     DCHECK(CanHaveOverflowScrollbars(*GetLayoutBox()));
@@ -2587,22 +2592,20 @@ cc::AnimationHost* PaintLayerScrollableArea::GetCompositorAnimationHost()
   return layer_->GetLayoutObject().GetFrameView()->GetCompositorAnimationHost();
 }
 
-CompositorAnimationTimeline*
+cc::AnimationTimeline*
 PaintLayerScrollableArea::GetCompositorAnimationTimeline() const {
-  return layer_->GetLayoutObject()
-      .GetFrameView()
-      ->GetCompositorAnimationTimeline();
+  return layer_->GetLayoutObject().GetFrameView()->GetScrollAnimationTimeline();
 }
 
 bool PaintLayerScrollableArea::HasTickmarks() const {
-  if (RareData() && !RareData()->tickmarks_override_.IsEmpty())
+  if (RareData() && !RareData()->tickmarks_override_.empty())
     return true;
   return layer_->IsRootLayer() &&
          To<LayoutView>(GetLayoutBox())->HasTickmarks();
 }
 
 Vector<gfx::Rect> PaintLayerScrollableArea::GetTickmarks() const {
-  if (RareData() && !RareData()->tickmarks_override_.IsEmpty())
+  if (RareData() && !RareData()->tickmarks_override_.empty())
     return RareData()->tickmarks_override_;
   if (layer_->IsRootLayer())
     return To<LayoutView>(GetLayoutBox())->GetTickmarks();
@@ -2718,7 +2721,7 @@ PaintLayerScrollableArea::PreventRelayoutScope::PreventRelayoutScope(
     SubtreeLayoutScope& layout_scope) {
   if (!count_) {
     DCHECK(!layout_scope_);
-    DCHECK(NeedsRelayoutList().IsEmpty());
+    DCHECK(NeedsRelayoutList().empty());
     layout_scope_ = &layout_scope;
   }
   count_++;
@@ -2772,7 +2775,7 @@ void PaintLayerScrollableArea::PreventRelayoutScope::SetBoxNeedsLayout(
 
 void PaintLayerScrollableArea::PreventRelayoutScope::ResetRelayoutNeeded() {
   DCHECK_EQ(count_, 0);
-  DCHECK(NeedsRelayoutList().IsEmpty());
+  DCHECK(NeedsRelayoutList().empty());
   relayout_needed_ = false;
 }
 
@@ -2810,7 +2813,7 @@ int PaintLayerScrollableArea::DelayScrollOffsetClampScope::count_ = 0;
 
 PaintLayerScrollableArea::DelayScrollOffsetClampScope::
     DelayScrollOffsetClampScope() {
-  DCHECK(count_ > 0 || NeedsClampList().IsEmpty());
+  DCHECK(count_ > 0 || NeedsClampList().empty());
   count_++;
 }
 
@@ -3113,9 +3116,9 @@ gfx::Size PaintLayerScrollableArea::PixelSnappedBorderBoxSize() const {
 gfx::Rect PaintLayerScrollableArea::ScrollingBackgroundVisualRect(
     const PhysicalOffset& paint_offset) const {
   const auto* box = GetLayoutBox();
-  auto overflow_clip_rect =
-      ToPixelSnappedRect(box->OverflowClipRect(paint_offset));
-  auto scroll_size = PixelSnappedContentsSize(paint_offset);
+  auto clip_rect = box->OverflowClipRect(paint_offset);
+  auto overflow_clip_rect = ToPixelSnappedRect(clip_rect);
+  auto scroll_size = PixelSnappedContentsSize(clip_rect.offset);
   // Ensure scrolling contents are at least as large as the scroll clip
   scroll_size.SetToMax(overflow_clip_rect.size());
   gfx::Rect result(overflow_clip_rect.origin(), scroll_size);

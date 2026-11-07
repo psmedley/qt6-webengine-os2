@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,19 +15,20 @@
 #include "base/callback.h"
 #include "base/callback_forward.h"
 #include "base/callback_helpers.h"
+#include "base/check_is_test.h"
 #include "base/containers/adapters.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
-#include "base/trace_event/typed_macros.h"
-#include "components/segmentation_platform/internal/database/metadata_utils.h"
+#include "components/prefs/pref_service.h"
+#include "components/segmentation_platform/internal/constants.h"
 #include "components/segmentation_platform/internal/database/segment_info_database.h"
 #include "components/segmentation_platform/internal/database/signal_database.h"
 #include "components/segmentation_platform/internal/database/signal_storage_config.h"
 #include "components/segmentation_platform/internal/execution/default_model_manager.h"
-#include "components/segmentation_platform/internal/proto/types.pb.h"
+#include "components/segmentation_platform/internal/metadata/metadata_utils.h"
 #include "components/segmentation_platform/internal/stats.h"
-#include "components/segmentation_platform/public/config.h"
+#include "components/segmentation_platform/public/proto/types.pb.h"
 
 namespace {
 constexpr uint64_t kFirstCompactionDay = 2;
@@ -39,6 +40,12 @@ using SignalIdentifier = DatabaseMaintenanceImpl::SignalIdentifier;
 using CleanupItem = DatabaseMaintenanceImpl::CleanupItem;
 
 namespace {
+// Gets the end of the UTC day time for `current_time`.
+base::Time GetEndOfDayTime(base::Time current_time) {
+  base::Time day_start_time = current_time.UTCMidnight();
+  return day_start_time + base::Days(1) - base::Seconds(1);
+}
+
 std::set<SignalIdentifier> CollectAllSignalIdentifiers(
     const DefaultModelManager::SegmentInfoList& segment_infos) {
   std::set<SignalIdentifier> signal_ids;
@@ -90,26 +97,26 @@ struct DatabaseMaintenanceImpl::CleanupState {
 };
 
 DatabaseMaintenanceImpl::DatabaseMaintenanceImpl(
-    const base::flat_set<OptimizationTarget>& segment_ids,
+    const base::flat_set<SegmentId>& segment_ids,
     base::Clock* clock,
     SegmentInfoDatabase* segment_info_database,
     SignalDatabase* signal_database,
     SignalStorageConfig* signal_storage_config,
-    DefaultModelManager* default_model_manager)
+    DefaultModelManager* default_model_manager,
+    PrefService* profile_prefs)
     : segment_ids_(segment_ids),
       clock_(clock),
       segment_info_database_(segment_info_database),
       signal_database_(signal_database),
       signal_storage_config_(signal_storage_config),
-      default_model_manager_(default_model_manager) {}
+      default_model_manager_(default_model_manager),
+      profile_prefs_(profile_prefs) {}
 
 DatabaseMaintenanceImpl::~DatabaseMaintenanceImpl() = default;
 
 void DatabaseMaintenanceImpl::ExecuteMaintenanceTasks() {
-  std::vector<OptimizationTarget> segment_ids(segment_ids_.begin(),
-                                              segment_ids_.end());
   default_model_manager_->GetAllSegmentInfoFromBothModels(
-      segment_ids, segment_info_database_,
+      segment_ids_, segment_info_database_,
       base::BindOnce(&DatabaseMaintenanceImpl::OnSegmentInfoCallback,
                      weak_ptr_factory_.GetWeakPtr()));
 }
@@ -201,9 +208,22 @@ void DatabaseMaintenanceImpl::CleanupSignalStorageDone(
 void DatabaseMaintenanceImpl::CompactSamples(
     std::set<SignalIdentifier> signal_ids,
     base::OnceClosure next_action) {
-  for (uint64_t days_ago = kFirstCompactionDay;
-       days_ago <= kMaxSignalStorageDays; ++days_ago) {
-    base::Time compaction_day = clock_->Now() - base::Days(days_ago);
+  base::Time last_compation_time = base::Time::Min();
+  if (profile_prefs_) {
+    last_compation_time =
+        profile_prefs_->GetTime(kSegmentationLastDBCompactionTimePref);
+  } else {
+    CHECK_IS_TEST();
+  }
+  base::Time end_of_day = GetEndOfDayTime(clock_->Now());
+  base::Time most_recent_day_to_compact =
+      end_of_day - base::Days(kFirstCompactionDay);
+  base::Time ealiest_day_to_compact =
+      end_of_day - base::Days(kMaxSignalStorageDays);
+  base::Time compaction_day = most_recent_day_to_compact;
+
+  while (compaction_day >= ealiest_day_to_compact &&
+         compaction_day > last_compation_time) {
     for (auto signal_id : signal_ids) {
       signal_database_->CompactSamplesForDay(
           signal_id.second, signal_id.first, compaction_day,
@@ -211,11 +231,13 @@ void DatabaseMaintenanceImpl::CompactSamples(
                          weak_ptr_factory_.GetWeakPtr(), signal_id.second,
                          signal_id.first));
     }
+    compaction_day -= base::Days(1);
   }
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::BindOnce(&DatabaseMaintenanceImpl::CompactSamplesDone,
-                     weak_ptr_factory_.GetWeakPtr(), std::move(next_action)));
+                     weak_ptr_factory_.GetWeakPtr(), std::move(next_action),
+                     most_recent_day_to_compact));
 }
 
 void DatabaseMaintenanceImpl::RecordCompactionResult(
@@ -226,7 +248,11 @@ void DatabaseMaintenanceImpl::RecordCompactionResult(
 }
 
 void DatabaseMaintenanceImpl::CompactSamplesDone(
-    base::OnceClosure next_action) {
+    base::OnceClosure next_action,
+    base::Time last_compation_time) {
+  if (profile_prefs_)
+    profile_prefs_->SetTime(kSegmentationLastDBCompactionTimePref,
+                            last_compation_time);
   std::move(next_action).Run();
 }
 

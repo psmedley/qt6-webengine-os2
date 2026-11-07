@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,9 +46,6 @@ struct DarkModeSettings {
   //
   // Warning: This behavior is the opposite of foreground_brightness_threshold!
   int background_brightness_threshold = 0;
-
-  // True if text contrast should be increased by painting an outline.
-  bool increase_text_contrast = false;
 };
 
 }  // namespace blink

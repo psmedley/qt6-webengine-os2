@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -157,7 +157,7 @@ void SendFeedback(content::BrowserContext* browser_context,
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   if (feedback_info.system_information) {
-    for (SystemInformation& info : *feedback_info.system_information)
+    for (const SystemInformation& info : *feedback_info.system_information)
       feedback_data->AddLog(std::move(info.key), std::move(info.value));
   }
 
@@ -220,15 +220,14 @@ std::unique_ptr<FeedbackInfo> FeedbackPrivateAPI::CreateFeedbackInfo(
   auto info = std::make_unique<FeedbackInfo>();
 
   info->description = description_template;
-  info->description_placeholder =
-      std::make_unique<std::string>(description_placeholder_text);
-  info->category_tag = std::make_unique<std::string>(category_tag);
-  info->page_url = std::make_unique<std::string>(page_url.spec());
-  info->system_information = std::make_unique<SystemInformationList>();
+  info->description_placeholder = description_placeholder_text;
+  info->category_tag = category_tag;
+  info->page_url = page_url.spec();
+  info->system_information.emplace();
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  info->from_assistant = std::make_unique<bool>(from_assistant);
-  info->include_bluetooth_logs = std::make_unique<bool>(include_bluetooth_logs);
-  info->show_questionnaire = std::make_unique<bool>(show_questionnaire);
+  info->from_assistant = from_assistant;
+  info->include_bluetooth_logs = include_bluetooth_logs;
+  info->show_questionnaire = show_questionnaire;
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   // Any extra diagnostics information should be added to the sys info.
@@ -241,7 +240,7 @@ std::unique_ptr<FeedbackInfo> FeedbackPrivateAPI::CreateFeedbackInfo(
 
   // The manager is only available if tracing is enabled.
   if (ContentTracingManager* manager = ContentTracingManager::Get()) {
-    info->trace_id = std::make_unique<int>(manager->RequestTrace());
+    info->trace_id = manager->RequestTrace();
   }
   info->flow = flow;
 #if BUILDFLAG(IS_MAC)
@@ -249,80 +248,22 @@ std::unique_ptr<FeedbackInfo> FeedbackPrivateAPI::CreateFeedbackInfo(
 #else
   const bool use_system_window_frame = false;
 #endif
-  info->use_system_window_frame =
-      std::make_unique<bool>(use_system_window_frame);
+  info->use_system_window_frame = use_system_window_frame;
 
   // If the feedback is from Chrome Labs or Kaleidoscope then this should use
   // a custom product ID.
   if (from_chrome_labs_or_kaleidoscope) {
-    info->product_id =
-        std::make_unique<int>(kChromeLabsAndKaleidoscopeProductId);
+    info->product_id = kChromeLabsAndKaleidoscopeProductId;
   }
 
   return info;
 }
 
-void FeedbackPrivateAPI::RequestFeedbackForFlow(
-    const std::string& description_template,
-    const std::string& description_placeholder_text,
-    const std::string& category_tag,
-    const std::string& extra_diagnostics,
-    const GURL& page_url,
-    api::feedback_private::FeedbackFlow flow,
-    bool from_assistant,
-    bool include_bluetooth_logs,
-    bool show_questionnaire,
-    bool from_chrome_labs_or_kaleidoscope) {
-  if (browser_context_ && EventRouter::Get(browser_context_)) {
-    auto info = CreateFeedbackInfo(
-        description_template, description_placeholder_text, category_tag,
-        extra_diagnostics, page_url, flow, from_assistant,
-        include_bluetooth_logs, show_questionnaire,
-        from_chrome_labs_or_kaleidoscope);
-
-    auto args = feedback_private::OnFeedbackRequested::Create(*info);
-
-    auto event = std::make_unique<Event>(
-        events::FEEDBACK_PRIVATE_ON_FEEDBACK_REQUESTED,
-        feedback_private::OnFeedbackRequested::kEventName, std::move(args),
-        browser_context_);
-
-    // TODO(weidongg/754329): Using DispatchEventWithLazyListener() is a
-    // temporary fix to the bug. Investigate a better solution that applies to
-    // all scenarios.
-    EventRouter::Get(browser_context_)
-        ->DispatchEventWithLazyListener(extension_misc::kFeedbackExtensionId,
-                                        std::move(event));
-  }
-}
-
-// static
-base::OnceClosure* FeedbackPrivateGetStringsFunction::test_callback_ = nullptr;
-
-ExtensionFunction::ResponseAction FeedbackPrivateGetStringsFunction::Run() {
-  auto params = feedback_private::GetStrings::Params::Create(args());
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-
-  FeedbackPrivateDelegate* feedback_private_delegate =
-      ExtensionsAPIClient::Get()->GetFeedbackPrivateDelegate();
-  DCHECK(feedback_private_delegate);
-  std::unique_ptr<base::DictionaryValue> dict =
-      feedback_private_delegate->GetStrings(
-          browser_context(),
-          params->flow == FeedbackFlow::FEEDBACK_FLOW_SADTABCRASH);
-
-  if (test_callback_ && !test_callback_->is_null())
-    std::move(*test_callback_).Run();
-
-  return RespondNow(
-      OneArgument(base::Value::FromUniquePtrValue(std::move(dict))));
-}
-
 ExtensionFunction::ResponseAction FeedbackPrivateGetUserEmailFunction::Run() {
   FeedbackPrivateDelegate* feedback_private_delegate =
       ExtensionsAPIClient::Get()->GetFeedbackPrivateDelegate();
-  return RespondNow(OneArgument(base::Value(
-      feedback_private_delegate->GetSignedInUserEmail(browser_context()))));
+  return RespondNow(WithArguments(
+      feedback_private_delegate->GetSignedInUserEmail(browser_context())));
 }
 
 ExtensionFunction::ResponseAction
@@ -423,23 +364,13 @@ ExtensionFunction::ResponseAction FeedbackPrivateSendFeedbackFunction::Run() {
 void FeedbackPrivateSendFeedbackFunction::OnCompleted(
     api::feedback_private::LandingPageType type,
     bool success) {
-  Respond(TwoArguments(base::Value(ToFeedbackStatus(success)),
-                       base::Value(feedback_private::ToString(type))));
+  Respond(WithArguments(ToFeedbackStatus(success),
+                        feedback_private::ToString(type)));
   if (!success) {
     ExtensionsAPIClient::Get()
         ->GetFeedbackPrivateDelegate()
         ->NotifyFeedbackDelayed();
   }
-}
-
-ExtensionFunction::ResponseAction
-FeedbackPrivateLoginFeedbackCompleteFunction::Run() {
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  FeedbackPrivateDelegate* feedback_private_delegate =
-      ExtensionsAPIClient::Get()->GetFeedbackPrivateDelegate();
-  feedback_private_delegate->UnloadFeedbackExtension(browser_context());
-#endif
-  return RespondNow(NoArguments());
 }
 
 }  // namespace extensions

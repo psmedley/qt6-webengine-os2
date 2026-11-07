@@ -17,7 +17,9 @@
 #include <utility>
 
 #include "src/tint/ast/identifier_expression.h"
+#include "src/tint/ast/parameter.h"
 #include "src/tint/ast/variable.h"
+#include "src/tint/sem/pointer.h"
 
 TINT_INSTANTIATE_TYPEINFO(tint::sem::Variable);
 TINT_INSTANTIATE_TYPEINFO(tint::sem::GlobalVariable);
@@ -26,15 +28,16 @@ TINT_INSTANTIATE_TYPEINFO(tint::sem::Parameter);
 TINT_INSTANTIATE_TYPEINFO(tint::sem::VariableUser);
 
 namespace tint::sem {
-
 Variable::Variable(const ast::Variable* declaration,
                    const sem::Type* type,
-                   ast::StorageClass storage_class,
+                   EvaluationStage stage,
+                   ast::AddressSpace address_space,
                    ast::Access access,
-                   Constant constant_value)
+                   const Constant* constant_value)
     : declaration_(declaration),
       type_(type),
-      storage_class_(storage_class),
+      stage_(stage),
+      address_space_(address_space),
       access_(access),
       constant_value_(constant_value) {}
 
@@ -42,35 +45,43 @@ Variable::~Variable() = default;
 
 LocalVariable::LocalVariable(const ast::Variable* declaration,
                              const sem::Type* type,
-                             ast::StorageClass storage_class,
+                             EvaluationStage stage,
+                             ast::AddressSpace address_space,
                              ast::Access access,
                              const sem::Statement* statement,
-                             Constant constant_value)
-    : Base(declaration, type, storage_class, access, std::move(constant_value)),
+                             const Constant* constant_value)
+    : Base(declaration, type, stage, address_space, access, constant_value),
       statement_(statement) {}
 
 LocalVariable::~LocalVariable() = default;
 
 GlobalVariable::GlobalVariable(const ast::Variable* declaration,
                                const sem::Type* type,
-                               ast::StorageClass storage_class,
+                               EvaluationStage stage,
+                               ast::AddressSpace address_space,
                                ast::Access access,
-                               Constant constant_value,
-                               sem::BindingPoint binding_point)
-    : Base(declaration, type, storage_class, access, std::move(constant_value)),
-      binding_point_(binding_point) {}
+                               const Constant* constant_value,
+                               sem::BindingPoint binding_point,
+                               std::optional<uint32_t> location)
+    : Base(declaration, type, stage, address_space, access, constant_value),
+      binding_point_(binding_point),
+      location_(location) {}
 
 GlobalVariable::~GlobalVariable() = default;
 
-Parameter::Parameter(const ast::Variable* declaration,
+Parameter::Parameter(const ast::Parameter* declaration,
                      uint32_t index,
                      const sem::Type* type,
-                     ast::StorageClass storage_class,
+                     ast::AddressSpace address_space,
                      ast::Access access,
-                     const ParameterUsage usage /* = ParameterUsage::kNone */)
-    : Base(declaration, type, storage_class, access, Constant{}),
+                     const ParameterUsage usage /* = ParameterUsage::kNone */,
+                     sem::BindingPoint binding_point /* = {} */,
+                     std::optional<uint32_t> location /* = std::nullopt */)
+    : Base(declaration, type, EvaluationStage::kRuntime, address_space, access, nullptr),
       index_(index),
-      usage_(usage) {}
+      usage_(usage),
+      binding_point_(binding_point),
+      location_(location) {}
 
 Parameter::~Parameter() = default;
 
@@ -79,9 +90,19 @@ VariableUser::VariableUser(const ast::IdentifierExpression* declaration,
                            sem::Variable* variable)
     : Base(declaration,
            variable->Type(),
+           variable->Stage(),
            statement,
            variable->ConstantValue(),
            /* has_side_effects */ false),
-      variable_(variable) {}
+      variable_(variable) {
+    auto* type = variable->Type();
+    if (type->Is<sem::Pointer>() && variable->Constructor()) {
+        source_variable_ = variable->Constructor()->SourceVariable();
+    } else {
+        source_variable_ = variable;
+    }
+}
+
+VariableUser::~VariableUser() = default;
 
 }  // namespace tint::sem

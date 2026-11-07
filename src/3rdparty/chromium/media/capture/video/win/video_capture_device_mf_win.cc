@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <d3d11_4.h>
 #include <ks.h>
+#include <ksmedia.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <stddef.h>
@@ -256,9 +257,9 @@ VideoPixelFormat MfSubTypeToSourcePixelFormat(
       {MFVideoFormat_YV12, PIXEL_FORMAT_YV12},
       {GUID_ContainerFormatJpeg, PIXEL_FORMAT_MJPEG}};
 
-  for (const auto& kEntry : kPixelFormatMap) {
-    if (kEntry.mf_source_media_subtype == mf_source_media_subtype) {
-      return kEntry.pixel_format;
+  for (const auto& [source_media_subtype, pixel_format] : kPixelFormatMap) {
+    if (source_media_subtype == mf_source_media_subtype) {
+      return pixel_format;
     }
   }
   return PIXEL_FORMAT_UNKNOWN;
@@ -606,6 +607,9 @@ HRESULT CopyTextureToGpuMemoryBuffer(ID3D11Texture2D* texture,
   return S_OK;
 }
 
+// Destruction helper. Can't use base::DoNothingAs<> since ComPtr isn't POD.
+void DestroyCaptureEngine(Microsoft::WRL::ComPtr<IMFCaptureEngine>) {}
+
 }  // namespace
 
 class MFVideoCallback final
@@ -675,8 +679,7 @@ class MFVideoCallback final
       ComPtr<IMFMediaBuffer> buffer;
       sample->GetBufferByIndex(i, &buffer);
       if (buffer) {
-        observer_->OnIncomingCapturedData(buffer.Get(), reference_time,
-                                          timestamp);
+        observer_->OnIncomingCapturedData(buffer, reference_time, timestamp);
       } else {
         observer_->OnFrameDropped(
             VideoCaptureFrameDropReason::
@@ -894,17 +897,20 @@ HRESULT VideoCaptureDeviceMFWin::FillCapabilities(
 VideoCaptureDeviceMFWin::VideoCaptureDeviceMFWin(
     const VideoCaptureDeviceDescriptor& device_descriptor,
     ComPtr<IMFMediaSource> source,
-    scoped_refptr<DXGIDeviceManager> dxgi_device_manager)
+    scoped_refptr<DXGIDeviceManager> dxgi_device_manager,
+    scoped_refptr<base::SequencedTaskRunner> main_thread_task_runner)
     : VideoCaptureDeviceMFWin(device_descriptor,
                               source,
                               std::move(dxgi_device_manager),
-                              nullptr) {}
+                              nullptr,
+                              std::move(main_thread_task_runner)) {}
 
 VideoCaptureDeviceMFWin::VideoCaptureDeviceMFWin(
     const VideoCaptureDeviceDescriptor& device_descriptor,
     ComPtr<IMFMediaSource> source,
     scoped_refptr<DXGIDeviceManager> dxgi_device_manager,
-    ComPtr<IMFCaptureEngine> engine)
+    ComPtr<IMFCaptureEngine> engine,
+    scoped_refptr<base::SequencedTaskRunner> main_thread_task_runner)
     : device_descriptor_(device_descriptor),
       create_mf_photo_callback_(base::BindRepeating(&CreateMFPhotoCallback)),
       is_initialized_(false),
@@ -922,7 +928,8 @@ VideoCaptureDeviceMFWin::VideoCaptureDeviceMFWin(
       // We never want to reset |capture_error_|.
       capture_error_(base::WaitableEvent::ResetPolicy::MANUAL,
                      base::WaitableEvent::InitialState::NOT_SIGNALED),
-      dxgi_device_manager_(std::move(dxgi_device_manager)) {
+      dxgi_device_manager_(std::move(dxgi_device_manager)),
+      main_thread_task_runner_(std::move(main_thread_task_runner)) {
   DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 
@@ -941,6 +948,15 @@ VideoCaptureDeviceMFWin::~VideoCaptureDeviceMFWin() {
   if (video_callback_) {
     video_callback_->Shutdown();
   }
+
+  // In case there's about to be a new device created with a different config,
+  // defer destruction of the IMFCaptureEngine since it force unloads a bunch of
+  // DLLs which are expensive to reload.
+  if (engine_) {
+    main_thread_task_runner_->PostDelayedTask(
+        FROM_HERE, base::BindOnce(&DestroyCaptureEngine, std::move(engine_)),
+        base::Seconds(5));
+  }
 }
 
 bool VideoCaptureDeviceMFWin::Init() {
@@ -952,6 +968,17 @@ bool VideoCaptureDeviceMFWin::Init() {
 
   hr = source_.As(&video_control_);
   DLOG_IF_FAILED_WITH_HRESULT("Failed to retrieve IAMVideoProcAmp", hr);
+
+  ComPtr<IMFGetService> get_service;
+  hr = source_.As(&get_service);
+  DLOG_IF_FAILED_WITH_HRESULT("Failed to retrieve IMFGetService", hr);
+
+  if (get_service) {
+    hr = get_service->GetService(GUID_NULL, IID_IMFExtendedCameraController,
+                                 &extended_camera_controller_);
+    DLOG_IF_FAILED_WITH_HRESULT(
+        "Failed to retrieve IMFExtendedCameraController", hr);
+  }
 
   if (!engine_) {
     hr = CreateCaptureEngine(&engine_);
@@ -999,14 +1026,6 @@ void VideoCaptureDeviceMFWin::AllocateAndStart(
     const VideoCaptureParams& params,
     std::unique_ptr<VideoCaptureDevice::Client> client) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  base::AutoLock lock(lock_);
-  return AllocateAndStartLocked(params, std::move(client));
-}
-
-void VideoCaptureDeviceMFWin::AllocateAndStartLocked(
-    const VideoCaptureParams& params,
-    std::unique_ptr<VideoCaptureDevice::Client> client) {
   params_ = params;
   client_ = std::move(client);
   DCHECK_EQ(false, is_started_);
@@ -1143,11 +1162,18 @@ void VideoCaptureDeviceMFWin::AllocateAndStartLocked(
   // event. For the lack of any other events indicating success, we have to wait
   // for the first video frame to arrive before sending our |OnStarted| event to
   // |client_|.
+  // We still need to wait for MF_CAPTURE_ENGINE_PREVIEW_STARTED event to ensure
+  // that we won't call StopPreview before the preview is started.
   has_sent_on_started_to_client_ = false;
   hr = engine_->StartPreview();
   if (FAILED(hr)) {
     OnError(VideoCaptureError::kWinMediaFoundationEngineStartPreviewFailed,
             FROM_HERE, hr);
+    return;
+  }
+
+  hr = WaitOnCaptureEvent(MF_CAPTURE_ENGINE_PREVIEW_STARTED);
+  if (FAILED(hr)) {
     return;
   }
 
@@ -1172,18 +1198,28 @@ void VideoCaptureDeviceMFWin::AllocateAndStartLocked(
 
 void VideoCaptureDeviceMFWin::StopAndDeAllocate() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  base::AutoLock lock(lock_);
-
-  if (is_started_ && engine_)
+  if (is_started_ && engine_) {
     engine_->StopPreview();
-  is_started_ = false;
+  }
 
+  // Ideally, we should wait for MF_CAPTURE_ENGINE_PREVIEW_STOPPED event here.
+  // However, since |engine_| is not reused for video capture after here,
+  // we can safely ignore this event to reduce the delay.
+  // It's only important to ensure that incoming events after the capture has
+  // stopped shouldn't lead to any crashes.
+  // This is achieved by ensuring that the |video_callback_| is shutdown in the
+  // destructor which will stop it from trying to use potentially destroyed
+  // VideoCaptureDeviceMFWin instance.
+  // Also, the callback itself is ref counted and |engine_| holds the reference,
+  // so we can delete this class at any time without creating use-after-free
+  // situations.
+
+  is_started_ = false;
   client_.reset();
 }
 
 void VideoCaptureDeviceMFWin::TakePhoto(TakePhotoCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  base::AutoLock lock(lock_);
 
   if (!is_started_)
     return;
@@ -1365,6 +1401,33 @@ void VideoCaptureDeviceMFWin::GetPhotoState(GetPhotoStateCallback callback) {
         RetrieveControlRangeAndCurrent(camera_control_, CameraControl_Zoom);
   }
 
+  if (extended_camera_controller_) {
+    ComPtr<IMFExtendedCameraControl> extended_camera_control;
+    // KSPROPERTY_CAMERACONTROL_EXTENDED_BACKGROUNDSEGMENTATION is supported in
+    // Windows 10 version 20H2. It was updated in Windows 11 version 22H2 to
+    // support optional shallow focus capability (according to
+    // https://docs.microsoft.com/en-us/windows-hardware/drivers/stream/ksproperty-cameracontrol-extended-backgroundsegmentation)
+    // but that support is not needed here.
+    hr = extended_camera_controller_->GetExtendedCameraControl(
+        MF_CAPTURE_ENGINE_MEDIASOURCE,
+        KSPROPERTY_CAMERACONTROL_EXTENDED_BACKGROUNDSEGMENTATION,
+        &extended_camera_control);
+    DLOG_IF_FAILED_WITH_HRESULT(
+        "Failed to retrieve IMFExtendedCameraControl for background "
+        "segmentation",
+        hr);
+    if (SUCCEEDED(hr) && (extended_camera_control->GetCapabilities() &
+                          KSCAMERA_EXTENDEDPROP_BACKGROUNDSEGMENTATION_BLUR)) {
+      photo_capabilities->supported_background_blur_modes = {
+          mojom::BackgroundBlurMode::OFF, mojom::BackgroundBlurMode::BLUR};
+      photo_capabilities->background_blur_mode =
+          (extended_camera_control->GetFlags() &
+           KSCAMERA_EXTENDEDPROP_BACKGROUNDSEGMENTATION_BLUR)
+              ? mojom::BackgroundBlurMode::BLUR
+              : mojom::BackgroundBlurMode::OFF;
+    }
+  }
+
   std::move(callback).Run(std::move(photo_capabilities));
 }
 
@@ -1538,26 +1601,65 @@ void VideoCaptureDeviceMFWin::SetPhotoOptions(
     }
   }
 
+  if (extended_camera_controller_) {
+    ComPtr<IMFExtendedCameraControl> extended_camera_control;
+    if (settings->has_background_blur_mode) {
+      hr = extended_camera_controller_->GetExtendedCameraControl(
+          MF_CAPTURE_ENGINE_MEDIASOURCE,
+          KSPROPERTY_CAMERACONTROL_EXTENDED_BACKGROUNDSEGMENTATION,
+          &extended_camera_control);
+      DLOG_IF_FAILED_WITH_HRESULT(
+          "Failed to retrieve IMFExtendedCameraControl for background "
+          "segmentation",
+          hr);
+      if (FAILED(hr))
+        return;
+      ULONGLONG flag;
+      switch (settings->background_blur_mode) {
+        case mojom::BackgroundBlurMode::OFF:
+          flag = KSCAMERA_EXTENDEDPROP_BACKGROUNDSEGMENTATION_OFF;
+          break;
+        case mojom::BackgroundBlurMode::BLUR:
+          flag = KSCAMERA_EXTENDEDPROP_BACKGROUNDSEGMENTATION_BLUR;
+          break;
+      }
+      if (extended_camera_control->GetFlags() != flag) {
+        hr = extended_camera_control->SetFlags(flag);
+        DLOG_IF_FAILED_WITH_HRESULT("Failed to set background segmentation",
+                                    hr);
+        if (FAILED(hr))
+          return;
+        hr = extended_camera_control->CommitSettings();
+        DLOG_IF_FAILED_WITH_HRESULT("Failed to commit background segmentation",
+                                    hr);
+        if (FAILED(hr))
+          return;
+      }
+    }
+  }
+
   std::move(callback).Run(true);
 }
 
 void VideoCaptureDeviceMFWin::OnUtilizationReport(
     media::VideoCaptureFeedback feedback) {
-  base::AutoLock lock(lock_);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   last_feedback_ = feedback;
 }
 
 void VideoCaptureDeviceMFWin::OnIncomingCapturedData(
-    IMFMediaBuffer* buffer,
+    Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer,
     base::TimeTicks reference_time,
     base::TimeDelta timestamp) {
-  VideoCaptureFrameDropReason frame_drop_reason =
-      VideoCaptureFrameDropReason::kNone;
-  OnIncomingCapturedDataInternal(buffer, reference_time, timestamp,
-                                 frame_drop_reason);
-  if (frame_drop_reason != VideoCaptureFrameDropReason::kNone) {
-    OnFrameDropped(frame_drop_reason);
-  }
+  // This is called on IMFCaptureEngine thread.
+  // To serialize all access to this class we post to the task
+  // runner which is used for Video capture service API calls
+  // (E.g. DeallocateAndStop).
+  main_thread_task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&VideoCaptureDeviceMFWin::OnIncomingCapturedDataInternal,
+                     weak_factory_.GetWeakPtr(), std::move(buffer),
+                     reference_time, timestamp));
 }
 
 HRESULT VideoCaptureDeviceMFWin::DeliverTextureToClient(
@@ -1580,6 +1682,13 @@ HRESULT VideoCaptureDeviceMFWin::DeliverTextureToClient(
     // Even if device was reset successfully, we can't continue
     // because the texture is tied to the old device.
     return hr;
+  }
+
+  if (texture_device.Get() != dxgi_device_manager_->GetDevice().Get()) {
+    // Main device has changed while IMFCaptureEngine was producing current
+    // texture. Change may happen either due to device removal or due to adapter
+    // change signalled via OnGpuInfoUpdate.
+    return MF_E_UNEXPECTED;
   }
 
   gfx::Size texture_size;
@@ -1658,11 +1767,10 @@ HRESULT VideoCaptureDeviceMFWin::DeliverTextureToClient(
 }
 
 void VideoCaptureDeviceMFWin::OnIncomingCapturedDataInternal(
-    IMFMediaBuffer* buffer,
+    Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer,
     base::TimeTicks reference_time,
-    base::TimeDelta timestamp,
-    VideoCaptureFrameDropReason& frame_drop_reason) {
-  base::AutoLock lock(lock_);
+    base::TimeDelta timestamp) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   SendOnStartedIfNotYetSent();
 
@@ -1685,7 +1793,7 @@ void VideoCaptureDeviceMFWin::OnIncomingCapturedDataInternal(
     if (dxgi_device_manager_ &&
         selected_video_capability_->supported_format.pixel_format ==
             PIXEL_FORMAT_NV12 &&
-        SUCCEEDED(GetTextureFromMFBuffer(buffer, &texture))) {
+        SUCCEEDED(GetTextureFromMFBuffer(buffer.Get(), &texture))) {
       HRESULT hr =
           DeliverTextureToClient(texture.Get(), reference_time, timestamp);
       DLOG_IF_FAILED_WITH_HRESULT("Failed to deliver D3D11 texture to client.",
@@ -1698,11 +1806,12 @@ void VideoCaptureDeviceMFWin::OnIncomingCapturedDataInternal(
     return;
   }
 
-  ScopedBufferLock locked_buffer(buffer);
+  ScopedBufferLock locked_buffer(buffer.Get());
   if (!locked_buffer.data()) {
     LOG(ERROR) << "Locked buffer delivered nullptr";
-    frame_drop_reason = VideoCaptureFrameDropReason::
-        kWinMediaFoundationLockingBufferDelieveredNullptr;
+    OnFrameDroppedInternal(
+        VideoCaptureFrameDropReason::
+            kWinMediaFoundationLockingBufferDelieveredNullptr);
     return;
   }
 
@@ -1743,7 +1852,19 @@ void VideoCaptureDeviceMFWin::OnIncomingCapturedDataInternal(
 
 void VideoCaptureDeviceMFWin::OnFrameDropped(
     VideoCaptureFrameDropReason reason) {
-  base::AutoLock lock(lock_);
+  // This is called on IMFCaptureEngine thread.
+  // To serialize all access to this class we post to the task
+  // runner which is used for Video capture service API calls
+  // (E.g. DeallocateAndStop).
+  main_thread_task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&VideoCaptureDeviceMFWin::OnFrameDroppedInternal,
+                     weak_factory_.GetWeakPtr(), reason));
+}
+
+void VideoCaptureDeviceMFWin::OnFrameDroppedInternal(
+    VideoCaptureFrameDropReason reason) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   SendOnStartedIfNotYetSent();
 
@@ -1759,22 +1880,35 @@ void VideoCaptureDeviceMFWin::OnEvent(IMFMediaEvent* media_event) {
   media_event->GetStatus(&hr);
   media_event->GetExtendedType(&capture_event_guid);
 
-  // TODO(http://crbug.com/1093521): Add cases for Start
-  // MF_CAPTURE_ENGINE_PREVIEW_STARTED and MF_CAPTURE_ENGINE_PREVIEW_STOPPED
   // When MF_CAPTURE_ENGINE_ERROR is returned the captureengine object is no
   // longer valid.
   if (capture_event_guid == MF_CAPTURE_ENGINE_ERROR || FAILED(hr)) {
+    // Safe to access this on a potentially different sequence, as
+    // this thread is write only and there is a barrier synchronization due
+    // to |capture_error_| event.
+    last_error_hr_ = hr;
     capture_error_.Signal();
     // There should always be a valid error
     hr = SUCCEEDED(hr) ? E_UNEXPECTED : hr;
+    // This is called on IMFCaptureEngine thread.
+    // To serialize all access to this class we post to the task
+    // runner which is used for Video capture service API calls
+    // (E.g. DeallocateAndStop).
+    main_thread_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&VideoCaptureDeviceMFWin::ProcessEventError,
+                                  weak_factory_.GetWeakPtr(), hr));
+
   } else if (capture_event_guid == MF_CAPTURE_ENGINE_INITIALIZED) {
     capture_initialize_.Signal();
+  } else if (capture_event_guid == MF_CAPTURE_ENGINE_PREVIEW_STOPPED) {
+    capture_stopped_.Signal();
+  } else if (capture_event_guid == MF_CAPTURE_ENGINE_PREVIEW_STARTED) {
+    capture_started_.Signal();
   }
+}
 
-  // Lock is taken after events are signalled, because if the capture
-  // is being restarted, lock is currently owned by another thread running
-  // OnEvent().
-  base::AutoLock lock(lock_);
+void VideoCaptureDeviceMFWin::ProcessEventError(HRESULT hr) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (hr == DXGI_ERROR_DEVICE_REMOVED && dxgi_device_manager_ != nullptr) {
     // Removed device can happen for external reasons.
@@ -1800,10 +1934,16 @@ void VideoCaptureDeviceMFWin::OnEvent(IMFMediaEvent* media_event) {
 
     if ((!try_d3d_path || recreated_d3d_device) && RecreateMFSource() &&
         Init()) {
-      AllocateAndStartLocked(params_, std::move(client_));
+      AllocateAndStart(params_, std::move(client_));
       // If AllocateAndStart fails somehow, OnError() will be called
       // internally. Therefore, it's safe to always override |hr| here.
       hr = S_OK;
+      // Ideally we should wait for MF_CAPTURE_ENGINE_PREVIEW_STARTED.
+      // However introducing that wait here could deadlocks in case if
+      // the same thread is used by MFCaptureEngine to signal events to
+      // the client.
+      // So we mark |is_started_| speculatevly here.
+      is_started_ = true;
       ++num_restarts_;
     } else {
       LOG(ERROR) << "Failed to re-initialize.";
@@ -1827,6 +1967,8 @@ void VideoCaptureDeviceMFWin::OnError(VideoCaptureError error,
 void VideoCaptureDeviceMFWin::OnError(VideoCaptureError error,
                                       const Location& from_here,
                                       const char* message) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   if (!client_.get())
     return;
 
@@ -1835,6 +1977,8 @@ void VideoCaptureDeviceMFWin::OnError(VideoCaptureError error,
 }
 
 void VideoCaptureDeviceMFWin::SendOnStartedIfNotYetSent() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   if (!client_ || has_sent_on_started_to_client_)
     return;
   has_sent_on_started_to_client_ = true;
@@ -1842,13 +1986,17 @@ void VideoCaptureDeviceMFWin::SendOnStartedIfNotYetSent() {
 }
 
 HRESULT VideoCaptureDeviceMFWin::WaitOnCaptureEvent(GUID capture_event_guid) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   HRESULT hr = S_OK;
   HANDLE events[] = {nullptr, capture_error_.handle()};
 
-  // TODO(http://crbug.com/1093521): Add cases for Start
-  // MF_CAPTURE_ENGINE_PREVIEW_STARTED and MF_CAPTURE_ENGINE_PREVIEW_STOPPED
   if (capture_event_guid == MF_CAPTURE_ENGINE_INITIALIZED) {
     events[0] = capture_initialize_.handle();
+  } else if (capture_event_guid == MF_CAPTURE_ENGINE_PREVIEW_STOPPED) {
+    events[0] = capture_stopped_.handle();
+  } else if (capture_event_guid == MF_CAPTURE_ENGINE_PREVIEW_STARTED) {
+    events[0] = capture_started_.handle();
   } else {
     // no registered event handle for the event requested
     hr = E_NOTIMPL;
@@ -1866,7 +2014,10 @@ HRESULT VideoCaptureDeviceMFWin::WaitOnCaptureEvent(GUID capture_event_guid) {
       LogError(FROM_HERE, hr);
       break;
     default:
-      hr = E_UNEXPECTED;
+      hr = last_error_hr_;
+      if (SUCCEEDED(hr)) {
+        hr = MF_E_UNEXPECTED;
+      }
       LogError(FROM_HERE, hr);
       break;
   }
@@ -1874,6 +2025,8 @@ HRESULT VideoCaptureDeviceMFWin::WaitOnCaptureEvent(GUID capture_event_guid) {
 }
 
 bool VideoCaptureDeviceMFWin::RecreateMFSource() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   const bool is_sensor_api = device_descriptor_.capture_api ==
                              VideoCaptureApi::WIN_MEDIA_FOUNDATION_SENSOR;
   ComPtr<IMFAttributes> attributes;

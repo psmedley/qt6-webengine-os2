@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,10 @@
 #include "base/containers/flat_set.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/common/buildflags.h"
@@ -211,12 +213,12 @@ class PrintPreviewHandler : public content::WebUIMessageHandler {
   void HandleManagePrinters(const base::Value::List& args);
 
   void SendInitialSettings(const std::string& callback_id,
-                           base::Value policies,
+                           base::Value::Dict policies,
                            const std::string& default_printer);
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
   // Sets |kIsDriveMounted| for Lacros chrome then returns the initial settings.
-  void OnDrivePathReady(base::Value initial_settings,
+  void OnDrivePathReady(base::Value::Dict initial_settings,
                         const std::string& callback_id,
                         const base::FilePath& drive_path);
 #endif
@@ -225,7 +227,7 @@ class PrintPreviewHandler : public content::WebUIMessageHandler {
   // printer capabilities information. If |settings_info| is empty, sends
   // error notification to the Web UI instead.
   void SendPrinterCapabilities(const std::string& callback_id,
-                               base::Value settings_info);
+                               base::Value::Dict settings_info);
 
   // Closes the preview dialog.
   void ClosePreviewDialog();
@@ -234,10 +236,10 @@ class PrintPreviewHandler : public content::WebUIMessageHandler {
   void ClearInitiatorDetails();
 
   // Populates |settings| according to the current locale.
-  void GetLocaleInformation(base::Value* settings);
+  void GetLocaleInformation(base::Value::Dict* settings);
 
   // Populates |settings| with the list of logged in accounts.
-  void GetUserAccountList(base::Value* settings);
+  void GetUserAccountList(base::Value::Dict* settings);
 
   PdfPrinterHandler* GetPdfPrinterHandler();
 
@@ -246,7 +248,7 @@ class PrintPreviewHandler : public content::WebUIMessageHandler {
   // |printers|: A non-empty list containing information about the printer or
   //     printers that have been added.
   void OnAddedPrinters(mojom::PrinterType printer_type,
-                       const base::ListValue& printers);
+                       base::Value::List printers);
 
   // Called when printer search is done for some destination type.
   // |callback_id|: The javascript callback to call.
@@ -302,7 +304,7 @@ class PrintPreviewHandler : public content::WebUIMessageHandler {
   // Note that this is not propagated to LocalPrinterHandlerLacros.
   // The pointer is constant - if ash crashes and the mojo connection is lost,
   // lacros will automatically be restarted.
-  crosapi::mojom::LocalPrinter* local_printer_ = nullptr;
+  raw_ptr<crosapi::mojom::LocalPrinter> local_printer_ = nullptr;
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
@@ -313,7 +315,8 @@ class PrintPreviewHandler : public content::WebUIMessageHandler {
   // Null if the interface is unavailable.
   // The pointer is constant - if ash crashes and the mojo connection is lost,
   // lacros will automatically be restarted.
-  crosapi::mojom::DriveIntegrationService* drive_integration_service_ = nullptr;
+  raw_ptr<crosapi::mojom::DriveIntegrationService> drive_integration_service_ =
+      nullptr;
 #endif
 
   base::WeakPtrFactory<PrintPreviewHandler> weak_factory_{this};

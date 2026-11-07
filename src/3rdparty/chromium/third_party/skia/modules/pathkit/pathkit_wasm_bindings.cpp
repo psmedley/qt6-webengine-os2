@@ -9,6 +9,7 @@
 #include "include/core/SkMatrix.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
+#include "include/core/SkPathEffect.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkString.h"
 #include "include/core/SkStrokeRec.h"
@@ -393,6 +394,7 @@ struct StrokeOpts {
     // any are omitted.
     SkScalar width;
     SkScalar miter_limit;
+    SkScalar res_scale;
     SkPaint::Join join;
     SkPaint::Cap cap;
 };
@@ -404,8 +406,11 @@ bool ApplyStroke(SkPath& path, StrokeOpts opts) {
     p.setStrokeJoin(opts.join);
     p.setStrokeWidth(opts.width);
     p.setStrokeMiter(opts.miter_limit);
-
-    return p.getFillPath(path, &path);
+    // Default to 1.0 if 0 (or an invalid negative number)
+    if (opts.res_scale <= 0) {
+        opts.res_scale = 1.0;
+    }
+    return p.getFillPath(path, &path, nullptr, opts.res_scale);
 }
 
 //========================================================================================
@@ -589,6 +594,7 @@ EMSCRIPTEN_BINDINGS(skia) {
     value_object<StrokeOpts>("StrokeOpts")
         .field("width",       &StrokeOpts::width)
         .field("miter_limit", &StrokeOpts::miter_limit)
+        .field("res_scale",   &StrokeOpts::res_scale)
         .field("join",        &StrokeOpts::join)
         .field("cap",         &StrokeOpts::cap);
 

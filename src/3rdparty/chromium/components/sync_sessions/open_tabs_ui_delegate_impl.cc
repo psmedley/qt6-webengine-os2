@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,20 +49,23 @@ bool OpenTabsUIDelegateImpl::GetForeignSessionTabs(
     const std::string& tag,
     std::vector<const sessions::SessionTab*>* tabs) {
   std::vector<const sessions::SessionWindow*> windows;
-  if (!session_tracker_->LookupSessionWindows(tag, &windows))
+  if (!session_tracker_->LookupSessionWindows(tag, &windows)) {
     return false;
+  }
 
   // Prune those tabs that are not syncable or are NewTabPage, then sort them
   // from most recent to least recent, independent of which window the tabs were
   // from.
   for (const sessions::SessionWindow* window : windows) {
     for (const std::unique_ptr<sessions::SessionTab>& tab : window->tabs) {
-      if (tab->navigations.empty())
+      if (tab->navigations.empty()) {
         continue;
+      }
       const sessions::SerializedNavigationEntry& current_navigation =
           tab->navigations.at(tab->normalized_navigation_index());
-      if (!sessions_client_->ShouldSyncURL(current_navigation.virtual_url()))
+      if (!sessions_client_->ShouldSyncURL(current_navigation.virtual_url())) {
         continue;
+      }
       tabs->push_back(tab.get());
     }
   }

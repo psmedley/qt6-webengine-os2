@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,8 +28,7 @@ class PasswordStoreProxyBackend : public PasswordStoreBackend {
   // this object as long as Shutdown() is not called.
   PasswordStoreProxyBackend(PasswordStoreBackend* built_in_backend,
                             PasswordStoreBackend* android_backend,
-                            PrefService* prefs,
-                            SyncDelegate* sync_delegate);
+                            PrefService* prefs);
   PasswordStoreProxyBackend(const PasswordStoreProxyBackend&) = delete;
   PasswordStoreProxyBackend(PasswordStoreProxyBackend&&) = delete;
   PasswordStoreProxyBackend& operator=(const PasswordStoreProxyBackend&) =
@@ -51,25 +50,25 @@ class PasswordStoreProxyBackend : public PasswordStoreBackend {
   void GetAllLoginsForAccountAsync(absl::optional<std::string> account,
                                    LoginsOrErrorReply callback) override;
   void FillMatchingLoginsAsync(
-      LoginsReply callback,
+      LoginsOrErrorReply callback,
       bool include_psl,
       const std::vector<PasswordFormDigest>& forms) override;
   void AddLoginAsync(const PasswordForm& form,
-                     PasswordStoreChangeListReply callback) override;
+                     PasswordChangesOrErrorReply callback) override;
   void UpdateLoginAsync(const PasswordForm& form,
-                        PasswordStoreChangeListReply callback) override;
+                        PasswordChangesOrErrorReply callback) override;
   void RemoveLoginAsync(const PasswordForm& form,
-                        PasswordStoreChangeListReply callback) override;
+                        PasswordChangesOrErrorReply callback) override;
   void RemoveLoginsByURLAndTimeAsync(
       const base::RepeatingCallback<bool(const GURL&)>& url_filter,
       base::Time delete_begin,
       base::Time delete_end,
       base::OnceCallback<void(bool)> sync_completion,
-      PasswordStoreChangeListReply callback) override;
+      PasswordChangesOrErrorReply callback) override;
   void RemoveLoginsCreatedBetweenAsync(
       base::Time delete_begin,
       base::Time delete_end,
-      PasswordStoreChangeListReply callback) override;
+      PasswordChangesOrErrorReply callback) override;
   void DisableAutoSignInForOriginsAsync(
       const base::RepeatingCallback<bool(const GURL&)>& origin_filter,
       base::OnceClosure completion) override;
@@ -92,13 +91,34 @@ class PasswordStoreProxyBackend : public PasswordStoreBackend {
       CallbackOriginatesFromAndroidBackend originatesFromAndroid,
       base::RepeatingClosure sync_enabled_or_disabled_cb);
 
+  // Helper used to determine main *and* shadow backends. Some UPM experiment
+  // groups use shadow traffic to compare the two backends, other may need it
+  // to execute login deletions on both backends, to avoid recovery of deleted
+  // data.
+  bool UsesAndroidBackendAsMainBackend();
+
+  // Retries to execute operation on |built_in_backend| in case of an
+  // unrecoverable error inside |android_backend|. |retry_callback| is the
+  // pending operation with binded parameters, |result_callback| is the original
+  // operation callback.
+  // |ResultT| is the resulting type of the backend operation that will be
+  // passed to the result callback. Could be either |LoginsResultOrError| or
+  // |PasswordChangesOrError|.
+  template <typename ResultT>
+  void MaybeRetryOperation(
+      base::OnceCallback<void(base::OnceCallback<void(ResultT)> callback)>
+          retry_callback,
+      const base::StrongAlias<struct MethodNameTag, std::string>& method_name,
+      base::OnceCallback<void(ResultT)> result_callback,
+      ResultT result);
+
   PasswordStoreBackend* main_backend();
   PasswordStoreBackend* shadow_backend();
 
   const raw_ptr<PasswordStoreBackend> built_in_backend_;
   const raw_ptr<PasswordStoreBackend> android_backend_;
   raw_ptr<PrefService> const prefs_ = nullptr;
-  const raw_ptr<SyncDelegate> sync_delegate_;
+  raw_ptr<const syncer::SyncService> sync_service_ = nullptr;
 
   base::WeakPtrFactory<PasswordStoreProxyBackend> weak_ptr_factory_{this};
 };

@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -409,11 +409,8 @@ def _native_value_tag_impl(idl_type):
     """Returns the tag type of NativeValueTraits."""
     assert isinstance(idl_type, web_idl.IdlType)
 
-    if idl_type.is_typedef:
-        if idl_type.identifier in ("EventHandler",
-                                   "OnBeforeUnloadEventHandler",
-                                   "OnErrorEventHandler"):
-            return "IDL{}".format(idl_type.identifier)
+    if idl_type.is_event_handler:
+        return "IDL{}".format(idl_type.identifier)
 
     real_type = idl_type.unwrap(typedef=True)
 
@@ -423,9 +420,15 @@ def _native_value_tag_impl(idl_type):
             idl_type.type_name_with_extended_attribute_key_values)
 
     if real_type.is_array_buffer:
+        if "BufferSourceTypeNoSizeLimit" in real_type.effective_annotations:
+            return "IDLBufferSourceTypeNoSizeLimit<{}>".format(
+                blink_type_info(real_type).typename)
         return blink_type_info(real_type).typename
 
     if real_type.is_buffer_source_type:
+        if "BufferSourceTypeNoSizeLimit" in real_type.effective_annotations:
+            return "IDLBufferSourceTypeNoSizeLimit<{}>".format(
+                blink_type_info(real_type).value_t)
         return blink_type_info(real_type).value_t
 
     if real_type.is_symbol:

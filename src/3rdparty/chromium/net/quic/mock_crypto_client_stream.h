@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define NET_QUIC_MOCK_CRYPTO_CLIENT_STREAM_H_
 
 #include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "net/quic/crypto/proof_verifier_chromium.h"
 #include "net/third_party/quiche/src/quiche/quic/core/crypto/crypto_handshake.h"
 #include "net/third_party/quiche/src/quiche/quic/core/crypto/crypto_protocol.h"
@@ -88,6 +89,10 @@ class MockCryptoClientStream : public quic::QuicCryptoClientStream,
   // Notify session that 0-RTT setup is complete.
   void NotifySessionZeroRttComplete();
 
+  base::WeakPtr<MockCryptoClientStream> GetWeakPtr() {
+    return weak_factory_.GetWeakPtr();
+  }
+
   static quic::CryptoHandshakeMessage GetDummyCHLOMessage();
 
  protected:
@@ -101,8 +106,8 @@ class MockCryptoClientStream : public quic::QuicCryptoClientStream,
   void FillCryptoParams();
 
   HandshakeMode handshake_mode_;
-  bool encryption_established_;
-  bool handshake_confirmed_;
+  bool encryption_established_ = false;
+  bool handshake_confirmed_ = false;
   quiche::QuicheReferenceCountedPointer<quic::QuicCryptoNegotiatedParameters>
       crypto_negotiated_params_;
   quic::CryptoFramer crypto_framer_;
@@ -111,6 +116,7 @@ class MockCryptoClientStream : public quic::QuicCryptoClientStream,
   const quic::QuicServerId server_id_;
   raw_ptr<const net::ProofVerifyDetailsChromium> proof_verify_details_;
   const quic::QuicConfig config_;
+  base::WeakPtrFactory<MockCryptoClientStream> weak_factory_{this};
 };
 
 }  // namespace net

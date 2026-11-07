@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -105,7 +105,7 @@ std::pair<base::ListValue, base::DictionaryValue> GetGCacheContents(
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // Use this map to sort the result list by the path.
-  std::map<base::FilePath, std::unique_ptr<base::DictionaryValue>> files;
+  std::map<base::FilePath, base::Value::Dict> files;
 
   const int options =
       (base::FileEnumerator::FILES | base::FileEnumerator::DIRECTORIES |
@@ -121,18 +121,17 @@ std::pair<base::ListValue, base::DictionaryValue> GetGCacheContents(
     const bool is_symbolic_link = base::IsLink(info.GetName());
     const base::Time last_modified = info.GetLastModifiedTime();
 
-    auto entry = std::make_unique<base::DictionaryValue>();
-    entry->SetStringKey("path", current.value());
+    base::Value::Dict entry;
+    entry.Set("path", current.value());
     // Use double instead of integer for large files.
-    entry->SetDoubleKey("size", size);
-    entry->SetBoolKey("is_directory", is_directory);
-    entry->SetBoolKey("is_symbolic_link", is_symbolic_link);
-    entry->SetStringKey(
-        "last_modified",
-        google_apis::util::FormatTimeAsStringLocaltime(last_modified));
+    entry.Set("size", static_cast<double>(size));
+    entry.Set("is_directory", is_directory);
+    entry.Set("is_symbolic_link", is_symbolic_link);
+    entry.Set("last_modified",
+              google_apis::util::FormatTimeAsStringLocaltime(last_modified));
     // Print lower 9 bits in octal format.
-    entry->SetStringKey(
-        "permission", base::StringPrintf("%03o", info.stat().st_mode & 0x1ff));
+    entry.Set("permission",
+              base::StringPrintf("%03o", info.stat().st_mode & 0x1ff));
     files[current] = std::move(entry);
 
     total_size += size;
@@ -141,7 +140,7 @@ std::pair<base::ListValue, base::DictionaryValue> GetGCacheContents(
   std::pair<base::ListValue, base::DictionaryValue> result;
   // Convert |files| into response.
   for (auto& it : files)
-    result.first.Append(std::move(it.second));
+    result.first.GetList().Append(std::move(it.second));
   result.second.SetDoubleKey("total_size", total_size);
   return result;
 }
@@ -668,7 +667,7 @@ class DriveInternalsWebUIHandler : public content::WebUIMessageHandler {
           base::StrCat({"log-", severity}));
       last_sent_event_id_ = log[i].id;
     }
-    if (!list.GetListDeprecated().empty()) {
+    if (!list.GetList().empty()) {
       MaybeCallJavascript("updateEventLog", std::move(list));
     }
   }
@@ -706,8 +705,8 @@ class DriveInternalsWebUIHandler : public content::WebUIMessageHandler {
       service_log_file_inode_ = response.first;
       last_sent_line_number_ = 0;
     }
-    if (!response.second.GetListDeprecated().empty()) {
-      last_sent_line_number_ += response.second.GetListDeprecated().size();
+    if (!response.second.GetList().empty()) {
+      last_sent_line_number_ += response.second.GetList().size();
       MaybeCallJavascript("updateServiceLog", std::move(response.second));
     }
     service_log_file_is_processing_ = false;
@@ -905,7 +904,7 @@ class DriveInternalsWebUIHandler : public content::WebUIMessageHandler {
     drive::DriveIntegrationService* service =
         drive::DriveIntegrationServiceFactory::FindForProfile(profile());
     if (!service || !service->is_enabled())
-      return NULL;
+      return nullptr;
     return service;
   }
 
@@ -1004,7 +1003,7 @@ class LogsZipper : public download::AllDownloadItemNotifier::Observer {
   void CleanUp() {
     base::ThreadPool::PostTask(
         FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-        base::BindOnce(base::GetDeleteFileCallback(), zip_path_));
+        base::GetDeleteFileCallback(zip_path_));
     download_notifier_.reset();
     if (drive_internals_) {
       drive_internals_->OnZipDone();

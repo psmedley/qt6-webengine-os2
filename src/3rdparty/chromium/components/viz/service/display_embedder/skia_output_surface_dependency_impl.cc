@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,10 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/viz/service/gl/gpu_service_impl.h"
+#include "gpu/command_buffer/service/command_buffer_task_executor.h"
+#include "gpu/command_buffer/service/gpu_task_scheduler_helper.h"
 #include "gpu/command_buffer/service/scheduler.h"
-#include "gpu/ipc/command_buffer_task_executor.h"
-#include "gpu/ipc/gpu_task_scheduler_helper.h"
-#include "gpu/ipc/scheduler_sequence.h"
+#include "gpu/command_buffer/service/scheduler_sequence.h"
 #include "gpu/ipc/service/image_transport_surface.h"
 #include "ui/gl/init/gl_factory.h"
 
@@ -34,7 +34,7 @@ std::unique_ptr<gpu::SingleTaskSequence>
 SkiaOutputSurfaceDependencyImpl::CreateSequence() {
   return std::make_unique<gpu::SchedulerSequence>(
       gpu_service_impl_->GetGpuScheduler(),
-      gpu_service_impl_->gpu_task_runner());
+      gpu_service_impl_->compositor_gpu_task_runner());
 }
 
 gpu::SharedImageManager*
@@ -107,29 +107,30 @@ scoped_refptr<gl::GLSurface> SkiaOutputSurfaceDependencyImpl::CreateGLSurface(
     base::WeakPtr<gpu::ImageTransportSurfaceDelegate> stub,
     gl::GLSurfaceFormat format) {
   if (IsOffscreen()) {
-    return gl::init::CreateOffscreenGLSurfaceWithFormat(gfx::Size(), format);
+    return gl::init::CreateOffscreenGLSurfaceWithFormat(
+        GetSharedContextState()->display(), gfx::Size(), format);
   } else {
     return gpu::ImageTransportSurface::CreateNativeSurface(
-        stub, surface_handle_, format);
+        GetSharedContextState()->display(), stub, surface_handle_, format);
   }
 }
 
 base::ScopedClosureRunner SkiaOutputSurfaceDependencyImpl::CacheGLSurface(
     gl::GLSurface* surface) {
-  gpu_service_impl_->gpu_task_runner()->PostTask(
+  gpu_service_impl_->compositor_gpu_task_runner()->PostTask(
       FROM_HERE,
       base::BindOnce(&gl::GLSurface::AddRef, base::Unretained(surface)));
 
   auto release_callback = base::BindPostTask(
-      gpu_service_impl_->gpu_task_runner(),
+      gpu_service_impl_->compositor_gpu_task_runner(),
       base::BindOnce(&gl::GLSurface::Release, base::Unretained(surface)));
 
   return base::ScopedClosureRunner(std::move(release_callback));
 }
 
-void SkiaOutputSurfaceDependencyImpl::PostTaskToClientThread(
-    base::OnceClosure closure) {
-  client_thread_task_runner_->PostTask(FROM_HERE, std::move(closure));
+scoped_refptr<base::TaskRunner>
+SkiaOutputSurfaceDependencyImpl::GetClientTaskRunner() {
+  return client_thread_task_runner_;
 }
 
 void SkiaOutputSurfaceDependencyImpl::ScheduleGrContextCleanup() {
@@ -139,7 +140,7 @@ void SkiaOutputSurfaceDependencyImpl::ScheduleGrContextCleanup() {
 void SkiaOutputSurfaceDependencyImpl::ScheduleDelayedGPUTaskFromGPUThread(
     base::OnceClosure task) {
   constexpr base::TimeDelta kDelayForDelayedWork = base::Milliseconds(2);
-  gpu_service_impl_->gpu_task_runner()->PostDelayedTask(
+  gpu_service_impl_->compositor_gpu_task_runner()->PostDelayedTask(
       FROM_HERE, std::move(task), kDelayForDelayedWork);
 }
 
@@ -150,16 +151,6 @@ void SkiaOutputSurfaceDependencyImpl::DidCreateAcceleratedSurfaceChildWindow(
   gpu_service_impl_->SendCreatedChildWindow(parent_window, child_window);
 }
 #endif
-
-void SkiaOutputSurfaceDependencyImpl::RegisterDisplayContext(
-    gpu::DisplayContext* display_context) {
-  gpu_service_impl_->RegisterDisplayContext(display_context);
-}
-
-void SkiaOutputSurfaceDependencyImpl::UnregisterDisplayContext(
-    gpu::DisplayContext* display_context) {
-  gpu_service_impl_->UnregisterDisplayContext(display_context);
-}
 
 void SkiaOutputSurfaceDependencyImpl::DidLoseContext(
     gpu::error::ContextLostReason reason,

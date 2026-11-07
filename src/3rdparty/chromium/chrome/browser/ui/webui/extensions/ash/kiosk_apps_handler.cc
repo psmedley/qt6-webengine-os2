@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include <utility>
 #include <vector>
 
-#include "ash/components/settings/cros_settings_names.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/strings/string_util.h"
@@ -23,6 +22,7 @@
 #include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/ash/settings/cros_settings.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chromeos/ash/components/settings/cros_settings_names.h"
 #include "components/crx_file/id_util.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/user_manager/user_manager.h"
@@ -193,15 +193,14 @@ void KioskAppsHandler::OnGetConsumerKioskAutoLaunchStatus(
     is_auto_launch_enabled_ = false;
   }
 
-  base::DictionaryValue kiosk_params;
-  kiosk_params.GetDict().Set("kioskEnabled", is_kiosk_enabled_);
-  kiosk_params.GetDict().Set("autoLaunchEnabled", is_auto_launch_enabled_);
+  base::Value::Dict kiosk_params;
+  kiosk_params.Set("kioskEnabled", is_kiosk_enabled_);
+  kiosk_params.Set("autoLaunchEnabled", is_auto_launch_enabled_);
   ResolveJavascriptCallback(base::Value(callback_id), kiosk_params);
 }
 
 void KioskAppsHandler::OnKioskAppsSettingsChanged() {
-  FireWebUIListener("kiosk-app-settings-changed",
-                    base::Value(GetSettingsDictionary()));
+  FireWebUIListener("kiosk-app-settings-changed", GetSettingsDictionary());
 }
 
 base::Value::Dict KioskAppsHandler::GetSettingsDictionary() {
@@ -250,8 +249,7 @@ void KioskAppsHandler::HandleGetKioskAppSettings(
   CHECK_EQ(1U, args.size());
   const std::string& callback_id = args.front().GetString();
 
-  ResolveJavascriptCallback(base::Value(callback_id),
-                            base::Value(GetSettingsDictionary()));
+  ResolveJavascriptCallback(base::Value(callback_id), GetSettingsDictionary());
 }
 
 void KioskAppsHandler::HandleAddKioskApp(const base::Value::List& args) {
@@ -320,8 +318,7 @@ void KioskAppsHandler::UpdateApp(const std::string& app_id) {
   if (!kiosk_app_manager_->GetApp(app_id, &app_data))
     return;
 
-  FireWebUIListener("kiosk-app-updated",
-                    base::Value(PopulateAppDict(app_data)));
+  FireWebUIListener("kiosk-app-updated", PopulateAppDict(app_data));
 }
 
 void KioskAppsHandler::ShowError(const std::string& app_id) {

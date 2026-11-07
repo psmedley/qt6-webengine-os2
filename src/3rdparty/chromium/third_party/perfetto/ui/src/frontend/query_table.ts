@@ -20,13 +20,13 @@ import {QueryResponse} from '../common/queries';
 import {Row} from '../common/query_result';
 import {fromNs} from '../common/time';
 
-import {queryResponseToClipboard} from './clipboard';
+import {copyToClipboard, queryResponseToClipboard} from './clipboard';
 import {globals} from './globals';
 import {Panel} from './panel';
 import {Router} from './router';
 import {
-  horizontalScrollAndZoomToRange,
-  verticalScrollToTrack
+  focusHorizontalRange,
+  verticalScrollToTrack,
 } from './scroll_helper';
 
 interface QueryTableRowAttrs {
@@ -59,7 +59,7 @@ class QueryTableRow implements m.ClassComponent<QueryTableRowAttrs> {
     const uiTrackId = globals.state.uiTrackIdByTraceTrackId[trackId];
     if (uiTrackId === undefined) return;
     verticalScrollToTrack(uiTrackId, true);
-    horizontalScrollAndZoomToRange(sliceStart, sliceEnd);
+    focusHorizontalRange(sliceStart, sliceEnd);
     let sliceId: number|undefined;
     if (row.type?.toString().includes('slice')) {
       sliceId = row.id as number | undefined;
@@ -93,11 +93,11 @@ class QueryTableRow implements m.ClassComponent<QueryTableRowAttrs> {
     return m(
         'tr',
         {
-          onclick: maybeOnClick,
+          'onclick': maybeOnClick,
           // TODO(altimin): Consider improving the logic here (e.g. delay?) to
           // account for cases when dblclick fires late.
-          ondblclick: maybeOnDblClick,
-          'clickable': containsSliceLocation
+          'ondblclick': maybeOnDblClick,
+          'clickable': containsSliceLocation,
         },
         cells);
   }
@@ -138,8 +138,16 @@ export class QueryTable extends Panel<QueryTableAttrs> {
     const headers = [
       m(
           'header.overview',
-          `Query result - ${Math.round(resp.durationMs)} ms`,
-          m('span.code', resp.query),
+          m('span', `Query result - ${Math.round(resp.durationMs)} ms`),
+          m('span.code.text-select', resp.query),
+          m('span.spacer'),
+          m('button.query-ctrl',
+            {
+              onclick: () => {
+                copyToClipboard(resp.query);
+              },
+            },
+            'Copy query'),
           resp.error ? null :
                        m('button.query-ctrl',
                          {
@@ -147,13 +155,13 @@ export class QueryTable extends Panel<QueryTableAttrs> {
                              queryResponseToClipboard(resp);
                            },
                          },
-                         'Copy as .tsv'),
+                         'Copy result (.tsv)'),
           m('button.query-ctrl',
             {
               onclick: () => {
                 globals.queryResults.delete(queryId);
                 globals.rafScheduler.scheduleFullRedraw();
-              }
+              },
             },
             'Close'),
           ),

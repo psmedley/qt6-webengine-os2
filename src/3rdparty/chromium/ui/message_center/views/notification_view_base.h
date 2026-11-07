@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -225,9 +225,12 @@ class MESSAGE_CENTER_EXPORT NotificationViewBase
   // inline settings or vice versa.
   virtual void ToggleInlineSettings(const ui::Event& event);
 
-  // This function is called when user clicks on the notification action
-  // buttons.
+  // Called when a user clicks on a notification action button, identified by
+  // `index`.
   virtual void ActionButtonPressed(size_t index, const ui::Event& event);
+
+  // Called after `inline_reply_` is updated for custom handling.
+  virtual void OnInlineReplyUpdated();
 
   // Whether `notification` is configured to have an inline reply field.
   bool HasInlineReply(const Notification& notification) const;
@@ -291,16 +294,12 @@ class MESSAGE_CENTER_EXPORT NotificationViewBase
   FRIEND_TEST_ALL_PREFIXES(NotificationViewBaseTest, AppNameWebNotification);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewBaseTest, AppNameWebAppNotification);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewBaseTest, CreateOrUpdateTest);
-  FRIEND_TEST_ALL_PREFIXES(NotificationViewBaseTest,
-                           ManuallyExpandedOrCollapsed);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewBaseTest, InlineSettings);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewBaseTest,
                            InlineSettingsInkDropAnimation);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewBaseTest, NotificationWithoutIcon);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewBaseTest, ShowProgress);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewBaseTest, ShowTimestamp);
-  FRIEND_TEST_ALL_PREFIXES(NotificationViewBaseTest,
-                           TestAccentColorTextFlagAffectsActionButtons);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewBaseTest, TestActionButtonClick);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewBaseTest, TestClick);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewBaseTest, TestClickExpanded);
@@ -321,6 +320,7 @@ class MESSAGE_CENTER_EXPORT NotificationViewBase
   FRIEND_TEST_ALL_PREFIXES(NotificationViewBaseTest, UseImageAsIcon);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewTest, TestIconSizing);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewTest, LeftContentResizeForIcon);
+  FRIEND_TEST_ALL_PREFIXES(NotificationViewTest, ManuallyExpandedOrCollapsed);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewTest, InlineSettingsNotBlock);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewTest, InlineSettingsBlockAll);
   FRIEND_TEST_ALL_PREFIXES(NotificationViewTest, TestAccentColor);
@@ -336,10 +336,6 @@ class MESSAGE_CENTER_EXPORT NotificationViewBase
   void CreateOrUpdateIconView(const Notification& notification);
   void CreateOrUpdateImageView(const Notification& notification);
   void CreateOrUpdateActionButtonViews(const Notification& notification);
-
-  void HeaderRowPressed();
-
-  void ToggleExpanded();
 
   // View containing close and settings buttons
   NotificationControlButtonsView* control_buttons_view_ = nullptr;
@@ -397,7 +393,7 @@ class MESSAGE_CENTER_EXPORT NotificationViewBase
 
   // Counter for view layouting, which is used during the CreateOrUpdate*
   // phases to keep track of the view ordering. See crbug.com/901045
-  int left_content_count_;
+  size_t left_content_count_;
 
   std::unique_ptr<ui::EventHandler> click_activator_;
 

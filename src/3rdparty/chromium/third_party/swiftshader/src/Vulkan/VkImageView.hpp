@@ -53,6 +53,8 @@ union Identifier
 		VkImageViewType imageViewType;
 		VkFormat format;
 		VkComponentMapping mapping;
+		uint8_t minLod;
+		uint8_t maxLod;
 		bool singleMipLevel;
 	};
 	State getState() const;
@@ -61,6 +63,7 @@ private:
 	void pack(const State &data);
 
 	// Identifier is a union of this struct and the integer below.
+	static_assert(sw::MIPMAP_LEVELS <= 15);
 	struct
 	{
 		uint32_t imageViewType : 3;
@@ -69,6 +72,8 @@ private:
 		uint32_t g : 3;
 		uint32_t b : 3;
 		uint32_t a : 3;
+		uint32_t minLod : 4;
+		uint32_t maxLod : 4;
 		uint32_t singleMipLevel : 1;
 	};
 
@@ -110,12 +115,12 @@ public:
 
 	int getSampleCount() const
 	{
-		switch(image->getSampleCountFlagBits())
+		switch(image->getSampleCount())
 		{
 		case VK_SAMPLE_COUNT_1_BIT: return 1;
 		case VK_SAMPLE_COUNT_4_BIT: return 4;
 		default:
-			UNSUPPORTED("Sample count flags %d", image->getSampleCountFlagBits());
+			UNSUPPORTED("Sample count %d", image->getSampleCount());
 			return 1;
 		}
 	}

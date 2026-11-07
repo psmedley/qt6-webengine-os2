@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,7 @@
 #include "services/device/public/mojom/geolocation_context.mojom.h"
 #include "services/device/public/mojom/geolocation_control.mojom.h"
 #include "services/device/public/mojom/power_monitor.mojom.h"
+#include "services/device/public/mojom/pressure_manager.mojom.h"
 #include "services/device/public/mojom/screen_orientation.mojom.h"
 #include "services/device/public/mojom/sensor_provider.mojom.h"
 #include "services/device/public/mojom/serial.mojom.h"
@@ -50,7 +51,6 @@
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "services/device/media_transfer_protocol/mtp_device_manager.h"
-#include "services/device/public/mojom/bluetooth_system.mojom.h"
 #endif
 
 #if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) && defined(USE_UDEV)
@@ -81,6 +81,7 @@ class DeviceService;
 class GeolocationManager;
 class PlatformSensorProvider;
 class PowerMonitorMessageBroadcaster;
+class PressureManagerImpl;
 class PublicIpAddressLocationNotifier;
 class SensorProviderImpl;
 class TimeZoneMonitor;
@@ -133,6 +134,12 @@ class DeviceService : public mojom::DeviceService {
   static void OverrideGeolocationContextBinderForTesting(
       GeolocationContextBinder binder);
 
+  // Supports global override of PressureManager binding within the service.
+  using PressureManagerBinder = base::RepeatingCallback<void(
+      mojo::PendingReceiver<mojom::PressureManager>)>;
+  static void OverridePressureManagerBinderForTesting(
+      PressureManagerBinder binder);
+
 #if BUILDFLAG(IS_ANDROID)
   // Allows tests to override how frame hosts bind NFCProvider receivers.
   using NFCProviderBinder = base::RepeatingCallback<void(
@@ -159,6 +166,9 @@ class DeviceService : public mojom::DeviceService {
   void BindBatteryMonitor(
       mojo::PendingReceiver<mojom::BatteryMonitor> receiver) override;
 
+  void BindPressureManager(
+      mojo::PendingReceiver<mojom::PressureManager> receiver) override;
+
 #if BUILDFLAG(IS_ANDROID)
   void BindNFCProvider(
       mojo::PendingReceiver<mojom::NFCProvider> receiver) override;
@@ -173,8 +183,6 @@ class DeviceService : public mojom::DeviceService {
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  void BindBluetoothSystemFactory(
-      mojo::PendingReceiver<mojom::BluetoothSystemFactory> receiver) override;
   void BindMtpManager(
       mojo::PendingReceiver<mojom::MtpManager> receiver) override;
 #endif
@@ -214,6 +222,7 @@ class DeviceService : public mojom::DeviceService {
       mojo::PendingReceiver<mojom::UsbDeviceManagerTest> receiver) override;
 
   mojo::ReceiverSet<mojom::DeviceService> receivers_;
+  std::unique_ptr<PressureManagerImpl> pressure_manager_;
   std::unique_ptr<PowerMonitorMessageBroadcaster>
       power_monitor_message_broadcaster_;
   std::unique_ptr<PublicIpAddressGeolocationProvider>

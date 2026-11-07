@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,7 @@ absl::optional<AttestedCredentialData> MakeAttestedCredentialData(
 // which may be |absl::nullopt| in GetAssertion operations.
 COMPONENT_EXPORT(DEVICE_FIDO)
 AuthenticatorData MakeAuthenticatorData(
-    CredentialMetadata::Version version,
+    CredentialMetadata::SignCounter counter_type,
     const std::string& rp_id,
     absl::optional<AttestedCredentialData> attested_credential_data);
 
@@ -50,23 +50,20 @@ AuthenticatorData MakeAuthenticatorData(
 absl::optional<std::vector<uint8_t>> GenerateSignature(
     const AuthenticatorData& authenticator_data,
     base::span<const uint8_t, kClientDataHashLength> client_data_hash,
-    SecKeyRef private_key) API_AVAILABLE(macosx(10.12.2));
+    SecKeyRef private_key);
 
 // SecKeyRefToECPublicKey converts a SecKeyRef for a public key into an
 // equivalent |PublicKey| instance. It returns |nullptr| if the key cannot
 // be converted.
-std::unique_ptr<PublicKey> SecKeyRefToECPublicKey(SecKeyRef public_key_ref)
-    API_AVAILABLE(macosx(10.12.2));
+std::unique_ptr<PublicKey> SecKeyRefToECPublicKey(SecKeyRef public_key_ref);
 
 enum class CodeSigningState {
   kSigned,
   kNotSigned,
-  kUnknown,
 };
 
-// ProcessIsSigned returns `kSigned` if the current process has been code
-// signed, `kNotSigned` if not, or `kUnknown` if the signing status cannot be
-// determined. (The latter will always happen on macOS < 10.12.)
+// ProcessIsSigned returns whether the current process has been code
+// signed.
 CodeSigningState ProcessIsSigned();
 
 }  // namespace mac

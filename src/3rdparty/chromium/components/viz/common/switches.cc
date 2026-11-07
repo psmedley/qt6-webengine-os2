@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,10 +28,6 @@ const char kDeadlineToSynchronizeSurfaces[] =
 // Disables begin frame limiting in both cc scheduler and display scheduler.
 // Also implies --disable-gpu-vsync (see //ui/gl/gl_switches.h).
 const char kDisableFrameRateLimit[] = "disable-frame-rate-limit";
-
-// Slows down animations during a DocumentTransition for debugging.
-const char kDocumentTransitionSlowdownFactor[] =
-    "document-transition-slowdown-factor";
 
 // Sets the number of max pending frames in the GL buffer queue to 1.
 const char kDoubleBufferCompositing[] = "double-buffer-compositing";
@@ -85,20 +81,6 @@ absl::optional<uint32_t> GetDeadlineToSynchronizeSurfaces() {
     return absl::nullopt;
   }
   return activation_deadline_in_frames;
-}
-
-int GetDocumentTransitionSlowDownFactor() {
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (!command_line ||
-      !command_line->HasSwitch(kDocumentTransitionSlowdownFactor))
-    return 1;
-
-  auto factor_str =
-      command_line->GetSwitchValueASCII(kDocumentTransitionSlowdownFactor);
-  int factor = 0;
-  LOG_IF(ERROR, !base::StringToInt(factor_str, &factor))
-      << "Error parsing document transition slow down factor " << factor_str;
-  return std::max(1, factor);
 }
 
 }  // namespace switches

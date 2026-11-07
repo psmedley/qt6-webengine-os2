@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -359,11 +359,6 @@ net::NextProto FakeSSLClientSocket::GetNegotiatedProtocol() const {
 
 bool FakeSSLClientSocket::GetSSLInfo(net::SSLInfo* ssl_info) {
   return transport_socket_->GetSSLInfo(ssl_info);
-}
-
-void FakeSSLClientSocket::GetConnectionAttempts(
-    net::ConnectionAttempts* out) const {
-  out->clear();
 }
 
 int64_t FakeSSLClientSocket::GetTotalReceivedBytes() const {

@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,8 +45,10 @@ SiteInstanceGroupManager::GetOrCreateGroupForNewSiteInstance(
   // own SiteInstanceGroup, and we can always create a new group for each new
   // SiteInstance here. When grouping policies are introduced, this function may
   // return an existing SiteInstanceGroup for a new SiteInstance.
-  return base::WrapRefCounted(
+  scoped_refptr<SiteInstanceGroup> site_instance_group = base::WrapRefCounted(
       new SiteInstanceGroup(site_instance->GetBrowsingInstanceId(), process));
+  site_instance_group->AddSiteInstance(site_instance);
+  return site_instance_group;
 }
 
 void SiteInstanceGroupManager::OnSiteInfoSet(SiteInstanceImpl* site_instance,

@@ -393,6 +393,37 @@ void QWebEngineProfile::setDownloadPath(const QString &path)
 }
 
 /*!
+    \since 6.5
+
+    Returns \c true if the push messaging service is enabled.
+    \note By default the push messaging service is disabled.
+
+    \sa setPushServiceEnabled()
+*/
+bool QWebEngineProfile::isPushServiceEnabled() const
+{
+    const Q_D(QWebEngineProfile);
+    return d->profileAdapter()->pushServiceEnabled();
+}
+
+/*!
+    \since 6.5
+
+    Enables the push messaging service if \a enable is \c true, otherwise disables it.
+
+    \note \QWE uses \l {https://firebase.google.com}{Firebase Cloud Messaging (FCM)}
+    as a browser push service. Therefore, all push messages will go through the
+    Google push service and its respective servers.
+
+    \sa isPushServiceEnabled()
+*/
+void QWebEngineProfile::setPushServiceEnabled(bool enable)
+{
+    Q_D(QWebEngineProfile);
+    d->profileAdapter()->setPushServiceEnabled(enable);
+}
+
+/*!
     Returns the path used for caches.
 
     By default, this is below StandardPaths::CacheLocation in a QtWebengine/StorageName specific
@@ -464,7 +495,10 @@ QWebEngineProfile::HttpCacheType QWebEngineProfile::httpCacheType() const
 /*!
     Sets the HTTP cache type to \a httpCacheType.
 
-    \sa httpCacheType(), setCachePath()
+    \note Setting the \a httpCacheType to NoCache on the profile, which has already some cache
+    entries does not trigger the removal of those entries.
+
+    \sa httpCacheType(), setCachePath(), clearHttpCache()
 */
 void QWebEngineProfile::setHttpCacheType(QWebEngineProfile::HttpCacheType httpCacheType)
 {

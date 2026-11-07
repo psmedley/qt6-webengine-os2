@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -35,11 +35,11 @@ import zlib
 # https://chromium.googlesource.com/chromium/src/+/main/docs/updating_clang.md
 # Reverting problematic clang rolls is safe, though.
 # This is the output of `git describe` and is usable as a commit-ish.
-CLANG_REVISION = 'llvmorg-15-init-7570-gba4537b2'
-CLANG_SUB_REVISION = 1
+CLANG_REVISION = 'llvmorg-16-init-6578-g0d30e92f'
+CLANG_SUB_REVISION = 2
 
 PACKAGE_VERSION = '%s-%s' % (CLANG_REVISION, CLANG_SUB_REVISION)
-RELEASE_VERSION = '15.0.0'
+RELEASE_VERSION = '16.0.0'
 
 CDS_URL = os.environ.get('CDS_CLANG_BUCKET_OVERRIDE',
     'https://commondatastorage.googleapis.com/chromium-browser-clang')
@@ -100,9 +100,12 @@ def DownloadUrl(url, output_file):
       request = urllib.request.Request(url)
       request.add_header('Accept-Encoding', 'gzip')
       response = urllib.request.urlopen(request)
-      total_size = int(response.info().get('Content-Length').strip())
+      total_size = None
+      if 'Content-Length' in response.headers:
+        total_size = int(response.headers['Content-Length'].strip())
 
-      is_gzipped = response.info().get('Content-Encoding', '').strip() == 'gzip'
+      is_gzipped = response.headers.get('Content-Encoding',
+                                        '').strip() == 'gzip'
       if is_gzipped:
         gzip_decode = zlib.decompressobj(zlib.MAX_WBITS + 16)
 
@@ -118,11 +121,12 @@ def DownloadUrl(url, output_file):
           chunk = gzip_decode.decompress(chunk)
         output_file.write(chunk)
 
-        num_dots = TOTAL_DOTS * bytes_done // total_size
-        sys.stdout.write('.' * (num_dots - dots_printed))
-        sys.stdout.flush()
-        dots_printed = num_dots
-      if bytes_done != total_size:
+        if total_size is not None:
+          num_dots = TOTAL_DOTS * bytes_done // total_size
+          sys.stdout.write('.' * (num_dots - dots_printed))
+          sys.stdout.flush()
+          dots_printed = num_dots
+      if total_size is not None and bytes_done != total_size:
         raise urllib.error.URLError("only got %d of %d bytes" %
                                     (bytes_done, total_size))
       if is_gzipped:
@@ -136,6 +140,8 @@ def DownloadUrl(url, output_file):
           e, urllib.error.HTTPError) and e.code == 404:
         raise e
       num_retries -= 1
+      output_file.seek(0)
+      output_file.truncate()
       print('Retrying in %d s ...' % retry_wait_s)
       sys.stdout.flush()
       time.sleep(retry_wait_s)
@@ -159,7 +165,7 @@ def DownloadAndUnpack(url, output_dir, path_prefixes=None):
       assert path_prefixes is None
       zipfile.ZipFile(f).extractall(path=output_dir)
     else:
-      t = tarfile.open(mode='r:gz', fileobj=f)
+      t = tarfile.open(mode='r:*', fileobj=f)
       members = None
       if path_prefixes is not None:
         members = [m for m in t.getmembers()
@@ -177,8 +183,11 @@ def GetPlatformUrlPrefix(host_os):
   return CDS_URL + '/' + _HOST_OS_URL_MAP[host_os] + '/'
 
 
-def DownloadAndUnpackPackage(package_file, output_dir, host_os):
-  cds_file = "%s-%s.tgz" % (package_file, PACKAGE_VERSION)
+def DownloadAndUnpackPackage(package_file,
+                             output_dir,
+                             host_os,
+                             version=PACKAGE_VERSION):
+  cds_file = "%s-%s.tar.xz" % (package_file, version)
   cds_full_url = GetPlatformUrlPrefix(host_os) + cds_file
   try:
     DownloadAndUnpack(cds_full_url, output_dir)
@@ -190,7 +199,7 @@ def DownloadAndUnpackPackage(package_file, output_dir, host_os):
 
 
 def DownloadAndUnpackClangMacRuntime(output_dir):
-  cds_file = "clang-%s.tgz" % PACKAGE_VERSION
+  cds_file = "clang-%s.tar.xz" % PACKAGE_VERSION
   # We run this only for the runtime libraries, and 'mac' and 'mac-arm64' both
   # have the same (universal) runtime libraries. It doesn't matter which one
   # we download here.
@@ -209,7 +218,7 @@ def DownloadAndUnpackClangMacRuntime(output_dir):
 
 # TODO(hans): Create a clang-win-runtime package instead.
 def DownloadAndUnpackClangWinRuntime(output_dir):
-  cds_file = "clang-%s.tgz" % PACKAGE_VERSION
+  cds_file = "clang-%s.tar.xz" % PACKAGE_VERSION
   cds_full_url = GetPlatformUrlPrefix('win') + cds_file
   path_prefixes = [
       'lib/clang/' + RELEASE_VERSION + '/lib/windows', 'bin/llvm-symbolizer.exe'
@@ -231,19 +240,14 @@ def UpdatePackage(package_name, host_os):
   if package_name == 'clang':
     stamp_file = STAMP_FILE
     package_file = 'clang'
-  elif package_name == 'clang-tidy':
-    package_file = 'clang-tidy'
-  elif package_name == 'clang-libs':
-    package_file = 'clang-libs'
-  elif package_name == 'objdump':
-    package_file = 'llvmobjdump'
-  elif package_name == 'translation_unit':
-    package_file = 'translation_unit'
   elif package_name == 'coverage_tools':
     stamp_file = os.path.join(LLVM_BUILD_DIR, 'cr_coverage_revision')
     package_file = 'llvm-code-coverage'
-  elif package_name == 'libclang':
-    package_file = 'libclang'
+  elif package_name == 'objdump':
+    package_file = 'llvmobjdump'
+  elif package_name in ['clang-libs', 'clang-tidy', 'clangd', 'libclang',
+                        'translation_unit']:
+    package_file = package_name
   else:
     print('Unknown package: "%s".' % package_name)
     return 1
@@ -336,6 +340,11 @@ def main():
     print(RELEASE_VERSION)
     return 0
 
+  if args.output_dir:
+    global LLVM_BUILD_DIR, STAMP_FILE
+    LLVM_BUILD_DIR = os.path.abspath(args.output_dir)
+    STAMP_FILE = os.path.join(LLVM_BUILD_DIR, 'cr_build_revision')
+
   if args.print_revision:
     if args.llvm_force_head_revision:
       force_head_revision = ReadStampFile(FORCE_HEAD_REVISION_FILE)
@@ -345,17 +354,19 @@ def main():
       print(force_head_revision)
       return 0
 
+    stamp_version = ReadStampFile(STAMP_FILE).partition(',')[0]
+    if PACKAGE_VERSION != stamp_version:
+      print('The expected clang version is %s but the actual version is %s' %
+            (PACKAGE_VERSION, stamp_version))
+      print('Did you run "gclient sync"?')
+      return 1
+
     print(PACKAGE_VERSION)
     return 0
 
   if args.llvm_force_head_revision:
     print('--llvm-force-head-revision can only be used for --print-revision')
     return 1
-
-  if args.output_dir:
-    global LLVM_BUILD_DIR, STAMP_FILE
-    LLVM_BUILD_DIR = os.path.abspath(args.output_dir)
-    STAMP_FILE = os.path.join(LLVM_BUILD_DIR, 'cr_build_revision')
 
   return UpdatePackage(args.package, args.host_os)
 

@@ -54,6 +54,9 @@
       Firmware Version
     </message>
   </if>
+  <message name="IDS_VERSION_UI_COPY_LABEL" desc="label for the button to copy the version string">
+    Copy version string
+  </message>
   <message name="IDS_VERSION_UI_EXECUTABLE_PATH" desc="label for the executable path on the about:version page">
     Executable Path
   </message>
@@ -64,7 +67,7 @@
     No such file or directory
   </message>
   <message name="IDS_VERSION_UI_VARIATIONS" desc="label for the variations list on the about:version page">
-    Variations
+    Active Variations
   </message>
   <message name="IDS_VERSION_UI_VARIATIONS_CMD" desc="label for the variations information in command-line format on the about:version page">
     Command-line variations

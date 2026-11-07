@@ -39,6 +39,7 @@ GrCaps::GrCaps(const GrContextOptions& options) {
     fTwoSidedStencilRefsAndMasksMustMatch = false;
     fMustClearUploadedBufferData = false;
     fShouldInitializeTextures = false;
+    fBuffersAreInitiallyZero = false;
     fSupportsAHardwareBufferImages = false;
     fFenceSyncSupport = false;
     fSemaphoreSupport = false;
@@ -51,12 +52,12 @@ GrCaps::GrCaps(const GrContextOptions& options) {
     fPerformStencilClearsAsDraws = false;
     fTransferFromBufferToTextureSupport = false;
     fTransferFromSurfaceToBufferSupport = false;
+    fTransferFromBufferToBufferSupport = false;
     fWritePixelsRowBytesSupport = false;
     fTransferPixelsToRowBytesSupport = false;
     fReadPixelsRowBytesSupport = false;
     fShouldCollapseSrcOverToSrcWhenAble = false;
     fMustSyncGpuDuringAbandon = true;
-    fDriverDisableMSAAClipAtlas = false;
     fDisableTessellationPathRenderer = false;
 
     fBlendEquationSupport = kBasic_BlendEquationSupport;
@@ -80,10 +81,10 @@ GrCaps::GrCaps(const GrContextOptions& options) {
     fBufferMapThreshold = options.fBufferMapThreshold;
     fAvoidStencilBuffers = false;
     fAvoidWritePixelsFastPath = false;
-    fRequiresManualFBBarrierAfterTessellatedStencilDraw = false;
     fNativeDrawIndexedIndirectIsBroken = false;
     fAvoidReorderingRenderTasks = false;
     fAvoidDithering = false;
+    fDisablePerspectiveSDFText = false;
 
     fPreferVRAMUseOverFlushes = true;
 
@@ -105,17 +106,17 @@ void GrCaps::finishInitialization(const GrContextOptions& options) {
     // Our render targets are always created with textures as the color attachment, hence this min:
     fMaxRenderTargetSize = std::min(fMaxRenderTargetSize, fMaxTextureSize);
     fMaxPreferredRenderTargetSize = std::min(fMaxPreferredRenderTargetSize, fMaxRenderTargetSize);
+
+    this->initSkCaps(this->shaderCaps());
 }
 
 void GrCaps::applyOptionsOverrides(const GrContextOptions& options) {
     fShaderCaps->applyOptionsOverrides(options);
     this->onApplyOptionsOverrides(options);
     if (options.fDisableDriverCorrectnessWorkarounds) {
-        SkASSERT(!fDriverDisableMSAAClipAtlas);
         SkASSERT(!fDisableTessellationPathRenderer);
         SkASSERT(!fAvoidStencilBuffers);
         SkASSERT(!fAvoidWritePixelsFastPath);
-        SkASSERT(!fRequiresManualFBBarrierAfterTessellatedStencilDraw);
         SkASSERT(!fNativeDrawIndexedIndirectIsBroken);
         SkASSERT(!fAdvBlendEqDisableFlags);
         SkASSERT(!fPerformColorClearsAsDraws);
@@ -142,9 +143,6 @@ void GrCaps::applyOptionsOverrides(const GrContextOptions& options) {
     if (options.fDisallowWriteAndTransferPixelRowBytes) {
         fWritePixelsRowBytesSupport = false;
         fTransferPixelsToRowBytesSupport = false;
-    }
-    if (options.fAlwaysPreferHardwareTessellation) {
-        fMinPathVerbsForHwTessellation = fMinStrokeVerbsForHwTessellation = 0;
     }
 #endif
     if (options.fSuppressMipmapSupport) {
@@ -220,6 +218,7 @@ void GrCaps::dumpJSON(SkJSONWriter* writer) const {
                        fTwoSidedStencilRefsAndMasksMustMatch);
     writer->appendBool("Must clear buffer memory", fMustClearUploadedBufferData);
     writer->appendBool("Should initialize textures", fShouldInitializeTextures);
+    writer->appendBool("Buffers are initially zero", fBuffersAreInitiallyZero);
     writer->appendBool("Supports importing AHardwareBuffers", fSupportsAHardwareBufferImages);
     writer->appendBool("Fence sync support", fFenceSyncSupport);
     writer->appendBool("Semaphore support", fSemaphoreSupport);
@@ -238,8 +237,6 @@ void GrCaps::dumpJSON(SkJSONWriter* writer) const {
     writer->appendBool("Write pixels row bytes support", fWritePixelsRowBytesSupport);
     writer->appendBool("Transfer pixels to row bytes support", fTransferPixelsToRowBytesSupport);
     writer->appendBool("Read pixels row bytes support", fReadPixelsRowBytesSupport);
-    writer->appendBool("Disable msaa clip mask atlas on current driver [workaround]",
-                       fDriverDisableMSAAClipAtlas);
     writer->appendBool("Disable TessellationPathRenderer current driver [workaround]",
                        fDisableTessellationPathRenderer);
     writer->appendBool("Clamp-to-border", fClampToBorderSupport);
@@ -247,12 +244,11 @@ void GrCaps::dumpJSON(SkJSONWriter* writer) const {
     writer->appendBool("Prefer VRAM Use over flushes [workaround]", fPreferVRAMUseOverFlushes);
     writer->appendBool("Avoid stencil buffers [workaround]", fAvoidStencilBuffers);
     writer->appendBool("Avoid writePixels fast path [workaround]", fAvoidWritePixelsFastPath);
-    writer->appendBool("Requires manual FB barrier after tessellated stencilDraw [workaround]",
-                       fRequiresManualFBBarrierAfterTessellatedStencilDraw);
     writer->appendBool("Native draw indexed indirect is broken [workaround]",
                        fNativeDrawIndexedIndirectIsBroken);
     writer->appendBool("Avoid DAG reordering [workaround]", fAvoidReorderingRenderTasks);
     writer->appendBool("Avoid Dithering [workaround]", fAvoidDithering);
+    writer->appendBool("Disable perspective SDF Text [workaround]", fDisablePerspectiveSDFText);
 
     if (this->advancedBlendEquationSupport()) {
         writer->appendHexU32("Advanced Blend Equation Disable Flags", fAdvBlendEqDisableFlags);
@@ -264,8 +260,6 @@ void GrCaps::dumpJSON(SkJSONWriter* writer) const {
     writer->appendS32("Max Preferred Render Target Size", fMaxPreferredRenderTargetSize);
     writer->appendS32("Max Window Rectangles", fMaxWindowRectangles);
     writer->appendS32("Sample Count for Internal MSAA", fInternalMultisampleCount);
-    writer->appendS32("Min Path Verbs for HW Tessellation", fMinPathVerbsForHwTessellation);
-    writer->appendS32("Min Stroke Verbs for HW Tessellation", fMinStrokeVerbsForHwTessellation);
 
     static const char* kBlendEquationSupportNames[] = {
         "Basic",
@@ -275,11 +269,11 @@ void GrCaps::dumpJSON(SkJSONWriter* writer) const {
     static_assert(0 == kBasic_BlendEquationSupport);
     static_assert(1 == kAdvanced_BlendEquationSupport);
     static_assert(2 == kAdvancedCoherent_BlendEquationSupport);
-    static_assert(SK_ARRAY_COUNT(kBlendEquationSupportNames) == kLast_BlendEquationSupport + 1);
+    static_assert(std::size(kBlendEquationSupportNames) == kLast_BlendEquationSupport + 1);
 
-    writer->appendString("Blend Equation Support",
-                         kBlendEquationSupportNames[fBlendEquationSupport]);
-    writer->appendString("Map Buffer Support", map_flags_to_string(fMapBufferFlags).c_str());
+    writer->appendCString("Blend Equation Support",
+                          kBlendEquationSupportNames[fBlendEquationSupport]);
+    writer->appendString("Map Buffer Support", map_flags_to_string(fMapBufferFlags));
 
     this->onDumpJSON(writer);
 
@@ -296,8 +290,8 @@ bool GrCaps::surfaceSupportsWritePixels(const GrSurface* surface) const {
     return surface->readOnly() ? false : this->onSurfaceSupportsWritePixels(surface);
 }
 
-bool GrCaps::canCopySurface(const GrSurfaceProxy* dst, const GrSurfaceProxy* src,
-                            const SkIRect& srcRect, const SkIPoint& dstPoint) const {
+bool GrCaps::canCopySurface(const GrSurfaceProxy* dst, const SkIRect& dstRect,
+                            const GrSurfaceProxy* src, const SkIRect& srcRect) const {
     if (dst->readOnly()) {
         return false;
     }
@@ -305,7 +299,13 @@ bool GrCaps::canCopySurface(const GrSurfaceProxy* dst, const GrSurfaceProxy* src
     if (dst->backendFormat() != src->backendFormat()) {
         return false;
     }
-    return this->onCanCopySurface(dst, src, srcRect, dstPoint);
+    // For simplicity, all GrGpu::copySurface() calls can assume that srcRect and dstRect
+    // are already contained within their respective surfaces.
+    if (!SkIRect::MakeSize(dst->dimensions()).contains(dstRect) ||
+        !SkIRect::MakeSize(src->dimensions()).contains(srcRect)) {
+        return false;
+    }
+    return this->onCanCopySurface(dst, dstRect, src, srcRect);
 }
 
 bool GrCaps::validateSurfaceParams(const SkISize& dimensions, const GrBackendFormat& format,

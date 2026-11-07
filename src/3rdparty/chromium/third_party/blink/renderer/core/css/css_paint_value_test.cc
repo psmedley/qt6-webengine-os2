@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -137,8 +137,8 @@ TEST_P(CSSPaintValueTest, ReportingNonCompositedUMA) {
   auto style = GetDocument().GetStyleResolver().CreateComputedStyle();
   auto* ident = MakeGarbageCollected<CSSCustomIdentValue>("testpainter");
   CSSPaintValue* paint_value = MakeGarbageCollected<CSSPaintValue>(ident, true);
-  StyleGeneratedImage* style_image =
-      MakeGarbageCollected<StyleGeneratedImage>(*paint_value);
+  StyleGeneratedImage* style_image = MakeGarbageCollected<StyleGeneratedImage>(
+      *paint_value, StyleGeneratedImage::ContainerSizes());
   style->SetBorderImageSource(style_image);
 
   ON_CALL(*mock_generator, IsImageGeneratorReady()).WillByDefault(Return(true));

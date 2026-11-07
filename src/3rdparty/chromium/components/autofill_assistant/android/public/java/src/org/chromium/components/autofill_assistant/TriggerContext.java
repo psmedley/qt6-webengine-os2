@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -103,9 +103,10 @@ public class TriggerContext {
 
     /**
      * Special bool parameter that MUST be present in all intents. It allows the caller to either
-     * request immediate start of autobot (if set to true), or a delayed start using trigger scripts
-     * (if set to false). If this is set to false, one of the trigger script parameters must be set
-     * as well (@code{PARAMETER_REQUEST_TRIGGER_SCRIPT} or @code{PARAMETER_TRIGGER_SCRIPTS_BASE64}).
+     * request immediate start of AutofillAssistant (if set to true), or a delayed start using
+     * trigger scripts (if set to false). If this is set to false, the trigger script parameter must
+     * be set
+     * (@code{PARAMETER_REQUEST_TRIGGER_SCRIPT}.
      */
     public static final String PARAMETER_START_IMMEDIATELY = "START_IMMEDIATELY";
 
@@ -120,13 +121,6 @@ public class TriggerContext {
      * starting the regular flow.
      */
     static final String PARAMETER_REQUEST_TRIGGER_SCRIPT = "REQUEST_TRIGGER_SCRIPT";
-
-    /**
-     * Special parameter to allow injecting a base64-encoded GetTriggerScriptsResponseProto. When
-     * specified, the client will directly use the specified trigger scripts instead of fetching
-     * them from a remote backend. Takes precedence over PARAMETER_REQUEST_TRIGGER_SCRIPT.
-     */
-    static final String PARAMETER_TRIGGER_SCRIPTS_BASE64 = "TRIGGER_SCRIPTS_BASE64";
 
     /**
      * Identifier used by parameters/or special intent that indicates experiments passed from
@@ -267,14 +261,9 @@ public class TriggerContext {
         return getBooleanParameter(PARAMETER_REQUEST_TRIGGER_SCRIPT);
     }
 
-    /** Whether the caller specified a base64-encoded trigger scripts response or not. */
-    public boolean containsBase64TriggerScripts() {
-        return !TextUtils.isEmpty(getStringParameter(PARAMETER_TRIGGER_SCRIPTS_BASE64));
-    }
-
     /** Whether the caller requested a trigger script to start in any of the supported ways. */
     public boolean containsTriggerScript() {
-        return requestsTriggerScript() || containsBase64TriggerScripts();
+        return requestsTriggerScript();
     }
 
     public void setOnboardingShown(boolean onboardingShown) {

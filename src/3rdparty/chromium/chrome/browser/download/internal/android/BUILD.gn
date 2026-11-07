@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -109,6 +109,8 @@ android_library("java") {
     ":java_resources",
     ":jni_headers",
     "//base:base_java",
+    "//base:jni_java",
+    "//build/android:build_java",
     "//chrome/browser/download/android:file_provider_java",
     "//chrome/browser/download/android:java",
     "//chrome/browser/preferences:java",
@@ -164,7 +166,6 @@ android_resources("java_resources") {
     "java/res/drawable/group_card_footer_curved_border.xml",
     "java/res/drawable/group_card_header_curved_border.xml",
     "java/res/drawable/group_card_item_border.xml",
-    "java/res/drawable/ic_file_download_scheduled_24dp.xml",
     "java/res/drawable/infobar_download_complete_animation.xml",
     "java/res/layout/download_home_tabs.xml",
     "java/res/layout/download_home_toolbar.xml",
@@ -214,8 +215,32 @@ android_resources("java_resources") {
 
 android_library("javatests") {
   testonly = true
+  sources = [ "java/src/org/chromium/chrome/browser/download/DownloadMessageUiControllerTest.java" ]
+
+  deps = [
+    ":java",
+    "//base:base_java_test_support",
+    "//chrome/browser/download/android:java",
+    "//chrome/browser/profiles/android:java",
+    "//chrome/test/android:chrome_java_integration_test_support",
+    "//components/messages/android:java",
+    "//components/offline_items_collection/core:core_java",
+    "//content/public/test/android:content_java_test_support",
+    "//third_party/android_support_test_runner:runner_java",
+    "//third_party/androidx:androidx_annotation_annotation_java",
+    "//third_party/androidx:androidx_test_runner_java",
+    "//third_party/hamcrest:hamcrest_library_java",
+    "//third_party/junit",
+    "//ui/android:ui_java_test_support",
+    "//url:gurl_junit_test_support",
+  ]
+
+  resources_package = "org.chromium.chrome.browser.download.internal"
+}
+
+android_library("unit_device_javatests") {
+  testonly = true
   sources = [
-    "java/src/org/chromium/chrome/browser/download/DownloadMessageUiControllerTest.java",
     "java/src/org/chromium/chrome/browser/download/home/DownloadActivityV2Test.java",
     "java/src/org/chromium/chrome/browser/download/home/StubbedOfflineContentProvider.java",
     "java/src/org/chromium/chrome/browser/download/home/StubbedProvider.java",
@@ -232,8 +257,9 @@ android_library("javatests") {
     "//chrome/browser/preferences:java",
     "//chrome/browser/profiles/android:java",
     "//chrome/browser/ui/messages/android:java",
-    "//chrome/test/android:chrome_java_test_support",
+    "//chrome/test/android:chrome_java_integration_test_support",
     "//components/browser_ui/modaldialog/android:java",
+    "//components/browser_ui/util/android:java",
     "//components/embedder_support/android:util_java",
     "//components/feature_engagement:feature_engagement_java",
     "//components/messages/android:java",
@@ -265,10 +291,7 @@ android_library("javatests") {
   resources_package = "org.chromium.chrome.browser.download.internal"
 }
 
-android_library("junit") {
-  # Skip platform checks since Robolectric depends on requires_android targets.
-  bypass_platform_checks = true
-  testonly = true
+robolectric_library("junit") {
   sources = [
     "java/src/org/chromium/chrome/browser/download/home/filter/DeleteUndoOfflineItemFilterTest.java",
     "java/src/org/chromium/chrome/browser/download/home/filter/FiltersTest.java",
@@ -291,7 +314,6 @@ android_library("junit") {
     "//components/browser_ui/util/android:java",
     "//components/offline_items_collection/core:core_java",
     "//components/url_formatter/android:url_formatter_java",
-    "//third_party/android_deps:robolectric_all_java",
     "//third_party/androidx:androidx_core_core_java",
     "//third_party/junit:junit",
     "//third_party/mockito:mockito_java",

@@ -9,7 +9,6 @@
 
 #include "src/core/SkMatrixPriv.h"
 #include "src/gpu/graphite/geom/Rect.h"
-#include "src/gpu/graphite/geom/VectorTypes.h"
 
 namespace skgpu::graphite {
 
@@ -24,13 +23,13 @@ Rect map_rect(const SkM44& m, const Rect& r) {
 
 void map_points(const SkM44& m, const SkV4* in, SkV4* out, int count) {
     // TODO: These maybe should go into SkM44, since bulk point mapping seems generally useful
-    float4 c0 = float4::Load(SkMatrixPriv::M44ColMajor(m) + 0);
-    float4 c1 = float4::Load(SkMatrixPriv::M44ColMajor(m) + 4);
-    float4 c2 = float4::Load(SkMatrixPriv::M44ColMajor(m) + 8);
-    float4 c3 = float4::Load(SkMatrixPriv::M44ColMajor(m) + 12);
+    auto c0 = skvx::float4::Load(SkMatrixPriv::M44ColMajor(m) + 0);
+    auto c1 = skvx::float4::Load(SkMatrixPriv::M44ColMajor(m) + 4);
+    auto c2 = skvx::float4::Load(SkMatrixPriv::M44ColMajor(m) + 8);
+    auto c3 = skvx::float4::Load(SkMatrixPriv::M44ColMajor(m) + 12);
 
     for (int i = 0; i < count; ++i) {
-        float4 p = (c0 * in[i].x) + (c1 * in[i].y) + (c2 * in[i].z) + (c3 * in[i].w);
+        auto p = (c0 * in[i].x) + (c1 * in[i].y) + (c2 * in[i].z) + (c3 * in[i].w);
         p.store(out + i);
     }
 }
@@ -94,6 +93,15 @@ Transform::Transform(const SkM44& m) : fM(m) {
     fType = get_matrix_info(m, &fInvM, &fScale);
 }
 
+const Transform& Transform::Identity() {
+    static const Transform kIdentity{SkM44()};
+    return kIdentity;
+}
+const Transform& Transform::Invalid() {
+    static const Transform kInvalid{SkM44(SkM44::kNaN_Constructor)};
+    return kInvalid;
+}
+
 bool Transform::operator==(const Transform& t) const {
     // Checking fM should be sufficient as all other values are computed from it.
     SkASSERT(fM != t.fM || (fInvM == t.fInvM && fType == t.fType && fScale == t.fScale));
@@ -113,13 +121,13 @@ void Transform::mapPoints(const Rect& localRect, SkV4 deviceOut[4]) const {
 
 void Transform::mapPoints(const SkV2* localIn, SkV4* deviceOut, int count) const {
     // TODO: These maybe should go into SkM44, since bulk point mapping seems generally useful
-    float4 c0 = float4::Load(SkMatrixPriv::M44ColMajor(fM) + 0);
-    float4 c1 = float4::Load(SkMatrixPriv::M44ColMajor(fM) + 4);
+    auto c0 = skvx::float4::Load(SkMatrixPriv::M44ColMajor(fM) + 0);
+    auto c1 = skvx::float4::Load(SkMatrixPriv::M44ColMajor(fM) + 4);
     // skip c2 since localIn's z is assumed to be 0
-    float4 c3 = float4::Load(SkMatrixPriv::M44ColMajor(fM) + 12);
+    auto c3 = skvx::float4::Load(SkMatrixPriv::M44ColMajor(fM) + 12);
 
     for (int i = 0; i < count; ++i) {
-        float4 p = c0 * localIn[i].x + c1 * localIn[i].y /* + c2*0.f */ + c3 /* *1.f */;
+        auto p = c0 * localIn[i].x + c1 * localIn[i].y /* + c2*0.f */ + c3 /* *1.f */;
         p.store(deviceOut + i);
     }
 }
@@ -130,6 +138,52 @@ void Transform::mapPoints(const SkV4* localIn, SkV4* deviceOut, int count) const
 
 void Transform::inverseMapPoints(const SkV4* deviceIn, SkV4* localOut, int count) const {
     return map_points(fInvM, deviceIn, localOut, count);
+}
+
+Transform Transform::preTranslate(float x, float y) const {
+    Transform t = *this;
+    t.fM.preTranslate(x, y);
+    t.fInvM.postTranslate(-x, -y);
+
+    // Under normal conditions, type and scale won't change, but if we've overflown the translation
+    // components, mark the matrix as invalid.
+    if (!t.fM.isFinite() || !t.fInvM.isFinite()) {
+        t.fType = Type::kInvalid;
+    }
+    return t;
+}
+
+Transform Transform::postTranslate(float x, float y) const {
+    Transform t = *this;
+    t.fM.postTranslate(x, y);
+    t.fInvM.preTranslate(-x, -y);
+    if (!t.fM.isFinite() || !t.fInvM.isFinite()) {
+        t.fType = Type::kInvalid;
+    }
+    return t;
+}
+
+Transform Transform::concat(const Transform& t) const {
+    Transform c = {fM * t.fM, t.fInvM * fInvM, std::max(fType, t.fType), {fScale * t.fScale}};
+    if (!c.fM.isFinite() || !c.fInvM.isFinite()) {
+        c.fType = Type::kInvalid;
+    }
+    return c;
+}
+
+Transform Transform::concatInverse(const Transform& t) const {
+    Transform c = {fM * t.fInvM, t.fM * fInvM, std::max(fType, t.fType), {fScale * (1.f/t.fScale)}};
+    if (!c.fM.isFinite() || !c.fInvM.isFinite()) {
+        c.fType = Type::kInvalid;
+    }
+    return c;
+}
+
+Transform Transform::concatInverse(const SkM44& t) const {
+    // saves a multiply compared to inverting just t and then computing fM*t^-1 and t*fInvM, if we
+    // instead start with (t*fInvM) and swap definition of computed fM and fInvM.
+    Transform inverse{t * fInvM};
+    return {inverse.fInvM, inverse.fM, inverse.fType, 1.f / inverse.fScale};
 }
 
 } // namespace skgpu::graphite

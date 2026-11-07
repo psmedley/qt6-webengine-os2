@@ -1,7 +1,8 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/ui_mode.gni")
 import("//components/safe_browsing/buildflags.gni")
 import("//extensions/buildflags/buildflags.gni")
 
@@ -21,11 +22,13 @@ static_library("safe_browsing") {
     "//build:branding_buildflags",
     "//chrome/app:generated_resources",
     "//chrome/browser:browser_process",
+    "//chrome/browser/google",
     "//chrome/browser/profiles",
     "//chrome/browser/profiles:profile",
     "//chrome/common",
     "//chrome/common:constants",
     "//components/browser_sync",
+    "//components/enterprise:enterprise",
     "//components/enterprise/common:strings",
     "//components/keyed_service/content",
     "//components/language/core/browser",
@@ -136,7 +139,6 @@ static_library("safe_browsing") {
       "services_delegate.h",
       "tailored_security/chrome_tailored_security_service.cc",
       "tailored_security/chrome_tailored_security_service.h",
-      "tailored_security/tailored_security_outcome.h",
       "tailored_security/tailored_security_service_factory.cc",
       "tailored_security/tailored_security_service_factory.h",
       "tailored_security/tailored_security_url_observer.cc",
@@ -211,8 +213,10 @@ static_library("safe_browsing") {
         "cloud_content_scanning/binary_fcm_service.h",
         "cloud_content_scanning/binary_upload_service.cc",
         "cloud_content_scanning/binary_upload_service.h",
-        "cloud_content_scanning/binary_upload_service_factory.cc",
-        "cloud_content_scanning/binary_upload_service_factory.h",
+        "cloud_content_scanning/cloud_binary_upload_service.cc",
+        "cloud_content_scanning/cloud_binary_upload_service.h",
+        "cloud_content_scanning/cloud_binary_upload_service_factory.cc",
+        "cloud_content_scanning/cloud_binary_upload_service_factory.h",
         "cloud_content_scanning/deep_scanning_utils.cc",
         "cloud_content_scanning/deep_scanning_utils.h",
         "cloud_content_scanning/file_analysis_request.cc",
@@ -253,8 +257,18 @@ static_library("safe_browsing") {
         "download_protection/ppapi_download_request.h",
         "download_protection/two_phase_uploader.cc",
         "download_protection/two_phase_uploader.h",
+        "extension_telemetry/cookies_get_all_signal.cc",
+        "extension_telemetry/cookies_get_all_signal.h",
+        "extension_telemetry/cookies_get_all_signal_processor.cc",
+        "extension_telemetry/cookies_get_all_signal_processor.h",
+        "extension_telemetry/cookies_get_signal.cc",
+        "extension_telemetry/cookies_get_signal.h",
+        "extension_telemetry/cookies_get_signal_processor.cc",
+        "extension_telemetry/cookies_get_signal_processor.h",
         "extension_telemetry/extension_signal.h",
         "extension_telemetry/extension_signal_processor.h",
+        "extension_telemetry/extension_signal_util.cc",
+        "extension_telemetry/extension_signal_util.h",
         "extension_telemetry/extension_telemetry_persister.cc",
         "extension_telemetry/extension_telemetry_persister.h",
         "extension_telemetry/extension_telemetry_service.cc",
@@ -263,6 +277,10 @@ static_library("safe_browsing") {
         "extension_telemetry/extension_telemetry_service_factory.h",
         "extension_telemetry/extension_telemetry_uploader.cc",
         "extension_telemetry/extension_telemetry_uploader.h",
+        "extension_telemetry/password_reuse_signal.cc",
+        "extension_telemetry/password_reuse_signal.h",
+        "extension_telemetry/potential_password_theft_signal_processor.cc",
+        "extension_telemetry/potential_password_theft_signal_processor.h",
         "extension_telemetry/remote_host_contacted_signal.cc",
         "extension_telemetry/remote_host_contacted_signal.h",
         "extension_telemetry/remote_host_contacted_signal_processor.cc",
@@ -384,6 +402,9 @@ static_library("safe_browsing") {
           "//chrome/common/safe_browsing:document_analyzer_results",
           "//chrome/services/file_util/public/mojom",
         ]
+      }
+      if (is_chromeos_ash) {
+        deps += [ "//ash/constants:constants" ]
       }
     } else if (safe_browsing_mode == 2) {
       if (is_android) {

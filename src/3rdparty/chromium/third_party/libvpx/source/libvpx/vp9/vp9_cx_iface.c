@@ -65,7 +65,11 @@ typedef struct vp9_extracfg {
 } vp9_extracfg;
 
 static struct vp9_extracfg default_extra_cfg = {
-  0,                     // cpu_used
+#if CONFIG_REALTIME_ONLY
+  5,  // cpu_used
+#else
+  0,  // cpu_used
+#endif
   1,                     // enable_auto_alt_ref
   0,                     // noise_sensitivity
   0,                     // sharpness
@@ -166,8 +170,8 @@ static vpx_codec_err_t update_error_state(
 static vpx_codec_err_t validate_config(vpx_codec_alg_priv_t *ctx,
                                        const vpx_codec_enc_cfg_t *cfg,
                                        const struct vp9_extracfg *extra_cfg) {
-  RANGE_CHECK(cfg, g_w, 1, 65535);  // 16 bits available
-  RANGE_CHECK(cfg, g_h, 1, 65535);  // 16 bits available
+  RANGE_CHECK(cfg, g_w, 1, 65536);  // 16 bits available
+  RANGE_CHECK(cfg, g_h, 1, 65536);  // 16 bits available
   RANGE_CHECK(cfg, g_timebase.den, 1, 1000000000);
   RANGE_CHECK(cfg, g_timebase.num, 1, 1000000000);
   RANGE_CHECK_HI(cfg, g_profile, 3);
@@ -780,7 +784,7 @@ static vpx_codec_err_t set_twopass_params_from_config(
 static vpx_codec_err_t encoder_set_config(vpx_codec_alg_priv_t *ctx,
                                           const vpx_codec_enc_cfg_t *cfg) {
   vpx_codec_err_t res;
-  int force_key = 0;
+  volatile int force_key = 0;
 
   if (cfg->g_w != ctx->cfg.g_w || cfg->g_h != ctx->cfg.g_h) {
     if (cfg->g_lag_in_frames > 1 || cfg->g_pass != VPX_RC_ONE_PASS)
@@ -799,19 +803,28 @@ static vpx_codec_err_t encoder_set_config(vpx_codec_alg_priv_t *ctx,
     ERROR("Cannot increase lag_in_frames");
 
   res = validate_config(ctx, cfg, &ctx->extra_cfg);
+  if (res != VPX_CODEC_OK) return res;
 
-  if (res == VPX_CODEC_OK) {
-    ctx->cfg = *cfg;
-    set_encoder_config(&ctx->oxcf, &ctx->cfg, &ctx->extra_cfg);
-    set_twopass_params_from_config(&ctx->cfg, ctx->cpi);
-    // On profile change, request a key frame
-    force_key |= ctx->cpi->common.profile != ctx->oxcf.profile;
-    vp9_change_config(ctx->cpi, &ctx->oxcf);
+  if (setjmp(ctx->cpi->common.error.jmp)) {
+    const vpx_codec_err_t codec_err =
+        update_error_state(ctx, &ctx->cpi->common.error);
+    ctx->cpi->common.error.setjmp = 0;
+    vpx_clear_system_state();
+    assert(codec_err != VPX_CODEC_OK);
+    return codec_err;
   }
+
+  ctx->cfg = *cfg;
+  set_encoder_config(&ctx->oxcf, &ctx->cfg, &ctx->extra_cfg);
+  set_twopass_params_from_config(&ctx->cfg, ctx->cpi);
+  // On profile change, request a key frame
+  force_key |= ctx->cpi->common.profile != ctx->oxcf.profile;
+  vp9_change_config(ctx->cpi, &ctx->oxcf);
 
   if (force_key) ctx->next_frame_flags |= VPX_EFLAG_FORCE_KF;
 
-  return res;
+  ctx->cpi->common.error.setjmp = 0;
+  return VPX_CODEC_OK;
 }
 
 static vpx_codec_err_t ctrl_get_quantizer(vpx_codec_alg_priv_t *ctx,
@@ -1344,8 +1357,6 @@ static vpx_codec_err_t encoder_encode(vpx_codec_alg_priv_t *ctx,
     unsigned int lib_flags = 0;
     YV12_BUFFER_CONFIG sd;
     int64_t dst_time_stamp = timebase_units_to_ticks(timestamp_ratio, pts);
-    int64_t dst_end_time_stamp =
-        timebase_units_to_ticks(timestamp_ratio, pts + duration);
     size_t size, cx_data_sz;
     unsigned char *cx_data;
 
@@ -1356,6 +1367,8 @@ static vpx_codec_err_t encoder_encode(vpx_codec_alg_priv_t *ctx,
     if (ctx->base.init_flags & VPX_CODEC_USE_PSNR) cpi->b_calculate_psnr = 1;
 
     if (img != NULL) {
+      const int64_t dst_end_time_stamp =
+          timebase_units_to_ticks(timestamp_ratio, pts + duration);
       res = image2yuvconfig(img, &sd);
 
       // Store the original flags in to the frame buffer. Will extract the
@@ -1392,6 +1405,7 @@ static vpx_codec_err_t encoder_encode(vpx_codec_alg_priv_t *ctx,
       // compute first pass stats
       if (img) {
         int ret;
+        int64_t dst_end_time_stamp;
         vpx_codec_cx_pkt_t fps_pkt;
         ENCODE_FRAME_RESULT encode_frame_result;
         vp9_init_encode_frame_result(&encode_frame_result);
@@ -1417,6 +1431,7 @@ static vpx_codec_err_t encoder_encode(vpx_codec_alg_priv_t *ctx,
 #endif  // !CONFIG_REALTIME_ONLY
     } else {
       ENCODE_FRAME_RESULT encode_frame_result;
+      int64_t dst_end_time_stamp;
       vp9_init_encode_frame_result(&encode_frame_result);
       while (cx_data_sz >= ctx->cx_data_sz / 2 &&
              -1 != vp9_get_compressed_data(cpi, &lib_flags, &size, cx_data,
@@ -2143,6 +2158,7 @@ static vp9_extracfg get_extra_cfg() {
 VP9EncoderConfig vp9_get_encoder_config(int frame_width, int frame_height,
                                         vpx_rational_t frame_rate,
                                         int target_bitrate, int encode_speed,
+                                        int target_level,
                                         vpx_enc_pass enc_pass) {
   /* This function will generate the same VP9EncoderConfig used by the
    * vpxenc command given below.
@@ -2154,6 +2170,7 @@ VP9EncoderConfig vp9_get_encoder_config(int frame_width, int frame_height,
    * FPS:     frame_rate
    * BITRATE: target_bitrate
    * CPU_USED:encode_speed
+   * TARGET_LEVEL: target_level
    *
    * INPUT, OUTPUT, LIMIT will not affect VP9EncoderConfig
    *
@@ -2166,6 +2183,7 @@ VP9EncoderConfig vp9_get_encoder_config(int frame_width, int frame_height,
    * FPS=30/1
    * LIMIT=150
    * CPU_USED=0
+   * TARGET_LEVEL=0
    * ./vpxenc --limit=$LIMIT --width=$WIDTH --height=$HEIGHT --fps=$FPS
    * --lag-in-frames=25 \
    *  --codec=vp9 --good --cpu-used=CPU_USED --threads=0 --profile=0 \
@@ -2174,7 +2192,7 @@ VP9EncoderConfig vp9_get_encoder_config(int frame_width, int frame_height,
    *  --minsection-pct=0 --maxsection-pct=150 --arnr-maxframes=7 --psnr \
    *  --arnr-strength=5 --sharpness=0 --undershoot-pct=100 --overshoot-pct=100 \
    *  --frame-parallel=0 --tile-columns=0 --cpu-used=0 --end-usage=vbr \
-   *  --target-bitrate=$BITRATE -o $OUTPUT $INPUT
+   *  --target-bitrate=$BITRATE --target-level=0 -o $OUTPUT $INPUT
    */
 
   VP9EncoderConfig oxcf;
@@ -2192,6 +2210,7 @@ VP9EncoderConfig vp9_get_encoder_config(int frame_width, int frame_height,
   oxcf.frame_parallel_decoding_mode = 0;
   oxcf.two_pass_vbrmax_section = 150;
   oxcf.speed = abs(encode_speed);
+  oxcf.target_level = target_level;
   return oxcf;
 }
 

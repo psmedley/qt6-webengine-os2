@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,6 @@
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_features.h"
 #include "ui/gl/gl_fence_android_native_fence_sync.h"
-#include "ui/gl/gl_image_ahardwarebuffer.h"
 #include "ui/gl/gl_utils.h"
 
 namespace gl {
@@ -56,14 +55,12 @@ base::TimeTicks GetSignalTime(const base::ScopedFD& fence) {
 }  // namespace
 
 GLSurfaceEGLSurfaceControl::GLSurfaceEGLSurfaceControl(
+    GLDisplayEGL* display,
     ANativeWindow* window,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner)
-    : root_surface_name_(BuildSurfaceName(kRootSurfaceName)),
+    : GLSurfaceEGL(display),
+      root_surface_name_(BuildSurfaceName(kRootSurfaceName)),
       child_surface_name_(BuildSurfaceName(kChildSurfaceName)),
-      window_rect_(0,
-                   0,
-                   ANativeWindow_getWidth(window),
-                   ANativeWindow_getHeight(window)),
       root_surface_(
           new gfx::SurfaceControl::Surface(window, root_surface_name_.c_str())),
       transaction_ack_timeout_manager_(task_runner),
@@ -90,8 +87,7 @@ bool GLSurfaceEGLSurfaceControl::Initialize(GLSurfaceFormat format) {
   // Surfaceless is always disabled on Android so we create a 1x1 pbuffer
   // surface.
   if (!offscreen_surface_) {
-    EGLDisplay display = GetEGLDisplay();
-    if (!display) {
+    if (!display_->GetDisplay()) {
       LOG(ERROR) << "Trying to create surface with invalid display.";
       return false;
     }
@@ -99,8 +95,8 @@ bool GLSurfaceEGLSurfaceControl::Initialize(GLSurfaceFormat format) {
     EGLint pbuffer_attribs[] = {
         EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE,
     };
-    offscreen_surface_ =
-        eglCreatePbufferSurface(display, GetConfig(), pbuffer_attribs);
+    offscreen_surface_ = eglCreatePbufferSurface(display_->GetDisplay(),
+                                                 GetConfig(), pbuffer_attribs);
     if (!offscreen_surface_) {
       LOG(ERROR) << "eglCreatePbufferSurface failed with error "
                  << ui::GetLastEGLErrorString();
@@ -140,7 +136,7 @@ void GLSurfaceEGLSurfaceControl::Destroy() {
   root_surface_.reset();
 
   if (offscreen_surface_) {
-    if (!eglDestroySurface(GetEGLDisplay(), offscreen_surface_)) {
+    if (!eglDestroySurface(display_->GetDisplay(), offscreen_surface_)) {
       LOG(ERROR) << "eglDestroySurface failed with error "
                  << ui::GetLastEGLErrorString();
     }
@@ -154,7 +150,6 @@ bool GLSurfaceEGLSurfaceControl::Resize(const gfx::Size& size,
                                         bool has_alpha) {
   // TODO(khushalsagar): Update GLSurfaceFormat using the |color_space| above?
   // We don't do this for the NativeViewGLSurfaceEGL as well yet.
-  window_rect_ = gfx::Rect(size);
   return true;
 }
 
@@ -163,13 +158,15 @@ bool GLSurfaceEGLSurfaceControl::IsOffscreen() {
 }
 
 gfx::SwapResult GLSurfaceEGLSurfaceControl::SwapBuffers(
-    PresentationCallback callback) {
+    PresentationCallback callback,
+    FrameData data) {
   NOTREACHED();
   return gfx::SwapResult::SWAP_FAILED;
 }
 
 gfx::SwapResult GLSurfaceEGLSurfaceControl::CommitOverlayPlanes(
-    PresentationCallback callback) {
+    PresentationCallback callback,
+    FrameData data) {
   NOTREACHED();
   return gfx::SwapResult::SWAP_FAILED;
 }
@@ -179,22 +176,25 @@ gfx::SwapResult GLSurfaceEGLSurfaceControl::PostSubBuffer(
     int y,
     int width,
     int height,
-    PresentationCallback callback) {
+    PresentationCallback callback,
+    FrameData data) {
   NOTREACHED();
   return gfx::SwapResult::SWAP_FAILED;
 }
 
 void GLSurfaceEGLSurfaceControl::SwapBuffersAsync(
     SwapCompletionCallback completion_callback,
-    PresentationCallback presentation_callback) {
-  CommitPendingTransaction(window_rect_, std::move(completion_callback),
+    PresentationCallback presentation_callback,
+    FrameData data) {
+  CommitPendingTransaction(std::move(completion_callback),
                            std::move(presentation_callback));
 }
 
 void GLSurfaceEGLSurfaceControl::CommitOverlayPlanesAsync(
     SwapCompletionCallback completion_callback,
-    PresentationCallback presentation_callback) {
-  CommitPendingTransaction(window_rect_, std::move(completion_callback),
+    PresentationCallback presentation_callback,
+    FrameData data) {
+  CommitPendingTransaction(std::move(completion_callback),
                            std::move(presentation_callback));
 }
 
@@ -204,14 +204,13 @@ void GLSurfaceEGLSurfaceControl::PostSubBufferAsync(
     int width,
     int height,
     SwapCompletionCallback completion_callback,
-    PresentationCallback presentation_callback) {
-  CommitPendingTransaction(gfx::Rect(x, y, width, height),
-                           std::move(completion_callback),
+    PresentationCallback presentation_callback,
+    FrameData data) {
+  CommitPendingTransaction(std::move(completion_callback),
                            std::move(presentation_callback));
 }
 
 void GLSurfaceEGLSurfaceControl::CommitPendingTransaction(
-    const gfx::Rect& damage_rect,
     SwapCompletionCallback completion_callback,
     PresentationCallback present_callback) {
   // The transaction is initialized on the first ScheduleOverlayPlane call. If
@@ -520,7 +519,11 @@ void GLSurfaceEGLSurfaceControl::OnTransactionAckOnGpuThread(
     // with no fence, since its not being released and so shouldn't be in
     // |released_resources| either.
     if (it == released_resources.end()) {
-      DCHECK(!surface_stat.fence.is_valid());
+      // TODO(vasilyt): We used to DCHECK(!surface_stat.fence.is_valid()) here,
+      // but due to flinger behavior it doesn't hold. This seems to be a
+      // potential fligner bug.  DCHECK is useful for catching resource
+      // life-time issues, so we should consider bringing it back when Android
+      // side will be fixed.
       continue;
     }
 
@@ -556,7 +559,7 @@ void GLSurfaceEGLSurfaceControl::OnTransactionAckOnGpuThread(
 
   // If we don't use OnCommit, we advance transaction queue after we received
   // OnComplete.
-  if (!using_on_commit_callback_)
+  if (!use_target_deadline_ && !using_on_commit_callback_)
     AdvanceTransactionQueue();
 }
 
@@ -652,33 +655,6 @@ void GLSurfaceEGLSurfaceControl::SetFrameRate(float frame_rate) {
 void GLSurfaceEGLSurfaceControl::SetChoreographerVsyncIdForNextFrame(
     absl::optional<int64_t> choreographer_vsync_id) {
   choreographer_vsync_id_for_next_frame_ = choreographer_vsync_id;
-}
-
-gfx::Rect GLSurfaceEGLSurfaceControl::ApplyDisplayInverse(
-    const gfx::Rect& input) const {
-  gfx::Transform display_inverse = gfx::OverlayTransformToTransform(
-      gfx::InvertOverlayTransform(display_transform_),
-      gfx::SizeF(window_rect_.size()));
-  return cc::MathUtil::MapEnclosedRectWith2dAxisAlignedTransform(
-      display_inverse, input);
-}
-
-const gfx::ColorSpace&
-GLSurfaceEGLSurfaceControl::GetNearestSupportedColorSpace(
-    const gfx::ColorSpace& buffer_color_space) const {
-  static constexpr gfx::ColorSpace kSRGB = gfx::ColorSpace::CreateSRGB();
-  static constexpr gfx::ColorSpace kP3 = gfx::ColorSpace::CreateDisplayP3D65();
-
-  switch (format_.GetColorSpace()) {
-    case GLSurfaceFormat::COLOR_SPACE_UNSPECIFIED:
-    case GLSurfaceFormat::COLOR_SPACE_SRGB:
-      return kSRGB;
-    case GLSurfaceFormat::COLOR_SPACE_DISPLAY_P3:
-      return buffer_color_space == kP3 ? kP3 : kSRGB;
-  }
-
-  NOTREACHED();
-  return kSRGB;
 }
 
 GLSurfaceEGLSurfaceControl::SurfaceState::SurfaceState(

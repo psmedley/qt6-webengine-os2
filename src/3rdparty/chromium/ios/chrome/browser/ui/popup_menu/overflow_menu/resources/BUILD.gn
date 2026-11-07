@@ -1,14 +1,26 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import("//build/config/ios/asset_catalog.gni")
+
+colorset("destination_highlight_color") {
+  sources = [ "destination_highlight_color.colorset/Contents.json" ]
+}
 
 imageset("overflow_menu_action_bookmark") {
   sources = [
     "overflow_menu_action_bookmark.imageset/Contents.json",
     "overflow_menu_action_bookmark.imageset/overflow_menu_action_bookmark@2x.png",
     "overflow_menu_action_bookmark.imageset/overflow_menu_action_bookmark@3x.png",
+  ]
+}
+
+imageset("overflow_menu_action_clear_browsing_data") {
+  sources = [
+    "overflow_menu_action_clear_browsing_data.imageset/Contents.json",
+    "overflow_menu_action_clear_browsing_data.imageset/overflow_menu_action_clear_browsing_data@2x.png",
+    "overflow_menu_action_clear_browsing_data.imageset/overflow_menu_action_clear_browsing_data@3x.png",
   ]
 }
 
@@ -68,6 +80,14 @@ imageset("overflow_menu_action_new_window") {
   ]
 }
 
+imageset("overflow_menu_action_price_notifications") {
+  sources = [
+    "overflow_menu_action_price_notifications.imageset/Contents.json",
+    "overflow_menu_action_price_notifications.imageset/overflow_menu_action_price_notifications@2x.png",
+    "overflow_menu_action_price_notifications.imageset/overflow_menu_action_price_notifications@3x.png",
+  ]
+}
+
 imageset("overflow_menu_action_read_later") {
   sources = [
     "overflow_menu_action_read_later.imageset/Contents.json",
@@ -105,6 +125,22 @@ imageset("overflow_menu_action_request_mobile") {
     "overflow_menu_action_request_mobile.imageset/Contents.json",
     "overflow_menu_action_request_mobile.imageset/overflow_menu_action_request_mobile@2x.png",
     "overflow_menu_action_request_mobile.imageset/overflow_menu_action_request_mobile@3x.png",
+  ]
+}
+
+imageset("overflow_menu_action_settings") {
+  sources = [
+    "overflow_menu_action_settings.imageset/Contents.json",
+    "overflow_menu_action_settings.imageset/overflow_menu_action_settings@2x.png",
+    "overflow_menu_action_settings.imageset/overflow_menu_action_settings@3x.png",
+  ]
+}
+
+imageset("overflow_menu_action_share_chrome") {
+  sources = [
+    "overflow_menu_action_share_chrome.imageset/Contents.json",
+    "overflow_menu_action_share_chrome.imageset/overflow_menu_action_share_chrome@2x.png",
+    "overflow_menu_action_share_chrome.imageset/overflow_menu_action_share_chrome@3x.png",
   ]
 }
 
@@ -180,16 +216,6 @@ imageset("overflow_menu_destination_passwords") {
   ]
 }
 
-imageset("overflow_menu_destination_passwords_rebrand") {
-  sources = [
-    "overflow_menu_destination_passwords_rebrand.imageset/Contents.json",
-    "overflow_menu_destination_passwords_rebrand.imageset/overflow_menu_destination_passwords@2x.png",
-    "overflow_menu_destination_passwords_rebrand.imageset/overflow_menu_destination_passwords@3x.png",
-    "overflow_menu_destination_passwords_rebrand.imageset/overflow_menu_destination_passwords_dark@2x.png",
-    "overflow_menu_destination_passwords_rebrand.imageset/overflow_menu_destination_passwords_dark@3x.png",
-  ]
-}
-
 imageset("overflow_menu_destination_reading_list") {
   sources = [
     "overflow_menu_destination_reading_list.imageset/Contents.json",
@@ -217,6 +243,16 @@ imageset("overflow_menu_destination_settings") {
     "overflow_menu_destination_settings.imageset/overflow_menu_destination_settings@3x.png",
     "overflow_menu_destination_settings.imageset/overflow_menu_destination_settings_dark@2x.png",
     "overflow_menu_destination_settings.imageset/overflow_menu_destination_settings_dark@3x.png",
+  ]
+}
+
+imageset("overflow_menu_destination_whats_new") {
+  sources = [
+    "overflow_menu_destination_whats_new.imageset/Contents.json",
+    "overflow_menu_destination_whats_new.imageset/overflow_menu_destination_whats_new@2x.png",
+    "overflow_menu_destination_whats_new.imageset/overflow_menu_destination_whats_new@3x.png",
+    "overflow_menu_destination_whats_new.imageset/overflow_menu_destination_whats_new_dark@2x.png",
+    "overflow_menu_destination_whats_new.imageset/overflow_menu_destination_whats_new_dark@3x.png",
   ]
 }
 

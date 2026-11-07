@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,7 @@
 #include "url/url_canon.h"
 #include "url/url_canon_stdstring.h"
 
-namespace net {
-
-namespace dns_alias_utility {
+namespace net::dns_alias_utility {
 
 std::string ValidateAndCanonicalizeAlias(base::StringPiece alias) {
   // Disallow empty hostnames, hostnames longer than
@@ -57,6 +55,4 @@ std::set<std::string> FixUpDnsAliases(const std::set<std::string>& aliases) {
   return fixed_aliases;
 }
 
-}  // namespace dns_alias_utility
-
-}  // namespace net
+}  // namespace net::dns_alias_utility

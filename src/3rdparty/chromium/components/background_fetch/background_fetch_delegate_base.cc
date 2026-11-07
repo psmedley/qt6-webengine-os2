@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/check_op.h"
+#include "base/containers/contains.h"
 #include "base/notreached.h"
 #include "build/build_config.h"
 #include "components/background_fetch/job_details.h"
@@ -179,16 +180,17 @@ void BackgroundFetchDelegateBase::CancelDownload(std::string job_id) {
   }
 }
 
-void BackgroundFetchDelegateBase::OnUiFinished(const std::string& job_id,
-                                               bool activated) {
+void BackgroundFetchDelegateBase::OnUiFinished(const std::string& job_id) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (activated) {
-    if (auto client = GetClient(job_id))
-      client->OnUIActivated(job_id);
-  }
 
   job_details_map_.erase(job_id);
   DoCleanUpUi(job_id);
+}
+
+void BackgroundFetchDelegateBase::OnUiActivated(const std::string& job_id) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (auto client = GetClient(job_id))
+    client->OnUIActivated(job_id);
 }
 
 JobDetails* BackgroundFetchDelegateBase::GetJobDetails(
@@ -235,7 +237,7 @@ void BackgroundFetchDelegateBase::MarkJobComplete(const std::string& job_id) {
   JobDetails* job_details = GetJobDetails(job_id);
 
   if (job_details->job_state == JobDetails::State::kCancelled) {
-    OnUiFinished(job_id, /*activated=*/false);
+    OnUiFinished(job_id);
     return;
   }
 
@@ -422,10 +424,8 @@ bool BackgroundFetchDelegateBase::IsGuidOutstanding(
   if (job_details_iter == job_details_map_.end())
     return false;
 
-  const std::vector<std::string>& outstanding_guids =
-      job_details_iter->second.fetch_description->outstanding_guids;
-  return std::find(outstanding_guids.begin(), outstanding_guids.end(), guid) !=
-         outstanding_guids.end();
+  return base::Contains(
+      job_details_iter->second.fetch_description->outstanding_guids, guid);
 }
 
 void BackgroundFetchDelegateBase::RestartPausedDownload(

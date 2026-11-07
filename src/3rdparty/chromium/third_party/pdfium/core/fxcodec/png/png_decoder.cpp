@@ -129,7 +129,7 @@ void _png_get_header_func(png_structp png_ptr, png_infop info_ptr) {
       if (color_type1 != PNG_COLOR_TYPE_PALETTE) {
         png_error(pContext->m_pPng, "Not Support Output Palette Now");
       }
-      FALLTHROUGH;
+      [[fallthrough]];
     case PNG_COLOR_TYPE_RGB:
     case PNG_COLOR_TYPE_RGB_ALPHA:
       if (!(color_type1 & PNG_COLOR_MASK_COLOR)) {
@@ -218,7 +218,7 @@ bool PngDecoder::ContinueDecode(ProgressiveDecoderIface::Context* pContext,
     }
     return false;
   }
-  pdfium::span<uint8_t> src_buf = codec_memory->GetSpan();
+  pdfium::span<uint8_t> src_buf = codec_memory->GetUnconsumedSpan();
   png_process_data(ctx->m_pPng, ctx->m_pInfo, src_buf.data(), src_buf.size());
   return true;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,15 +69,15 @@ bool AppIsolationHandler::Parse(Extension* extension, std::u16string* error) {
   }
 
   bool has_isolated_storage = false;
-  base::Value::ConstListView list_view = isolation_list->GetListDeprecated();
-  for (size_t i = 0; i < list_view.size(); ++i) {
-    if (!list_view[i].is_string()) {
+  const base::Value::List& list = isolation_list->GetList();
+  for (size_t i = 0; i < list.size(); ++i) {
+    if (!list[i].is_string()) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
           manifest_errors::kInvalidIsolationValue, base::NumberToString(i));
       return false;
     }
 
-    const std::string& isolation_string = list_view[i].GetString();
+    const std::string& isolation_string = list[i].GetString();
     // Check for isolated storage.
     if (isolation_string == manifest_values::kIsolatedStorage) {
       has_isolated_storage = true;

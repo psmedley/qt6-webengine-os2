@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gfx/color_space_win.h"
 
 #include "base/logging.h"
-#include "third_party/skia/include/third_party/skcms/skcms.h"
+#include "third_party/skia/modules/skcms/skcms.h"
 
 namespace gfx {
 
@@ -106,6 +106,7 @@ DXVA2_ExtendedFormat ColorSpaceWin::GetExtendedFormat(
       break;
     case gfx::ColorSpace::TransferID::LINEAR:
     case gfx::ColorSpace::TransferID::LINEAR_HDR:
+    case gfx::ColorSpace::TransferID::SCRGB_LINEAR_80_NITS:
       format.VideoTransferFunction = DXVA2_VideoTransFunc_10;
       break;
     case gfx::ColorSpace::TransferID::SRGB:
@@ -167,7 +168,9 @@ DXGI_COLOR_SPACE_TYPE ColorSpaceWin::GetDXGIColorSpace(
         if (color_space.GetTransferID() ==
                 gfx::ColorSpace::TransferID::LINEAR ||
             color_space.GetTransferID() ==
-                gfx::ColorSpace::TransferID::LINEAR_HDR) {
+                gfx::ColorSpace::TransferID::LINEAR_HDR ||
+            color_space.GetTransferID() ==
+                gfx::ColorSpace::TransferID::SCRGB_LINEAR_80_NITS) {
           return DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
         } else if (color_space.GetTransferID() ==
                    gfx::ColorSpace::TransferID::CUSTOM_HDR) {

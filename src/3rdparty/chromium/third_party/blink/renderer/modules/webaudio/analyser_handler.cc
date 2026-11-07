@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,12 +12,19 @@
 
 namespace blink {
 
+namespace {
+
+constexpr unsigned kDefaultNumberOfInputChannels2 = 2;
+constexpr unsigned kDefaultNumberOfOutputChannels2 = 1;
+
+}  // namespace
+
 AnalyserHandler::AnalyserHandler(AudioNode& node, float sample_rate)
     : AudioBasicInspectorHandler(kNodeTypeAnalyser, node, sample_rate),
       analyser_(
           node.context()->GetDeferredTaskHandler().RenderQuantumFrames()) {
-  channel_count_ = 2;
-  AddOutput(1);
+  channel_count_ = kDefaultNumberOfInputChannels2;
+  AddOutput(kDefaultNumberOfOutputChannels2);
 
   Initialize();
 }
@@ -32,9 +39,14 @@ AnalyserHandler::~AnalyserHandler() {
 }
 
 void AnalyserHandler::Process(uint32_t frames_to_process) {
-  AudioBus* output_bus = Output(0).Bus();
+  DCHECK(Context()->IsAudioThread());
 
-  if (!IsInitialized()) {
+  // It's possible that output is not connected. Assign nullptr to indicate
+  // such case.
+  AudioBus* output_bus =
+      Output(0).RenderingFanOutCount() > 0 ? Output(0).Bus() : nullptr;
+
+  if (!IsInitialized() && output_bus) {
     output_bus->Zero();
     return;
   }
@@ -45,6 +57,11 @@ void AnalyserHandler::Process(uint32_t frames_to_process) {
   // AudioNode.  This must always be done so that the state of the
   // Analyser reflects the current input.
   analyser_.WriteInput(input_bus.get(), frames_to_process);
+
+  // Subsequent steps require `output_bus` to be valid.
+  if (!output_bus) {
+    return;
+  }
 
   if (!Input(0).IsConnected()) {
     // No inputs, so clear the output, and propagate the silence hint.

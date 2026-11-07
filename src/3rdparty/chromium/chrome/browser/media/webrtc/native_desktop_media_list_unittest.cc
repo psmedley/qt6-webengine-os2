@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -31,6 +32,7 @@
 #include "third_party/webrtc/modules/desktop_capture/desktop_capture_options.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_capturer.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_frame.h"
+#include "ui/views/widget/unique_widget_ptr.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_AURA)
@@ -41,6 +43,7 @@
 
 #if BUILDFLAG(IS_WIN)
 #include <windows.h>
+#include "base/strings/string_util_win.h"
 #endif
 
 using content::DesktopMediaID;
@@ -124,6 +127,8 @@ class MockObserver : public DesktopMediaListObserver {
   MOCK_METHOD1(OnSourceNameChanged, void(int index));
   MOCK_METHOD1(OnSourceThumbnailChanged, void(int index));
   MOCK_METHOD1(OnSourcePreviewChanged, void(size_t index));
+  MOCK_METHOD0(OnDelegatedSourceListSelection, void());
+  MOCK_METHOD0(OnDelegatedSourceListDismissed, void());
 };
 
 class FakeScreenCapturer : public webrtc::DesktopCapturer {
@@ -262,8 +267,13 @@ class NativeDesktopMediaListTest : public ChromeViewsTestBase {
       delete;
 
   void TearDown() override {
-    for (size_t i = 0; i < desktop_widgets_.size(); i++)
-      desktop_widgets_[i].reset();
+#if BUILDFLAG(IS_WIN)
+    if (window_open_)
+      DestroyTestWindow(window_info_);
+#endif  // BUILDFLAG(IS_WIN
+
+    for (auto& desktop_widget : desktop_widgets_)
+      desktop_widget.reset();
 
     ChromeViewsTestBase::TearDown();
   }
@@ -276,12 +286,11 @@ class NativeDesktopMediaListTest : public ChromeViewsTestBase {
   }
 
 #if defined(USE_AURA)
-  std::unique_ptr<views::Widget> CreateDesktopWidget() {
-    std::unique_ptr<views::Widget> widget(new views::Widget);
+  views::UniqueWidgetPtr CreateDesktopWidget() {
+    views::UniqueWidgetPtr widget(std::make_unique<views::Widget>());
     views::Widget::InitParams params;
     params.type = views::Widget::InitParams::TYPE_WINDOW_FRAMELESS;
     params.accept_events = false;
-    params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
     params.native_widget = new views::DesktopNativeWidgetAura(widget.get());
     params.bounds = gfx::Rect(0, 0, 20, 20);
     widget->Init(std::move(params));
@@ -339,14 +348,55 @@ class NativeDesktopMediaListTest : public ChromeViewsTestBase {
     window_list_.erase(window_list_.begin() + i);
     native_aura_id_map_.erase(native_id);
   }
-
 #endif  // defined(USE_AURA)
 
-  void AddWindowsAndVerify(bool has_view_dialog) {
-    window_capturer_ = new FakeWindowCapturer();
+  void CreateCapturerAndModel() {
+    webrtc::DesktopCaptureOptions options =
+        content::desktop_capture::CreateDesktopCaptureOptions();
+
+#if BUILDFLAG(IS_WIN)
+    // This option should always be false on Windows so we avoid a potential
+    // deadlock.
+    EXPECT_FALSE(options.enumerate_current_process_windows());
+#endif  // BUILDFLAG(IS_WIN)
+
+    window_capturer_ = new FakeWindowCapturer(options);
+
+    // Only set `add_current_process_windows` if we're using real test windows.
+    // The tests that use fake windows will have their expectations fail if
+    // `model_` picks up other windows on the system.
+    bool add_current_process_windows = false;
+#if BUILDFLAG(IS_WIN)
+    add_current_process_windows = window_open_;
+#endif  // BUILDFLAG(IS_WIN)
     model_ = std::make_unique<NativeDesktopMediaList>(
         DesktopMediaList::Type::kWindow,
-        base::WrapUnique(window_capturer_.get()));
+        base::WrapUnique(window_capturer_.get()), add_current_process_windows);
+  }
+
+  void UpdateModel() {
+    base::RunLoop run_loop;
+    base::OnceClosure update_callback =
+        base::BindLambdaForTesting([&]() { run_loop.Quit(); });
+    model_->Update(std::move(update_callback));
+    run_loop.Run();
+  }
+
+  DesktopMediaList::Source GetSourceFromModel(content::DesktopMediaID::Id id) {
+    int source_count = model_->GetSourceCount();
+    DesktopMediaList::Source source;
+    for (int i = 0; i < source_count; i++) {
+      source = model_->GetSource(i);
+      if (source.id.id == id) {
+        return source;
+      }
+    }
+
+    return DesktopMediaList::Source();
+  }
+
+  void AddWindowsAndVerify(bool has_view_dialog) {
+    CreateCapturerAndModel();
 
     // Set update period to reduce the time it takes to run tests.
     model_->SetUpdatePeriod(base::Milliseconds(20));
@@ -410,6 +460,13 @@ class NativeDesktopMediaListTest : public ChromeViewsTestBase {
     testing::Mock::VerifyAndClearExpectations(&observer_);
   }
 
+#if BUILDFLAG(IS_WIN)
+  void CreateRealWindow() {
+    window_open_ = true;
+    window_info_ = CreateTestWindow();
+  }
+#endif  // BUILDFLAG(IS_WIN)
+
  protected:
   // Must be listed before |model_|, so it's destroyed last.
   MockObserver observer_;
@@ -418,9 +475,14 @@ class NativeDesktopMediaListTest : public ChromeViewsTestBase {
   raw_ptr<FakeWindowCapturer> window_capturer_;
 
   webrtc::DesktopCapturer::SourceList window_list_;
-  std::vector<std::unique_ptr<views::Widget>> desktop_widgets_;
+  std::vector<views::UniqueWidgetPtr> desktop_widgets_;
   std::map<DesktopMediaID::Id, DesktopMediaID::Id> native_aura_id_map_;
   std::unique_ptr<NativeDesktopMediaList> model_;
+
+#if BUILDFLAG(IS_WIN)
+  bool window_open_ = false;
+  WindowInfo window_info_;
+#endif  // BUILDFLAG(IS_WIN)
 };
 
 TEST_F(NativeDesktopMediaListTest, Windows) {
@@ -614,10 +676,7 @@ TEST_F(NativeDesktopMediaListTest, MoveWindow) {
 // This test verifies that webrtc::DesktopCapturer::CaptureFrame() is not
 // called when the thumbnail size is empty.
 TEST_F(NativeDesktopMediaListTest, EmptyThumbnail) {
-  window_capturer_ = new FakeWindowCapturer();
-  model_ = std::make_unique<NativeDesktopMediaList>(
-      DesktopMediaList::Type::kWindow,
-      base::WrapUnique(window_capturer_.get()));
+  CreateCapturerAndModel();
   model_->SetThumbnailSize(gfx::Size());
 
   // Set update period to reduce the time it takes to run tests.
@@ -686,4 +745,270 @@ TEST_F(NativeDesktopMediaListTest, GetSourceListAvoidsDeadlock) {
       FROM_HERE, base::BindOnce(&DestroyTestWindow, info));
   window_thread.Stop();
 }
+
+TEST_F(NativeDesktopMediaListTest, CollectsCurrentProcessWindows) {
+  // We need a real window so we can ensure windows owned by the current
+  // process are picked up by `model_` even if they aren't enumerated by the
+  // capturer.
+  CreateRealWindow();
+  CreateCapturerAndModel();
+  UpdateModel();
+
+  // Ensure that `model_` is finding and adding the window to it's sources, and
+  // not getting it from the capturer.
+  webrtc::DesktopCapturer::SourceList source_list;
+  EXPECT_TRUE(window_capturer_->GetSourceList(&source_list));
+  EXPECT_EQ(source_list.size(), 0ull);
+
+  content::DesktopMediaID::Id window_id =
+      reinterpret_cast<intptr_t>(window_info_.hwnd);
+  DesktopMediaList::Source source = GetSourceFromModel(window_id);
+  EXPECT_EQ(source.id.id, window_id);
+  EXPECT_STREQ(base::as_wcstr(source.name.c_str()), kWideWindowTitle);
+}
+
+TEST_F(NativeDesktopMediaListTest, MinimizedCurrentProcessWindows) {
+  CreateRealWindow();
+  CreateCapturerAndModel();
+
+  webrtc::DesktopCapturer::SourceList source_list;
+  EXPECT_TRUE(window_capturer_->GetSourceList(&source_list));
+  EXPECT_EQ(source_list.size(), 0ull);
+
+  // If we minimize the window it should not appear in `model_`s sources.
+  ::ShowWindow(window_info_.hwnd, SW_MINIMIZE);
+  UpdateModel();
+  DesktopMediaList::Source source =
+      GetSourceFromModel(reinterpret_cast<intptr_t>(window_info_.hwnd));
+
+  // We expect the source is not found.
+  EXPECT_EQ(source.id.id, content::DesktopMediaID::kNullId);
+}
 #endif  // BUILDFLAG(IS_WIN)
+
+class DelegatedFakeScreenCapturer
+    : public FakeScreenCapturer,
+      public webrtc::DelegatedSourceListController {
+ public:
+  webrtc::DelegatedSourceListController* GetDelegatedSourceListController()
+      override {
+    return this;
+  }
+
+  void Observe(
+      webrtc::DelegatedSourceListController::Observer* observer) override {
+    DCHECK(!observer_ || !observer);
+    observer_ = observer;
+  }
+
+  void SimulateSourceListSelection() {
+    DCHECK(observer_);
+    observer_->OnSelection();
+  }
+
+  void SimulateSourceListCancelled() {
+    DCHECK(observer_);
+    observer_->OnCancelled();
+  }
+
+  void SimulateSourceListError() {
+    DCHECK(observer_);
+    observer_->OnError();
+  }
+
+  void EnsureVisible() override { ensure_visible_call_count_++; }
+
+  void EnsureHidden() override { ensure_hidden_call_count_++; }
+
+  int ensure_visible_call_count() const { return ensure_visible_call_count_; }
+
+  int ensure_hidden_call_count() const { return ensure_hidden_call_count_; }
+
+ private:
+  webrtc::DelegatedSourceListController::Observer* observer_ = nullptr;
+  int ensure_visible_call_count_ = 0;
+  int ensure_hidden_call_count_ = 0;
+};
+
+class NativeDesktopMediaListDelegatedTest : public ChromeViewsTestBase {
+ public:
+  NativeDesktopMediaListDelegatedTest() {
+    auto capturer = std::make_unique<DelegatedFakeScreenCapturer>();
+    capturer_ = capturer.get();
+    model_ = std::make_unique<NativeDesktopMediaList>(
+        DesktopMediaList::Type::kScreen, std::move(capturer));
+
+    model_->SetUpdatePeriod(base::Milliseconds(20));
+  }
+
+  ~NativeDesktopMediaListDelegatedTest() override = default;
+
+  void SetUp() override {
+    // We're not testing this behavior, but if we don't add an expectation, then
+    // the tests will complain about unexpected calls occurring.
+    EXPECT_CALL(observer_, OnSourceAdded(0)).Times(testing::AnyNumber());
+    EXPECT_CALL(observer_, OnSourceThumbnailChanged(0))
+        .Times(testing::AnyNumber());
+
+    // Start updating and then ensure that the capturer is ready before allowing
+    // the test to proceed.
+    model_->StartUpdating(&observer_);
+    WaitForCapturerTasks();
+    ChromeViewsTestBase::SetUp();
+  }
+
+  void WaitForCapturerTasks() {
+    base::RunLoop run_loop;
+    model_->GetCapturerTaskRunnerForTesting()->PostTask(FROM_HERE,
+                                                        run_loop.QuitClosure());
+    run_loop.Run();
+  }
+
+  void TriggerAndWaitForSelection() {
+    base::RunLoop run_loop;
+    EXPECT_CALL(observer_, OnDelegatedSourceListSelection())
+        .WillOnce(QuitRunLoop(base::ThreadTaskRunnerHandle::Get(), &run_loop));
+    capturer_->SimulateSourceListSelection();
+    run_loop.Run();
+  }
+
+  void TriggerAndWaitForError() {
+    base::RunLoop run_loop;
+    // We don't differentiate to the observer *why* the list is dismissed, just
+    // that it was.
+    EXPECT_CALL(observer_, OnDelegatedSourceListDismissed())
+        .WillOnce(QuitRunLoop(base::ThreadTaskRunnerHandle::Get(), &run_loop));
+    capturer_->SimulateSourceListError();
+    run_loop.Run();
+  }
+
+  void TriggerAndWaitForCancelled() {
+    base::RunLoop run_loop;
+    // We don't differentiate to the observer *why* the list is dismissed, just
+    // that it was.
+    EXPECT_CALL(observer_, OnDelegatedSourceListDismissed())
+        .WillOnce(QuitRunLoop(base::ThreadTaskRunnerHandle::Get(), &run_loop));
+    capturer_->SimulateSourceListCancelled();
+    run_loop.Run();
+  }
+
+ protected:
+  // The order is important here. Obsever must outlive model, and the capturer
+  // is owned by the model, so we should dispose of it's raw pointer before
+  // we dispose of the model which would invalidate it. Hence observer is listed
+  // first, followed by model, followed by the capturer.
+  MockObserver observer_;
+  std::unique_ptr<NativeDesktopMediaList> model_;
+  raw_ptr<DelegatedFakeScreenCapturer> capturer_;
+};
+
+TEST_F(NativeDesktopMediaListDelegatedTest, Selection) {
+  // This triggers a selection and waits for it to come through the Observer.
+  // This will time out if it fails.
+  TriggerAndWaitForSelection();
+}
+
+TEST_F(NativeDesktopMediaListDelegatedTest, Cancelled) {
+  // This triggers a cancellation and waits for it to come through the Observer.
+  // This will time out if it fails.
+  TriggerAndWaitForCancelled();
+}
+
+TEST_F(NativeDesktopMediaListDelegatedTest, Error) {
+  // This triggers an error and waits for it to come through the Observer.
+  // This will time out if it fails.
+  TriggerAndWaitForError();
+}
+
+// Verify that all calls to FocusList are passed on unless there is a selection.
+TEST_F(NativeDesktopMediaListDelegatedTest, ShowRepeatedlyNotForced) {
+  const int expected_call_times = 5;
+
+  for (int i = 0; i < expected_call_times; i++) {
+    model_->FocusList();
+  }
+
+  WaitForCapturerTasks();
+  EXPECT_EQ(expected_call_times, capturer_->ensure_visible_call_count());
+
+  TriggerAndWaitForSelection();
+
+  for (int i = 0; i < expected_call_times; i++) {
+    model_->FocusList();
+  }
+
+  // No new calls should've come in via FocusList after being notified of a
+  // selection.
+  WaitForCapturerTasks();
+  EXPECT_EQ(expected_call_times, capturer_->ensure_visible_call_count());
+}
+
+// Verify that all calls to HideList are passed on.
+TEST_F(NativeDesktopMediaListDelegatedTest, HideRepeatedly) {
+  const int expected_call_times = 5;
+
+  for (int i = 0; i < expected_call_times; i++) {
+    model_->HideList();
+  }
+
+  WaitForCapturerTasks();
+  EXPECT_EQ(expected_call_times, capturer_->ensure_hidden_call_count());
+
+  TriggerAndWaitForSelection();
+
+  for (int i = 0; i < expected_call_times; i++) {
+    model_->HideList();
+  }
+
+  // HideList may still be called after being notified of a selection.
+  WaitForCapturerTasks();
+  EXPECT_EQ(2 * expected_call_times, capturer_->ensure_hidden_call_count());
+}
+
+TEST_F(NativeDesktopMediaListDelegatedTest, FocusAfterSelect) {
+  TriggerAndWaitForSelection();
+
+  // Calling FocusList after a selection should not trigger an EnsureVisible
+  // call.
+  model_->FocusList();
+  WaitForCapturerTasks();
+  EXPECT_EQ(0, capturer_->ensure_visible_call_count());
+
+  // Clearing the selection while visible (a result of calling FocusList above),
+  // should trigger an EnsureVisible call.
+  model_->ClearDelegatedSourceListSelection();
+  WaitForCapturerTasks();
+  EXPECT_EQ(1, capturer_->ensure_visible_call_count());
+
+  // Calling FocusList after clearing the selection should again trigger an
+  // EnsureVisible call.
+  model_->FocusList();
+  WaitForCapturerTasks();
+  EXPECT_EQ(2, capturer_->ensure_visible_call_count());
+}
+
+// Verify that ClearSelection is a no-op if there is not a selection or if it is
+// not focused.
+TEST_F(NativeDesktopMediaListDelegatedTest, ClearSelectionNoOp) {
+  model_->ClearDelegatedSourceListSelection();
+
+  // Because we never triggered a selection, we should not have a call to
+  // EnsureVisible.
+  WaitForCapturerTasks();
+  EXPECT_EQ(0, capturer_->ensure_visible_call_count());
+
+  // Select and then clear the call.
+  TriggerAndWaitForSelection();
+  model_->ClearDelegatedSourceListSelection();
+
+  // Because we have never called |FocusList|, ensure visible shouldn't have
+  // been called.
+  WaitForCapturerTasks();
+  EXPECT_EQ(0, capturer_->ensure_visible_call_count());
+
+  // Because our selection has been cleared, we should become visible the next
+  // time that we are focused.
+  model_->FocusList();
+  WaitForCapturerTasks();
+  EXPECT_EQ(1, capturer_->ensure_visible_call_count());
+}

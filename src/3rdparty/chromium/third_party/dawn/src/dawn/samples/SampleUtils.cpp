@@ -14,6 +14,12 @@
 
 #include "dawn/samples/SampleUtils.h"
 
+#include <algorithm>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "GLFW/glfw3.h"
 #include "dawn/common/Assert.h"
 #include "dawn/common/Log.h"
@@ -22,13 +28,10 @@
 #include "dawn/dawn_proc.h"
 #include "dawn/dawn_wsi.h"
 #include "dawn/native/DawnNative.h"
-#include "dawn/utils/GLFWUtils.h"
 #include "dawn/utils/TerribleCommandBuffer.h"
 #include "dawn/wire/WireClient.h"
 #include "dawn/wire/WireServer.h"
-
-#include <algorithm>
-#include <cstring>
+#include "webgpu/webgpu_glfw.h"
 
 void PrintDeviceError(WGPUErrorType errorType, const char* message, void*) {
     const char* errorTypeName = "";
@@ -75,7 +78,7 @@ static wgpu::BackendType backendType = wgpu::BackendType::OpenGLES;
 #elif defined(DAWN_ENABLE_BACKEND_DESKTOP_GL)
 static wgpu::BackendType backendType = wgpu::BackendType::OpenGL;
 #else
-#    error
+#error
 #endif
 
 static CmdBufType cmdBufType = CmdBufType::Terrible;
@@ -100,8 +103,8 @@ wgpu::Device CreateCppDawnDevice() {
         return wgpu::Device();
     }
 
-    // Create the test window and discover adapters using it (esp. for OpenGL)
-    utils::SetupGLFWWindowHintsForBackend(backendType);
+    // Create the test window with no client API.
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_FALSE);
     window = glfwCreateWindow(640, 480, "Dawn window", nullptr, nullptr);
     if (!window) {
@@ -129,7 +132,7 @@ wgpu::Device CreateCppDawnDevice() {
     DawnProcTable backendProcs = dawn::native::GetProcs();
 
     // Create the swapchain
-    auto surfaceChainedDesc = utils::SetupWindowAndGetSurfaceDescriptor(window);
+    auto surfaceChainedDesc = wgpu::glfw::SetupWindowAndGetSurfaceDescriptor(window);
     WGPUSurfaceDescriptor surfaceDesc;
     surfaceDesc.nextInChain = reinterpret_cast<WGPUChainedStruct*>(surfaceChainedDesc.get());
     WGPUSurface surface = backendProcs.instanceCreateSurface(instance->Get(), &surfaceDesc);

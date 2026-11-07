@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,22 +18,24 @@
 #include "base/json/json_writer.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/time/default_tick_clock.h"
+#include "components/autofill_assistant/android/jni_headers/AssistantParseSingleTagXmlUtilWrapper_jni.h"
 #include "components/autofill_assistant/android/jni_headers/AutofillAssistantClient_jni.h"
 #include "components/autofill_assistant/android/jni_headers/AutofillAssistantDirectActionImpl_jni.h"
 #include "components/autofill_assistant/browser/android/ui_controller_android_utils.h"
 #include "components/autofill_assistant/browser/autofill_assistant_tts_controller.h"
 #include "components/autofill_assistant/browser/controller.h"
 #include "components/autofill_assistant/browser/display_strings_util.h"
-#include "components/autofill_assistant/browser/empty_website_login_manager_impl.h"
 #include "components/autofill_assistant/browser/features.h"
+#include "components/autofill_assistant/browser/public/password_change/empty_website_login_manager_impl.h"
+#include "components/autofill_assistant/browser/public/password_change/website_login_manager_impl.h"
 #include "components/autofill_assistant/browser/public/ui_state.h"
 #include "components/autofill_assistant/browser/service/access_token_fetcher.h"
+#include "components/autofill_assistant/browser/service/local_script_store.h"
+#include "components/autofill_assistant/browser/service/no_round_trip_service.h"
 #include "components/autofill_assistant/browser/switches.h"
-#include "components/autofill_assistant/browser/website_login_manager_impl.h"
 #include "components/password_manager/content/browser/password_change_success_tracker_factory.h"
 #include "components/password_manager/core/browser/password_change_success_tracker.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
-#include "components/variations/service/variations_service.h"
 #include "components/version_info/android/channel_getter.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -42,17 +44,28 @@
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "url/gurl.h"
 
-using base::android::AttachCurrentThread;
-using base::android::JavaParamRef;
-using base::android::JavaRef;
-using base::android::ScopedJavaGlobalRef;
-using base::android::ScopedJavaLocalRef;
+using ::base::android::AppendJavaStringArrayToStringVector;
+using ::base::android::AttachCurrentThread;
+using ::base::android::ConvertJavaStringToUTF8;
+using ::base::android::ConvertUTF8ToJavaString;
+using ::base::android::JavaParamRef;
+using ::base::android::JavaRef;
+using ::base::android::ScopedJavaGlobalRef;
+using ::base::android::ScopedJavaLocalRef;
+using ::base::android::ToJavaArrayOfStrings;
 
 namespace autofill_assistant {
 namespace {
 
+// Experiment for "Data Input via QR Code Scanning". This is an Experiment id
+// which is passed as part of the script parameters and is used to indicate
+// whether QR Code Scan can be used for data input.
+const char kDataInputViaQrCodeScanningExperiment[] = "4835818";
+
 // Strings for Synthetic Field Trials.
 const char kAutofillAssistantTtsTrialName[] = "AutofillAssistantEnableTtsParam";
+const char kAutofillAssistantQrCodeScanningTrialName[] =
+    "AutofillAssistantQrCodeScanning";
 const char kEnabledGroupName[] = "Enabled";
 const char kDisabledGroupName[] = "Disabled";
 
@@ -82,20 +95,13 @@ JNI_AutofillAssistantClient_FromWebContents(
   return client_android->GetJavaObject();
 }
 
-static void JNI_AutofillAssistantClient_OnOnboardingUiChange(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& jweb_contents,
-    jboolean shown) {
-  RuntimeManager* runtime_manager = RuntimeManager::GetForWebContents(
-      content::WebContents::FromJavaWebContents(jweb_contents));
-  if (runtime_manager)
-    runtime_manager->SetUIState(shown ? UIState::kShown : UIState::kNotShown);
-}
-
 ClientAndroid::ClientAndroid(content::WebContents* web_contents,
                              const ScopedJavaGlobalRef<jobject>& jdependencies)
     : content::WebContentsUserData<ClientAndroid>(*web_contents),
-      dependencies_(Dependencies::CreateFromJavaDependencies(jdependencies)),
+      dependencies_(
+          DependenciesAndroid::CreateFromJavaDependencies(jdependencies)),
+      annotate_dom_model_service_(dependencies_->GetCommonDependencies()
+                                      ->GetOrCreateAnnotateDomModelService()),
       jdependencies_(jdependencies),
       java_object_(Java_AutofillAssistantClient_Constructor(
           AttachCurrentThread(),
@@ -127,10 +133,10 @@ bool ClientAndroid::IsVisible() const {
          ui_controller_android_->IsAttached();
 }
 
-bool ClientAndroid::Start(
+void ClientAndroid::Start(
     const GURL& url,
     std::unique_ptr<TriggerContext> trigger_context,
-    std::unique_ptr<Service> test_service_to_inject,
+    std::unique_ptr<Service> service,
     const base::android::JavaRef<jobject>& joverlay_coordinator,
     const absl::optional<TriggerScriptProto>& trigger_script) {
   // When Start() is called, AA_START should have been measured. From now on,
@@ -147,7 +153,13 @@ bool ClientAndroid::Start(
   Java_AutofillAssistantClient_chooseAccountAsyncIfNecessary(
       base::android::AttachCurrentThread(), java_object_, jaccount_name);
 
-  CreateController(std::move(test_service_to_inject), trigger_script);
+  if (trigger_context->GetScriptParameters().GetIsNoRoundtrip().value_or(
+          false)) {
+    service =
+        NoRoundTripService::Create(GetWebContents()->GetBrowserContext(), this);
+  }
+
+  CreateController(std::move(service), trigger_script);
 
   // If an overlay is already shown, then show the rest of the UI.
   if (joverlay_coordinator) {
@@ -155,11 +167,22 @@ bool ClientAndroid::Start(
   }
 
   // Register TTS Synthetic Field Trial.
-  const bool enable_tts =
-      trigger_context->GetScriptParameters().GetEnableTts().value_or(false);
-  dependencies_->CreateFieldTrialUtil()->RegisterSyntheticFieldTrial(
-      kAutofillAssistantTtsTrialName,
-      enable_tts ? kEnabledGroupName : kDisabledGroupName);
+  const bool enable_tts = trigger_context->GetScriptParameters().GetEnableTts();
+  dependencies_->GetCommonDependencies()
+      ->CreateFieldTrialUtil()
+      ->RegisterSyntheticFieldTrial(
+          kAutofillAssistantTtsTrialName,
+          enable_tts ? kEnabledGroupName : kDisabledGroupName);
+
+  // Register QR Code Scanning Synthetic Field Trial.
+  const bool can_use_qr_code_scanning =
+      trigger_context->GetScriptParameters().HasExperimentId(
+          kDataInputViaQrCodeScanningExperiment);
+  dependencies_->GetCommonDependencies()
+      ->CreateFieldTrialUtil()
+      ->RegisterSyntheticFieldTrial(
+          kAutofillAssistantQrCodeScanningTrialName,
+          can_use_qr_code_scanning ? kEnabledGroupName : kDisabledGroupName);
 
   DCHECK(!trigger_context->GetDirectAction());
   if (VLOG_IS_ON(2)) {
@@ -172,7 +195,7 @@ bool ClientAndroid::Start(
       DVLOG(2) << "\t\t" << param.name() << ": " << param.value();
     }
   }
-  return controller_->Start(url, std::move(trigger_context));
+  controller_->Start(url, std::move(trigger_context));
 }
 
 void ClientAndroid::OnJavaDestroyUI(
@@ -181,38 +204,10 @@ void ClientAndroid::OnJavaDestroyUI(
   DestroyUI();
 }
 
-void ClientAndroid::TransferUITo(
-    JNIEnv* env,
-    const base::android::JavaParamRef<jobject>& jcaller,
-    const base::android::JavaParamRef<jobject>& jother_web_contents) {
-  if (!ui_controller_android_)
-    return;
-
-  auto ui_ptr = std::move(ui_controller_android_);
-  // From this point on, the UIController, in ui_ptr, is either transferred or
-  // deleted.
-
-  if (!jother_web_contents)
-    return;
-
-  auto* other_web_contents =
-      content::WebContents::FromJavaWebContents(jother_web_contents);
-  DCHECK_NE(other_web_contents, GetWebContents());
-
-  ClientAndroid* other_client =
-      ClientAndroid::FromWebContents(other_web_contents);
-  if (!other_client || !other_client->NeedsUI())
-    return;
-
-  other_client->ui_controller_android_ = std::move(ui_ptr);
-  other_client->AttachUI();
-}
-
 base::android::ScopedJavaLocalRef<jstring> ClientAndroid::GetPrimaryAccountName(
     JNIEnv* env,
     const JavaParamRef<jobject>& jcaller) {
-  return base::android::ConvertUTF8ToJavaString(
-      env, GetChromeSignedInEmailAddress());
+  return ConvertUTF8ToJavaString(env, GetSignedInEmail());
 }
 
 void ClientAndroid::OnAccessToken(JNIEnv* env,
@@ -248,7 +243,9 @@ void ClientAndroid::FetchWebsiteActions(
           /* onboarding_shown = */ false,
           /* is_direct_action = */ true,
           /* jinitial_url = */ nullptr,
-          /* is_custom_tab = */ dependencies_->IsCustomTab(*GetWebContents())),
+          /* is_custom_tab = */
+          dependencies_->GetPlatformDependencies()->IsCustomTab(
+              *GetWebContents())),
       base::BindOnce(&ClientAndroid::OnFetchWebsiteActions,
                      weak_ptr_factory_.GetWeakPtr(), scoped_jcallback));
 }
@@ -359,7 +356,8 @@ bool ClientAndroid::PerformDirectAction(
       /* is_direct_action = */ true,
       /* jinitial_url = */
       nullptr,
-      /* is_custom_tab = */ dependencies_->IsCustomTab(*GetWebContents()));
+      /* is_custom_tab = */
+      dependencies_->GetPlatformDependencies()->IsCustomTab(*GetWebContents()));
 
   int action_index = FindDirectAction(action_name);
   if (action_index == -1)
@@ -385,6 +383,12 @@ void ClientAndroid::ShowFatalError(
       GetDisplayStringUTF8(ClientSettingsProto::DEFAULT_ERROR,
                            controller_->GetSettings()),
       Metrics::DropOutReason::NO_SCRIPTS);
+}
+
+bool ClientAndroid::IsSupervisedUser(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& jcaller) {
+  return dependencies_->GetCommonDependencies()->IsSupervisedUser();
 }
 
 void ClientAndroid::OnSpokenFeedbackAccessibilityServiceChanged(
@@ -474,7 +478,7 @@ void ClientAndroid::DestroyUI() {
 }
 
 version_info::Channel ClientAndroid::GetChannel() const {
-  return version_info::android::GetChannel();
+  return dependencies_->GetCommonDependencies()->GetChannel();
 }
 
 std::string ClientAndroid::GetEmailAddressForAccessTokenAccount() const {
@@ -484,8 +488,8 @@ std::string ClientAndroid::GetEmailAddressForAccessTokenAccount() const {
           env, java_object_));
 }
 
-std::string ClientAndroid::GetChromeSignedInEmailAddress() const {
-  return dependencies_->GetChromeSignedInEmailAddress(GetWebContents());
+std::string ClientAndroid::GetSignedInEmail() const {
+  return dependencies_->GetCommonDependencies()->GetSignedInEmail();
 }
 
 absl::optional<std::pair<int, int>> ClientAndroid::GetWindowSize() const {
@@ -530,13 +534,14 @@ AccessTokenFetcher* ClientAndroid::GetAccessTokenFetcher() {
 }
 
 autofill::PersonalDataManager* ClientAndroid::GetPersonalDataManager() const {
-  return dependencies_->GetPersonalDataManager();
+  return dependencies_->GetCommonDependencies()->GetPersonalDataManager();
 }
 
 WebsiteLoginManager* ClientAndroid::GetWebsiteLoginManager() const {
   if (!website_login_manager_) {
     auto* password_manager_client =
-        dependencies_->GetPasswordManagerClient(GetWebContents());
+        dependencies_->GetCommonDependencies()->GetPasswordManagerClient(
+            GetWebContents());
     if (password_manager_client) {
       website_login_manager_ = std::make_unique<WebsiteLoginManagerImpl>(
           password_manager_client, GetWebContents());
@@ -554,16 +559,17 @@ ClientAndroid::GetPasswordChangeSuccessTracker() const {
 }
 
 std::string ClientAndroid::GetLocale() const {
+  // TODO(b/249978747): use dependencies instead.
   return base::android::GetDefaultLocaleString();
 }
 
-std::string ClientAndroid::GetCountryCode() const {
-  variations::VariationsService* variations_service =
-      dependencies_->GetVariationsService();
-  // Use fallback "ZZ" if no country is available.
-  if (!variations_service || variations_service->GetLatestCountry().empty())
-    return "ZZ";
-  return base::ToUpperASCII(variations_service->GetLatestCountry());
+std::string ClientAndroid::GetLatestCountryCode() const {
+  return dependencies_->GetCommonDependencies()->GetLatestCountryCode();
+}
+
+std::string ClientAndroid::GetStoredPermanentCountryCode() const {
+  return dependencies_->GetCommonDependencies()
+      ->GetStoredPermanentCountryCode();
 }
 
 DeviceContext ClientAndroid::GetDeviceContext() const {
@@ -612,6 +618,61 @@ bool ClientAndroid::HasHadUI() const {
 
 ScriptExecutorUiDelegate* ClientAndroid::GetScriptExecutorUiDelegate() {
   return ui_controller_.get();
+}
+
+bool ClientAndroid::MustUseBackendData() const {
+  // For WebLayer flows the client does not have access to Chrome's Autofill
+  // data and must use data from our backend. Similarly the client can not use
+  // e.g. Autofill's data editors and must rely on GMS Core provided
+  // replacements.
+  return dependencies_->GetCommonDependencies()->IsWebLayer();
+}
+
+void ClientAndroid::GetAnnotateDomModelVersion(
+    base::OnceCallback<void(absl::optional<int64_t>)> callback) const {
+  if (!annotate_dom_model_service_) {
+    std::move(callback).Run(absl::nullopt);
+    return;
+  }
+
+  auto model_version = annotate_dom_model_service_->GetModelVersion();
+  if (model_version.has_value()) {
+    std::move(callback).Run(model_version);
+    return;
+  }
+
+  annotate_dom_model_service_->NotifyOnModelFileAvailable(base::BindOnce(
+      &ClientAndroid::OnAnnotateDomModelFileAvailable,
+      weak_ptr_factory_.GetMutableWeakPtr(), std::move(callback)));
+}
+
+bool ClientAndroid::IsXmlSigned(const std::string& xml_string) const {
+  JNIEnv* env = AttachCurrentThread();
+  jboolean j_output = Java_AssistantParseSingleTagXmlUtilWrapper_isXmlSigned(
+      env, ConvertUTF8ToJavaString(env, xml_string));
+
+  return (j_output == JNI_TRUE);
+}
+
+const std::vector<std::string> ClientAndroid::ExtractValuesFromSingleTagXml(
+    const std::string& xml_string,
+    const std::vector<std::string>& keys) const {
+  JNIEnv* env = AttachCurrentThread();
+  auto j_output_values =
+      Java_AssistantParseSingleTagXmlUtilWrapper_extractValuesFromSingleTagXml(
+          env, ConvertUTF8ToJavaString(env, xml_string),
+          ToJavaArrayOfStrings(env, std::move(keys)));
+
+  std::vector<std::string> output_values;
+  AppendJavaStringArrayToStringVector(env, j_output_values, &output_values);
+  return output_values;
+}
+
+void ClientAndroid::OnAnnotateDomModelFileAvailable(
+    base::OnceCallback<void(absl::optional<int64_t>)> callback,
+    bool available) {
+  DCHECK(annotate_dom_model_service_);
+  std::move(callback).Run(annotate_dom_model_service_->GetModelVersion());
 }
 
 void ClientAndroid::Shutdown(Metrics::DropOutReason reason) {
@@ -687,9 +748,8 @@ void ClientAndroid::CreateController(
       GetWebContents(), /* client= */ this,
       base::DefaultTickClock::GetInstance(),
       RuntimeManager::GetForWebContents(GetWebContents())->GetWeakPtr(),
-      std::move(service), ukm::UkmRecorder::Get(),
-      dependencies_->GetOrCreateAnnotateDomModelService(
-          GetWebContents()->GetBrowserContext()));
+      std::move(service), /* web_controller= */ nullptr,
+      ukm::UkmRecorder::Get(), annotate_dom_model_service_);
   ui_controller_ = std::make_unique<UiController>(
       /* client= */ this, controller_.get(), std::move(tts_controller));
   ui_controller_->StartListening();
@@ -712,6 +772,15 @@ void ClientAndroid::DestroyController() {
 
 bool ClientAndroid::NeedsUI() {
   return !ui_controller_android_ && controller_ && controller_->NeedsUI();
+}
+
+bool ClientAndroid::GetMakeSearchesAndBrowsingBetterEnabled() const {
+  return dependencies_->GetCommonDependencies()
+      ->GetMakeSearchesAndBrowsingBetterEnabled();
+}
+
+bool ClientAndroid::GetMetricsReportingEnabled() const {
+  return dependencies_->GetCommonDependencies()->GetMetricsReportingEnabled();
 }
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(ClientAndroid);

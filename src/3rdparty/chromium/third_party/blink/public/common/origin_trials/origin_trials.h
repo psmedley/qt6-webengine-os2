@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,11 @@ BLINK_COMMON_EXPORT bool IsTrialEnabledForInsecureContext(
 
 // Return true if |trial_name| can be enabled from third party origins.
 BLINK_COMMON_EXPORT bool IsTrialEnabledForThirdPartyOrigins(
+    base::StringPiece trial_name);
+
+// Returns true if |trial_name| should be enabled until the next response
+// from the same origin is received.
+BLINK_COMMON_EXPORT bool IsTrialPersistentToNextResponse(
     base::StringPiece trial_name);
 
 // Returns the trial type of the given |feature|.

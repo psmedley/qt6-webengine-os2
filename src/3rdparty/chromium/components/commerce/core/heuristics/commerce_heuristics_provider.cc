@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "build/buildflag.h"
 #include "components/commerce/core/commerce_feature_list.h"
 #include "components/commerce/core/commerce_heuristics_data.h"
+#include "components/commerce/core/commerce_heuristics_data_metrics_helper.h"
 #include "components/grit/components_resources.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "third_party/re2/src/re2/re2.h"
@@ -29,17 +30,17 @@ std::string eTLDPlusOne(const GURL& url) {
 
 const std::map<std::string, std::string>& GetCartPatternMapping() {
   static base::NoDestructor<std::map<std::string, std::string>> pattern_map([] {
-    const base::Value json(
-        base::JSONReader::Read(
-            commerce::kCartPatternMapping.Get().empty()
-                ? ui::ResourceBundle::GetSharedInstance().GetRawDataResource(
-                      IDR_CART_DOMAIN_CART_URL_REGEX_JSON)
-                : commerce::kCartPatternMapping.Get())
-            .value());
+    base::Value json(base::JSONReader::Read(
+                         commerce::kCartPatternMapping.Get().empty()
+                             ? ui::ResourceBundle::GetSharedInstance()
+                                   .LoadDataResourceString(
+                                       IDR_CART_DOMAIN_CART_URL_REGEX_JSON)
+                             : commerce::kCartPatternMapping.Get())
+                         .value());
     DCHECK(json.is_dict());
     std::map<std::string, std::string> map;
-    for (auto item : json.DictItems()) {
-      map.insert({std::move(item.first), std::move(item.second.GetString())});
+    for (auto&& item : json.DictItems()) {
+      map.insert({std::move(item.first), std::move(item.second).TakeString()});
     }
     return map;
   }());
@@ -48,17 +49,18 @@ const std::map<std::string, std::string>& GetCartPatternMapping() {
 
 const std::map<std::string, std::string>& GetCheckoutPatternMapping() {
   static base::NoDestructor<std::map<std::string, std::string>> pattern_map([] {
-    const base::Value json(
+    base::Value json(
         base::JSONReader::Read(
             commerce::kCheckoutPatternMapping.Get().empty()
-                ? ui::ResourceBundle::GetSharedInstance().GetRawDataResource(
-                      IDR_CHECKOUT_URL_REGEX_DOMAIN_MAPPING_JSON)
+                ? ui::ResourceBundle::GetSharedInstance()
+                      .LoadDataResourceString(
+                          IDR_CHECKOUT_URL_REGEX_DOMAIN_MAPPING_JSON)
                 : commerce::kCheckoutPatternMapping.Get())
             .value());
     DCHECK(json.is_dict());
     std::map<std::string, std::string> map;
-    for (const auto item : json.DictItems()) {
-      map.insert({std::move(item.first), std::move(item.second.GetString())});
+    for (auto&& item : json.DictItems()) {
+      map.insert({std::move(item.first), std::move(item.second).TakeString()});
     }
     return map;
   }());
@@ -124,10 +126,17 @@ const re2::RE2* GetVisitCheckoutPattern(const GURL& url) {
     if (global_pattern_from_component &&
         commerce::kCheckoutPattern.Get() ==
             commerce::kCheckoutPattern.default_value) {
+      CommerceHeuristicsDataMetricsHelper::
+          RecordCheckoutURLGeneralPatternSource(
+              CommerceHeuristicsDataMetricsHelper::HeuristicsSource::
+                  FROM_COMPONENT);
       return global_pattern_from_component;
     }
     static base::NoDestructor<re2::RE2> instance(
         commerce::kCheckoutPattern.Get(), options);
+    CommerceHeuristicsDataMetricsHelper::RecordCheckoutURLGeneralPatternSource(
+        CommerceHeuristicsDataMetricsHelper::HeuristicsSource::
+            FROM_FEATURE_PARAMETER);
     return instance.get();
   }
   if (checkout_regex_map->find(domain) == checkout_regex_map->end()) {

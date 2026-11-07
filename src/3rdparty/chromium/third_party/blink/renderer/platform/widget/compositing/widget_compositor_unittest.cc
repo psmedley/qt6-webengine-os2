@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -86,7 +86,8 @@ class WidgetCompositorTest : public cc::LayerTreeTest {
         std::move(widget_receiver), base::ThreadTaskRunnerHandle::Get(),
         /*is_hidden=*/false,
         /*never_composited=*/false,
-        /*is_for_child_local_root=*/false);
+        /*is_for_child_local_root=*/false,
+        /*is_for_scalable_page=*/true);
 
     widget_compositor_ = base::MakeRefCounted<FakeWidgetCompositor>(
         layer_tree_host(), widget_base_->GetWeakPtr(),

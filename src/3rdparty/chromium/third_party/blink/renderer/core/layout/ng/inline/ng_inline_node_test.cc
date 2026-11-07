@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -217,7 +217,7 @@ TEST_F(NGInlineNodeTest, CollectInlinesFloat) {
             "</div>");
   NGInlineNodeForTest node = CreateInlineNode();
   node.CollectInlines();
-  EXPECT_EQ(u8"abc\uFFFCghi\uFFFCmno", node.Text())
+  EXPECT_EQ("abc\uFFFCghi\uFFFCmno", node.Text())
       << "floats are appeared as an object replacement character";
   HeapVector<NGInlineItem>& items = node.Items();
   ASSERT_EQ(5u, items.size());
@@ -235,7 +235,7 @@ TEST_F(NGInlineNodeTest, CollectInlinesInlineBlock) {
             "</div>");
   NGInlineNodeForTest node = CreateInlineNode();
   node.CollectInlines();
-  EXPECT_EQ(u8"abc\uFFFCjkl", node.Text())
+  EXPECT_EQ("abc\uFFFCjkl", node.Text())
       << "inline-block is appeared as an object replacement character";
   HeapVector<NGInlineItem>& items = node.Items();
   ASSERT_EQ(3u, items.size());
@@ -345,7 +345,7 @@ TEST_F(NGInlineNodeTest, CollectInlinesTextCombineListItemMarker) {
   NGInlineNodeForTest node = CreateInlineNode(
       To<LayoutNGTextCombine>(layout_object_->SlowFirstChild()));
   node.CollectInlines();
-  EXPECT_EQ(u8"\u2022", node.Text());
+  EXPECT_EQ("\u2022", node.Text());
   HeapVector<NGInlineItem>& items = node.Items();
   ASSERT_EQ(1u, items.size());
   TEST_ITEM_TYPE_OFFSET(items[0], kText, 0u, 1u);
@@ -376,7 +376,7 @@ TEST_F(NGInlineNodeTest, CollectInlinesTextCombineWBR) {
   NGInlineNodeForTest node =
       CreateInlineNode(To<LayoutNGBlockFlow>(layout_object_.Get()));
   node.CollectInlines();
-  EXPECT_EQ(u8"a\u200Bz", node.Text());
+  EXPECT_EQ("a\u200Bz", node.Text());
   HeapVector<NGInlineItem>& items = node.Items();
   ASSERT_EQ(3u, items.size());
   TEST_ITEM_TYPE_OFFSET(items[0], kText, 0u, 1u);
@@ -1551,74 +1551,6 @@ TEST_F(NGInlineNodeTest, ReuseFirstNonSafeRtl) {
       StringView(data->text_content, item_v.StartOffset(), item_v.Length()),
       "V");
   EXPECT_TRUE(NGInlineNode::NeedsShapingForTesting(item_v));
-}
-
-TEST_F(NGInlineNodeTest, LetterSpacingUseCounterFalse) {
-  SetBodyInnerHTML(R"HTML(
-    <p id="p" style="letter-spacing: 1em; text-align: center">
-      text
-    </p>
-  )HTML");
-  auto* p = To<LayoutNGBlockFlow>(GetLayoutObjectByElementId("p"));
-  EXPECT_FALSE(NGInlineNode(p).ShouldReportLetterSpacingUseCounterForTesting(
-      p->FirstChild(), /* first_line */ false, p));
-}
-
-TEST_F(NGInlineNodeTest, LetterSpacingUseCounterCenterTextIndent) {
-  SetBodyInnerHTML(R"HTML(
-    <p id="p" style="letter-spacing: 1em; text-align: center; text-indent: 1em">
-      text
-    </p>
-  )HTML");
-  auto* p = To<LayoutNGBlockFlow>(GetLayoutObjectByElementId("p"));
-  EXPECT_TRUE(NGInlineNode(p).ShouldReportLetterSpacingUseCounterForTesting(
-      p->FirstChild(), /* first_line */ false, p));
-}
-
-TEST_F(NGInlineNodeTest, LetterSpacingUseCounterCenterPadding) {
-  SetBodyInnerHTML(R"HTML(
-    <p id="p" style="letter-spacing: 1em; text-align: center; padding-left: 1em">
-      text
-    </p>
-  )HTML");
-  auto* p = To<LayoutNGBlockFlow>(GetLayoutObjectByElementId("p"));
-  EXPECT_TRUE(NGInlineNode(p).ShouldReportLetterSpacingUseCounterForTesting(
-      p->FirstChild(), /* first_line */ false, p));
-}
-
-TEST_F(NGInlineNodeTest, LetterSpacingUseCounterRight) {
-  SetBodyInnerHTML(R"HTML(
-    <p id="p" style="letter-spacing: 1em; text-align: right; margin-right: -1em">
-      text
-    </p>
-  )HTML");
-  auto* p = To<LayoutNGBlockFlow>(GetLayoutObjectByElementId("p"));
-  EXPECT_TRUE(NGInlineNode(p).ShouldReportLetterSpacingUseCounterForTesting(
-      p->FirstChild(), /* first_line */ false, p));
-}
-
-TEST_F(NGInlineNodeTest, LetterSpacingUseCounterBorder) {
-  SetBodyInnerHTML(R"HTML(
-    <p id="p" style="letter-spacing: 1em">
-      <span id="span" style="border:1px solid; padding-left:1em">span</span>
-    </p>
-  )HTML");
-  auto* p = To<LayoutNGBlockFlow>(GetLayoutObjectByElementId("p"));
-  const LayoutObject* span = GetLayoutObjectByElementId("span");
-  EXPECT_TRUE(NGInlineNode(p).ShouldReportLetterSpacingUseCounterForTesting(
-      span->SlowFirstChild(), /* first_line */ false, p));
-}
-
-TEST_F(NGInlineNodeTest, LetterSpacingUseCounterUnderline) {
-  SetBodyInnerHTML(R"HTML(
-    <p id="p" style="letter-spacing: 1em">
-      <span id="span" style="text-decoration: underline">span</span>
-    </p>
-  )HTML");
-  auto* p = To<LayoutNGBlockFlow>(GetLayoutObjectByElementId("p"));
-  const LayoutObject* span = GetLayoutObjectByElementId("span");
-  EXPECT_TRUE(NGInlineNode(p).ShouldReportLetterSpacingUseCounterForTesting(
-      span->SlowFirstChild(), /* first_line */ false, p));
 }
 
 TEST_F(NGInlineNodeTest, TextCombineUsesScalingX) {

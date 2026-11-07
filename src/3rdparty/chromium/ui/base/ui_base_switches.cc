@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,13 @@ const char kDisableModalAnimations[] = "disable-modal-animations";
 
 // Show borders around CALayers corresponding to overlays and partial damage.
 const char kShowMacOverlayBorders[] = "show-mac-overlay-borders";
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS)
+// Enable resources file sharing with ash-chrome.
+// This flag is enabled when feature::kLacrosResourcesFileSharing is set and
+// ash-side operation is successfully done.
+const char kEnableResourcesFileSharing[] = "enable-resources-file-sharing";
 #endif
 
 // Disables layer-edge anti-aliasing in the compositor.

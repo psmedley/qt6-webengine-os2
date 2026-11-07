@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,7 +36,7 @@ XlibXcbLoader* GetXlibXcbLoader() {
 
 }  // namespace
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 void InitXlib() {
   auto* xlib_loader = GetXlibLoader();
   if (xlib_loader->loaded())
@@ -57,17 +57,17 @@ void InitXlib() {
   SetXlibErrorHandler();
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 void SetXlibErrorHandler() {
   GetXlibLoader()->XSetErrorHandler(XlibErrorHandler);
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 void XlibFree(void* data) {
   GetXlibLoader()->XFree(data);
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 XlibDisplay::XlibDisplay(const std::string& address) {
   InitXlib();
 
@@ -79,7 +79,7 @@ XlibDisplay::XlibDisplay(const std::string& address) {
 #endif
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 XlibDisplay::~XlibDisplay() {
 #ifndef TOOLKIT_QT
   if (!display_)
@@ -90,11 +90,13 @@ XlibDisplay::~XlibDisplay() {
   // events, they will just queue up and leak memory.  This check makes sure
   // |display_| never had any pending events before it is closed.
   CHECK(!loader->XPending(display_));
-  loader->XCloseDisplay(display_);
+  // ExtractAsDangling clears the underlying pointer and returns another raw_ptr
+  // instance that is allowed to dangle.
+  loader->XCloseDisplay(display_.ExtractAsDangling());
 #endif
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 XlibDisplayWrapper::XlibDisplayWrapper(struct _XDisplay* display,
                                        XlibDisplayType type)
     : display_(display), type_(type) {
@@ -104,7 +106,7 @@ XlibDisplayWrapper::XlibDisplayWrapper(struct _XDisplay* display,
     GetXlibLoader()->XSynchronize(display_, true);
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 XlibDisplayWrapper::~XlibDisplayWrapper() {
   if (!display_)
     return;
@@ -129,7 +131,7 @@ XlibDisplayWrapper& XlibDisplayWrapper::operator=(XlibDisplayWrapper&& other) {
   return *this;
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 struct xcb_connection_t* XlibDisplayWrapper::GetXcbConnection() {
   return GetXlibXcbLoader()->XGetXCBConnection(display_);
 }

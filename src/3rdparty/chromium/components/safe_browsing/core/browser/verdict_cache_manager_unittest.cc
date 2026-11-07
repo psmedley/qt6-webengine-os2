@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -825,7 +825,7 @@ TEST_F(VerdictCacheManagerTest, TestGetExpiredPageLoadToken) {
       cache_manager_->GetPageLoadToken(url);
   ASSERT_TRUE(token.has_token_value());
 
-  task_environment_.FastForwardBy(base::Minutes(6));
+  task_environment_.FastForwardBy(base::Minutes(11));
   token = cache_manager_->GetPageLoadToken(url);
   // Token is not found because it has already expired.
   ASSERT_FALSE(token.has_token_value());
@@ -858,6 +858,29 @@ TEST_F(VerdictCacheManagerTest, TestClearTokenOnSyncStateChanged) {
   token = cache_manager_->GetPageLoadToken(url);
   // Token is not found because the sync state has changed.
   ASSERT_FALSE(token.has_token_value());
+}
+
+TEST_F(VerdictCacheManagerTest, TestShutdown) {
+  cache_manager_->Shutdown();
+  RTLookupResponse rt_response;
+  // Call to cache_manager after shutdown should not cause a crash.
+  cache_manager_->CacheRealTimeUrlVerdict(GURL("https://www.example.com/"),
+                                          rt_response, base::Time::Now());
+  RTLookupResponse::ThreatInfo out_rt_verdict;
+  cache_manager_->GetCachedRealTimeUrlVerdict(
+      GURL("https://www.example.com/path"), &out_rt_verdict);
+  LoginReputationClientResponse pg_response;
+  ReusedPasswordAccountType password_type;
+  cache_manager_->CachePhishGuardVerdict(
+      LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE, password_type,
+      pg_response, base::Time::Now());
+  cache_manager_->GetStoredPhishGuardVerdictCount(
+      LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE);
+  LoginReputationClientResponse out_pg_verdict;
+  cache_manager_->GetCachedPhishGuardVerdict(
+      GURL("https://www.example.com/path"),
+      LoginReputationClientRequest::UNFAMILIAR_LOGIN_PAGE, password_type,
+      &out_pg_verdict);
 }
 
 }  // namespace safe_browsing

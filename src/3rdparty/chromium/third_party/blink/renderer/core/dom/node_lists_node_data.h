@@ -22,6 +22,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_NODE_LISTS_NODE_DATA_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_NODE_LISTS_NODE_DATA_H_
 
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/dom/child_node_list.h"
 #include "third_party/blink/renderer/core/dom/empty_node_list.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
@@ -140,8 +141,8 @@ class NodeListsNodeData final : public GarbageCollected<NodeListsNodeData> {
   void InvalidateCaches(const QualifiedName* attr_name = nullptr);
 
   bool IsEmpty() const {
-    return !child_node_list_ && atomic_name_caches_.IsEmpty() &&
-           tag_collection_ns_caches_.IsEmpty();
+    return !child_node_list_ && atomic_name_caches_.empty() &&
+           tag_collection_ns_caches_.empty();
   }
 
   void AdoptTreeScope() { InvalidateCaches(); }

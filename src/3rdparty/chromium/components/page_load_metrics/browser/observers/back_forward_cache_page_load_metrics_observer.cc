@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,9 +84,9 @@ const char
 //
 // For cumulative layout shift scores, we use actual score values for back-
 // forward cache navigations instead of 0s.
-const base::Feature kBackForwardCacheEmitZeroSamplesForKeyMetrics{
-    "BackForwardCacheEmitZeroSamplesForKeyMetrics",
-    base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kBackForwardCacheEmitZeroSamplesForKeyMetrics,
+             "BackForwardCacheEmitZeroSamplesForKeyMetrics",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace internal
 
@@ -108,6 +108,24 @@ BackForwardCachePageLoadMetricsObserver::OnStart(
     const GURL& currently_committed_url,
     bool started_in_foreground) {
   was_hidden_ = !started_in_foreground;
+  return CONTINUE_OBSERVING;
+}
+
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+BackForwardCachePageLoadMetricsObserver::OnFencedFramesStart(
+    content::NavigationHandle* navigation_handle,
+    const GURL& currently_committed_url) {
+  // TODO(https://crbug.com/1251387): This must be updated when FencedFrames
+  // supports back/forward cache.
+  return STOP_OBSERVING;
+}
+
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+BackForwardCachePageLoadMetricsObserver::OnPrerenderStart(
+    content::NavigationHandle* navigation_handle,
+    const GURL& currently_committed_url) {
+  // This class mainly interested in the behavior after entreing Back/Forward
+  // Cache. Works as same as non prerendering case.
   return CONTINUE_OBSERVING;
 }
 
@@ -164,6 +182,13 @@ BackForwardCachePageLoadMetricsObserver::ShouldObserveMimeType(
   PageLoadMetricsObserver::ObservePolicy policy =
       PageLoadMetricsObserver::ShouldObserveMimeType(mime_type);
   if (policy == STOP_OBSERVING && has_ever_entered_back_forward_cache_) {
+    // We should not record UKMs while prerendering. But the page in
+    // prerendering is not eligible for Back/Forward Cache and
+    // `has_ever_entered_back_forward_cache_` implies the page is not in
+    // prerendering. So, we can record UKM safely.
+    DCHECK_NE(GetDelegate().GetPrerenderingState(),
+              page_load_metrics::PrerenderingState::kInPrerendering);
+
     ukm::builders::UserPerceivedPageVisit(
         GetLastUkmSourceIdForBackForwardCacheRestore())
         .SetNotCountedForCoreWebVitals(true)
@@ -339,7 +364,7 @@ void BackForwardCachePageLoadMetricsObserver::
   ukm::builders::HistoryNavigation builder(
       GetLastUkmSourceIdForBackForwardCacheRestore());
   builder
-      .SetWorstUserInteractionLatencyAfterBackForwardCacheRestore_MaxEventduration(
+      .SetWorstUserInteractionLatencyAfterBackForwardCacheRestore_MaxEventDuration2(
           max_event_durations.worst_latency.InMilliseconds());
   UmaHistogramCustomTimes(
       internal::
@@ -348,11 +373,11 @@ void BackForwardCachePageLoadMetricsObserver::
       base::Seconds(60), 50);
 
   builder
-      .SetSumOfUserInteractionLatencyOverBudgetAfterBackForwardCacheRestore_MaxEventduration(
+      .SetSumOfUserInteractionLatencyOverBudgetAfterBackForwardCacheRestore_MaxEventDuration2(
           max_event_durations.sum_of_latency_over_budget.InMilliseconds());
 
   builder
-      .SetAverageUserInteractionLatencyOverBudgetAfterBackForwardCacheRestore_MaxEventduration(
+      .SetAverageUserInteractionLatencyOverBudgetAfterBackForwardCacheRestore_MaxEventDuration2(
           max_event_durations.sum_of_latency_over_budget.InMilliseconds() /
           normalized_responsiveness_metrics.num_user_interactions);
 
@@ -366,7 +391,7 @@ void BackForwardCachePageLoadMetricsObserver::
               normalized_responsiveness_metrics.num_user_interactions,
               max_event_durations.worst_ten_latencies_over_budget);
   builder
-      .SetSlowUserInteractionLatencyOverBudgetAfterBackForwardCacheRestore_HighPercentile2_MaxEventduration(
+      .SetSlowUserInteractionLatencyOverBudgetAfterBackForwardCacheRestore_HighPercentile2_MaxEventDuration2(
           high_percentile2_max_event_duration_over_budget.InMilliseconds());
   builder
       .SetUserInteractionLatencyAfterBackForwardCacheRestore_HighPercentile2_MaxEventDuration(

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <algorithm>
 #include <memory>
 #include <numeric>
 
@@ -17,6 +16,7 @@
 #include "base/i18n/char_iterator.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
+#include "base/ranges/algorithm.h"
 #include "base/run_loop.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
@@ -187,10 +187,10 @@ DecoratedText::RangedAttribute CreateRangedAttribute(
     int font_index,
     Font::Weight weight,
     int style_mask) {
-  const auto iter = std::find_if(font_spans.cbegin(), font_spans.cend(),
-                                 [font_index](const FontSpan& span) {
-                                   return IndexInRange(span.second, font_index);
-                                 });
+  const auto iter =
+      base::ranges::find_if(font_spans, [font_index](const FontSpan& span) {
+        return IndexInRange(span.second, font_index);
+      });
   DCHECK(font_spans.end() != iter);
   const Font& font = iter->first;
 
@@ -223,11 +223,9 @@ void VerifyDecoratedWordsAreEqual(const DecoratedText& expected,
       return IndexInRange(attr.range, i);
     };
     const auto expected_attr =
-        std::find_if(expected.attributes.begin(), expected.attributes.end(),
-                     find_attribute_func);
+        base::ranges::find_if(expected.attributes, find_attribute_func);
     const auto actual_attr =
-        std::find_if(actual.attributes.begin(), actual.attributes.end(),
-                     find_attribute_func);
+        base::ranges::find_if(actual.attributes, find_attribute_func);
     ASSERT_NE(expected.attributes.end(), expected_attr);
     ASSERT_NE(actual.attributes.end(), actual_attr);
 
@@ -511,12 +509,14 @@ class RenderTextTest : public testing::Test {
       size_t logical_index = run_list->visual_to_logical(i);
       const internal::TextRunHarfBuzz& run = *run_list->runs()[logical_index];
       if (run.range.length() == 1) {
-        result.append(base::StringPrintf("[%d]", run.range.start()));
+        result.append(base::StringPrintf("[%" PRIuS "]", run.range.start()));
       } else if (run.font_params.is_rtl) {
-        result.append(base::StringPrintf("[%d<-%d]", run.range.end() - 1,
+        result.append(base::StringPrintf("[%" PRIuS "<-%" PRIuS "]",
+                                         run.range.end() - 1,
                                          run.range.start()));
       } else {
-        result.append(base::StringPrintf("[%d->%d]", run.range.start(),
+        result.append(base::StringPrintf("[%" PRIuS "->%" PRIuS "]",
+                                         run.range.start(),
                                          run.range.end() - 1));
       }
     }
@@ -1070,7 +1070,7 @@ TEST_F(RenderTextTest, SelectWithTranslucentBackground) {
       SkImageInfo::MakeN32Premul(kCanvasSize.width(), kCanvasSize.height()));
   cc::SkiaPaintCanvas paint_canvas(bitmap);
   Canvas canvas(&paint_canvas, 1.0f);
-  paint_canvas.clear(SK_ColorWHITE);
+  paint_canvas.clear(SkColors::kWhite);
 
   SetGlyphWidth(kGlyphWidth);
   RenderText* render_text = GetRenderText();
@@ -1320,7 +1320,7 @@ TEST_F(RenderTextTest, RevealObscuredText) {
             render_text->GetDisplayText());
 
   // Invalid reveal index.
-  render_text->RenderText::SetObscuredRevealIndex(-1);
+  render_text->RenderText::SetObscuredRevealIndex(absl::nullopt);
   EXPECT_EQ(no_seuss, render_text->GetDisplayText());
   render_text->RenderText::SetObscuredRevealIndex(seuss.length() + 1);
   EXPECT_EQ(no_seuss, render_text->GetDisplayText());
@@ -6285,6 +6285,16 @@ TEST_F(RenderTextTest, Multiline_ZeroWidthChars) {
         test_api()->lines()[j].segments[segment_size - 1].char_range.end());
     EXPECT_EQ(char_ranges[j], line_range);
   }
+
+  for (const std::u16string test_text : {u"\u200b", u"A\u200bB", u"A\u200b"}) {
+    for (int width = 1; width <= 5; width++) {
+      SCOPED_TRACE(testing::Message()
+                   << "String: '" << test_text << "' width: " << width);
+      render_text->SetText(test_text);
+      render_text->SetDisplayRect(Rect(0, 0, width, 0));
+      render_text->Draw(canvas());
+    }
+  }
 }
 
 TEST_F(RenderTextTest, Multiline_ZeroWidthNewline) {
@@ -6765,13 +6775,6 @@ TEST_F(RenderTextTest, HarfBuzz_BreakRunsByEmojiVariationSelectors) {
   render_text->MoveCursor(CHARACTER_BREAK, CURSOR_RIGHT, SELECTION_NONE);
   EXPECT_EQ(gfx::Range(1, 1), render_text->selection());
   EXPECT_EQ(1 * kGlyphWidth, render_text->GetUpdatedCursorBounds().x());
-
-#if BUILDFLAG(IS_APPLE)
-  // Early versions of macOS provide a tofu glyph for the variation selector.
-  // Bail out early except on 10.12 and above.
-  if (base::mac::IsAtMostOS10_11())
-    return;
-#endif
 
   // TODO(865709): make this work on Android.
 #if !BUILDFLAG(IS_ANDROID)
@@ -7430,7 +7433,7 @@ TEST_F(RenderTextTest, DISABLED_TextDoesntClip) {
   render_text->SetColor(SK_ColorBLACK);
 
   for (auto* string : kTestStrings) {
-    paint_canvas.clear(SK_ColorWHITE);
+    paint_canvas.clear(SkColors::kWhite);
     render_text->SetText(base::UTF8ToUTF16(string));
     render_text->ApplyBaselineStyle(SUPERSCRIPT, Range(1, 2));
     render_text->ApplyBaselineStyle(SUPERIOR, Range(3, 4));
@@ -7501,7 +7504,7 @@ TEST_F(RenderTextTest, DISABLED_TextDoesClip) {
   render_text->SetColor(SK_ColorBLACK);
 
   for (auto* string : kTestStrings) {
-    paint_canvas.clear(SK_ColorWHITE);
+    paint_canvas.clear(SkColors::kWhite);
     render_text->SetText(base::UTF8ToUTF16(string));
     const Size string_size = render_text->GetStringSize();
     int fake_width = string_size.width() / 2;
@@ -8572,8 +8575,7 @@ TEST_F(RenderTextTest, Clusterfuzz_Issue_1298286) {
   gfx::FontList font_list;
   gfx::Rect field(2119635455, font_list.GetHeight());
 
-  std::unique_ptr<gfx::RenderText> render_text =
-      gfx::RenderText::CreateRenderText();
+  RenderText* render_text = GetRenderText();
   render_text->SetFontList(font_list);
   render_text->SetHorizontalAlignment(ALIGN_RIGHT);
   render_text->SetDirectionalityMode(DIRECTIONALITY_FROM_UI);
@@ -8581,7 +8583,7 @@ TEST_F(RenderTextTest, Clusterfuzz_Issue_1298286) {
   render_text->SetDisplayRect(field);
   render_text->SetCursorEnabled(true);
 
-  gfx::test::RenderTextTestApi render_text_test_api(render_text.get());
+  gfx::test::RenderTextTestApi render_text_test_api(render_text);
   render_text_test_api.SetGlyphWidth(2016371456);
 
   EXPECT_FALSE(render_text->multiline());
@@ -8602,8 +8604,7 @@ TEST_F(RenderTextTest, Clusterfuzz_Issue_1299054) {
   gfx::FontList font_list;
   gfx::Rect field(-1334808765, font_list.GetHeight());
 
-  std::unique_ptr<gfx::RenderText> render_text =
-      gfx::RenderText::CreateRenderText();
+  RenderText* render_text = GetRenderText();
   render_text->SetFontList(font_list);
   render_text->SetHorizontalAlignment(ALIGN_CENTER);
   render_text->SetDirectionalityMode(DIRECTIONALITY_FROM_TEXT);
@@ -8611,7 +8612,7 @@ TEST_F(RenderTextTest, Clusterfuzz_Issue_1299054) {
   render_text->SetDisplayRect(field);
   render_text->SetCursorEnabled(false);
 
-  gfx::test::RenderTextTestApi render_text_test_api(render_text.get());
+  gfx::test::RenderTextTestApi render_text_test_api(render_text);
   render_text_test_api.SetGlyphWidth(1778384896);
 
   const Vector2d& offset = render_text->GetUpdatedDisplayOffset();
@@ -8627,6 +8628,17 @@ TEST_F(RenderTextTest, Clusterfuzz_Issue_1287804) {
   render_text->SetDisplayRect(Rect(0, 0, 100, 24));
   render_text->SetElideBehavior(ELIDE_TAIL);
   EXPECT_EQ(RangeF(0, 0), render_text->GetCursorSpan(Range(0, 0)));
+}
+
+TEST_F(RenderTextTest, Clusterfuzz_Issue_1193815) {
+  RenderText* render_text = GetRenderText();
+  gfx::FontList font_list;
+  render_text->SetFontList(font_list);
+  render_text->Draw(canvas());
+  render_text->SetText(u"F\r");
+  render_text->SetMaxLines(1);
+  render_text->SetMultiline(true);
+  render_text->Draw(canvas());
 }
 
 }  // namespace gfx

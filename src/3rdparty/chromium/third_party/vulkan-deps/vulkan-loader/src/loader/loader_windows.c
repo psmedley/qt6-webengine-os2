@@ -51,6 +51,11 @@
 #include <dxgi1_6.h>
 #include "adapters.h"
 
+#ifndef __MINGW32__
+// not yet available with MinGW-w64 stable
+#include <appmodel.h>
+#endif
+
 #if !defined(NDEBUG)
 #include <crtdbg.h>
 #endif
@@ -73,10 +78,10 @@ void windows_initialization(void) {
     // and not after the first call that has been statically linked
     LoadLibrary("gdi32.dll");
 
-    TCHAR systemPath[MAX_PATH] = "";
-    GetSystemDirectory(systemPath, MAX_PATH);
-    StringCchCat(systemPath, MAX_PATH, TEXT("\\dxgi.dll"));
-    HMODULE dxgi_module = LoadLibrary(systemPath);
+    wchar_t systemPath[MAX_PATH] = L"";
+    GetSystemDirectoryW(systemPath, MAX_PATH);
+    StringCchCatW(systemPath, MAX_PATH, L"\\dxgi.dll");
+    HMODULE dxgi_module = LoadLibraryW(systemPath);
     fpCreateDXGIFactory1 = dxgi_module == NULL ? NULL : (PFN_CreateDXGIFactory1)GetProcAddress(dxgi_module, "CreateDXGIFactory1");
 
 #if !defined(NDEBUG)
@@ -215,9 +220,7 @@ bool windows_get_device_registry_entry(const struct loader_instance *inst, char 
     found = windows_add_json_entry(inst, reg_data, total_size, value_name, data_type, manifest_path, requiredSize, result);
 
 out:
-    if (manifest_path != NULL) {
-        loader_instance_heap_free(inst, manifest_path);
-    }
+    loader_instance_heap_free(inst, manifest_path);
     RegCloseKey(hkrKey);
     return found;
 }
@@ -250,9 +253,7 @@ VkResult windows_get_device_registry_files(const struct loader_instance *inst, u
     do {
         CM_Get_Device_ID_List_SizeW(&deviceNamesSize, displayGUID, flags);
 
-        if (pDeviceNames != NULL) {
-            loader_instance_heap_free(inst, pDeviceNames);
-        }
+        loader_instance_heap_free(inst, pDeviceNames);
 
         pDeviceNames = loader_instance_heap_alloc(inst, deviceNamesSize * sizeof(wchar_t), VK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
         if (pDeviceNames == NULL) {
@@ -687,15 +688,9 @@ VkResult windows_read_manifest_from_d3d_adapters(const struct loader_instance *i
     }
 
 out:
-    if (json_path != NULL) {
-        loader_instance_heap_free(inst, json_path);
-    }
-    if (full_info != NULL) {
-        loader_instance_heap_free(inst, full_info);
-    }
-    if (adapters.adapters != NULL) {
-        loader_instance_heap_free(inst, adapters.adapters);
-    }
+    loader_instance_heap_free(inst, json_path);
+    loader_instance_heap_free(inst, full_info);
+    loader_instance_heap_free(inst, adapters.adapters);
 
     return result;
 }
@@ -783,9 +778,7 @@ VkResult windows_read_data_files_in_registry(const struct loader_instance *inst,
 
 out:
 
-    if (NULL != search_path) {
-        loader_instance_heap_free(inst, search_path);
-    }
+    loader_instance_heap_free(inst, search_path);
 
     return vk_result;
 }
@@ -804,14 +797,12 @@ VkResult windows_read_sorted_physical_devices(struct loader_instance *inst, uint
         goto out;
     }
     sorted_alloc = 16;
-    *sorted_devices =
-        loader_instance_heap_alloc(inst, sorted_alloc * sizeof(struct loader_phys_dev_per_icd), VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
+    *sorted_devices = loader_instance_heap_calloc(inst, sorted_alloc * sizeof(struct loader_phys_dev_per_icd),
+                                                  VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
     if (*sorted_devices == NULL) {
         res = VK_ERROR_OUT_OF_HOST_MEMORY;
         goto out;
     }
-
-    memset(*sorted_devices, 0, sorted_alloc * sizeof(struct loader_phys_dev_per_icd));
 
     for (uint32_t i = 0;; ++i) {
         IDXGIAdapter1 *adapter;
@@ -998,4 +989,78 @@ VkResult windows_sort_physical_device_groups(struct loader_instance *inst, const
     return VK_SUCCESS;
 }
 
+char *windows_get_app_package_manifest_path(const struct loader_instance *inst) {
+    // These functions are only available on Windows 8 and above, load them dynamically for compatibility with Windows 7
+    typedef LONG(WINAPI * PFN_GetPackagesByPackageFamily)(PCWSTR, UINT32 *, PWSTR *, UINT32 *, WCHAR *);
+    PFN_GetPackagesByPackageFamily fpGetPackagesByPackageFamily =
+        (PFN_GetPackagesByPackageFamily)GetProcAddress(GetModuleHandle(TEXT("kernel32.dll")), "GetPackagesByPackageFamily");
+    if (!fpGetPackagesByPackageFamily) {
+        return NULL;
+    }
+    typedef LONG(WINAPI * PFN_GetPackagePathByFullName)(PCWSTR, UINT32 *, PWSTR);
+    PFN_GetPackagePathByFullName fpGetPackagePathByFullName =
+        (PFN_GetPackagePathByFullName)GetProcAddress(GetModuleHandle(TEXT("kernel32.dll")), "GetPackagePathByFullName");
+    if (!fpGetPackagePathByFullName) {
+        return NULL;
+    }
+
+    UINT32 numPackages = 0, bufferLength = 0;
+    /* This literal string identifies the Microsoft-published OpenCL and OpenGL Compatibility Pack
+     * (so named at the time this is being added), which contains OpenGLOn12 and OpenCLOn12 mapping
+     * layers, and will contain VulkanOn12 (aka Dozen) going forward.
+     */
+    PCWSTR familyName = L"Microsoft.D3DMappingLayers_8wekyb3d8bbwe";
+    if (ERROR_INSUFFICIENT_BUFFER != fpGetPackagesByPackageFamily(familyName, &numPackages, NULL, &bufferLength, NULL) ||
+        numPackages == 0 || bufferLength == 0) {
+        loader_log(inst, VULKAN_LOADER_INFO_BIT, 0,
+                   "windows_get_app_package_manifest_path: Failed to find mapping layers packages by family name\n");
+        return NULL;
+    }
+
+    char *ret = NULL;
+    WCHAR *buffer = loader_instance_heap_alloc(inst, sizeof(WCHAR) * bufferLength, VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
+    PWSTR *packages = loader_instance_heap_alloc(inst, sizeof(PWSTR) * numPackages, VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
+    if (!buffer || !packages) {
+        loader_log(inst, VULKAN_LOADER_ERROR_BIT, 0,
+                   "windows_get_app_package_manifest_path: Failed to allocate memory for package names\n");
+        goto cleanup;
+    }
+
+    if (ERROR_SUCCESS != fpGetPackagesByPackageFamily(familyName, &numPackages, packages, &bufferLength, buffer)) {
+        loader_log(inst, VULKAN_LOADER_ERROR_BIT, 0,
+                   "windows_get_app_package_manifest_path: Failed to mapping layers package full names\n");
+        goto cleanup;
+    }
+
+    UINT32 pathLength = 0;
+    WCHAR path[MAX_PATH];
+    memset(path, 0, sizeof(path));
+    if (ERROR_INSUFFICIENT_BUFFER != fpGetPackagePathByFullName(packages[0], &pathLength, NULL) || pathLength > MAX_PATH ||
+        ERROR_SUCCESS != fpGetPackagePathByFullName(packages[0], &pathLength, path)) {
+        loader_log(inst, VULKAN_LOADER_ERROR_BIT, 0,
+                   "windows_get_app_package_manifest_path: Failed to get mapping layers package path\n");
+        goto cleanup;
+    }
+
+    int narrowPathLength = WideCharToMultiByte(CP_ACP, 0, path, -1, NULL, 0, NULL, NULL);
+    if (narrowPathLength == 0) {
+        loader_log(inst, VULKAN_LOADER_ERROR_BIT, 0,
+                   "windows_get_app_package_manifest_path: Failed to convert path from wide to narrow\n");
+        goto cleanup;
+    }
+
+    ret = loader_instance_heap_alloc(inst, narrowPathLength, VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
+    if (!ret) {
+        loader_log(inst, VULKAN_LOADER_ERROR_BIT, 0, "windows_get_app_package_manifest_path: Failed to allocate path\n");
+        goto cleanup;
+    }
+
+    narrowPathLength = WideCharToMultiByte(CP_ACP, 0, path, -1, ret, narrowPathLength, NULL, NULL);
+    assert((size_t)narrowPathLength == strlen(ret) + 1);
+
+cleanup:
+    loader_instance_heap_free(inst, buffer);
+    loader_instance_heap_free(inst, packages);
+    return ret;
+}
 #endif  // _WIN32

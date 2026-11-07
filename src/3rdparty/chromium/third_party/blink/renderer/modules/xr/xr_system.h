@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -420,7 +420,6 @@ class XRSystem final : public EventTargetWithInlineData,
       device::mojom::blink::XRInteractionMode interaction_mode,
       mojo::PendingReceiver<device::mojom::blink::XRSessionClient>
           client_receiver,
-      device::mojom::blink::VRDisplayInfoPtr display_info,
       device::mojom::blink::XRSessionDeviceConfigPtr device_config,
       XRSessionFeatureSet enabled_features,
       bool sensorless_session = false);

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "build/chromeos_buildflags.h"
 #include "components/enterprise/browser/reporting/report_request.h"
 #include "components/enterprise/browser/reporting/report_type.h"
+#include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
 #include "device_management_backend.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -148,7 +149,7 @@ TEST_F(ReportUploaderTest, PersistentError) {
 }
 
 TEST_F(ReportUploaderTest, RequestTooBigError) {
-  CreateUploader(/* *retyr_count = */ 2);
+  CreateUploader(/* *retry_count = */ 2);
   EXPECT_CALL(client_, UploadReportProxy(_, _))
       .Times(2)
       .WillOnce(WithArgs<1>(policy::ScheduleStatusCallback(false)))

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -182,7 +182,7 @@ namespace {
 
 class PriorityGetter : public BufferedSpdyFramerVisitorInterface {
  public:
-  PriorityGetter() : priority_(0) {}
+  PriorityGetter() = default;
   ~PriorityGetter() override = default;
 
   spdy::SpdyPriority priority() const { return priority_; }
@@ -236,7 +236,7 @@ class PriorityGetter : public BufferedSpdyFramerVisitorInterface {
   }
 
  private:
-  spdy::SpdyPriority priority_;
+  spdy::SpdyPriority priority_ = 0;
 };
 
 }  // namespace
@@ -308,29 +308,7 @@ SpdySessionDependencies::SpdySessionDependencies(
       http_auth_handler_factory(HttpAuthHandlerFactory::CreateDefault()),
       http_server_properties(std::make_unique<HttpServerProperties>()),
       quic_context(std::make_unique<QuicContext>()),
-      enable_ip_pooling(true),
-      enable_ping(false),
-      enable_user_alternate_protocol_ports(false),
-      enable_quic(false),
-      enable_server_push_cancellation(false),
-      session_max_recv_window_size(kDefaultInitialWindowSize),
-      session_max_queued_capped_frames(kSpdySessionMaxQueuedCappedFrames),
-      time_func(&base::TimeTicks::Now),
-      enable_http2_alternative_service(false),
-      enable_websocket_over_http2(false),
-      enable_http2_settings_grease(false),
-      http2_end_stream_with_data_frame(false),
-      net_log(nullptr),
-      disable_idle_sockets_close_on_memory_pressure(false),
-      enable_early_data(false),
-      key_auth_cache_server_entries_by_network_isolation_key(false),
-      enable_priority_update(false),
-#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_IOS)
-      go_away_on_ip_change(true),
-#else
-      go_away_on_ip_change(false),
-#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_IOS)
-      ignore_ip_address_changes(false) {
+      time_func(&base::TimeTicks::Now) {
   http2_settings[spdy::SETTINGS_INITIAL_WINDOW_SIZE] =
       kDefaultInitialWindowSize;
 }
@@ -392,8 +370,8 @@ HttpNetworkSessionParams SpdySessionDependencies::CreateSessionParams(
   params.disable_idle_sockets_close_on_memory_pressure =
       session_deps->disable_idle_sockets_close_on_memory_pressure;
   params.enable_early_data = session_deps->enable_early_data;
-  params.key_auth_cache_server_entries_by_network_isolation_key =
-      session_deps->key_auth_cache_server_entries_by_network_isolation_key;
+  params.key_auth_cache_server_entries_by_network_anonymization_key =
+      session_deps->key_auth_cache_server_entries_by_network_anonymization_key;
   params.enable_priority_update = session_deps->enable_priority_update;
   params.spdy_go_away_on_ip_change = session_deps->go_away_on_ip_change;
   params.ignore_ip_address_changes = session_deps->ignore_ip_address_changes;
@@ -476,7 +454,8 @@ base::WeakPtr<SpdySession> CreateSpdySessionHelper(
           url::SchemeHostPort(url::kHttpsScheme,
                               key.host_port_pair().HostForURL(),
                               key.host_port_pair().port()),
-          key.privacy_mode(), NetworkIsolationKey(), SecureDnsPolicy::kAllow),
+          key.privacy_mode(), NetworkAnonymizationKey(),
+          SecureDnsPolicy::kAllow),
       socket_params, /*proxy_annotation_tag=*/absl::nullopt, MEDIUM,
       key.socket_tag(), ClientSocketPool::RespectLimits::ENABLED,
       callback.callback(), ClientSocketPool::ProxyAuthCallback(),
@@ -680,8 +659,8 @@ std::string SpdyTestUtil::ConstructSpdyReplyString(
 spdy::SpdySerializedFrame SpdyTestUtil::ConstructSpdySettings(
     const spdy::SettingsMap& settings) {
   spdy::SpdySettingsIR settings_ir;
-  for (auto it = settings.begin(); it != settings.end(); ++it) {
-    settings_ir.AddSetting(it->first, it->second);
+  for (const auto& setting : settings) {
+    settings_ir.AddSetting(setting.first, setting.second);
   }
   return spdy::SpdySerializedFrame(
       headerless_spdy_framer_.SerializeFrame(settings_ir));
@@ -1007,12 +986,11 @@ spdy::SpdySerializedFrame SpdyTestUtil::SerializeFrame(
 }
 
 void SpdyTestUtil::UpdateWithStreamDestruction(int stream_id) {
-  for (auto priority_it = priority_to_stream_id_list_.begin();
-       priority_it != priority_to_stream_id_list_.end(); ++priority_it) {
-    for (auto stream_it = priority_it->second.begin();
-         stream_it != priority_it->second.end(); ++stream_it) {
+  for (auto& priority_it : priority_to_stream_id_list_) {
+    for (auto stream_it = priority_it.second.begin();
+         stream_it != priority_it.second.end(); ++stream_it) {
       if (*stream_it == stream_id) {
-        priority_it->second.erase(stream_it);
+        priority_it.second.erase(stream_it);
         return;
       }
     }

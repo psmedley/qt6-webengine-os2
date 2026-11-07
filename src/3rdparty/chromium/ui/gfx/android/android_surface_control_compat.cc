@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -397,7 +397,7 @@ uint64_t ColorSpaceToADataSpace(const gfx::ColorSpace& color_space) {
   if (!color_space.IsValid() || color_space == gfx::ColorSpace::CreateSRGB())
     return ADATASPACE_SRGB;
 
-  if (color_space == gfx::ColorSpace::CreateSCRGBLinear())
+  if (color_space == gfx::ColorSpace::CreateSRGBLinear())
     return ADATASPACE_SCRGB_LINEAR;
 
   if (color_space == gfx::ColorSpace::CreateDisplayP3D65())

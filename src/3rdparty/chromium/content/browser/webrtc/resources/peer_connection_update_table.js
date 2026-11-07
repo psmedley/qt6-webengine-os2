@@ -1,8 +1,8 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {$} from 'chrome://resources/js/util.m.js';
+import {$} from 'chrome://resources/js/util.js';
 
 const MAX_NUMBER_OF_STATE_CHANGES_DISPLAYED = 10;
 const MAX_NUMBER_OF_EXPANDED_MEDIASECTIONS = 10;
@@ -136,10 +136,10 @@ export class PeerConnectionUpdateTable {
     const details = row.cells[1].childNodes[0];
     details.appendChild(valueContainer);
 
-    // Highlight ICE failures and failure callbacks.
+    // Highlight ICE/DTLS failures and failure callbacks.
     if ((update.type === 'iceconnectionstatechange' &&
          update.value === 'failed') ||
-        (update.type === 'iceconnectionstatechange (legacy)' &&
+        (update.type === 'connectionstatechange' &&
          update.value === 'failed') ||
         update.type.indexOf('OnFailure') !== -1 ||
         update.type === 'addIceCandidateFailed') {

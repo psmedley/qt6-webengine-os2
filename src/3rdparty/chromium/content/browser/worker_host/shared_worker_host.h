@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,9 @@
 #include "base/scoped_observation.h"
 #include "base/unguessable_token.h"
 #include "content/browser/browser_interface_broker_impl.h"
+#include "content/browser/buckets/bucket_context.h"
 #include "content/browser/renderer_host/code_cache_host_impl.h"
+#include "content/browser/renderer_host/policy_container_host.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/render_process_host.h"
@@ -68,7 +70,8 @@ class SiteInstanceImpl;
 // in the renderer. This class is owned by the SharedWorkerServiceImpl of the
 // current BrowserContext.
 class CONTENT_EXPORT SharedWorkerHost : public blink::mojom::SharedWorkerHost,
-                                        public RenderProcessHostObserver {
+                                        public RenderProcessHostObserver,
+                                        public BucketContext {
  public:
   SharedWorkerHost(
       SharedWorkerServiceImpl* service,
@@ -76,6 +79,7 @@ class CONTENT_EXPORT SharedWorkerHost : public blink::mojom::SharedWorkerHost,
       scoped_refptr<SiteInstanceImpl> site_instance,
       std::vector<network::mojom::ContentSecurityPolicyPtr>
           content_security_policies,
+      scoped_refptr<PolicyContainerHost> creator_policy_container_host,
       network::mojom::ClientSecurityStatePtr creator_client_security_state);
 
   SharedWorkerHost(const SharedWorkerHost&) = delete;
@@ -134,6 +138,8 @@ class CONTENT_EXPORT SharedWorkerHost : public blink::mojom::SharedWorkerHost,
       mojo::PendingReceiver<blink::mojom::CacheStorage> receiver);
   void CreateBroadcastChannelProvider(
       mojo::PendingReceiver<blink::mojom::BroadcastChannelProvider> receiver);
+  void CreateBucketManagerHost(
+      mojo::PendingReceiver<blink::mojom::BucketManagerHost> receiver);
 
   // Causes this instance to be deleted, which will terminate the worker. May
   // be done based on a UI action.
@@ -191,6 +197,8 @@ class CONTENT_EXPORT SharedWorkerHost : public blink::mojom::SharedWorkerHost,
 
   net::NetworkIsolationKey GetNetworkIsolationKey() const;
 
+  net::NetworkAnonymizationKey GetNetworkAnonymizationKey() const;
+
   const blink::StorageKey& GetStorageKey() const;
 
   const base::UnguessableToken& GetReportingSource() const {
@@ -205,6 +213,14 @@ class CONTENT_EXPORT SharedWorkerHost : public blink::mojom::SharedWorkerHost,
   // Creates a network factory params for subresource requests from this worker.
   network::mojom::URLLoaderFactoryParamsPtr
   CreateNetworkFactoryParamsForSubresources();
+
+  // BucketContext:
+  blink::StorageKey GetBucketStorageKey() override;
+  blink::mojom::PermissionStatus GetPermissionStatus(
+      blink::PermissionType permission_type) override;
+  void BindCacheStorageForBucket(
+      const storage::BucketInfo& bucket,
+      mojo::PendingReceiver<blink::mojom::CacheStorage> receiver) override;
 
  private:
   friend class SharedWorkerHostTest;
@@ -250,6 +266,10 @@ class CONTENT_EXPORT SharedWorkerHost : public blink::mojom::SharedWorkerHost,
                                bool allowed);
   void OnClientConnectionLost();
   void OnWorkerConnectionLost();
+
+  void BindCacheStorageInternal(
+      mojo::PendingReceiver<blink::mojom::CacheStorage> receiver,
+      const storage::BucketLocator& bucket_locator);
 
   // Creates a network factory for subresource requests from this worker. The
   // network factory is meant to be passed to the renderer.
@@ -316,6 +336,8 @@ class CONTENT_EXPORT SharedWorkerHost : public blink::mojom::SharedWorkerHost,
   const ukm::SourceId ukm_source_id_;
 
   const base::UnguessableToken reporting_source_;
+
+  scoped_refptr<PolicyContainerHost> creator_policy_container_host_;
 
   // The client security state of the creator execution context.
   // Never nullptr. Copied at construction time.

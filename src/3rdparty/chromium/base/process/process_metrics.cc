@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 
 namespace base {
 
@@ -26,7 +25,7 @@ int CalculateEventsPerSecond(uint64_t event_count,
 
   int events_per_second = 0;
   if (*last_event_count != 0) {
-    const int64_t events_delta = event_count - *last_event_count;
+    const uint64_t events_delta = event_count - *last_event_count;
     const base::TimeDelta time_delta = time - *last_calculated;
     DCHECK(!time_delta.is_zero());
     events_per_second = ClampRound(events_delta / time_delta.InSecondsF());
@@ -60,7 +59,7 @@ SystemMetrics SystemMetrics::Sample() {
   GetVmStatInfo(&system_metrics.vmstat_info_);
   GetSystemDiskInfo(&system_metrics.disk_info_);
 #endif
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   GetSwapInfo(&system_metrics.swap_info_);
   GetGraphicsMemoryInfo(&system_metrics.gpu_memory_info_);
 #endif
@@ -81,7 +80,7 @@ Value SystemMetrics::ToValue() const {
   res.SetKey("meminfo", std::move(meminfo));
   res.SetKey("diskinfo", disk_info_.ToValue());
 #endif
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   res.SetKey("swapinfo", swap_info_.ToValue());
   res.SetKey("gpu_meminfo", gpu_memory_info_.ToValue());
 #endif
@@ -101,8 +100,8 @@ std::unique_ptr<ProcessMetrics> ProcessMetrics::CreateCurrentProcessMetrics() {
 }
 
 #if !BUILDFLAG(IS_FREEBSD) || !BUILDFLAG(IS_POSIX)
-double ProcessMetrics::GetPlatformIndependentCPUUsage() {
-  TimeDelta cumulative_cpu = GetCumulativeCPUUsage();
+double ProcessMetrics::GetPlatformIndependentCPUUsage(
+    TimeDelta cumulative_cpu) {
   TimeTicks time = TimeTicks::Now();
 
   if (last_cumulative_cpu_.is_zero()) {
@@ -123,11 +122,14 @@ double ProcessMetrics::GetPlatformIndependentCPUUsage() {
 
   return 100.0 * cpu_time_delta / time_delta;
 }
+
+double ProcessMetrics::GetPlatformIndependentCPUUsage() {
+  return GetPlatformIndependentCPUUsage(GetCumulativeCPUUsage());
+}
 #endif
 
 #if BUILDFLAG(IS_WIN)
-double ProcessMetrics::GetPreciseCPUUsage() {
-  TimeDelta cumulative_cpu = GetPreciseCumulativeCPUUsage();
+double ProcessMetrics::GetPreciseCPUUsage(TimeDelta cumulative_cpu) {
   TimeTicks time = TimeTicks::Now();
 
   if (last_precise_cumulative_cpu_.is_zero()) {
@@ -147,6 +149,10 @@ double ProcessMetrics::GetPreciseCPUUsage() {
   last_cpu_time_for_precise_cpu_usage_ = time;
 
   return 100.0 * cpu_time_delta / time_delta;
+}
+
+double ProcessMetrics::GetPreciseCPUUsage() {
+  return GetPreciseCPUUsage(GetPreciseCumulativeCPUUsage());
 }
 #endif  // BUILDFLAG(IS_WIN)
 

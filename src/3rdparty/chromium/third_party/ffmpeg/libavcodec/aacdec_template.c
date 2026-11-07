@@ -91,6 +91,7 @@
 
 #include "libavutil/channel_layout.h"
 #include "libavutil/thread.h"
+#include "decode.h"
 #include "internal.h"
 
 static VLC vlc_scalefactors;
@@ -701,14 +702,15 @@ static ChannelElement *get_che(AACContext *ac, int type, int elem_id)
 
         av_log(ac->avctx, AV_LOG_DEBUG, "stereo with SCE\n");
 
-        if (set_default_channel_config(ac, ac->avctx, layout_map,
-                                       &layout_map_tags, 1) < 0)
-            return NULL;
+        layout_map_tags = 2;
+        layout_map[0][0] = layout_map[1][0] = TYPE_SCE;
+        layout_map[0][2] = layout_map[1][2] = AAC_CHANNEL_FRONT;
+        layout_map[0][1] = 0;
+        layout_map[1][1] = 1;
         if (output_configure(ac, layout_map, layout_map_tags,
                              OC_TRIAL_FRAME, 1) < 0)
             return NULL;
 
-        ac->oc[1].m4ac.chan_config = 1;
         if (ac->oc[1].m4ac.sbr)
             ac->oc[1].m4ac.ps = -1;
     }
@@ -786,8 +788,10 @@ static ChannelElement *get_che(AACContext *ac, int type, int elem_id)
             type == TYPE_CPE) {
             ac->tags_mapped++;
             return ac->tag_che_map[TYPE_CPE][elem_id] = ac->che[TYPE_CPE][0];
-        } else if (ac->oc[1].m4ac.chan_config == 2) {
-            return NULL;
+        } else if (ac->tags_mapped == 1 && ac->oc[1].m4ac.chan_config == 2 &&
+            type == TYPE_SCE) {
+            ac->tags_mapped++;
+            return ac->tag_che_map[TYPE_SCE][elem_id] = ac->che[TYPE_SCE][1];
         }
     case 1:
         if (!ac->tags_mapped && type == TYPE_SCE) {
@@ -1221,8 +1225,8 @@ static void aacdec_init(AACContext *ac);
 
 static av_cold void aac_static_table_init(void)
 {
-    static VLC_TYPE vlc_buf[304 + 270 + 550 + 300 + 328 +
-                            294 + 306 + 268 + 510 + 366 + 462][2];
+    static VLCElem vlc_buf[304 + 270 + 550 + 300 + 328 +
+                           294 + 306 + 268 + 510 + 366 + 462];
     for (unsigned i = 0, offset = 0; i < 11; i++) {
         vlc_spectral[i].table           = &vlc_buf[offset];
         vlc_spectral[i].table_allocated = FF_ARRAY_ELEMS(vlc_buf) - offset;
@@ -1821,7 +1825,7 @@ static int decode_spectrum_and_dequant(AACContext *ac, INTFLOAT coef[1024],
 #if !USE_FIXED
                 const float *vq = ff_aac_codebook_vector_vals[cbt_m1];
 #endif /* !USE_FIXED */
-                VLC_TYPE (*vlc_tab)[2] = vlc_spectral[cbt_m1].table;
+                const VLCElem *vlc_tab = vlc_spectral[cbt_m1].table;
                 OPEN_READER(re, gb);
 
                 switch (cbt_m1 >> 1) {
@@ -2581,6 +2585,10 @@ static int decode_extension_payload(AACContext *ac, GetBitContext *gb, int cnt,
             ac->avctx->profile = FF_PROFILE_AAC_HE;
         }
         res = AAC_RENAME(ff_decode_sbr_extension)(ac, &che->sbr, gb, crc_flag, cnt, elem_type);
+        if (ac->oc[1].m4ac.ps == 1 && !ac->warned_he_aac_mono) {
+            av_log(ac->avctx, AV_LOG_VERBOSE, "Treating HE-AAC mono as stereo.\n");
+            ac->warned_he_aac_mono = 1;
+        }
         break;
     case EXT_DYNAMIC_RANGE:
         res = decode_dynamic_range(&ac->che_drc, gb);
@@ -3088,7 +3096,7 @@ static void spectral_to_sample(AACContext *ac, int samples)
                     /* preparation for resampler */
                     for(j = 0; j<samples; j++){
                         che->ch[0].ret[j] = (int32_t)av_clip64((int64_t)che->ch[0].ret[j]*128, INT32_MIN, INT32_MAX-0x8000)+0x8000;
-                        if(type == TYPE_CPE)
+                        if (type == TYPE_CPE || (type == TYPE_SCE && ac->oc[1].m4ac.ps == 1))
                             che->ch[1].ret[j] = (int32_t)av_clip64((int64_t)che->ch[1].ret[j]*128, INT32_MIN, INT32_MAX-0x8000)+0x8000;
                     }
                 }
@@ -3235,7 +3243,7 @@ static int aac_decode_er_frame(AVCodecContext *avctx, void *data,
     return 0;
 }
 
-static int aac_decode_frame_int(AVCodecContext *avctx, void *data,
+static int aac_decode_frame_int(AVCodecContext *avctx, AVFrame *frame,
                                 int *got_frame_ptr, GetBitContext *gb,
                                 const AVPacket *avpkt)
 {
@@ -3248,7 +3256,7 @@ static int aac_decode_frame_int(AVCodecContext *avctx, void *data,
     int payload_alignment;
     uint8_t che_presence[4][MAX_ELEM_ID] = {{0}};
 
-    ac->frame = data;
+    ac->frame = frame;
 
     if (show_bits(gb, 12) == 0xfff) {
         if ((err = parse_adts_frame_header(ac, gb)) < 0) {
@@ -3415,9 +3423,6 @@ static int aac_decode_frame_int(AVCodecContext *avctx, void *data,
         ac->oc[1].status = OC_LOCKED;
     }
 
-    if (multiplier)
-        avctx->internal->skip_samples_multiplier = 2;
-
     if (!ac->frame->data[0] && samples) {
         av_log(avctx, AV_LOG_ERROR, "no frame data found\n");
         err = AVERROR_INVALIDDATA;
@@ -3437,9 +3442,9 @@ static int aac_decode_frame_int(AVCodecContext *avctx, void *data,
                                           &(AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO);
     if (is_dmono) {
         if (ac->dmono_mode == 1)
-            ((AVFrame *)data)->data[1] =((AVFrame *)data)->data[0];
+            frame->data[1] = frame->data[0];
         else if (ac->dmono_mode == 2)
-            ((AVFrame *)data)->data[0] =((AVFrame *)data)->data[1];
+            frame->data[0] = frame->data[1];
     }
 
     return 0;
@@ -3448,7 +3453,7 @@ fail:
     return err;
 }
 
-static int aac_decode_frame(AVCodecContext *avctx, void *data,
+static int aac_decode_frame(AVCodecContext *avctx, AVFrame *frame,
                             int *got_frame_ptr, AVPacket *avpkt)
 {
     AACContext *ac = avctx->priv_data;
@@ -3495,10 +3500,10 @@ static int aac_decode_frame(AVCodecContext *avctx, void *data,
     case AOT_ER_AAC_LTP:
     case AOT_ER_AAC_LD:
     case AOT_ER_AAC_ELD:
-        err = aac_decode_er_frame(avctx, data, got_frame_ptr, &gb);
+        err = aac_decode_er_frame(avctx, frame, got_frame_ptr, &gb);
         break;
     default:
-        err = aac_decode_frame_int(avctx, data, got_frame_ptr, &gb, avpkt);
+        err = aac_decode_frame_int(avctx, frame, got_frame_ptr, &gb, avpkt);
     }
     if (err < 0)
         return err;
@@ -3550,8 +3555,9 @@ static void aacdec_init(AACContext *c)
 #endif
 
 #if !USE_FIXED
-    if(ARCH_MIPS)
-        ff_aacdec_init_mips(c);
+#if ARCH_MIPS
+    ff_aacdec_init_mips(c);
+#endif
 #endif /* !USE_FIXED */
 }
 /**

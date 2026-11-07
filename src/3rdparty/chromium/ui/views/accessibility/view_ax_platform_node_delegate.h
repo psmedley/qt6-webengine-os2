@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,6 @@
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/ax_node_position.h"
 #include "ui/accessibility/platform/ax_platform_node_delegate_base.h"
-#include "ui/accessibility/test_ax_tree_manager.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/accessibility/view_accessibility.h"
@@ -29,6 +28,7 @@ namespace ui {
 
 struct AXActionData;
 class AXUniqueId;
+class AXDummyTreeManager;
 
 }  // namespace ui
 
@@ -64,8 +64,8 @@ class ViewAXPlatformNodeDelegate : public ViewAccessibility,
 
   // ui::AXPlatformNodeDelegate.
   const ui::AXNodeData& GetData() const override;
-  int GetChildCount() const override;
-  gfx::NativeViewAccessible ChildAtIndex(int index) override;
+  size_t GetChildCount() const override;
+  gfx::NativeViewAccessible ChildAtIndex(size_t index) override;
   bool HasModalDialog() const override;
   // Also in |ViewAccessibility|.
   bool IsChildOfLeaf() const override;
@@ -98,6 +98,9 @@ class ViewAXPlatformNodeDelegate : public ViewAccessibility,
   bool IsOffscreen() const override;
   std::u16string GetAuthorUniqueId() const override;
   bool IsMinimized() const override;
+  bool IsReadOnlySupported() const override;
+  bool IsReadOnlyOrDisabled() const override;
+
   // Also in |ViewAccessibility|.
   const ui::AXUniqueId& GetUniqueId() const override;
   absl::optional<bool> GetTableHasColumnOrRowHeaderNode() const override;
@@ -154,12 +157,8 @@ class ViewAXPlatformNodeDelegate : public ViewAccessibility,
   TableView* GetAncestorTableView() const;
 
   // A tree manager that is used to hook up `AXPosition` to text fields in
-  // Views. This is a temporary workaround until `ViewsAXTreeManager` is
-  // well-tested and fully implemented.
-  //
-  // TODO(nektar): Replace `TestAXTreeManager` with `ViewsAXTreeManager` in the
-  // next release of Chrome.
-  mutable std::unique_ptr<ui::TestAXTreeManager> dummy_tree_manager_;
+  // Views.
+  mutable std::unique_ptr<ui::AXDummyTreeManager> dummy_tree_manager_;
 
   // We own this, but it is reference-counted on some platforms so we can't use
   // a unique_ptr. It is destroyed in the destructor.

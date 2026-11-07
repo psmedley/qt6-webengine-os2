@@ -7,6 +7,7 @@
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkDrawable.h"
+#include "include/core/SkFont.h"
 #include "include/core/SkPath.h"
 #include "include/core/SkRSXform.h"
 #include "include/core/SkString.h"
@@ -27,7 +28,7 @@ const SkBlendMode gModes[] = {
     SkBlendMode::kDstOut,
     SkBlendMode::kDstATop,
 };
-const int N_Modes = SK_ARRAY_COUNT(gModes);
+const int N_Modes = std::size(gModes);
 
 static SkRandom gRand;
 

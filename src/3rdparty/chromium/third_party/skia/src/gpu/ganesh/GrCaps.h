@@ -8,6 +8,7 @@
 #ifndef GrCaps_DEFINED
 #define GrCaps_DEFINED
 
+#include "include/core/SkCapabilities.h"
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkString.h"
@@ -37,7 +38,7 @@ class KeyBuilder;
 /**
  * Represents the capabilities of a GrContext.
  */
-class GrCaps : public SkRefCnt {
+class GrCaps : public SkCapabilities {
 public:
     GrCaps(const GrContextOptions&);
 
@@ -119,11 +120,6 @@ public:
 
     bool avoidWritePixelsFastPath() const { return fAvoidWritePixelsFastPath; }
 
-    // http://skbug.com/9739
-    bool requiresManualFBBarrierAfterTessellatedStencilDraw() const {
-        return fRequiresManualFBBarrierAfterTessellatedStencilDraw;
-    }
-
     // glDrawElementsIndirect fails GrMeshTest on every Win10 Intel bot.
     bool nativeDrawIndexedIndirectIsBroken() const { return fNativeDrawIndexedIndirectIsBroken; }
 
@@ -170,8 +166,8 @@ public:
         return fMustSyncGpuDuringAbandon;
     }
 
-    // Shortcut for shaderCaps()->reducedShaderMode().
-    bool reducedShaderMode() const { return this->shaderCaps()->reducedShaderMode(); }
+    // Shortcut for shaderCaps()->fReducedShaderMode.
+    bool reducedShaderMode() const { return this->shaderCaps()->fReducedShaderMode; }
 
     /**
      * Indicates whether GPU->CPU memory mapping for GPU resources such as vertex buffers and
@@ -219,14 +215,21 @@ public:
         return this->maxWindowRectangles() > 0 && this->onIsWindowRectanglesSupportedForRT(rt);
     }
 
-    // Hardware tessellation seems to have a fixed upfront cost. If there is a somewhat small number
-    // of verbs, we seem to be faster emulating tessellation with instanced draws instead.
-    int minPathVerbsForHwTessellation() const { return fMinPathVerbsForHwTessellation; }
-    int minStrokeVerbsForHwTessellation() const { return fMinStrokeVerbsForHwTessellation; }
-
     uint32_t maxPushConstantsSize() const { return fMaxPushConstantsSize; }
 
-    size_t transferBufferAlignment() const { return fTransferBufferAlignment; }
+    // Alignment requirement for row bytes in buffer<->texture transfers.
+    size_t transferBufferRowBytesAlignment() const { return fTransferBufferRowBytesAlignment; }
+
+    // Alignment requirement for offsets and size in buffer->buffer transfers.
+    size_t transferFromBufferToBufferAlignment() const {
+        return fTransferFromBufferToBufferAlignment;
+    }
+
+    // Alignment requirement for offset and size passed to in GrGpuBuffer::updateData when the
+    // preserve param is true.
+    size_t bufferUpdateDataPreserveAlignment() const {
+        return fBufferUpdateDataPreserveAlignment;
+    }
 
     virtual bool isFormatSRGB(const GrBackendFormat&) const = 0;
 
@@ -343,12 +346,13 @@ public:
 
     bool transferFromSurfaceToBufferSupport() const { return fTransferFromSurfaceToBufferSupport; }
     bool transferFromBufferToTextureSupport() const { return fTransferFromBufferToTextureSupport; }
+    bool transferFromBufferToBufferSupport()  const { return fTransferFromBufferToBufferSupport;  }
 
     bool suppressPrints() const { return fSuppressPrints; }
 
     size_t bufferMapThreshold() const {
         SkASSERT(fBufferMapThreshold >= 0);
-        return fBufferMapThreshold;
+        return static_cast<size_t>(fBufferMapThreshold);
     }
 
     /** True in environments that will issue errors if memory uploaded to buffers
@@ -360,6 +364,11 @@ public:
         performance hit to not doing it.
      */
     bool shouldInitializeTextures() const { return fShouldInitializeTextures; }
+
+    /**
+     * When a new GrGpuBuffer is created is it known to contain all zero bytes?
+     */
+    bool buffersAreInitiallyZero() const { return fBuffersAreInitiallyZero; }
 
     /** Returns true if the given backend supports importing AHardwareBuffers via the
      * GrAHardwarebufferImageGenerator. This will only ever be supported on Android devices with API
@@ -379,8 +388,8 @@ public:
     /**
      * Returns whether or not we will be able to do a copy given the passed in params
      */
-    bool canCopySurface(const GrSurfaceProxy* dst, const GrSurfaceProxy* src,
-                        const SkIRect& srcRect, const SkIPoint& dstPoint) const;
+    bool canCopySurface(const GrSurfaceProxy* dst, const SkIRect& dstRect,
+                        const GrSurfaceProxy* src, const SkIRect& srcRect) const;
 
     bool dynamicStateArrayGeometryProcessorTextureSupport() const {
         return fDynamicStateArrayGeometryProcessorTextureSupport;
@@ -401,9 +410,6 @@ public:
     /// clears. The minimal repro steps are not precisely known but drawing a rect with a stencil
     /// op instead of using glClear seems to resolve the issue.
     bool performStencilClearsAsDraws() const { return fPerformStencilClearsAsDraws; }
-
-    // Should we disable the clip mask atlas due to a faulty driver?
-    bool driverDisableMSAAClipAtlas() const { return fDriverDisableMSAAClipAtlas; }
 
     // Should we disable TessellationPathRenderer due to a faulty driver?
     bool disableTessellationPathRenderer() const { return fDisableTessellationPathRenderer; }
@@ -511,6 +517,10 @@ public:
         return fAvoidDithering;
     }
 
+    bool disablePerspectiveSDFText() const {
+        return fDisablePerspectiveSDFText;
+    }
+
     /**
      * Checks whether the passed color type is renderable. If so, the same color type is passed
      * back along with the default format used for the color type. If not, provides an alternative
@@ -560,6 +570,7 @@ protected:
     bool fPreferFullscreenClears                     : 1;
     bool fTwoSidedStencilRefsAndMasksMustMatch       : 1;
     bool fMustClearUploadedBufferData                : 1;
+    bool fBuffersAreInitiallyZero                    : 1;
     bool fShouldInitializeTextures                   : 1;
     bool fSupportsAHardwareBufferImages              : 1;
     bool fHalfFloatVertexAttributeSupport            : 1;
@@ -570,6 +581,7 @@ protected:
     bool fPerformStencilClearsAsDraws                : 1;
     bool fTransferFromBufferToTextureSupport         : 1;
     bool fTransferFromSurfaceToBufferSupport         : 1;
+    bool fTransferFromBufferToBufferSupport          : 1;
     bool fWritePixelsRowBytesSupport                 : 1;
     bool fTransferPixelsToRowBytesSupport            : 1;
     bool fReadPixelsRowBytesSupport                  : 1;
@@ -577,14 +589,13 @@ protected:
     bool fMustSyncGpuDuringAbandon                   : 1;
 
     // Driver workaround
-    bool fDriverDisableMSAAClipAtlas                 : 1;
     bool fDisableTessellationPathRenderer            : 1;
     bool fAvoidStencilBuffers                        : 1;
     bool fAvoidWritePixelsFastPath                   : 1;
-    bool fRequiresManualFBBarrierAfterTessellatedStencilDraw : 1;
     bool fNativeDrawIndexedIndirectIsBroken          : 1;
     bool fAvoidReorderingRenderTasks                 : 1;
     bool fAvoidDithering                             : 1;
+    bool fDisablePerspectiveSDFText                  : 1;
 
     // ANGLE performance workaround
     bool fPreferVRAMUseOverFlushes                   : 1;
@@ -611,10 +622,10 @@ protected:
     int fMaxTextureSize;
     int fMaxWindowRectangles;
     int fInternalMultisampleCount;
-    int fMinPathVerbsForHwTessellation = 25;
-    int fMinStrokeVerbsForHwTessellation = 50;
     uint32_t fMaxPushConstantsSize = 0;
-    size_t fTransferBufferAlignment = 1;
+    size_t fTransferBufferRowBytesAlignment = 1;
+    size_t fTransferFromBufferToBufferAlignment = 1;
+    size_t fBufferUpdateDataPreserveAlignment = 1;
 
     GrDriverBugWorkarounds fDriverBugWorkarounds;
 
@@ -624,8 +635,8 @@ private:
     virtual void onApplyOptionsOverrides(const GrContextOptions&) {}
     virtual void onDumpJSON(SkJSONWriter*) const {}
     virtual bool onSurfaceSupportsWritePixels(const GrSurface*) const = 0;
-    virtual bool onCanCopySurface(const GrSurfaceProxy* dst, const GrSurfaceProxy* src,
-                                  const SkIRect& srcRect, const SkIPoint& dstPoint) const = 0;
+    virtual bool onCanCopySurface(const GrSurfaceProxy* dst, const SkIRect& dstRect,
+                                  const GrSurfaceProxy* src, const SkIRect& srcRect) const = 0;
     virtual GrBackendFormat onGetDefaultBackendFormat(GrColorType) const = 0;
 
     // Backends should implement this if they have any extra requirements for use of window

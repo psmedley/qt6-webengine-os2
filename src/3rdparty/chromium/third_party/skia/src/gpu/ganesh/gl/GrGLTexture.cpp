@@ -146,9 +146,10 @@ sk_sp<GrGLTexture> GrGLTexture::MakeWrapped(GrGLGpu* gpu,
                                             const Desc& desc,
                                             sk_sp<GrGLTextureParameters> parameters,
                                             GrWrapCacheable cacheable,
-                                            GrIOType ioType) {
+                                            GrIOType ioType,
+                                            std::string_view label) {
     return sk_sp<GrGLTexture>(new GrGLTexture(
-            gpu, desc, mipmapStatus, std::move(parameters), cacheable, ioType, /*label=*/{}));
+            gpu, desc, mipmapStatus, std::move(parameters), cacheable, ioType, label));
 }
 
 bool GrGLTexture::onStealBackendTexture(GrBackendTexture* backendTexture,
@@ -162,6 +163,18 @@ bool GrGLTexture::onStealBackendTexture(GrBackendTexture* backendTexture,
     // cleaned up by us.
     this->GrGLTexture::onAbandon();
     return true;
+}
+
+void GrGLTexture::onSetLabel() {
+    SkASSERT(fID);
+    SkASSERT(fTextureIDOwnership == GrBackendObjectOwnership::kOwned);
+    if (!this->getLabel().empty()) {
+        const std::string label = "_Skia_" + this->getLabel();
+        GrGLGpu* glGpu = static_cast<GrGLGpu*>(this->getGpu());
+        if (glGpu->glCaps().debugSupport()) {
+            GR_GL_CALL(glGpu->glInterface(), ObjectLabel(GR_GL_TEXTURE, fID, -1, label.c_str()));
+        }
+    }
 }
 
 void GrGLTexture::dumpMemoryStatistics(SkTraceMemoryDump* traceMemoryDump) const {

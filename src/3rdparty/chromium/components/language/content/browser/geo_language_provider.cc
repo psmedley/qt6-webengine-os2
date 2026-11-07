@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,6 +34,9 @@ GeoLanguageProvider::Binder& GetBinderOverride() {
 const char GeoLanguageProvider::kCachedGeoLanguagesPref[] =
     "language.geo_language_provider.cached_geo_languages";
 
+const char GeoLanguageProvider::kTimeOfLastGeoLanguagesUpdatePref[] =
+    "language.geo_language_provider.time_of_last_geo_languages_update";
+
 GeoLanguageProvider::GeoLanguageProvider()
     : creation_task_runner_(base::SequencedTaskRunnerHandle::Get()),
       background_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
@@ -65,6 +68,7 @@ GeoLanguageProvider* GeoLanguageProvider::GetInstance() {
 void GeoLanguageProvider::RegisterLocalStatePrefs(
     PrefRegistrySimple* const registry) {
   registry->RegisterListPref(kCachedGeoLanguagesPref);
+  registry->RegisterDoublePref(kTimeOfLastGeoLanguagesUpdatePref, 0);
 }
 
 void GeoLanguageProvider::StartUp(PrefService* const prefs) {
@@ -72,17 +76,33 @@ void GeoLanguageProvider::StartUp(PrefService* const prefs) {
 
   prefs_ = prefs;
 
-  const base::Value* const cached_languages_list =
+  const base::Value::List& cached_languages_list =
       prefs_->GetList(kCachedGeoLanguagesPref);
-  for (const auto& language_value :
-       cached_languages_list->GetListDeprecated()) {
+  for (const auto& language_value : cached_languages_list) {
     languages_.push_back(language_value.GetString());
   }
 
-  // Continue startup in the background.
-  background_task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(&GeoLanguageProvider::BackgroundStartUp,
-                                base::Unretained(this)));
+  const double last_update =
+      prefs_->GetDouble(kTimeOfLastGeoLanguagesUpdatePref);
+
+  base::TimeDelta time_passed_since_update =
+      base::Time::Now() - base::Time::FromTimeT(last_update);
+
+  // Delay startup if languages have been updated within |kMinUpdatePeriod|.
+  if (time_passed_since_update < kMinUpdatePeriod) {
+    base::TimeDelta time_till_next_update =
+        kMinUpdatePeriod - time_passed_since_update;
+    background_task_runner_->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(&GeoLanguageProvider::BackgroundStartUp,
+                       base::Unretained(this)),
+        time_till_next_update);
+  } else {
+    // Continue startup in the background.
+    background_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&GeoLanguageProvider::BackgroundStartUp,
+                                  base::Unretained(this)));
+  }
 }
 
 std::vector<std::string> GeoLanguageProvider::CurrentGeoLanguages() const {
@@ -202,6 +222,8 @@ void GeoLanguageProvider::SetGeoLanguages(
     cache_list.Append(language);
   }
   prefs_->Set(kCachedGeoLanguagesPref, cache_list);
+  prefs_->SetDouble(kTimeOfLastGeoLanguagesUpdatePref,
+                    base::Time::Now().ToDoubleT());
 }
 
 }  // namespace language

@@ -30,16 +30,12 @@ public:
         return fFunction;
     }
 
-    bool hasProperty(Property property) const override {
-        return property == Property::kSideEffects;
-    }
-
-    std::string description() const override {
+    std::string description(OperatorPrecedence) const override {
         return std::string(this->function().name());
     }
 
-    std::unique_ptr<Expression> clone() const override {
-        return std::make_unique<ExternalFunctionReference>(fPosition, &this->function());
+    std::unique_ptr<Expression> clone(Position pos) const override {
+        return std::make_unique<ExternalFunctionReference>(pos, &this->function());
     }
 
 private:

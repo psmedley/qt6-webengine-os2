@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,13 @@ import {ForeignSession, HistoryEntry, HistoryQuery} from './externs.js';
 
 export type RemoveVisitsRequest = Array<{
   url: string,
-  timestamps: Array<number>,
+  timestamps: number[],
 }>;
 
-export type QueryResult = {
-  info: HistoryQuery,
-  value: HistoryEntry[],
-};
+export interface QueryResult {
+  info: HistoryQuery;
+  value: HistoryEntry[];
+}
 
 /**
  * @fileoverview Defines a singleton object, history.BrowserService, which
@@ -33,11 +33,12 @@ export interface BrowserService {
   recordHistogram(histogram: string, value: number, max: number): void;
   recordAction(action: string): void;
   recordTime(histogram: string, time: number): void;
+  recordLongTime(histogram: string, time: number): void;
   navigateToUrl(url: string, target: string, e: MouseEvent): void;
   otherDevicesInitialized(): void;
   queryHistoryContinuation(): Promise<QueryResult>;
   queryHistory(searchTerm: string): Promise<QueryResult>;
-  startSignInFlow(): void;
+  startTurnOnSyncFlow(): void;
 }
 
 export class BrowserServiceImpl implements BrowserService {
@@ -64,8 +65,14 @@ export class BrowserServiceImpl implements BrowserService {
   openForeignSessionTab(
       sessionTag: string, windowId: number, tabId: number, e: MouseEvent) {
     chrome.send('openForeignSession', [
-      sessionTag, String(windowId), String(tabId), e.button || 0, e.altKey,
-      e.ctrlKey, e.metaKey, e.shiftKey
+      sessionTag,
+      String(windowId),
+      String(tabId),
+      e.button || 0,
+      e.altKey,
+      e.ctrlKey,
+      e.metaKey,
+      e.shiftKey,
     ]);
   }
 
@@ -96,6 +103,13 @@ export class BrowserServiceImpl implements BrowserService {
     chrome.send('metricsHandler:recordTime', [histogram, time]);
   }
 
+  recordLongTime(histogram: string, time: number) {
+    // It's a bit odd that this is the only one to use chrome.metricsPrivate,
+    // but that's because the other code predates chrome.metricsPrivate.
+    // In any case, the MetricsHandler doesn't support long time histograms.
+    chrome.metricsPrivate.recordLongTime(histogram, time);
+  }
+
   navigateToUrl(url: string, target: string, e: MouseEvent) {
     chrome.send(
         'navigateToUrl',
@@ -114,8 +128,8 @@ export class BrowserServiceImpl implements BrowserService {
     return sendWithPromise('queryHistory', searchTerm, RESULTS_PER_PAGE);
   }
 
-  startSignInFlow() {
-    chrome.send('startSignInFlow');
+  startTurnOnSyncFlow() {
+    chrome.send('startTurnOnSyncFlow');
   }
 
   static getInstance(): BrowserService {

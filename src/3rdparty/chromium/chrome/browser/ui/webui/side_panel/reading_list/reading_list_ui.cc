@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,19 +7,28 @@
 #include <string>
 #include <utility>
 
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/commerce/shopping_service_factory.h"
+#include "chrome/browser/feature_engagement/tracker_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/read_later/reading_list_model_factory.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
+#include "chrome/browser/ui/webui/sanitized_image_source.h"
 #include "chrome/browser/ui/webui/side_panel/bookmarks/bookmarks_page_handler.h"
 #include "chrome/browser/ui/webui/side_panel/read_anything/read_anything_page_handler.h"
 #include "chrome/browser/ui/webui/side_panel/reading_list/reading_list_page_handler.h"
 #include "chrome/browser/ui/webui/webui_util.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/side_panel_resources.h"
 #include "chrome/grit/side_panel_resources_map.h"
+#include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
+#include "components/commerce/core/shopping_service.h"
+#include "components/commerce/core/webui/shopping_list_handler.h"
 #include "components/favicon_base/favicon_url_parser.h"
 #include "components/prefs/pref_service.h"
 #include "components/reading_list/core/reading_list_model.h"
@@ -50,6 +59,7 @@ ReadingListUI::ReadingListUI(content::WebUI* web_ui)
        IDS_READ_LATER_MENU_EMPTY_STATE_ADD_FROM_DIALOG_SUBHEADER},
       {"emptyStateHeader", IDS_READ_LATER_MENU_EMPTY_STATE_HEADER},
       {"emptyStateSubheader", IDS_READ_LATER_MENU_EMPTY_STATE_SUBHEADER},
+      {"markCurrentTabAsRead", IDS_READ_LATER_MARK_CURRENT_TAB_READ},
       {"readAnythingTabTitle", IDS_READ_ANYTHING_TITLE},
       {"readHeader", IDS_READ_LATER_MENU_READ_HEADER},
       {"title", IDS_READ_LATER_TITLE},
@@ -59,6 +69,11 @@ ReadingListUI::ReadingListUI(content::WebUI* web_ui)
       {"tooltipMarkAsRead", IDS_READ_LATER_MENU_TOOLTIP_MARK_AS_READ},
       {"tooltipMarkAsUnread", IDS_READ_LATER_MENU_TOOLTIP_MARK_AS_UNREAD},
       {"unreadHeader", IDS_READ_LATER_MENU_UNREAD_HEADER},
+      {"shoppingListFolderTitle", IDS_SIDE_PANEL_TRACKED_PRODUCTS},
+      {"shoppingListTrackPriceButtonDescription",
+       IDS_PRICE_TRACKING_TRACK_PRODUCT_ACCESSIBILITY},
+      {"shoppingListUntrackPriceButtonDescription",
+       IDS_PRICE_TRACKING_UNTRACK_PRODUCT_ACCESSIBILITY},
   };
   for (const auto& str : kLocalizedStrings)
     webui::AddLocalizedString(source, str.name, str.id);
@@ -69,9 +84,7 @@ ReadingListUI::ReadingListUI(content::WebUI* web_ui)
   PrefService* prefs = profile->GetPrefs();
   source->AddBoolean(
       "bookmarksDragAndDropEnabled",
-
-      base::FeatureList::IsEnabled(features::kSidePanelDragAndDrop) &&
-          prefs->GetBoolean(bookmarks::prefs::kEditBookmarksEnabled));
+      prefs->GetBoolean(bookmarks::prefs::kEditBookmarksEnabled));
 
   ReadingListModel* const reading_list_model =
       ReadingListModelFactory::GetForBrowserContext(profile);
@@ -82,6 +95,17 @@ ReadingListUI::ReadingListUI(content::WebUI* web_ui)
   source->AddBoolean("readAnythingEnabled", features::IsReadAnythingEnabled());
   source->AddBoolean("unifiedSidePanel",
                      base::FeatureList::IsEnabled(features::kUnifiedSidePanel));
+
+  source->AddBoolean(
+      "showPowerBookmarks",
+      base::FeatureList::IsEnabled(features::kPowerBookmarksSidePanel));
+
+  bool shouldShowBookmark =
+      prefs->GetBoolean(prefs::kShouldShowSidePanelBookmarkTab);
+  source->AddBoolean("shouldShowBookmark", shouldShowBookmark);
+  if (shouldShowBookmark) {
+    prefs->SetBoolean(prefs::kShouldShowSidePanelBookmarkTab, false);
+  }
 
   content::URLDataSource::Add(
       profile, std::make_unique<FaviconSource>(
@@ -95,6 +119,8 @@ ReadingListUI::ReadingListUI(content::WebUI* web_ui)
       resource);
   content::WebUIDataSource::Add(web_ui->GetWebContents()->GetBrowserContext(),
                                 source);
+  content::URLDataSource::Add(profile,
+                              std::make_unique<SanitizedImageSource>(profile));
 }
 
 ReadingListUI::~ReadingListUI() = default;
@@ -140,6 +166,28 @@ void ReadingListUI::CreatePageHandler(
   DCHECK(page);
   read_anything_page_handler_ = std::make_unique<ReadAnythingPageHandler>(
       std::move(page), std::move(receiver));
+}
+
+void ReadingListUI::BindInterface(
+    mojo::PendingReceiver<shopping_list::mojom::ShoppingListHandlerFactory>
+        receiver) {
+  shopping_list_factory_receiver_.reset();
+  shopping_list_factory_receiver_.Bind(std::move(receiver));
+}
+
+void ReadingListUI::CreateShoppingListHandler(
+    mojo::PendingRemote<shopping_list::mojom::Page> page,
+    mojo::PendingReceiver<shopping_list::mojom::ShoppingListHandler> receiver) {
+  Profile* const profile = Profile::FromWebUI(web_ui());
+  bookmarks::BookmarkModel* bookmark_model =
+      BookmarkModelFactory::GetForBrowserContext(profile);
+  commerce::ShoppingService* shopping_service =
+      commerce::ShoppingServiceFactory::GetForBrowserContext(profile);
+  feature_engagement::Tracker* const tracker =
+      feature_engagement::TrackerFactory::GetForBrowserContext(profile);
+  shopping_list_handler_ = std::make_unique<commerce::ShoppingListHandler>(
+      std::move(page), std::move(receiver), bookmark_model, shopping_service,
+      profile->GetPrefs(), tracker, g_browser_process->GetApplicationLocale());
 }
 
 void ReadingListUI::SetActiveTabURL(const GURL& url) {

@@ -25,6 +25,7 @@
 
 #include "services/network/public/cpp/web_sandbox_flags.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink.h"
+#include "third_party/blink/public/mojom/frame/frame.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/binding_security.h"
 #include "third_party/blink/renderer/bindings/core/v8/js_event_handler_for_content_attribute.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
@@ -57,7 +58,7 @@ HTMLFrameElementBase::HTMLFrameElementBase(const QualifiedName& tag_name,
       margin_height_(-1) {}
 
 bool HTMLFrameElementBase::IsURLAllowed() const {
-  if (url_.IsEmpty())
+  if (url_.empty())
     return true;
 
   const KURL& complete_url = GetDocument().CompleteURL(url_);
@@ -83,7 +84,7 @@ void HTMLFrameElementBase::OpenURL(bool replace_current_item) {
   if (!IsURLAllowed())
     return;
 
-  if (url_.IsEmpty())
+  if (url_.empty())
     url_ = AtomicString(BlankURL().GetString());
 
   LocalFrame* parent_frame = GetDocument().GetFrame();

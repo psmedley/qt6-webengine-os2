@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@ TileDrawInfo::~TileDrawInfo() {
 void TileDrawInfo::AsValueInto(base::trace_event::TracedValue* state) const {
   state->SetBoolean("is_solid_color", mode_ == SOLID_COLOR_MODE);
   state->SetBoolean("is_transparent",
-                    mode_ == SOLID_COLOR_MODE && !SkColorGetA(solid_color_));
+                    mode_ == SOLID_COLOR_MODE && !solid_color_.isOpaque());
 }
 
 void TileDrawInfo::SetResource(ResourcePool::InUsePoolResource resource,

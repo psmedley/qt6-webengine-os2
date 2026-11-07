@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,11 +17,12 @@
 namespace policy {
 namespace {
 base::Value ToListValue(const std::vector<std::string>& values) {
-  base::Value::ListStorage storage(values.size());
-  std::transform(values.begin(), values.end(), storage.begin(),
-                 [](const auto& value) { return base::Value(value); });
+  base::Value::List storage;
+  storage.reserve(values.size());
+  for (const auto& value : values)
+    storage.Append(value);
 
-  return base::Value(storage);
+  return base::Value(std::move(storage));
 }
 
 base::Value ToDictValue(const std::string& json) {

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@
 #include "third_party/blink/renderer/core/input/event_handling_util.h"
 #include "third_party/blink/renderer/core/input/touch_action_util.h"
 #include "third_party/blink/renderer/core/layout/hit_test_canvas_result.h"
-#include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
@@ -222,7 +221,7 @@ Touch* TouchEventManager::CreateDomTouch(
 }
 
 WebCoalescedInputEvent TouchEventManager::GenerateWebCoalescedInputEvent() {
-  DCHECK(!touch_attribute_map_.IsEmpty());
+  DCHECK(!touch_attribute_map_.empty());
 
   auto event = std::make_unique<WebTouchEvent>();
 
@@ -499,14 +498,46 @@ TouchEventManager::DispatchTouchEventFromAccumulatdTouchPoints() {
   return event_result;
 }
 
-void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
+Node* TouchEventManager::GetTouchPointerNode(
     const WebPointerEvent& event,
     const event_handling_util::PointerEventTarget& pointer_event_target) {
-  // Touch events implicitly capture to the touched node, and don't change
-  // active/hover states themselves (Gesture events do). So we only need
-  // to hit-test on touchstart and when the target could be different than
-  // the corresponding pointer event target.
   DCHECK(event.GetType() == WebInputEvent::Type::kPointerDown);
+
+  Node* touch_pointer_node = pointer_event_target.target_element;
+
+  if (touch_sequence_document_ &&
+      (!touch_pointer_node ||
+       &touch_pointer_node->GetDocument() != touch_sequence_document_)) {
+    if (!touch_sequence_document_->GetFrame())
+      return nullptr;
+
+    HitTestLocation location(PhysicalOffset::FromPointFRound(
+        touch_sequence_document_->GetFrame()->View()->ConvertFromRootFrame(
+            event.PositionInWidget())));
+    HitTestRequest::HitTestRequestType hit_type = HitTestRequest::kTouchEvent |
+                                                  HitTestRequest::kReadOnly |
+                                                  HitTestRequest::kActive;
+    HitTestResult result = event_handling_util::HitTestResultInFrame(
+        touch_sequence_document_->GetFrame(), location, hit_type);
+    Node* node = result.InnerNode();
+    if (!node)
+      return nullptr;
+    // Touch events should not go to text nodes.
+    if (node->IsTextNode())
+      node = FlatTreeTraversal::Parent(*node);
+    touch_pointer_node = node;
+  }
+
+  return touch_pointer_node;
+}
+
+void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
+    const WebPointerEvent& event,
+    Node* touch_node,
+    TouchAction effective_touch_action) {
+  DCHECK(event.GetType() == WebInputEvent::Type::kPointerDown);
+  DCHECK(touch_node);
+
   // Ideally we'd DCHECK(!touch_attribute_map_.Contains(event.id))
   // since we shouldn't get a touchstart for a touch that's already
   // down. However EventSender allows this to be violated and there's
@@ -516,40 +547,6 @@ void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
   touch_attribute_map_.Set(event.id,
                            MakeGarbageCollected<TouchPointAttributes>(event));
 
-  Node* touch_node = pointer_event_target.target_element;
-
-  HitTestRequest::HitTestRequestType hit_type = HitTestRequest::kTouchEvent |
-                                                HitTestRequest::kReadOnly |
-                                                HitTestRequest::kActive;
-  HitTestResult result;
-  // For the touchPressed points hit-testing is done in
-  // PointerEventManager. If it was the second touch there is a
-  // capturing documents for the touch and |m_touchSequenceDocument|
-  // is not null. So if PointerEventManager should hit-test again
-  // against |m_touchSequenceDocument| if the target set by
-  // PointerEventManager was either null or not in
-  // |m_touchSequenceDocument|.
-  if (touch_sequence_document_ &&
-      (!touch_node || &touch_node->GetDocument() != touch_sequence_document_)) {
-    if (touch_sequence_document_->GetFrame()) {
-      HitTestLocation location(PhysicalOffset::FromPointFRound(
-          touch_sequence_document_->GetFrame()->View()->ConvertFromRootFrame(
-              event.PositionInWidget())));
-      result = event_handling_util::HitTestResultInFrame(
-          touch_sequence_document_->GetFrame(), location, hit_type);
-      Node* node = result.InnerNode();
-      if (!node)
-        return;
-      // Touch events should not go to text nodes.
-      if (node->IsTextNode())
-        node = FlatTreeTraversal::Parent(*node);
-      touch_node = node;
-    } else {
-      return;
-    }
-  }
-  if (!touch_node)
-    return;
   if (!touch_sequence_document_) {
     // Keep track of which document should receive all touch events
     // in the active sequence. This must be a single document to
@@ -560,20 +557,6 @@ void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
 
   TouchPointAttributes* attributes = touch_attribute_map_.at(event.id);
   attributes->target_ = touch_node;
-
-  TouchAction effective_touch_action =
-      touch_action_util::ComputeEffectiveTouchAction(*touch_node);
-
-  if ((effective_touch_action & TouchAction::kPanX) != TouchAction::kNone) {
-    // Effective touch action is computed during style before we know whether
-    // any ancestor supports horizontal scrolling, so we need to check it here.
-    if (LayoutBox::HasHorizontallyScrollableAncestor(
-            touch_node->GetLayoutObject())) {
-      // If the node or its parent is horizontal scrollable, we need to disable
-      // swipe to move cursor.
-      effective_touch_action |= TouchAction::kInternalPanXScrolls;
-    }
-  }
 
   should_enforce_vertical_scroll_ =
       touch_sequence_document_->IsVerticalScrollEnforced();
@@ -601,7 +584,7 @@ void TouchEventManager::HandleTouchPoint(
   DCHECK_LE(event.GetType(), WebInputEvent::Type::kPointerTypeLast);
   DCHECK_NE(event.GetType(), WebInputEvent::Type::kPointerCausedUaAction);
 
-  if (touch_attribute_map_.IsEmpty()) {
+  if (touch_attribute_map_.empty()) {
     // Ideally we'd DCHECK(!m_touchSequenceDocument) here since we should
     // have cleared the active document when we saw the last release. But we
     // have some tests that violate this, ClusterFuzz could trigger it, and
@@ -622,12 +605,6 @@ void TouchEventManager::HandleTouchPoint(
       attributes->event_ = event;
     }
     return;
-  }
-
-  // In touch event model only touch starts can set the target and after that
-  // the touch event always goes to that target.
-  if (event.GetType() == WebInputEvent::Type::kPointerDown) {
-    UpdateTouchAttributeMapsForPointerDown(event, pointer_event_target);
   }
 
   // We might not receive the down action for a touch point. In that case we
@@ -674,7 +651,7 @@ WebInputEventResult TouchEventManager::FlushEvents() {
   }
   touch_attribute_map_.RemoveAll(released_canceled_points);
 
-  if (touch_attribute_map_.IsEmpty()) {
+  if (touch_attribute_map_.empty()) {
     AllTouchesReleasedCleanup();
   }
 
@@ -696,7 +673,14 @@ void TouchEventManager::AllTouchesReleasedCleanup() {
 }
 
 bool TouchEventManager::IsAnyTouchActive() const {
-  return !touch_attribute_map_.IsEmpty();
+  return !touch_attribute_map_.empty();
+}
+
+Element* TouchEventManager::CurrentTouchDownElement() {
+  if (touch_attribute_map_.empty() || touch_attribute_map_.size() > 1)
+    return nullptr;
+  Node* touch_node = touch_attribute_map_.begin()->value->target_;
+  return touch_node ? DynamicTo<Element>(*touch_node) : nullptr;
 }
 
 WebInputEventResult TouchEventManager::EnsureVerticalScrollIsPossible(

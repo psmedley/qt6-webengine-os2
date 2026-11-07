@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,9 +27,9 @@
 #include "chrome/grit/assistant_optin_resources_map.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/oobe_conditional_resources.h"
-#include "chromeos/assistant/buildflags.h"
-#include "chromeos/services/assistant/public/cpp/assistant_prefs.h"
-#include "chromeos/services/assistant/public/cpp/features.h"
+#include "chromeos/ash/components/assistant/buildflags.h"
+#include "chromeos/ash/services/assistant/public/cpp/assistant_prefs.h"
+#include "chromeos/ash/services/assistant/public/cpp/features.h"
 #include "components/prefs/pref_service.h"
 #include "components/session_manager/core/session_manager.h"
 #include "content/public/browser/host_zoom_map.h"
@@ -77,8 +77,6 @@ AssistantOptInUI::AssistantOptInUI(content::WebUI* web_ui)
   auto assistant_handler = std::make_unique<AssistantOptInFlowScreenHandler>();
   assistant_handler_ptr_ = assistant_handler.get();
   web_ui->AddMessageHandler(std::move(assistant_handler));
-  assistant_handler_ptr_->set_on_initialized(base::BindOnce(
-      &AssistantOptInUI::Initialize, weak_factory_.GetWeakPtr()));
   assistant_handler_ptr_->SetupAssistantConnection();
 
   base::Value::Dict localized_strings;
@@ -90,10 +88,7 @@ AssistantOptInUI::AssistantOptInUI(content::WebUI* web_ui)
   source->UseStringsJs();
   source->AddResourcePaths(
       base::make_span(kAssistantOptinResources, kAssistantOptinResourcesSize));
-  source->AddResourcePath("assistant_optin.js", IDR_ASSISTANT_OPTIN_JS);
-  source->SetDefaultResource(IDR_ASSISTANT_OPTIN_HTML);
-  source->AddResourcePath("voice_match_animation.json",
-                          IDR_ASSISTANT_VOICE_MATCH_ANIMATION);
+  source->SetDefaultResource(IDR_ASSISTANT_OPTIN_ASSISTANT_OPTIN_HTML);
   source->OverrideContentSecurityPolicy(
       network::mojom::CSPDirectiveName::WorkerSrc, "worker-src blob: 'self';");
   source->DisableTrustedTypesCSP();
@@ -113,8 +108,6 @@ void AssistantOptInUI::OnDialogClosed() {
     assistant_handler_ptr_->OnDialogClosed();
   }
 }
-
-void AssistantOptInUI::Initialize() {}
 
 // AssistantOptInDialog
 

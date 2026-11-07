@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -117,7 +117,7 @@ class NET_EXPORT_PRIVATE SerialWorker {
 
   void RerunWork(std::unique_ptr<WorkItem> work_item);
 
-  State state_;
+  State state_ = State::kIdle;
 
   // Max retries and backoff entry to control timing.
   const int max_number_of_retries_;

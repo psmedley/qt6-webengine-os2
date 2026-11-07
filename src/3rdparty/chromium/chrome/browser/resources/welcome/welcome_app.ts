@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import 'chrome://resources/cr_elements/cr_toast/cr_toast.js';
 import 'chrome://resources/cr_elements/cr_view_manager/cr_view_manager.js';
-import 'chrome://resources/cr_elements/hidden_style_css.m.js';
+import 'chrome://resources/cr_elements/cr_hidden_style.css.js';
 import './google_apps/nux_google_apps.js';
 import './landing_view.js';
 import './ntp_background/nux_ntp_background.js';
@@ -14,6 +14,7 @@ import '../strings.m.js';
 
 import {CrViewManagerElement} from 'chrome://resources/cr_elements/cr_view_manager/cr_view_manager.js';
 import {assert} from 'chrome://resources/js/assert_ts.js';
+import {FocusOutlineManager} from 'chrome://resources/js/focus_outline_manager.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
@@ -26,17 +27,20 @@ import {WelcomeBrowserProxyImpl} from './welcome_browser_proxy.js';
 /**
  * The strings contained in the arrays should be valid DOM-element tag names.
  */
-type NuxOnboardingModules = {
-  'new-user': string[],
-  'returning-user': string[],
-};
+interface NuxOnboardingModules {
+  'new-user': string[];
+  'returning-user': string[];
+}
 
 /**
  * This list needs to be updated if new modules need to be supported in the
  * onboarding flow.
  */
 const MODULES_WHITELIST: Set<string> = new Set([
-  'nux-google-apps', 'nux-ntp-background', 'nux-set-as-default', 'signin-view'
+  'nux-google-apps',
+  'nux-ntp-background',
+  'nux-set-as-default',
+  'signin-view',
 ]);
 
 /**
@@ -81,7 +85,7 @@ export class WelcomeAppElement extends WelcomeAppElementBase {
     this.modules_ = {
       'new-user': loadTimeData.getString('newUserModules').split(','),
       'returning-user':
-          loadTimeData.getString('returningUserModules').split(',')
+          loadTimeData.getString('returningUserModules').split(','),
     };
   }
 
@@ -90,6 +94,10 @@ export class WelcomeAppElement extends WelcomeAppElementBase {
     this.setAttribute('role', 'main');
     this.addEventListener(
         'default-browser-change', () => this.onDefaultBrowserChange_());
+
+    // Initiate focus-outline-manager for this document so that action-link
+    // style can take advantage of it.
+    FocusOutlineManager.forDocument(document);
   }
 
   private onDefaultBrowserChange_() {
@@ -183,7 +191,7 @@ export class WelcomeAppElement extends WelcomeAppElementBase {
             if (MODULES_NEEDING_INDICATOR.has(elementTagName)) {
               element.set('indicatorModel', {
                 total: indicatorElementCount,
-                active: indicatorActiveCount++
+                active: indicatorActiveCount++,
               });
             }
           });

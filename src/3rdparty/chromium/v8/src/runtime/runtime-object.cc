@@ -2,29 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/ast/prettyprinter.h"
 #include "src/base/macros.h"
 #include "src/builtins/builtins.h"
 #include "src/common/globals.h"
 #include "src/common/message-template.h"
-#include "src/debug/debug.h"
 #include "src/execution/arguments-inl.h"
 #include "src/execution/frames.h"
 #include "src/execution/isolate-inl.h"
 #include "src/execution/messages.h"
 #include "src/handles/maybe-handles.h"
 #include "src/heap/heap-inl.h"  // For ToBoolean. TODO(jkummerow): Drop.
-#include "src/heap/memory-chunk.h"
-#include "src/init/bootstrapper.h"
-#include "src/logging/counters.h"
-#include "src/objects/hash-table-inl.h"
-#include "src/objects/js-array-inl.h"
 #include "src/objects/map-updater.h"
 #include "src/objects/property-descriptor-object.h"
 #include "src/objects/property-descriptor.h"
 #include "src/objects/property-details.h"
 #include "src/objects/swiss-name-dictionary-inl.h"
-#include "src/runtime/runtime-utils.h"
 #include "src/runtime/runtime.h"
 
 namespace v8 {
@@ -89,190 +81,10 @@ MaybeHandle<Object> Runtime::HasProperty(Isolate* isolate,
                           : ReadOnlyRoots(isolate).false_value_handle();
 }
 
-namespace {
-
-// This function sets the sentinel value in a deleted field. Thes sentinel has
-// to look like a proper standalone object because the slack tracking may
-// complete at any time. For this reason we use the filler map word.
-// If V8_MAP_PACKING is enabled, then the filler map word is a packed filler
-// map. Otherwise, the filler map word is the same as the filler map.
-inline void ClearField(Isolate* isolate, JSObject object, FieldIndex index) {
-  if (index.is_inobject()) {
-    MapWord filler_map_word =
-        ReadOnlyRoots(isolate).one_pointer_filler_map_word();
-#ifndef V8_MAP_PACKING
-    DCHECK_EQ(filler_map_word.ToMap(),
-              ReadOnlyRoots(isolate).one_pointer_filler_map());
-#endif
-    int offset = index.offset();
-    TaggedField<MapWord>::Release_Store(object, offset, filler_map_word);
-  } else {
-    object.property_array().set(
-        index.outobject_array_index(),
-        ReadOnlyRoots(isolate).one_pointer_filler_map());
-  }
-}
-
-void GeneralizeAllTransitionsToFieldAsMutable(Isolate* isolate, Handle<Map> map,
-                                              Handle<Name> name) {
-  InternalIndex descriptor(map->NumberOfOwnDescriptors());
-
-  Handle<Map> target_maps[kPropertyAttributesCombinationsCount];
-  int target_maps_count = 0;
-
-  // Collect all outgoing field transitions.
-  {
-    DisallowGarbageCollection no_gc;
-    TransitionsAccessor transitions(isolate, *map);
-    transitions.ForEachTransitionTo(
-        *name,
-        [&](Map target) {
-          DCHECK_EQ(descriptor, target.LastAdded());
-          DCHECK_EQ(*name, target.GetLastDescriptorName(isolate));
-          PropertyDetails details = target.GetLastDescriptorDetails(isolate);
-          // Currently, we track constness only for fields.
-          if (details.kind() == PropertyKind::kData &&
-              details.constness() == PropertyConstness::kConst) {
-            target_maps[target_maps_count++] = handle(target, isolate);
-          }
-          DCHECK_IMPLIES(details.kind() == PropertyKind::kAccessor,
-                         details.constness() == PropertyConstness::kConst);
-        },
-        &no_gc);
-    CHECK_LE(target_maps_count, kPropertyAttributesCombinationsCount);
-  }
-
-  for (int i = 0; i < target_maps_count; i++) {
-    Handle<Map> target = target_maps[i];
-    PropertyDetails details =
-        target->instance_descriptors(isolate).GetDetails(descriptor);
-    Handle<FieldType> field_type(
-        target->instance_descriptors(isolate).GetFieldType(descriptor),
-        isolate);
-    MapUpdater::GeneralizeField(isolate, target, descriptor,
-                                PropertyConstness::kMutable,
-                                details.representation(), field_type);
-    DCHECK_EQ(PropertyConstness::kMutable, target->instance_descriptors(isolate)
-                                               .GetDetails(descriptor)
-                                               .constness());
-  }
-}
-
-bool DeleteObjectPropertyFast(Isolate* isolate, Handle<JSReceiver> receiver,
-                              Handle<Object> raw_key) {
-  // This implements a special case for fast property deletion: when the
-  // last property in an object is deleted, then instead of normalizing
-  // the properties, we can undo the last map transition, with a few
-  // prerequisites:
-  // (1) The receiver must be a regular object and the key a unique name.
-  Handle<Map> receiver_map(receiver->map(), isolate);
-  if (receiver_map->IsSpecialReceiverMap()) return false;
-  DCHECK(receiver_map->IsJSObjectMap());
-
-  if (!raw_key->IsUniqueName()) return false;
-  Handle<Name> key = Handle<Name>::cast(raw_key);
-  // (2) The property to be deleted must be the last property.
-  int nof = receiver_map->NumberOfOwnDescriptors();
-  if (nof == 0) return false;
-  InternalIndex descriptor(nof - 1);
-  Handle<DescriptorArray> descriptors(
-      receiver_map->instance_descriptors(isolate), isolate);
-  if (descriptors->GetKey(descriptor) != *key) return false;
-  // (3) The property to be deleted must be deletable.
-  PropertyDetails details = descriptors->GetDetails(descriptor);
-  if (!details.IsConfigurable()) return false;
-  // (4) The map must have a back pointer.
-  Handle<Object> backpointer(receiver_map->GetBackPointer(), isolate);
-  if (!backpointer->IsMap()) return false;
-  Handle<Map> parent_map = Handle<Map>::cast(backpointer);
-  // (5) The last transition must have been caused by adding a property
-  // (and not any kind of special transition).
-  if (parent_map->NumberOfOwnDescriptors() != nof - 1) return false;
-
-  // Preconditions successful. No more bailouts after this point.
-
-  // Zap the property to avoid keeping objects alive. Zapping is not necessary
-  // for properties stored in the descriptor array.
-  if (details.location() == PropertyLocation::kField) {
-    DisallowGarbageCollection no_gc;
-
-    // Invalidate slots manually later in case we delete an in-object tagged
-    // property. In this case we might later store an untagged value in the
-    // recorded slot.
-    isolate->heap()->NotifyObjectLayoutChange(*receiver, no_gc,
-                                              InvalidateRecordedSlots::kNo);
-    FieldIndex index =
-        FieldIndex::ForPropertyIndex(*receiver_map, details.field_index());
-    // Special case deleting the last out-of object property.
-    if (!index.is_inobject() && index.outobject_array_index() == 0) {
-      DCHECK(!parent_map->HasOutOfObjectProperties());
-      // Clear out the properties backing store.
-      receiver->SetProperties(ReadOnlyRoots(isolate).empty_fixed_array());
-    } else {
-      ClearField(isolate, JSObject::cast(*receiver), index);
-      // We must clear any recorded slot for the deleted property, because
-      // subsequent object modifications might put a raw double there.
-      // Slot clearing is the reason why this entire function cannot currently
-      // be implemented in the DeleteProperty stub.
-      if (index.is_inobject()) {
-        // We need to clear the recorded slot in this case because in-object
-        // slack tracking might not be finished. This ensures that we don't
-        // have recorded slots in free space.
-        isolate->heap()->ClearRecordedSlot(*receiver,
-                                           receiver->RawField(index.offset()));
-        if (!FLAG_enable_third_party_heap) {
-          MemoryChunk* chunk = MemoryChunk::FromHeapObject(*receiver);
-          chunk->InvalidateRecordedSlots(*receiver);
-        }
-      }
-    }
-  }
-  // If the {receiver_map} was marked stable before, then there could be
-  // optimized code that depends on the assumption that no object that
-  // reached this {receiver_map} transitions away from it without triggering
-  // the "deoptimize dependent code" mechanism.
-  receiver_map->NotifyLeafMapLayoutChange(isolate);
-  // Finally, perform the map rollback.
-  receiver->set_map(*parent_map, kReleaseStore);
-#if VERIFY_HEAP
-  receiver->HeapObjectVerify(isolate);
-  receiver->property_array().PropertyArrayVerify(isolate);
-#endif
-
-  // If the {descriptor} was "const" so far, we need to update the
-  // {receiver_map} here, otherwise we could get the constants wrong, i.e.
-  //
-  //   o.x = 1;
-  //   [change o.x's attributes or reconfigure property kind]
-  //   delete o.x;
-  //   o.x = 2;
-  //
-  // could trick V8 into thinking that `o.x` is still 1 even after the second
-  // assignment.
-
-  // Step 1: Migrate object to an up-to-date shape.
-  if (parent_map->is_deprecated()) {
-    JSObject::MigrateInstance(isolate, Handle<JSObject>::cast(receiver));
-    parent_map = handle(receiver->map(), isolate);
-  }
-
-  // Step 2: Mark outgoing transitions from the up-to-date version of the
-  // parent_map to same property name of any kind or attributes as mutable.
-  // Also migrate object to the up-to-date map to make the object shapes
-  // converge sooner.
-  GeneralizeAllTransitionsToFieldAsMutable(isolate, parent_map, key);
-
-  return true;
-}
-
-}  // namespace
-
 Maybe<bool> Runtime::DeleteObjectProperty(Isolate* isolate,
                                           Handle<JSReceiver> receiver,
                                           Handle<Object> key,
                                           LanguageMode language_mode) {
-  if (DeleteObjectPropertyFast(isolate, receiver, key)) return Just(true);
-
   bool success = false;
   PropertyKey lookup_key(isolate, key, &success);
   if (!success) return Nothing<bool>();
@@ -295,7 +107,7 @@ RUNTIME_FUNCTION(Runtime_ObjectKeys) {
   Handle<FixedArray> keys;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, keys,
-      KeyAccumulator::GetKeys(receiver, KeyCollectionMode::kOwnOnly,
+      KeyAccumulator::GetKeys(isolate, receiver, KeyCollectionMode::kOwnOnly,
                               ENUMERABLE_STRINGS,
                               GetKeysConversion::kConvertToString));
   return *keys;
@@ -317,7 +129,7 @@ RUNTIME_FUNCTION(Runtime_ObjectGetOwnPropertyNames) {
   Handle<FixedArray> keys;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, keys,
-      KeyAccumulator::GetKeys(receiver, KeyCollectionMode::kOwnOnly,
+      KeyAccumulator::GetKeys(isolate, receiver, KeyCollectionMode::kOwnOnly,
                               SKIP_SYMBOLS,
                               GetKeysConversion::kConvertToString));
   return *keys;
@@ -339,13 +151,13 @@ RUNTIME_FUNCTION(Runtime_ObjectGetOwnPropertyNamesTryFast) {
   if (nod != 0 && map->NumberOfEnumerableProperties() == nod) {
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
         isolate, keys,
-        KeyAccumulator::GetKeys(receiver, KeyCollectionMode::kOwnOnly,
+        KeyAccumulator::GetKeys(isolate, receiver, KeyCollectionMode::kOwnOnly,
                                 ENUMERABLE_STRINGS,
                                 GetKeysConversion::kConvertToString));
   } else {
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
         isolate, keys,
-        KeyAccumulator::GetKeys(receiver, KeyCollectionMode::kOwnOnly,
+        KeyAccumulator::GetKeys(isolate, receiver, KeyCollectionMode::kOwnOnly,
                                 SKIP_SYMBOLS,
                                 GetKeysConversion::kConvertToString));
   }
@@ -533,6 +345,7 @@ RUNTIME_FUNCTION(Runtime_ObjectCreate) {
     THROW_NEW_ERROR_RETURN_FAILURE(
         isolate, NewTypeError(MessageTemplate::kProtoObjectOrNull, prototype));
   }
+
   // 2. Let obj be ObjectCreate(O).
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, obj, JSObject::ObjectCreate(isolate, prototype));
@@ -575,9 +388,12 @@ MaybeHandle<Object> Runtime::SetObjectProperty(
   PropertyKey lookup_key(isolate, key, &success);
   if (!success) return MaybeHandle<Object>();
   LookupIterator it(isolate, object, lookup_key);
-  if (key->IsSymbol() && Symbol::cast(*key).is_private_name() &&
-      !JSReceiver::CheckPrivateNameStore(&it, false)) {
-    return MaybeHandle<Object>();
+  if (key->IsSymbol() && Symbol::cast(*key).is_private_name()) {
+    Maybe<bool> can_store = JSReceiver::CheckPrivateNameStore(&it, false);
+    MAYBE_RETURN_NULL(can_store);
+    if (!can_store.FromJust()) {
+      return isolate->factory()->undefined_value();
+    }
   }
 
   MAYBE_RETURN_NULL(
@@ -605,10 +421,15 @@ MaybeHandle<Object> Runtime::DefineObjectOwnProperty(Isolate* isolate,
   LookupIterator it(isolate, object, lookup_key, LookupIterator::OWN);
 
   if (key->IsSymbol() && Symbol::cast(*key).is_private_name()) {
-    if (!JSReceiver::CheckPrivateNameStore(&it, true)) {
-      return MaybeHandle<Object>();
+    Maybe<bool> can_store = JSReceiver::CheckPrivateNameStore(&it, true);
+    MAYBE_RETURN_NULL(can_store);
+    // If the state is ACCESS_CHECK, the faliled access check callback
+    // is configured but it did't throw.
+    DCHECK_IMPLIES(it.IsFound(), it.state() == LookupIterator::ACCESS_CHECK &&
+                                     !can_store.FromJust());
+    if (!can_store.FromJust()) {
+      return isolate->factory()->undefined_value();
     }
-    DCHECK(!it.IsFound());
     MAYBE_RETURN_NULL(
         JSReceiver::AddPrivateField(&it, value, Nothing<ShouldThrow>()));
   } else {
@@ -653,8 +474,8 @@ RUNTIME_FUNCTION(Runtime_ObjectValues) {
   Handle<FixedArray> values;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, values,
-      JSReceiver::GetOwnValues(receiver, PropertyFilter::ENUMERABLE_STRINGS,
-                               true));
+      JSReceiver::GetOwnValues(isolate, receiver,
+                               PropertyFilter::ENUMERABLE_STRINGS, true));
   return *isolate->factory()->NewJSArrayWithElements(values);
 }
 
@@ -667,8 +488,8 @@ RUNTIME_FUNCTION(Runtime_ObjectValuesSkipFastPath) {
   Handle<FixedArray> value;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, value,
-      JSReceiver::GetOwnValues(receiver, PropertyFilter::ENUMERABLE_STRINGS,
-                               false));
+      JSReceiver::GetOwnValues(isolate, receiver,
+                               PropertyFilter::ENUMERABLE_STRINGS, false));
   return *isolate->factory()->NewJSArrayWithElements(value);
 }
 
@@ -681,8 +502,8 @@ RUNTIME_FUNCTION(Runtime_ObjectEntries) {
   Handle<FixedArray> entries;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, entries,
-      JSReceiver::GetOwnEntries(receiver, PropertyFilter::ENUMERABLE_STRINGS,
-                                true));
+      JSReceiver::GetOwnEntries(isolate, receiver,
+                                PropertyFilter::ENUMERABLE_STRINGS, true));
   return *isolate->factory()->NewJSArrayWithElements(entries);
 }
 
@@ -695,8 +516,8 @@ RUNTIME_FUNCTION(Runtime_ObjectEntriesSkipFastPath) {
   Handle<FixedArray> entries;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, entries,
-      JSReceiver::GetOwnEntries(receiver, PropertyFilter::ENUMERABLE_STRINGS,
-                                false));
+      JSReceiver::GetOwnEntries(isolate, receiver,
+                                PropertyFilter::ENUMERABLE_STRINGS, false));
   return *isolate->factory()->NewJSArrayWithElements(entries);
 }
 
@@ -1020,8 +841,8 @@ RUNTIME_FUNCTION(Runtime_GetOwnPropertyKeys) {
   Handle<FixedArray> keys;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, keys,
-      KeyAccumulator::GetKeys(object, KeyCollectionMode::kOwnOnly, filter,
-                              GetKeysConversion::kConvertToString));
+      KeyAccumulator::GetKeys(isolate, object, KeyCollectionMode::kOwnOnly,
+                              filter, GetKeysConversion::kConvertToString));
 
   return *isolate->factory()->NewJSArrayWithElements(keys);
 }
@@ -1060,7 +881,8 @@ RUNTIME_FUNCTION(Runtime_GetDerivedMap) {
   Handle<JSReceiver> new_target = args.at<JSReceiver>(1);
   Handle<Object> rab_gsab = args.at(2);
   if (rab_gsab->IsTrue()) {
-    return *JSFunction::GetDerivedRabGsabMap(isolate, target, new_target);
+    RETURN_RESULT_OR_FAILURE(
+        isolate, JSFunction::GetDerivedRabGsabMap(isolate, target, new_target));
   } else {
     RETURN_RESULT_OR_FAILURE(
         isolate, JSFunction::GetDerivedMap(isolate, target, new_target));
@@ -1115,7 +937,9 @@ RUNTIME_FUNCTION(Runtime_DefineAccessorPropertyUnchecked) {
   auto attrs = PropertyAttributesFromInt(args.smi_value_at(4));
 
   RETURN_FAILURE_ON_EXCEPTION(
-      isolate, JSObject::DefineAccessor(obj, name, getter, setter, attrs));
+      isolate,
+      JSObject::DefineOwnAccessorIgnoreAttributes(
+          obj, name, getter, setter, attrs));
   return ReadOnlyRoots(isolate).undefined_value();
 }
 
@@ -1181,35 +1005,6 @@ RUNTIME_FUNCTION(Runtime_DefineKeyedOwnPropertyInLiteral) {
   return *value;
 }
 
-RUNTIME_FUNCTION(Runtime_CollectTypeProfile) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(3, args.length());
-  int position = args.smi_value_at(0);
-  Handle<Object> value = args.at(1);
-  Handle<HeapObject> maybe_vector = args.at<HeapObject>(2);
-
-  if (maybe_vector->IsUndefined()) {
-    return ReadOnlyRoots(isolate).undefined_value();
-  }
-  Handle<FeedbackVector> vector = args.at<FeedbackVector>(2);
-
-  Handle<String> type = Object::TypeOf(isolate, value);
-  if (value->IsJSReceiver()) {
-    Handle<JSReceiver> object = Handle<JSReceiver>::cast(value);
-    type = JSReceiver::GetConstructorName(isolate, object);
-  } else if (value->IsNull(isolate)) {
-    // typeof(null) is object. But it's more user-friendly to annotate
-    // null as type "null".
-    type = Handle<String>(ReadOnlyRoots(isolate).null_string(), isolate);
-  }
-
-  DCHECK(vector->metadata().HasTypeProfileSlot());
-  FeedbackNexus nexus(vector, vector->GetTypeProfileSlot());
-  nexus.Collect(type, position);
-
-  return ReadOnlyRoots(isolate).undefined_value();
-}
-
 RUNTIME_FUNCTION(Runtime_HasFastPackedElements) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(1, args.length());
@@ -1250,8 +1045,9 @@ RUNTIME_FUNCTION(Runtime_DefineGetterPropertyUnchecked) {
 
   RETURN_FAILURE_ON_EXCEPTION(
       isolate,
-      JSObject::DefineAccessor(object, name, getter,
-                               isolate->factory()->null_value(), attrs));
+      JSObject::DefineOwnAccessorIgnoreAttributes(
+          object, name, getter,
+          isolate->factory()->null_value(), attrs));
   return ReadOnlyRoots(isolate).undefined_value();
 }
 
@@ -1395,8 +1191,8 @@ RUNTIME_FUNCTION(Runtime_DefineSetterPropertyUnchecked) {
 
   RETURN_FAILURE_ON_EXCEPTION(
       isolate,
-      JSObject::DefineAccessor(object, name, isolate->factory()->null_value(),
-                               setter, attrs));
+      JSObject::DefineOwnAccessorIgnoreAttributes(
+          object, name, isolate->factory()->null_value(), setter, attrs));
   return ReadOnlyRoots(isolate).undefined_value();
 }
 

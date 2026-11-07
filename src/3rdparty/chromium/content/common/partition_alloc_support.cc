@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,12 @@
 
 #include <string>
 
-#include "base/allocator/allocator_shim.h"
-#include "base/allocator/allocator_shim_default_dispatch_to_partition_alloc.h"
 #include "base/allocator/buildflags.h"
 #include "base/allocator/partition_alloc_features.h"
 #include "base/allocator/partition_alloc_support.h"
 #include "base/allocator/partition_allocator/partition_alloc_config.h"
+#include "base/allocator/partition_allocator/shim/allocator_shim.h"
+#include "base/allocator/partition_allocator/shim/allocator_shim_default_dispatch_to_partition_alloc.h"
 #include "base/allocator/partition_allocator/starscan/pcscan.h"
 #include "base/allocator/partition_allocator/starscan/pcscan_scheduling.h"
 #include "base/allocator/partition_allocator/starscan/stack/stack.h"
@@ -21,9 +21,11 @@
 #include "base/feature_list.h"
 #include "base/location.h"
 #include "base/memory/nonscannable_memory.h"
+#include "base/memory/raw_ptr_asan_service.h"
 #include "base/no_destructor.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 
 #if BUILDFLAG(IS_ANDROID)
@@ -56,17 +58,17 @@ void SetProcessNameForPCScan(const std::string& process_type) {
   }();
 
   if (name) {
-    base::internal::PCScan::SetProcessName(name);
+    partition_alloc::internal::PCScan::SetProcessName(name);
   }
 }
 
 bool EnablePCScanForMallocPartitionsIfNeeded() {
 #if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && defined(PA_ALLOW_PCSCAN)
-  using Config = base::internal::PCScan::InitConfig;
+  using Config = partition_alloc::internal::PCScan::InitConfig;
   DCHECK(base::FeatureList::GetInstance());
   if (base::FeatureList::IsEnabled(base::features::kPartitionAllocPCScan)) {
-    base::allocator::EnablePCScan({Config::WantedWriteProtectionMode::kEnabled,
-                                   Config::SafepointMode::kEnabled});
+    allocator_shim::EnablePCScan({Config::WantedWriteProtectionMode::kEnabled,
+                                  Config::SafepointMode::kEnabled});
     base::allocator::RegisterPCScanStatsReporter();
     return true;
   }
@@ -76,7 +78,7 @@ bool EnablePCScanForMallocPartitionsIfNeeded() {
 
 bool EnablePCScanForMallocPartitionsInBrowserProcessIfNeeded() {
 #if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && defined(PA_ALLOW_PCSCAN)
-  using Config = base::internal::PCScan::InitConfig;
+  using Config = partition_alloc::internal::PCScan::InitConfig;
   DCHECK(base::FeatureList::GetInstance());
   if (base::FeatureList::IsEnabled(
           base::features::kPartitionAllocPCScanBrowserOnly)) {
@@ -88,7 +90,7 @@ bool EnablePCScanForMallocPartitionsInBrowserProcessIfNeeded() {
     CHECK_EQ(Config::WantedWriteProtectionMode::kDisabled, wp_mode)
         << "DCScan is currently only supported on Linux based systems";
 #endif
-    base::allocator::EnablePCScan({wp_mode, Config::SafepointMode::kEnabled});
+    allocator_shim::EnablePCScan({wp_mode, Config::SafepointMode::kEnabled});
     base::allocator::RegisterPCScanStatsReporter();
     return true;
   }
@@ -98,7 +100,7 @@ bool EnablePCScanForMallocPartitionsInBrowserProcessIfNeeded() {
 
 bool EnablePCScanForMallocPartitionsInRendererProcessIfNeeded() {
 #if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && defined(PA_ALLOW_PCSCAN)
-  using Config = base::internal::PCScan::InitConfig;
+  using Config = partition_alloc::internal::PCScan::InitConfig;
   DCHECK(base::FeatureList::GetInstance());
   if (base::FeatureList::IsEnabled(
           base::features::kPartitionAllocPCScanRendererOnly)) {
@@ -110,7 +112,7 @@ bool EnablePCScanForMallocPartitionsInRendererProcessIfNeeded() {
     CHECK_EQ(Config::WantedWriteProtectionMode::kDisabled, wp_mode)
         << "DCScan is currently only supported on Linux based systems";
 #endif
-    base::allocator::EnablePCScan({wp_mode, Config::SafepointMode::kDisabled});
+    allocator_shim::EnablePCScan({wp_mode, Config::SafepointMode::kDisabled});
     base::allocator::RegisterPCScanStatsReporter();
     return true;
   }
@@ -149,7 +151,7 @@ void PartitionAllocSupport::ReconfigureEarlyish(
   // These initializations are only relevant for PartitionAlloc-Everywhere
   // builds.
 #if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-  base::allocator::EnablePartitionAllocMemoryReclaimer();
+  allocator_shim::EnablePartitionAllocMemoryReclaimer();
 #endif  // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
 }
 
@@ -183,6 +185,8 @@ void PartitionAllocSupport::ReconfigureAfterZygoteFork(
 
 void PartitionAllocSupport::ReconfigureAfterFeatureListInit(
     const std::string& process_type) {
+  base::allocator::InstallDanglingRawPtrChecks();
+  base::allocator::InstallUnretainedDanglingRawPtrChecks();
   {
     base::AutoLock scoped_lock(lock_);
     // Avoid initializing more than once.
@@ -216,11 +220,14 @@ void PartitionAllocSupport::ReconfigureAfterFeatureListInit(
   CHECK(base::FeatureList::GetInstance());
 
   bool enable_brp = false;
+  [[maybe_unused]] bool enable_brp_zapping = false;
   [[maybe_unused]] bool split_main_partition = false;
   [[maybe_unused]] bool use_dedicated_aligned_partition = false;
-#if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-#if BUILDFLAG(USE_BACKUP_REF_PTR)
-  bool process_affected_by_brp_flag = false;
+  [[maybe_unused]] bool process_affected_by_brp_flag = false;
+
+#if (BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && \
+     BUILDFLAG(USE_BACKUP_REF_PTR)) ||           \
+    BUILDFLAG(USE_ASAN_BACKUP_REF_PTR)
   if (base::FeatureList::IsEnabled(
           base::features::kPartitionAllocBackupRefPtr)) {
     // No specified process type means this is the Browser process.
@@ -242,7 +249,26 @@ void PartitionAllocSupport::ReconfigureAfterFeatureListInit(
         break;
     }
   }
+#endif
 
+#if BUILDFLAG(USE_ASAN_BACKUP_REF_PTR)
+  if (process_affected_by_brp_flag) {
+    base::RawPtrAsanService::GetInstance().Configure(
+        base::EnableDereferenceCheck(
+            base::features::kBackupRefPtrAsanEnableDereferenceCheckParam.Get()),
+        base::EnableExtractionCheck(
+            base::features::kBackupRefPtrAsanEnableExtractionCheckParam.Get()),
+        base::EnableInstantiationCheck(
+            base::features::kBackupRefPtrAsanEnableInstantiationCheckParam
+                .Get()));
+  } else {
+    base::RawPtrAsanService::GetInstance().Configure(
+        base::EnableDereferenceCheck(false), base::EnableExtractionCheck(false),
+        base::EnableInstantiationCheck(false));
+  }
+#endif  // BUILDFLAG(USE_ASAN_BACKUP_REF_PTR)
+
+#if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && BUILDFLAG(USE_BACKUP_REF_PTR)
   if (process_affected_by_brp_flag) {
     switch (base::features::kBackupRefPtrModeParam.Get()) {
       case base::features::BackupRefPtrMode::kDisabled:
@@ -250,6 +276,9 @@ void PartitionAllocSupport::ReconfigureAfterFeatureListInit(
         break;
 
       case base::features::BackupRefPtrMode::kEnabled:
+        enable_brp_zapping = true;
+        ABSL_FALLTHROUGH_INTENDED;
+      case base::features::BackupRefPtrMode::kEnabledWithoutZapping:
         enable_brp = true;
         split_main_partition = true;
 #if !BUILDFLAG(PUT_REF_COUNT_IN_PREVIOUS_SLOT)
@@ -275,17 +304,19 @@ void PartitionAllocSupport::ReconfigureAfterFeatureListInit(
         break;
     }
   }
-#endif  // BUILDFLAG(USE_BACKUP_REF_PTR)
-#endif  // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
+#endif  // BUILDFLAG(USE_BACKUP_REF_PTR) &&
+        // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
 
 #if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-  base::allocator::ConfigurePartitions(
-      base::allocator::EnableBrp(enable_brp),
-      base::allocator::SplitMainPartition(split_main_partition),
-      base::allocator::UseDedicatedAlignedPartition(
+  allocator_shim::ConfigurePartitions(
+      allocator_shim::EnableBrp(enable_brp),
+      allocator_shim::EnableBrpZapping(enable_brp_zapping),
+      allocator_shim::SplitMainPartition(split_main_partition),
+      allocator_shim::UseDedicatedAlignedPartition(
           use_dedicated_aligned_partition),
-      base::allocator::AlternateBucketDistribution(base::FeatureList::IsEnabled(
-          base::features::kPartitionAllocUseAlternateDistribution)));
+      allocator_shim::AlternateBucketDistribution(
+          base::features::kPartitionAllocAlternateBucketDistributionParam
+              .Get()));
 #endif  // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
 
   // If BRP is not enabled, check if any of PCScan flags is enabled.
@@ -305,20 +336,20 @@ void PartitionAllocSupport::ReconfigureAfterFeatureListInit(
       if (base::FeatureList::IsEnabled(
               base::features::kPartitionAllocPCScanStackScanning)) {
 #if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-        base::internal::PCScan::EnableStackScanning();
+        partition_alloc::internal::PCScan::EnableStackScanning();
         // Notify PCScan about the main thread.
-        base::internal::PCScan::NotifyThreadCreated(
-            base::internal::GetStackTop());
+        partition_alloc::internal::PCScan::NotifyThreadCreated(
+            partition_alloc::internal::GetStackTop());
 #endif
       }
       if (base::FeatureList::IsEnabled(
               base::features::kPartitionAllocPCScanImmediateFreeing)) {
-        base::internal::PCScan::EnableImmediateFreeing();
+        partition_alloc::internal::PCScan::EnableImmediateFreeing();
       }
       if (base::FeatureList::IsEnabled(
               base::features::kPartitionAllocPCScanEagerClearing)) {
-        base::internal::PCScan::SetClearType(
-            base::internal::PCScan::ClearType::kEager);
+        partition_alloc::internal::PCScan::SetClearType(
+            partition_alloc::internal::PCScan::ClearType::kEager);
       }
       SetProcessNameForPCScan(process_type);
     }
@@ -334,15 +365,15 @@ void PartitionAllocSupport::ReconfigureAfterFeatureListInit(
         .root()
         ->EnableThreadCacheIfSupported();
   } else {
-    base::internal::PartitionAllocMalloc::Allocator()
+    allocator_shim::internal::PartitionAllocMalloc::Allocator()
         ->EnableThreadCacheIfSupported();
   }
 
   if (base::FeatureList::IsEnabled(
           base::features::kPartitionAllocLargeEmptySlotSpanRing)) {
-    base::internal::PartitionAllocMalloc::Allocator()
+    allocator_shim::internal::PartitionAllocMalloc::Allocator()
         ->EnableLargeEmptySlotSpanRing();
-    base::internal::PartitionAllocMalloc::AlignedAllocator()
+    allocator_shim::internal::PartitionAllocMalloc::AlignedAllocator()
         ->EnableLargeEmptySlotSpanRing();
   }
 #endif  // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
@@ -392,7 +423,7 @@ void PartitionAllocSupport::ReconfigureAfterTaskRunnerInit(
 #if BUILDFLAG(IS_ANDROID) && defined(ARCH_CPU_32_BITS)
     // Devices almost always report less physical memory than what they actually
     // have, so anything above 3GiB will catch 4GiB and above.
-    if (base::SysInfo::AmountOfPhysicalMemory() <= int64_t{3500} * 1024 * 1024)
+    if (base::SysInfo::AmountOfPhysicalMemoryMB() <= 3500)
       largest_cached_size_ =
           ::partition_alloc::ThreadCacheLimits::kDefaultSizeThreshold;
 #endif  // BUILDFLAG(IS_ANDROID) && !defined(ARCH_CPU_64_BITS)
@@ -406,20 +437,27 @@ void PartitionAllocSupport::ReconfigureAfterTaskRunnerInit(
   if (base::FeatureList::IsEnabled(
           base::features::kPartitionAllocPCScanMUAwareScheduler)) {
     // Assign PCScan a task-based scheduling backend.
-    static base::NoDestructor<base::internal::MUAwareTaskBasedBackend>
+    static base::NoDestructor<
+        partition_alloc::internal::MUAwareTaskBasedBackend>
         mu_aware_task_based_backend{
-            base::internal::PCScan::scheduler(),
-            &base::internal::PCScan::PerformDelayedScan};
-    base::internal::PCScan::scheduler().SetNewSchedulingBackend(
+            partition_alloc::internal::PCScan::scheduler(),
+            &partition_alloc::internal::PCScan::PerformDelayedScan};
+    partition_alloc::internal::PCScan::scheduler().SetNewSchedulingBackend(
         *mu_aware_task_based_backend.get());
   }
 
 #if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
   base::allocator::StartMemoryReclaimer(base::ThreadTaskRunnerHandle::Get());
 #endif
+
+  if (base::FeatureList::IsEnabled(
+          base::features::kPartitionAllocSortActiveSlotSpans)) {
+    partition_alloc::PartitionRoot<
+        partition_alloc::internal::ThreadSafe>::EnableSortActiveSlotSpans();
+  }
 }
 
-void PartitionAllocSupport::OnForegrounded() {
+void PartitionAllocSupport::OnForegrounded(bool has_main_frame) {
 #if defined(PA_THREAD_CACHE_SUPPORTED) && \
     BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
   {
@@ -428,7 +466,10 @@ void PartitionAllocSupport::OnForegrounded() {
       return;
   }
 
-  ::partition_alloc::ThreadCache::SetLargestCachedSize(largest_cached_size_);
+  if (!base::FeatureList::IsEnabled(
+          features::kLowerPAMemoryLimitForNonMainRenderers) ||
+      has_main_frame)
+    ::partition_alloc::ThreadCache::SetLargestCachedSize(largest_cached_size_);
 #endif  // defined(PA_THREAD_CACHE_SUPPORTED) &&
         // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
 }

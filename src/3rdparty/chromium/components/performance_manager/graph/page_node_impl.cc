@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "components/performance_manager/graph/graph_impl.h"
 #include "components/performance_manager/graph/graph_impl_operations.h"
 #include "components/performance_manager/graph/process_node_impl.h"
+#include "components/performance_manager/public/graph/graph_operations.h"
 
 namespace performance_manager {
 
@@ -112,6 +113,11 @@ void PageNodeImpl::RemoveFrame(base::PassKey<FrameNodeImpl>,
 void PageNodeImpl::SetLoadingState(LoadingState loading_state) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   loading_state_.SetAndMaybeNotify(this, loading_state);
+}
+
+void PageNodeImpl::SetType(PageType type) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  type_.SetAndMaybeNotify(this, type);
 }
 
 void PageNodeImpl::SetIsVisible(bool is_visible) {
@@ -214,6 +220,11 @@ PageNodeImpl::EmbeddingType PageNodeImpl::embedding_type() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(embedder_frame_node_ || embedding_type_ == EmbeddingType::kInvalid);
   return embedding_type_;
+}
+
+PageType PageNodeImpl::type() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return type_.value();
 }
 
 bool PageNodeImpl::is_visible() const {
@@ -453,6 +464,11 @@ PageNodeImpl::EmbeddingType PageNodeImpl::GetEmbeddingType() const {
   return embedding_type();
 }
 
+PageType PageNodeImpl::GetType() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return type();
+}
+
 bool PageNodeImpl::IsVisible() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return is_visible();
@@ -552,6 +568,18 @@ const absl::optional<freezing::FreezingVote>& PageNodeImpl::GetFreezingVote()
 PageState PageNodeImpl::GetPageState() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return page_state();
+}
+
+uint64_t PageNodeImpl::EstimateResidentSetSize() const {
+  uint64_t total = 0;
+  performance_manager::GraphOperations::VisitFrameTreePreOrder(
+      this, base::BindRepeating(
+                [](uint64_t* total, const FrameNode* frame_node) {
+                  *total += frame_node->GetResidentSetKbEstimate();
+                  return true;
+                },
+                &total));
+  return total;
 }
 
 void PageNodeImpl::SetLifecycleState(LifecycleState lifecycle_state) {

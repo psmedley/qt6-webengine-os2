@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,15 +31,18 @@ struct SameSizeAsNGLayoutResult
   };
   LayoutUnit intrinsic_block_size;
   unsigned bitfields[1];
-
-#if DCHECK_IS_ON()
-  bool has_valid_space;
-#endif
 };
 
 ASSERT_SIZE(NGLayoutResult, SameSizeAsNGLayoutResult);
 
 }  // namespace
+
+// static
+const NGLayoutResult* NGLayoutResult::Clone(const NGLayoutResult& other) {
+  return MakeGarbageCollected<NGLayoutResult>(
+      other, NGPhysicalBoxFragment::Clone(
+                 To<NGPhysicalBoxFragment>(other.PhysicalFragment())));
+}
 
 // static
 const NGLayoutResult* NGLayoutResult::CloneWithPostLayoutFragments(
@@ -79,8 +82,8 @@ NGLayoutResult::NGLayoutResult(NGBoxFragmentBuilderPassKey passkey,
 
       // This field shares storage with "minimal space shortage", so both
       // cannot be set at the same time.
-      DCHECK_EQ(builder->minimal_space_shortage_, LayoutUnit::Max());
-    } else if (builder->minimal_space_shortage_ != LayoutUnit::Max()) {
+      DCHECK_EQ(builder->minimal_space_shortage_, kIndefiniteSize);
+    } else if (builder->minimal_space_shortage_ != kIndefiniteSize) {
       rare_data->minimal_space_shortage = builder->minimal_space_shortage_;
     }
 
@@ -93,13 +96,24 @@ NGLayoutResult::NGLayoutResult(NGBoxFragmentBuilderPassKey passkey,
     bitfields_.break_appeal = builder->break_appeal_;
     bitfields_.has_forced_break = builder->has_forced_break_;
   }
+  bitfields_.disable_simplified_layout = builder->disable_simplified_layout;
+  bitfields_.is_truncated_by_fragmentation_line =
+      builder->is_truncated_by_fragmentation_line;
 
-  if (builder->ConstraintSpace() &&
-      builder->ConstraintSpace()->ShouldPropagateChildBreakValues()) {
+  if (builder->ConstraintSpace().ShouldPropagateChildBreakValues() &&
+      !builder->layout_object_->ShouldApplyLayoutContainment()) {
     bitfields_.initial_break_before = static_cast<unsigned>(
         builder->initial_break_before_.value_or(EBreakBetween::kAuto));
     bitfields_.final_break_after =
         static_cast<unsigned>(builder->previous_break_after_);
+
+    if ((builder->start_page_name_ != g_null_atom &&
+         builder->start_page_name_) ||
+        builder->previous_page_name_) {
+      RareData* rare_data = EnsureRareData();
+      rare_data->start_page_name = builder->start_page_name_;
+      rare_data->end_page_name = builder->previous_page_name_;
+    }
   }
 
   if (builder->table_column_count_) {
@@ -187,10 +201,6 @@ NGLayoutResult::NGLayoutResult(const NGLayoutResult& other,
 
   if (new_end_margin_strut != NGMarginStrut() || HasRareData())
     EnsureRareData()->end_margin_strut = new_end_margin_strut;
-
-#if DCHECK_IS_ON()
-  has_valid_space_ = other.has_valid_space_;
-#endif
 }
 
 NGLayoutResult::NGLayoutResult(const NGLayoutResult& other,
@@ -209,16 +219,11 @@ NGLayoutResult::NGLayoutResult(const NGLayoutResult& other,
   }
 
   DCHECK_EQ(physical_fragment_->Size(), other.physical_fragment_->Size());
-
-#if DCHECK_IS_ON()
-  has_valid_space_ = other.has_valid_space_;
-#endif
 }
 
 NGLayoutResult::NGLayoutResult(const NGPhysicalFragment* physical_fragment,
                                NGContainerFragmentBuilder* builder)
-    : space_(builder->space_ ? NGConstraintSpace(*builder->space_)
-                             : NGConstraintSpace()),
+    : space_(builder->space_),
       physical_fragment_(std::move(physical_fragment)),
       bitfields_(builder->is_self_collapsing_,
                  builder->is_pushed_by_floats_,
@@ -283,10 +288,6 @@ NGLayoutResult::NGLayoutResult(const NGPhysicalFragment* physical_fragment,
     bitfields_.is_bfc_block_offset_nullopt =
         !builder->bfc_block_offset_.has_value();
   }
-
-#if DCHECK_IS_ON()
-  has_valid_space_ = builder->space_;
-#endif
 }
 
 NGExclusionSpace NGLayoutResult::MergeExclusionSpaces(
@@ -317,11 +318,12 @@ NGLayoutResult::RareData* NGLayoutResult::EnsureRareData() {
 #if DCHECK_IS_ON()
 void NGLayoutResult::CheckSameForSimplifiedLayout(
     const NGLayoutResult& other,
-    bool check_same_block_size) const {
+    bool check_same_block_size,
+    bool check_no_fragmentation) const {
   To<NGPhysicalBoxFragment>(*physical_fragment_)
       .CheckSameForSimplifiedLayout(
           To<NGPhysicalBoxFragment>(*other.physical_fragment_),
-          check_same_block_size);
+          check_same_block_size, check_no_fragmentation);
 
   DCHECK(LinesUntilClamp() == other.LinesUntilClamp());
   ExclusionSpace().CheckSameForSimplifiedLayout(other.ExclusionSpace());
@@ -333,8 +335,11 @@ void NGLayoutResult::CheckSameForSimplifiedLayout(
   // this may change (even if the size of the fragment remains the same).
 
   DCHECK(EndMarginStrut() == other.EndMarginStrut());
-  DCHECK_EQ(MinimalSpaceShortage(), other.MinimalSpaceShortage());
+  DCHECK(MinimalSpaceShortage() == other.MinimalSpaceShortage());
   DCHECK_EQ(TableColumnCount(), other.TableColumnCount());
+
+  DCHECK_EQ(StartPageName(), other.StartPageName());
+  DCHECK_EQ(EndPageName(), other.EndPageName());
 
   DCHECK_EQ(bitfields_.has_forced_break, other.bitfields_.has_forced_break);
   DCHECK_EQ(bitfields_.is_self_collapsing, other.bitfields_.is_self_collapsing);

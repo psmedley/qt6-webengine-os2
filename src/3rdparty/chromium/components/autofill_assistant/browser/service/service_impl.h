@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/autofill_assistant/browser/client_context.h"
 #include "components/autofill_assistant/browser/device_context.h"
@@ -18,6 +19,7 @@
 #include "components/autofill_assistant/browser/service/server_url_fetcher.h"
 #include "components/autofill_assistant/browser/service/service.h"
 #include "components/autofill_assistant/browser/service/service_request_sender.h"
+#include "components/autofill_assistant/browser/user_data.h"
 #include "components/signin/public/identity_manager/access_token_fetcher.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "services/network/public/cpp/simple_url_loader.h"
@@ -52,6 +54,7 @@ class ServiceImpl : public Service {
               const GURL& script_server_url,
               const GURL& action_server_url,
               const GURL& user_data_url,
+              const GURL& report_progress_url,
               std::unique_ptr<ClientContext> client_context);
   ServiceImpl(const ServiceImpl&) = delete;
   ServiceImpl& operator=(const ServiceImpl&) = delete;
@@ -87,7 +90,18 @@ class ServiceImpl : public Service {
 
   void GetUserData(const CollectUserDataOptions& options,
                    uint64_t run_id,
+                   const UserData* user_data,
                    ServiceRequestSender::ResponseCallback callback) override;
+
+  void ReportProgress(const std::string& token,
+                      const std::string& payload,
+                      ServiceRequestSender::ResponseCallback callback) override;
+
+  void SetDisableRpcSigning(bool disable_rpc_signing) override;
+
+  void UpdateAnnotateDomModelContext(int64_t model_version) override;
+
+  void UpdateJsFlowLibraryLoaded(bool js_flow_library_loaded) override;
 
  private:
   void SendUserDataRequest(
@@ -96,12 +110,14 @@ class ServiceImpl : public Service {
       bool request_email,
       bool request_phone,
       bool request_shipping,
+      const std::vector<std::string>& preexisting_address_ids,
       bool request_payment_methods,
       const std::vector<std::string>& supported_card_networks,
+      const std::vector<std::string>& preexisting_payment_instrument_ids,
       ServiceRequestSender::ResponseCallback callback,
       const std::string& client_token);
 
-  Client* const client_;
+  const raw_ptr<Client> client_;
 
   // The request sender responsible for communicating with a remote endpoint.
   std::unique_ptr<ServiceRequestSender> request_sender_;
@@ -110,6 +126,7 @@ class ServiceImpl : public Service {
   GURL script_server_url_;
   GURL script_action_server_url_;
   GURL user_data_url_;
+  GURL report_progress_url_;
 
   // The client context to send to the backend.
   std::unique_ptr<ClientContext> client_context_;

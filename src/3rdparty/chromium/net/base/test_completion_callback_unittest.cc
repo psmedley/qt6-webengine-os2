@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,7 +98,7 @@ ExampleEmployer::~ExampleEmployer() = default;
 bool ExampleEmployer::DoSomething(CompletionOnceCallback callback) {
   DCHECK(!request_.get()) << "already in use";
 
-  request_ = new ExampleWorker(this, std::move(callback));
+  request_ = base::MakeRefCounted<ExampleWorker>(this, std::move(callback));
 
   if (!base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE, base::BindOnce(&ExampleWorker::DoWork, request_))) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,17 +38,14 @@ SpdyProxyClientSocket::SpdyProxyClientSocket(
     const std::string& user_agent,
     const HostPortPair& endpoint,
     const NetLogWithSource& source_net_log,
-    HttpAuthController* auth_controller,
+    scoped_refptr<HttpAuthController> auth_controller,
     ProxyDelegate* proxy_delegate)
     : spdy_stream_(spdy_stream),
       endpoint_(endpoint),
-      auth_(auth_controller),
+      auth_(std::move(auth_controller)),
       proxy_server_(proxy_server),
       proxy_delegate_(proxy_delegate),
       user_agent_(user_agent),
-      user_buffer_len_(0),
-      write_buffer_len_(0),
-      was_ever_used_(false),
       net_log_(NetLogWithSource::Make(spdy_stream->net_log().net_log(),
                                       NetLogSourceType::PROXY_CLIENT_SOCKET)),
       source_dependency_(source_net_log.source()) {
@@ -126,7 +123,6 @@ void SpdyProxyClientSocket::Disconnect() {
 
   write_buffer_len_ = 0;
   write_callback_.Reset();
-  write_callback_weak_factory_.InvalidateWeakPtrs();
 
   next_state_ = STATE_DISCONNECTED;
 
@@ -174,11 +170,6 @@ bool SpdyProxyClientSocket::GetSSLInfo(SSLInfo* ssl_info) {
   // proxy with TLS, this object represents the tunneled TCP connection to the
   // origin.
   return false;
-}
-
-void SpdyProxyClientSocket::GetConnectionAttempts(
-    ConnectionAttempts* out) const {
-  out->clear();
 }
 
 int64_t SpdyProxyClientSocket::GetTotalReceivedBytes() const {
@@ -250,6 +241,8 @@ int SpdyProxyClientSocket::Write(
   DCHECK(write_callback_.is_null());
   if (next_state_ != STATE_OPEN)
     return ERR_SOCKET_NOT_CONNECTED;
+  if (end_stream_state_ == EndStreamState::kEndStreamSent)
+    return ERR_CONNECTION_CLOSED;
 
   DCHECK(spdy_stream_.get());
   spdy_stream_->SendData(buf, buf_len, MORE_DATA_TO_SEND);
@@ -284,14 +277,22 @@ int SpdyProxyClientSocket::GetLocalAddress(IPEndPoint* address) const {
   return spdy_stream_->GetLocalAddress(address);
 }
 
-void SpdyProxyClientSocket::RunWriteCallback(CompletionOnceCallback callback,
-                                             int result) const {
-  std::move(callback).Run(result);
+void SpdyProxyClientSocket::RunWriteCallback(int result) {
+  base::WeakPtr<SpdyProxyClientSocket> weak_ptr = weak_factory_.GetWeakPtr();
+  // `write_callback_` might be consumed by OnClose().
+  if (write_callback_) {
+    std::move(write_callback_).Run(result);
+  }
+  if (!weak_ptr) {
+    // `this` was already destroyed while running `write_callback_`. Must
+    // return immediately without touching any field member.
+    return;
+  }
 
   if (end_stream_state_ == EndStreamState::kEndStreamReceived) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::BindOnce(&SpdyProxyClientSocket::MaybeSendEndStream,
-                                  weak_factory_.GetWeakPtr()));
+                                  weak_factory_.GetMutableWeakPtr()));
   }
 }
 
@@ -523,8 +524,7 @@ void SpdyProxyClientSocket::OnDataSent() {
   // stream's write callback chain to unwind (see crbug.com/355511).
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(&SpdyProxyClientSocket::RunWriteCallback,
-                                write_callback_weak_factory_.GetWeakPtr(),
-                                std::move(write_callback_), rv));
+                                weak_factory_.GetWeakPtr(), rv));
 }
 
 void SpdyProxyClientSocket::OnTrailers(const spdy::Http2HeaderBlock& trailers) {

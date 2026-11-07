@@ -1,10 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_CONSTRAINT_SPACE_BUILDER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_CONSTRAINT_SPACE_BUILDER_H_
 
+#include "base/check_op.h"
 #include "base/dcheck_is_on.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -37,6 +38,9 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
                                  adjust_inline_size_if_needed) {
     if (parent_space.ShouldPropagateChildBreakValues())
       SetShouldPropagateChildBreakValues();
+    if (parent_space.ShouldRepeat())
+      SetShouldRepeat(true);
+    SetIsInsideRepeatableContent(parent_space.IsInsideRepeatableContent());
   }
 
   // The setters on this builder are in the writing mode of parent_writing_mode.
@@ -114,6 +118,12 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
     orthogonal_fallback_inline_size_ = size;
   }
 
+  void SetPageName(const AtomicString& name) {
+    if (!name && !space_.rare_data_)
+      return;
+    space_.EnsureRareData()->page_name = name;
+  }
+
   void SetFragmentainerBlockSize(LayoutUnit size) {
 #if DCHECK_IS_ON()
     DCHECK(!is_fragmentainer_block_size_set_);
@@ -123,17 +133,39 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
       space_.EnsureRareData()->fragmentainer_block_size = size;
   }
 
-  void SetFragmentainerOffsetAtBfc(LayoutUnit offset) {
+  // Shrink the fragmentainer block-size, to reserve space for repeated table
+  // headers and footers. If there's a repeated header, the argument to
+  // SetFragmentainerOffset() also needs to be compensated for the block-size
+  // taken up by the repeated header, so that offset 0 is exactly where the
+  // non-repeated content starts / resumes after the repeated header.
+  void ReserveSpaceInFragmentainer(LayoutUnit space) {
 #if DCHECK_IS_ON()
-    DCHECK(!is_fragmentainer_offset_at_bfc_set_);
-    is_fragmentainer_offset_at_bfc_set_ = true;
+    DCHECK(is_fragmentainer_block_size_set_);
+#endif
+    space_.rare_data_->fragmentainer_block_size -= space;
+    space_.rare_data_->fragmentainer_block_size =
+        space_.rare_data_->fragmentainer_block_size.ClampNegativeToZero();
+  }
+
+  void SetFragmentainerOffset(LayoutUnit offset) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_fragmentainer_offset_set_);
+    is_fragmentainer_offset_set_ = true;
 #endif
     if (offset != LayoutUnit())
-      space_.EnsureRareData()->fragmentainer_offset_at_bfc = offset;
+      space_.EnsureRareData()->fragmentainer_offset = offset;
   }
 
   void SetIsAtFragmentainerStart() {
     space_.EnsureRareData()->is_at_fragmentainer_start = true;
+  }
+
+  void SetShouldRepeat(bool b) { space_.EnsureRareData()->should_repeat = b; }
+
+  void SetIsInsideRepeatableContent(bool b) {
+    if (!b && !space_.rare_data_)
+      return;
+    space_.EnsureRareData()->is_inside_repeatable_content = b;
   }
 
   void SetIsFixedInlineSize(bool b) {
@@ -175,6 +207,11 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
     }
   }
 
+  void SetOverrideMinMaxBlockSizes(const MinMaxSizes& min_max_sizes) {
+    if (!min_max_sizes.IsEmpty() || space_.HasRareData())
+      space_.EnsureRareData()->SetOverrideMinMaxBlockSizes(min_max_sizes);
+  }
+
   void SetIsPaintedAtomically(bool b) {
     space_.bitfields_.is_painted_atomically = b;
   }
@@ -198,6 +235,10 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
 
   void SetIsInsideBalancedColumns() {
     space_.EnsureRareData()->is_inside_balanced_columns = true;
+  }
+
+  void SetShouldIgnoreForcedBreaks() {
+    space_.EnsureRareData()->should_ignore_forced_breaks = true;
   }
 
   void SetIsInColumnBfc() { space_.EnsureRareData()->is_in_column_bfc = true; }
@@ -314,6 +355,10 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
     space_.EnsureRareData()->SetForcedBfcBlockOffset(forced_bfc_block_offset);
   }
 
+  LayoutUnit ExpectedBfcBlockOffset() const {
+    return space_.ExpectedBfcBlockOffset();
+  }
+
   void SetClearanceOffset(LayoutUnit clearance_offset) {
 #if DCHECK_IS_ON()
     DCHECK(!is_clearance_offset_set_);
@@ -323,13 +368,18 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
       space_.EnsureRareData()->SetClearanceOffset(clearance_offset);
   }
 
-  void SetTableCellBorders(const NGBoxStrut& table_cell_borders) {
+  void SetTableCellBorders(const NGBoxStrut& table_cell_borders,
+                           WritingDirectionMode cell_writing_direction,
+                           WritingDirectionMode table_writing_direction) {
 #if DCHECK_IS_ON()
     DCHECK(!is_table_cell_borders_set_);
     is_table_cell_borders_set_ = true;
 #endif
-    if (table_cell_borders != NGBoxStrut())
-      space_.EnsureRareData()->SetTableCellBorders(table_cell_borders);
+    if (table_cell_borders != NGBoxStrut()) {
+      space_.EnsureRareData()->SetTableCellBorders(
+          table_cell_borders.ConvertToPhysical(table_writing_direction)
+              .ConvertToLogical(cell_writing_direction));
+    }
   }
 
   void SetTableCellAlignmentBaseline(
@@ -371,6 +421,17 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
     if (has_collapsed_borders) {
       space_.EnsureRareData()->SetIsTableCellWithCollapsedBorders(
           has_collapsed_borders);
+    }
+  }
+
+  void SetIsTableCellWithEffectiveRowspan(bool has_effective_rowspan) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_table_cell_with_effective_rowspan_set_);
+    is_table_cell_with_effective_rowspan_set_ = true;
+#endif
+    if (has_effective_rowspan) {
+      space_.EnsureRareData()->SetIsTableCellWithEffectiveRowspan(
+          has_effective_rowspan);
     }
   }
 
@@ -437,6 +498,10 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
     DCHECK(!is_new_fc_);
     if (clamp)
       space_.EnsureRareData()->SetLinesUntilClamp(*clamp);
+  }
+
+  void SetIsPushedByFloats() {
+    space_.EnsureRareData()->is_pushed_by_floats = true;
   }
 
   void SetTargetStretchInlineSize(LayoutUnit target_stretch_inline_size) {
@@ -507,7 +572,7 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
   bool is_available_size_set_ = false;
   bool is_percentage_resolution_size_set_ = false;
   bool is_fragmentainer_block_size_set_ = false;
-  bool is_fragmentainer_offset_at_bfc_set_ = false;
+  bool is_fragmentainer_offset_set_ = false;
   bool is_block_direction_fragmentation_type_set_ = false;
   bool is_margin_strut_set_ = false;
   bool is_optimistic_bfc_block_offset_set_ = false;
@@ -518,6 +583,7 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
   bool is_table_cell_column_index_set_ = false;
   bool is_table_cell_hidden_for_paint_set_ = false;
   bool is_table_cell_with_collapsed_borders_set_ = false;
+  bool is_table_cell_with_effective_rowspan_set_ = false;
   bool is_custom_layout_data_set_ = false;
   bool is_lines_until_clamp_set_ = false;
   bool is_table_row_data_set_ = false;

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -95,18 +95,18 @@ bool ValidateAppendToQuery(
 
 bool ValidateRewrite(const mojom::UrlRequestActionPtr& action) {
   switch (action->which()) {
-    case mojom::UrlRequestAction::Tag::ADD_HEADERS:
+    case mojom::UrlRequestAction::Tag::kAddHeaders:
       return ValidateAddHeaders(action->get_add_headers());
-    case mojom::UrlRequestAction::Tag::REMOVE_HEADER:
+    case mojom::UrlRequestAction::Tag::kRemoveHeader:
       return ValidateRemoveHeader(action->get_remove_header());
-    case mojom::UrlRequestAction::Tag::SUBSTITUTE_QUERY_PATTERN:
+    case mojom::UrlRequestAction::Tag::kSubstituteQueryPattern:
       return ValidateSubstituteQueryPattern(
           action->get_substitute_query_pattern());
-    case mojom::UrlRequestAction::Tag::REPLACE_URL:
+    case mojom::UrlRequestAction::Tag::kReplaceUrl:
       return ValidateReplaceUrl(action->get_replace_url());
-    case mojom::UrlRequestAction::Tag::APPEND_TO_QUERY:
+    case mojom::UrlRequestAction::Tag::kAppendToQuery:
       return ValidateAppendToQuery(action->get_append_to_query());
-    case mojom::UrlRequestAction::Tag::POLICY:
+    case mojom::UrlRequestAction::Tag::kPolicy:
       return true;
   }
 }

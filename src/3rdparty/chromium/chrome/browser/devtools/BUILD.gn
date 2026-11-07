@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -112,7 +112,7 @@ static_library("devtools") {
     "//ui/events:dom_keycode_converter",
   ]
 
-  if (!is_android && !use_qt) {
+  if (!is_android && !is_qtwebengine) {
     deps += [
       "//build:chromeos_buildflags",
       "//chrome:extra_resources",
@@ -267,7 +267,10 @@ static_library("devtools") {
       ]
     }
     if (enable_basic_printing) {
-      deps += [ "//components/printing/browser/print_to_pdf" ]
+      deps += [
+        "//components/printing/browser/headless",
+        "//components/printing/browser/print_to_pdf",
+      ]
     }
     sources += rebase_path(_protocol_generated, ".", target_gen_dir)
   }

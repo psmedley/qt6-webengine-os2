@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,9 @@
 #include "components/shared_highlighting/core/common/fragment_directives_utils.h"
 #include "components/shared_highlighting/core/common/shared_highlighting_features.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/renderer/core/annotation/annotation_agent_impl.h"
+#include "third_party/blink/renderer/core/annotation/annotation_selector.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
 #include "third_party/blink/renderer/core/editing/position_with_affinity.h"
@@ -37,15 +40,18 @@ void TextFragmentHandler::BindTextFragmentReceiver(
 }
 
 void TextFragmentHandler::Cancel() {
-  DCHECK(GetTextFragmentSelectorGenerator());
+  // TODO(crbug.com/1303881): This shouldn't happen, but sometimes browser
+  // side requests link to text when generation was never started.
+  // See crash in crbug.com/1301794.
+  if (!GetTextFragmentSelectorGenerator())
+    return;
 
   GetTextFragmentSelectorGenerator()->Reset();
 }
 
 void TextFragmentHandler::RequestSelector(RequestSelectorCallback callback) {
   DCHECK(shared_highlighting::ShouldOfferLinkToText(
-      GetFrame()->GetDocument()->Url()));
-  DCHECK(!GetFrame()->Selection().SelectedText().IsEmpty());
+      GURL(GetFrame()->GetDocument()->Url())));
 
   response_callback_ = std::move(callback);
   selector_ready_status_ =
@@ -78,37 +84,27 @@ void TextFragmentHandler::GetExistingSelectors(
     GetExistingSelectorsCallback callback) {
   Vector<String> text_fragment_selectors;
 
-  TextFragmentAnchor* anchor = GetTextFragmentAnchor();
-  if (!anchor) {
-    std::move(callback).Run(Vector<String>());
-    return;
-  }
-
-  for (auto& directive_finder_pair : anchor->DirectiveFinderPairs()) {
-    TextFragmentFinder* finder = directive_finder_pair.second.Get();
-    if (finder->FirstMatch()) {
-      text_fragment_selectors.push_back(finder->GetSelector().ToString());
-    }
+  for (auto& annotation : annotation_agents_) {
+    if (annotation->IsAttached())
+      text_fragment_selectors.push_back(annotation->GetSelector()->Serialize());
   }
 
   std::move(callback).Run(text_fragment_selectors);
 }
 
-// TODO(http://crbug/1262141): look into using PageBroadcast Mojo.
 void TextFragmentHandler::RemoveFragments() {
-  DCHECK(
-      base::FeatureList::IsEnabled(shared_highlighting::kSharedHighlightingV2));
+  // DismissFragmentAnchor normally runs the URL update steps to remove the
+  // selectors from the URL. However, even if the outermost main frame doesn't
+  // have a text fragment anchor, the selectors still need to be removed from
+  // the URL. This is because dismissing the text fragment anchors is a
+  // page-wide operation, and the URL might have selectors for a subframe.
+  FragmentDirectiveUtils::RemoveSelectorsFromUrl(GetFrame());
+  for (auto& annotation : annotation_agents_)
+    annotation->Remove();
 
-  if (GetTextFragmentAnchor()) {
-    GetFrame()->View()->DismissFragmentAnchor();
-  } else if (GetFrame()->IsOutermostMainFrame()) {
-    // DismissFragmentAnchor normally runs the URL update steps to remove the
-    // selectors from the URL. However, even if the outermost main frame doesn't
-    // have a text fragment anchor, the selectors still need to be removed from
-    // the URL. This is because dismissing the text fragment anchors is a
-    // page-wide operation, and the URL might have selectors for a subframe.
-    FragmentDirectiveUtils::RemoveSelectorsFromUrl(GetFrame());
-  }
+  annotation_agents_.clear();
+
+  GetFrame()->View()->ClearFragmentAnchor();
 }
 
 // static
@@ -130,26 +126,17 @@ bool TextFragmentHandler::IsOverTextFragment(HitTestResult result) {
   auto markers = marker_controller.MarkersAroundPosition(
       ToPositionInFlatTree(marker_position),
       DocumentMarker::MarkerTypes::TextFragment());
-  return !markers.IsEmpty();
+  return !markers.empty();
 }
 
 void TextFragmentHandler::ExtractTextFragmentsMatches(
     ExtractTextFragmentsMatchesCallback callback) {
-  DCHECK(
-      base::FeatureList::IsEnabled(shared_highlighting::kSharedHighlightingV2));
   Vector<String> text_fragment_matches;
 
-  TextFragmentAnchor* anchor = GetTextFragmentAnchor();
-  if (!anchor) {
-    std::move(callback).Run(Vector<String>());
-    return;
-  }
-
-  for (auto& directive_finder_pair : anchor->DirectiveFinderPairs()) {
-    TextFragmentFinder* finder = directive_finder_pair.second.Get();
-    if (finder->FirstMatch()) {
+  for (auto& annotation : annotation_agents_) {
+    if (annotation->IsAttached()) {
       text_fragment_matches.push_back(
-          PlainText(finder->FirstMatch()->ToEphemeralRange()));
+          PlainText(annotation->GetAttachedRange().ToEphemeralRange()));
     }
   }
 
@@ -158,24 +145,19 @@ void TextFragmentHandler::ExtractTextFragmentsMatches(
 
 void TextFragmentHandler::ExtractFirstFragmentRect(
     ExtractFirstFragmentRectCallback callback) {
-  DCHECK(
-      base::FeatureList::IsEnabled(shared_highlighting::kSharedHighlightingV2));
   gfx::Rect rect_in_viewport;
 
-  TextFragmentAnchor* anchor = GetTextFragmentAnchor();
-  if (!anchor || anchor->DirectiveFinderPairs().size() <= 0) {
+  if (annotation_agents_.empty()) {
     std::move(callback).Run(gfx::Rect());
     return;
   }
 
-  for (auto& directive_finder_pair : anchor->DirectiveFinderPairs()) {
-    TextFragmentFinder* finder = directive_finder_pair.second.Get();
-    if (finder->FirstMatch() == nullptr) {
+  for (auto& annotation : annotation_agents_) {
+    if (!annotation->IsAttached())
       continue;
-    }
 
     PhysicalRect bounding_box(
-        ComputeTextRect(finder->FirstMatch()->ToEphemeralRange()));
+        ComputeTextRect(annotation->GetAttachedRange().ToEphemeralRange()));
     rect_in_viewport =
         GetFrame()->View()->FrameToViewport(ToEnclosingRect(bounding_box));
     break;
@@ -222,11 +204,12 @@ void TextFragmentHandler::StartGeneratingForCurrentSelection() {
   }
   GetTextFragmentSelectorGenerator()->Generate(
       *current_selection_range,
-      WTF::Bind(&TextFragmentHandler::DidFinishSelectorGeneration,
-                WrapWeakPersistent(this)));
+      WTF::BindOnce(&TextFragmentHandler::DidFinishSelectorGeneration,
+                    WrapWeakPersistent(this)));
 }
 
 void TextFragmentHandler::Trace(Visitor* visitor) const {
+  visitor->Trace(annotation_agents_);
   visitor->Trace(text_fragment_selector_generator_);
   visitor->Trace(selector_producer_);
   visitor->Trace(frame_);
@@ -237,6 +220,8 @@ void TextFragmentHandler::DidDetachDocumentOrFrame() {
   // don't run after frame detachment.
   if (GetTextFragmentSelectorGenerator())
     GetTextFragmentSelectorGenerator()->Reset();
+
+  annotation_agents_.clear();
 }
 
 void TextFragmentHandler::InvokeReplyCallback(
@@ -277,7 +262,7 @@ bool TextFragmentHandler::ShouldPreemptivelyGenerateFor(LocalFrame* frame) {
   return base::FeatureList::IsEnabled(
              shared_highlighting::kSharedHighlightingAmp) &&
          shared_highlighting::SupportsLinkGenerationInIframe(
-             frame->GetDocument()->Url());
+             GURL(frame->GetDocument()->Url()));
 }
 
 // static
@@ -286,17 +271,29 @@ void TextFragmentHandler::OpenedContextMenuOverSelection(LocalFrame* frame) {
     return;
 
   if (!shared_highlighting::ShouldOfferLinkToText(
-          frame->GetDocument()->Url())) {
+          GURL(frame->GetDocument()->Url()))) {
     return;
   }
 
-  if (frame->Selection().SelectedText().IsEmpty())
+  if (frame->Selection().SelectedText().empty())
     return;
 
   if (!frame->GetTextFragmentHandler())
     frame->CreateTextFragmentHandler();
 
   frame->GetTextFragmentHandler()->StartGeneratingForCurrentSelection();
+}
+
+// static
+void TextFragmentHandler::DidCreateTextFragment(AnnotationAgentImpl& agent,
+                                                Document& owning_document) {
+  LocalFrame* frame = owning_document.GetFrame();
+  DCHECK(frame);
+
+  if (!frame->GetTextFragmentHandler())
+    frame->CreateTextFragmentHandler();
+
+  frame->GetTextFragmentHandler()->annotation_agents_.push_back(&agent);
 }
 
 }  // namespace blink

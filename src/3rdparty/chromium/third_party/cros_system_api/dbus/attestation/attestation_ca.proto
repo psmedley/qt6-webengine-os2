@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium OS Authors. All rights reserved.
+// Copyright 2015 The ChromiumOS Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,6 +56,11 @@ enum CertificateProfile {
   //   CN=Local Authority
   //   O=Chrome Device Soft Bind
   SOFT_BIND_CERTIFICATE = 10;
+
+  // A remote attestation certificate for proving device integrity.
+  //   CN=<An opaque device identifier string>
+  //   O=Chrome Device Setup
+  DEVICE_SETUP_CERTIFICATE = 11;
 }
 
 enum TpmVersion {
@@ -200,6 +205,20 @@ message AttestationEnrollmentResponse {
   optional string extra_details = 4;
 }
 
+// `DEVICE_SETUP_CERTIFICATE` specific metadata.
+message DeviceSetupCertificateMetadata {
+  // This will eventually be a DUSI. For now, this will be a 36 character GUID.
+  // This will be used as the CN of the Remote Attestation certificate.
+  optional string id = 1;
+
+  // Unix timestamp (in seconds) of the generation of the request.
+  optional uint64 timestamp_seconds = 2;
+
+  // The generated certificate will be bound to this value. This is used to
+  // prevent replay attacks. Currently it is the FIDO credential id.
+  optional string content_binding = 3;
+}
+
 // The certificate request to be sent to the attestation server.
 message AttestationCertificateRequest {
   // The AIK cert in X.509 format.
@@ -226,6 +245,15 @@ message AttestationCertificateRequest {
   // NVRAM quoted by AIK. Keys are values of the NVRAMQuoteType. This is only
   // used for enrollment certificates.
   map<int32, Quote> nvram_quotes = 15;
+  // Certificate profile specific metadata.
+  oneof metadata {
+    // `DEVICE_SETUP_CERTIFICATE` specific metadata.
+    DeviceSetupCertificateMetadata device_setup_certificate_metadata = 16;
+  }
+  // ADID read from the VPD. Used as the host identifier incorporated in the
+  // certificates.
+  // Used for `ENTERPRISE_VTPM_EK_CERTIFICATE` profile only.
+  optional bytes attested_device_id = 17;
 }
 
 // The response from the attestation server for the certificate request.
@@ -349,11 +377,19 @@ message KeyInfo {
   // DeviceIdentity policy.
   optional string signing_scheme = 8;
   // Device Trust Signals
-  optional DeviceTrustSignals device_trust_signals = 9;
+  // Deprecated due to signals collection change to store signals in a
+  // dictionary and converting them to a JSON string. Use
+  // `device_trust_signals_json` instead.
+  optional DeviceTrustSignals device_trust_signals = 9 [deprecated = true];
+  // Device Trust Signals
+  optional string device_trust_signals_json = 10;
+  // DM token to be used for this request.
+  optional string dm_token = 11;
 }
 
 // Device Trust Signals
 message DeviceTrustSignals {
+  option deprecated = true;
   // Device Id
   optional string device_id = 1;
   // Obfuscated CBCM-enrolled Customer Id

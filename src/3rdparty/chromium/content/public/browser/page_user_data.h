@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,6 +53,8 @@ class PageUserData : public base::SupportsUserData::Data {
     }
   }
 
+  // TODO(crbug.com/1335845): Due to a unresolved bug, this can return nullptr
+  // even after CreateForPage() or GetOrCreateForPage() has been called.
   static T* GetForPage(Page& page) {
     return static_cast<T*>(page.GetUserData(UserDataKey()));
   }

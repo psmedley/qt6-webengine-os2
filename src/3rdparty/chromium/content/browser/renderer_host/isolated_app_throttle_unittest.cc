@@ -1,13 +1,15 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/renderer_host/isolated_app_throttle.h"
 
+#include "base/command_line.h"
 #include "base/memory/raw_ptr.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/site_isolation_policy.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/page_type.h"
@@ -86,7 +88,7 @@ class IsolatedAppThrottleTest : public RenderViewHostTestHarness {
     RenderViewHostTestHarness::SetUp();
 
     base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-        switches::kRestrictedApiOrigins, kAppUrl);
+        switches::kIsolatedAppOrigins, kAppUrl);
     content::SiteIsolationPolicy::DisableFlagCachingForTesting();
 
     old_client_ = SetBrowserClientForTesting(&test_client_);
@@ -400,7 +402,8 @@ TEST_F(IsolatedAppThrottleTest, AllowHistoryNavigationFromErrorPage) {
             GetWebExposedIsolationLevel(main_frame_id()));
 
   auto* error_rfh = NavigationSimulator::NavigateAndFailFromDocument(
-      GURL(kAppUrl2), net::ERR_TIMED_OUT, web_contents()->GetMainFrame());
+      GURL(kAppUrl2), net::ERR_TIMED_OUT,
+      web_contents()->GetPrimaryMainFrame());
   EXPECT_NE(nullptr, error_rfh);
   EXPECT_EQ(GURL(kAppUrl2), error_rfh->GetLastCommittedURL());
   EXPECT_EQ(PAGE_TYPE_ERROR, GetPageType(error_rfh));

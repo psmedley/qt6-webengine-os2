@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -14,7 +14,7 @@ class MinifyWithUglifyTest(unittest.TestCase):
             var foo = 0;
         """
     minimized = minify_with_uglify.Minify(source)
-    self.assertEquals(minimized, "var foo=0;")
+    self.assertEqual(minimized, "var foo=0;")
 
   def test_complex(self):
     source = """
@@ -26,5 +26,5 @@ class MinifyWithUglifyTest(unittest.TestCase):
             var qux = foo.bar + foo.baz;
         """
     minimized = minify_with_uglify.Minify(source)
-    self.assertEquals(minimized,
+    self.assertEqual(minimized,
                       "var foo={bar:0,baz:5};var qux=foo.bar+foo.baz;")

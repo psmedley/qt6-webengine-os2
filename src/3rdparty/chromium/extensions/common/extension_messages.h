@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,7 @@
 #include "extensions/common/draggable_region.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_guid.h"
+#include "extensions/common/extension_param_traits.h"
 #include "extensions/common/extensions_client.h"
 #include "extensions/common/message_bundle.h"
 #include "extensions/common/mojom/css_origin.mojom-shared.h"
@@ -42,7 +43,6 @@
 #include "extensions/common/mojom/run_location.mojom-shared.h"
 #include "extensions/common/permissions/socket_permission_data.h"
 #include "extensions/common/permissions/usb_device_permission_data.h"
-#include "extensions/common/stack_frame.h"
 #include "extensions/common/user_script.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_start.h"
@@ -75,7 +75,7 @@ IPC_STRUCT_BEGIN(ExtensionHostMsg_APIActionOrEvent_Params)
   IPC_STRUCT_MEMBER(std::string, api_call)
 
   // List of arguments.
-  IPC_STRUCT_MEMBER(base::ListValue, arguments)
+  IPC_STRUCT_MEMBER(base::Value::List, arguments)
 
   // Extra logging information.
   IPC_STRUCT_MEMBER(std::string, extra)
@@ -93,7 +93,7 @@ IPC_STRUCT_BEGIN(ExtensionHostMsg_DOMAction_Params)
   IPC_STRUCT_MEMBER(std::string, api_call)
 
   // List of arguments.
-  IPC_STRUCT_MEMBER(base::ListValue, arguments)
+  IPC_STRUCT_MEMBER(base::Value::List, arguments)
 
   // Type of DOM API call.
   IPC_STRUCT_MEMBER(int, call_type)
@@ -141,7 +141,7 @@ IPC_STRUCT_TRAITS_END()
 // originate from a tab.
 IPC_STRUCT_BEGIN(ExtensionMsg_TabConnectionInfo)
   // The tab from where the connection was created.
-  IPC_STRUCT_MEMBER(base::DictionaryValue, tab)
+  IPC_STRUCT_MEMBER(base::Value::Dict, tab)
 
   // The ID of the frame that initiated the connection.
   // 0 if main frame, positive otherwise. -1 if not initiated from a frame.
@@ -149,6 +149,9 @@ IPC_STRUCT_BEGIN(ExtensionMsg_TabConnectionInfo)
 
   // The unique ID of the document of the frame that initiated the connection.
   IPC_STRUCT_MEMBER(std::string, document_id)
+
+  // The lifecycle of the frame that initiated the connection.
+  IPC_STRUCT_MEMBER(std::string, document_lifecycle)
 IPC_STRUCT_END()
 
 // Struct containing information about the destination of tab.connect().
@@ -227,13 +230,6 @@ IPC_STRUCT_TRAITS_BEGIN(extensions::SocketPermissionData)
   IPC_STRUCT_TRAITS_MEMBER(entry())
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(extensions::StackFrame)
-  IPC_STRUCT_TRAITS_MEMBER(line_number)
-  IPC_STRUCT_TRAITS_MEMBER(column_number)
-  IPC_STRUCT_TRAITS_MEMBER(source)
-  IPC_STRUCT_TRAITS_MEMBER(function)
-IPC_STRUCT_TRAITS_END()
-
 IPC_STRUCT_TRAITS_BEGIN(extensions::UsbDevicePermissionData)
   IPC_STRUCT_TRAITS_MEMBER(vendor_id())
   IPC_STRUCT_TRAITS_MEMBER(product_id())
@@ -253,30 +249,23 @@ IPC_STRUCT_TRAITS_BEGIN(extensions::PortId)
   IPC_STRUCT_TRAITS_MEMBER(serialization_format)
 IPC_STRUCT_TRAITS_END()
 
+// Struct to work around the maximum number of parameters in the
+// ExtensionMsg_ResponseWorker message.
+IPC_STRUCT_BEGIN(ExtensionMsg_ResponseWorkerData)
+  // Response wrapper, the response data (if any) is the first element in this
+  // list.
+  IPC_STRUCT_MEMBER(base::Value::List, results)
+  IPC_STRUCT_MEMBER(extensions::mojom::ExtraResponseDataPtr, extra_data)
+IPC_STRUCT_END()
+
 // Singly-included section for custom IPC traits.
 #ifndef INTERNAL_EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_
 #define INTERNAL_EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_
 
 // Map of extensions IDs to the executing script paths.
-typedef std::map<std::string, std::set<std::string> > ExecutingScriptsMap;
-
-struct ExtensionHostMsg_AutomationQuerySelector_Error {
-  enum Value { kNone, kNoDocument, kNodeDestroyed };
-
-  ExtensionHostMsg_AutomationQuerySelector_Error() : value(kNone) {}
-
-  Value value;
-};
+typedef std::map<std::string, std::set<std::string>> ExecutingScriptsMap;
 
 #endif  // INTERNAL_EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_
-
-IPC_ENUM_TRAITS_MAX_VALUE(
-    ExtensionHostMsg_AutomationQuerySelector_Error::Value,
-    ExtensionHostMsg_AutomationQuerySelector_Error::kNodeDestroyed)
-
-IPC_STRUCT_TRAITS_BEGIN(ExtensionHostMsg_AutomationQuerySelector_Error)
-IPC_STRUCT_TRAITS_MEMBER(value)
-IPC_STRUCT_TRAITS_END()
 
 // Messages sent from the browser to the renderer:
 
@@ -385,8 +374,7 @@ IPC_MESSAGE_ROUTED2(ExtensionHostMsg_ContentScriptsExecuting,
 
 // Optional Ack message sent to the browser to notify that the response to a
 // function has been processed.
-IPC_MESSAGE_ROUTED1(ExtensionHostMsg_ResponseAck,
-                    int /* request_id */)
+IPC_MESSAGE_ROUTED1(ExtensionHostMsg_ResponseAck, int /* request_id */)
 
 // Informs the browser to increment the keepalive count for the lazy background
 // page, keeping it alive.
@@ -411,8 +399,8 @@ IPC_MESSAGE_CONTROL2(ExtensionHostMsg_AddAPIActionToActivityLog,
 
 // Sent by the renderer to log an event to the extension activity log.
 IPC_MESSAGE_CONTROL2(ExtensionHostMsg_AddEventToActivityLog,
-                    std::string /* extension_id */,
-                    ExtensionHostMsg_APIActionOrEvent_Params)
+                     std::string /* extension_id */,
+                     ExtensionHostMsg_APIActionOrEvent_Params)
 
 // Sent by the renderer to log a DOM action to the extension activity log.
 IPC_MESSAGE_CONTROL2(ExtensionHostMsg_AddDOMActionToActivityLog,
@@ -425,29 +413,6 @@ IPC_MESSAGE_CONTROL2(ExtensionHostMsg_WakeEventPage,
                      int /* request_id */,
                      std::string /* extension_id */)
 
-// Tells listeners that a detailed message was reported to the console by
-// WebKit.
-IPC_MESSAGE_ROUTED4(ExtensionHostMsg_DetailedConsoleMessageAdded,
-                    std::u16string /* message */,
-                    std::u16string /* source */,
-                    extensions::StackTrace /* stack trace */,
-                    int32_t /* severity level */)
-
-// Sent when a query selector request is made from the automation API.
-// acc_obj_id is the accessibility tree ID of the starting element.
-IPC_MESSAGE_ROUTED3(ExtensionMsg_AutomationQuerySelector,
-                    int /* request_id */,
-                    int /* acc_obj_id */,
-                    std::u16string /* selector */)
-
-// Result of a query selector request.
-// result_acc_obj_id is the accessibility tree ID of the result element; 0
-// indicates no result.
-IPC_MESSAGE_ROUTED3(ExtensionHostMsg_AutomationQuerySelector_Result,
-                    int /* request_id */,
-                    ExtensionHostMsg_AutomationQuerySelector_Error /* error */,
-                    int /* result_acc_obj_id */)
-
 // Messages related to Extension Service Worker.
 #undef IPC_MESSAGE_START
 #define IPC_MESSAGE_START ExtensionWorkerMsgStart
@@ -458,15 +423,13 @@ IPC_MESSAGE_CONTROL1(ExtensionHostMsg_RequestWorker,
                      extensions::mojom::RequestParams)
 
 // The browser sends this message in response to all service worker extension
-// api calls. The response data (if any) is the first element in the Value::List
-// parameter.
-IPC_MESSAGE_CONTROL5(
-    ExtensionMsg_ResponseWorker,
-    int /* thread_id */,
-    int /* request_id */,
-    bool /* success */,
-    base::Value::List /* response wrapper (see comment above) */,
-    std::string /* error */)
+// api calls.
+IPC_MESSAGE_CONTROL5(ExtensionMsg_ResponseWorker,
+                     int /* thread_id */,
+                     int /* request_id */,
+                     bool /* success */,
+                     ExtensionMsg_ResponseWorkerData /* response */,
+                     std::string /* error */)
 
 // Asks the browser to increment the pending activity count for
 // the worker with version id |service_worker_version_id|.

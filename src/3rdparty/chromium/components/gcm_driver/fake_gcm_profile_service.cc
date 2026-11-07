@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -93,9 +93,7 @@ class FakeGCMProfileService::CustomFakeGCMDriver
 
 FakeGCMProfileService::CustomFakeGCMDriver::CustomFakeGCMDriver(
     FakeGCMProfileService* service)
-    : instance_id::FakeGCMDriverForInstanceID(
-          base::ThreadTaskRunnerHandle::Get()),
-      service_(service) {}
+    : service_(service) {}
 
 FakeGCMProfileService::CustomFakeGCMDriver::~CustomFakeGCMDriver() {}
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,15 +31,20 @@ class MODULES_EXPORT CredentialsContainer final : public ScriptWrappable,
   explicit CredentialsContainer(Navigator&);
 
   // CredentialsContainer.idl
-  ScriptPromise get(ScriptState*, const CredentialRequestOptions*);
+  ScriptPromise get(ScriptState*,
+                    const CredentialRequestOptions*,
+                    ExceptionState&);
   ScriptPromise store(ScriptState*, Credential* = nullptr);
   ScriptPromise create(ScriptState*,
                        const CredentialCreationOptions*,
                        ExceptionState&);
   ScriptPromise preventSilentAccess(ScriptState*);
-  bool conditionalMediationSupported();
 
   void Trace(Visitor*) const override;
+
+ private:
+  class OtpRequestAbortAlgorithm;
+  class PublicKeyRequestAbortAlgorithm;
 };
 
 }  // namespace blink

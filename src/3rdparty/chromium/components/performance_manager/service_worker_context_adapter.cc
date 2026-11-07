@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -192,6 +192,21 @@ void ServiceWorkerContextAdapter::StartWorkerForScope(
     StartWorkerCallback info_callback,
     StatusCodeCallback status_callback) {
   NOTIMPLEMENTED();
+}
+
+bool ServiceWorkerContextAdapter::IsLiveRunningServiceWorker(
+    int64_t service_worker_version_id) {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+service_manager::InterfaceProvider&
+ServiceWorkerContextAdapter::GetRemoteInterfaces(
+    int64_t service_worker_version_id) {
+  NOTIMPLEMENTED();
+  static service_manager::InterfaceProvider interface_provider(
+      base::ThreadTaskRunnerHandle::Get());
+  return interface_provider;
 }
 
 void ServiceWorkerContextAdapter::StartServiceWorkerAndDispatchMessage(

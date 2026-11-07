@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,12 +15,14 @@ std::unique_ptr<UserNoteMetadata> GetTestUserNoteMetadata() {
 }
 
 std::unique_ptr<UserNoteBody> GetTestUserNoteBody() {
-  return std::make_unique<UserNoteBody>("test note");
+  return std::make_unique<UserNoteBody>(u"test note");
 }
 
-std::unique_ptr<UserNoteTarget> GetTestUserNotePageTarget() {
-  return std::make_unique<UserNoteTarget>(UserNoteTarget::TargetType::PAGE, "",
-                                          GURL("www.exmaple.com"), "");
+std::unique_ptr<UserNoteTarget> GetTestUserNotePageTarget(
+    const std::string& url) {
+  return std::make_unique<UserNoteTarget>(UserNoteTarget::TargetType::kPage,
+                                          /*original_text=*/u"", GURL(url),
+                                          /*selector=*/"");
 }
 
 }  // namespace user_notes

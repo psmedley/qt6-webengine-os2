@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/no_destructor.h"
 #include "base/notreached.h"
 #include "base/strings/string_piece.h"
 #include "build/build_config.h"
@@ -34,9 +33,9 @@
 
 namespace {
 
-typedef void (*MojoGetSystemThunksFunction)(MojoSystemThunks64* thunks);
+typedef void (*MojoGetSystemThunksFunction)(MojoSystemThunks2* thunks);
 
-MojoSystemThunks64 g_thunks;
+MojoSystemThunks2 g_thunks;
 
 MojoResult NotImplemented(const char* name) {
   if (g_thunks.size > 0) {
@@ -54,9 +53,9 @@ MojoResult NotImplemented(const char* name) {
 
 }  // namespace
 
-#define INVOKE_THUNK(name, ...)                      \
-  offsetof(MojoSystemThunks64, name) < g_thunks.size \
-      ? g_thunks.name(__VA_ARGS__)                   \
+#define INVOKE_THUNK(name, ...)                     \
+  offsetof(MojoSystemThunks2, name) < g_thunks.size \
+      ? g_thunks.name(__VA_ARGS__)                  \
       : NotImplemented(#name)
 
 namespace mojo {
@@ -153,9 +152,7 @@ class CoreLibraryInitializer {
 extern "C" {
 
 MojoResult MojoInitialize(const struct MojoInitializeOptions* options) {
-  static base::NoDestructor<mojo::CoreLibraryInitializer,
-                            base::AllowForTriviallyDestructibleType>
-      initializer;
+  static mojo::CoreLibraryInitializer initializer;
 
   base::StringPiece library_path_utf8;
   if (options) {
@@ -165,7 +162,7 @@ MojoResult MojoInitialize(const struct MojoInitializeOptions* options) {
                                           options->mojo_core_path_length);
   }
 
-  MojoResult load_result = initializer->LoadLibrary(
+  MojoResult load_result = initializer.LoadLibrary(
       base::FilePath::FromUTF8Unsafe(library_path_utf8));
   if (load_result != MOJO_RESULT_OK)
     return load_result;
@@ -863,7 +860,7 @@ MojoSystemThunks32 g_thunks_32 = {
 
 }  // extern "C"
 
-const MojoSystemThunks64* MojoEmbedderGetSystemThunks64() {
+const MojoSystemThunks2* MojoEmbedderGetSystemThunks2() {
   return &g_thunks;
 }
 
@@ -871,7 +868,7 @@ const MojoSystemThunks32* MojoEmbedderGetSystemThunks32() {
   return &g_thunks_32;
 }
 
-void MojoEmbedderSetSystemThunks(const MojoSystemThunks64* thunks) {
+void MojoEmbedderSetSystemThunks(const MojoSystemThunks2* thunks) {
   // Assume embedders will always use matching versions of the Mojo Core and
   // public APIs.
   DCHECK_EQ(thunks->size, sizeof(g_thunks));

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,9 +62,7 @@ CSSValue* StylePath::ComputedCSSValue() const {
       const_cast<StylePath*>(this), kTransformToAbsolute);
 }
 
-bool StylePath::operator==(const BasicShape& o) const {
-  if (!IsSameType(o))
-    return false;
+bool StylePath::IsEqualAssumingSameType(const BasicShape& o) const {
   const StylePath& other = To<StylePath>(o);
   return wind_rule_ == other.wind_rule_ && *byte_stream_ == *other.byte_stream_;
 }

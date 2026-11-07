@@ -21,30 +21,29 @@ TINT_INSTANTIATE_TYPEINFO(tint::ast::MultisampledTexture);
 namespace tint::ast {
 
 MultisampledTexture::MultisampledTexture(ProgramID pid,
+                                         NodeID nid,
                                          const Source& src,
                                          TextureDimension d,
                                          const Type* ty)
-    : Base(pid, src, d), type(ty) {
-  TINT_ASSERT(AST, type);
+    : Base(pid, nid, src, d), type(ty) {
+    TINT_ASSERT(AST, type);
 }
 
 MultisampledTexture::MultisampledTexture(MultisampledTexture&&) = default;
 
 MultisampledTexture::~MultisampledTexture() = default;
 
-std::string MultisampledTexture::FriendlyName(
-    const SymbolTable& symbols) const {
-  std::ostringstream out;
-  out << "texture_multisampled_" << dim << "<" << type->FriendlyName(symbols)
-      << ">";
-  return out.str();
+std::string MultisampledTexture::FriendlyName(const SymbolTable& symbols) const {
+    std::ostringstream out;
+    out << "texture_multisampled_" << dim << "<" << type->FriendlyName(symbols) << ">";
+    return out.str();
 }
 
 const MultisampledTexture* MultisampledTexture::Clone(CloneContext* ctx) const {
-  // Clone arguments outside of create() call to have deterministic ordering
-  auto src = ctx->Clone(source);
-  auto* ty = ctx->Clone(type);
-  return ctx->dst->create<MultisampledTexture>(src, dim, ty);
+    // Clone arguments outside of create() call to have deterministic ordering
+    auto src = ctx->Clone(source);
+    auto* ty = ctx->Clone(type);
+    return ctx->dst->create<MultisampledTexture>(src, dim, ty);
 }
 
 }  // namespace tint::ast

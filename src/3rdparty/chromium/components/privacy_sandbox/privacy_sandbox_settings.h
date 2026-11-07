@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
-#include "components/content_settings/core/common/content_settings.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/privacy_sandbox/canonical_topic.h"
@@ -17,6 +16,7 @@
 
 class HostContentSettingsMap;
 class PrefService;
+class GURL;
 
 namespace content_settings {
 class CookieSettings;
@@ -48,6 +48,10 @@ class PrivacySandboxSettings : public KeyedService {
     // TODO(crbug.com/1304132): Unify this so Trust Tokens only need to consult
     // a single source of truth.
     virtual void OnTrustTokenBlockingChanged(bool blocked) {}
+
+    // Fired when the First-Party Sets changes to being `enabled` as a result of
+    // the kPrivacySandboxFirstPartySets preference changing.
+    virtual void OnFirstPartySetsEnabledChanged(bool enabled) {}
   };
 
   class Delegate {
@@ -59,12 +63,6 @@ class PrivacySandboxSettings : public KeyedService {
     // consulted on every access check, and it is acceptable for this to change
     // return value over the life of the service.
     virtual bool IsPrivacySandboxRestricted() = 0;
-
-    // Allows the delegate to express the concept of confirmation, e.g. a notice
-    // or consent, required before Privacy Sandbox operation can occur. This is
-    // checked on every access check, and must return true for Privacy Sandbox
-    // APIs to run.
-    virtual bool IsPrivacySandboxConfirmed() = 0;
   };
 
   PrivacySandboxSettings(
@@ -109,20 +107,19 @@ class PrivacySandboxSettings : public KeyedService {
   // future, in which case no history is eligible.
   base::Time TopicsDataAccessibleSince() const;
 
-  // Determines whether Conversion Measurement is allowable in a particular
-  // context. Should be called at both impression & conversion. At each of these
-  // points |top_frame_origin| is the same as either the impression origin or
-  // the conversion origin respectively.
-  bool IsConversionMeasurementAllowed(
-      const url::Origin& top_frame_origin,
-      const url::Origin& reporting_origin) const;
+  // Determines whether Attribution Reporting is allowable in a particular
+  // context. Should be called at both source and trigger registration. At each
+  // of these points |top_frame_origin| is the same as either the source origin
+  // or the destination origin respectively.
+  bool IsAttributionReportingAllowed(const url::Origin& top_frame_origin,
+                                     const url::Origin& reporting_origin) const;
 
-  // Called before sending the associated conversion report to
+  // Called before sending the associated attribution report to
   // |reporting_origin|. Re-checks that |reporting_origin| is allowable as a 3P
-  // on both |impression_origin| and |conversion_origin|.
-  bool ShouldSendConversionReport(const url::Origin& impression_origin,
-                                  const url::Origin& conversion_origin,
-                                  const url::Origin& reporting_origin) const;
+  // on both |source_origin| and |destination_origin|.
+  bool MaySendAttributionReport(const url::Origin& source_origin,
+                                const url::Origin& destination_origin,
+                                const url::Origin& reporting_origin) const;
 
   // Sets the ability for |top_frame_etld_plus1| to join the profile to interest
   // groups to |allowed|. This information is stored in preferences, and is made
@@ -155,12 +152,23 @@ class PrivacySandboxSettings : public KeyedService {
       const url::Origin& top_frame_origin,
       const std::vector<GURL>& auction_parties);
 
+  // Determines whether Shared Storage is allowable in a particular context.
+  // `top_frame_origin` can be the same as `accessing_origin` in the case of a
+  // top-level document calling Shared Storage.
+  bool IsSharedStorageAllowed(const url::Origin& top_frame_origin,
+                              const url::Origin& accessing_origin) const;
+
+  // Determines whether the Private Aggregation API is allowable in a particular
+  // context. `top_frame_origin` is the associated top-frame origin of the
+  // calling context.
+  bool IsPrivateAggregationAllowed(const url::Origin& top_frame_origin,
+                                   const url::Origin& reporting_origin) const;
+
   // Returns whether the profile has the Privacy Sandbox enabled. This consults
   // the main preference, as well as the delegate to check whether the sandbox
-  // is restricted, or has not been confirmed.  It does not consider any cookie
-  // settings. A return value of false means that no Privacy Sandbox operations
-  // can occur. A return value of true must be followed up with the appropriate
-  // IsXAllowed() call.
+  // is restricted. It does not consider any cookie settings. A return value of
+  // false means that no Privacy Sandbox operations can occur. A return value of
+  // true must be followed up with the appropriate IsXAllowed() call.
   bool IsPrivacySandboxEnabled() const;
 
   // Disables the Privacy Sandbox completely if |enabled| is false, if |enabled|
@@ -187,6 +195,9 @@ class PrivacySandboxSettings : public KeyedService {
   // Called when the main privacy sandbox preference is changed.
   void OnPrivacySandboxPrefChanged();
 
+  // Called when the First-Party Sets enabled preference is changed.
+  void OnFirstPartySetsEnabledPrefChanged();
+
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
@@ -204,8 +215,7 @@ class PrivacySandboxSettings : public KeyedService {
   // provided as a parameter to allow callers to cache it between calls.
   bool IsPrivacySandboxEnabledForContext(
       const GURL& url,
-      const absl::optional<url::Origin>& top_frame_origin,
-      const ContentSettingsForOneType& cookie_settings) const;
+      const absl::optional<url::Origin>& top_frame_origin) const;
 
   void SetTopicsDataAccessibleFromNow() const;
 

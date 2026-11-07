@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "base/metrics/histogram_functions.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
@@ -18,7 +19,9 @@
 #include "components/password_manager/core/browser/password_reuse_manager.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
 #include "components/password_manager/core/browser/password_sync_util.h"
+#include "components/password_manager/core/common/password_manager_features.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
+#include "components/sync/base/features.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_urls.h"
 
@@ -195,6 +198,35 @@ void ReportLoginsWithSchemesMetrics(
   LogNumberOfAccountsForScheme(suffix_for_store, "Other", other_logins);
 }
 
+void ReportPasswordNotesMetrics(
+    bool is_account_store,
+    const std::vector<std::unique_ptr<PasswordForm>>& forms) {
+  if (!base::FeatureList::IsEnabled(syncer::kPasswordNotesWithBackup)) {
+    return;
+  }
+
+  base::StringPiece suffix_for_store =
+      GetMetricsSuffixForStore(is_account_store);
+
+  int credentials_with_non_empty_notes_count =
+      base::ranges::count_if(forms, [](const auto& form) {
+        return base::ranges::any_of(
+            form->notes, [](const auto& note) { return !note.value.empty(); });
+      });
+
+  base::UmaHistogramCounts1000(
+      base::StrCat({kPasswordManager, suffix_for_store,
+                    ".PasswordNotes.CountCredentialsWithNonEmptyNotes"}),
+      credentials_with_non_empty_notes_count);
+
+  const std::string histogram_name =
+      base::StrCat({kPasswordManager, suffix_for_store,
+                    ".PasswordNotes.CountNotesPerCredential"});
+  base::ranges::for_each(forms, [histogram_name](const auto& form) {
+    base::UmaHistogramCounts100(histogram_name, form->notes.size());
+  });
+}
+
 void ReportTimesPasswordUsedMetrics(
     bool is_account_store,
     bool custom_passphrase_sync_enabled,
@@ -233,11 +265,11 @@ void ReportTimesPasswordUsedMetrics(
 void ReportSyncingAccountStateMetrics(
     const std::string& sync_username,
     const std::vector<std::unique_ptr<PasswordForm>>& forms) {
-  std::string signon_realm =
-      GaiaUrls::GetInstance()->gaia_url().DeprecatedGetOriginAsURL().spec();
+  const GURL gaia_signon_realm =
+      GaiaUrls::GetInstance()->gaia_origin().GetURL();
   bool syncing_account_saved = base::ranges::any_of(
-      forms, [&signon_realm, &sync_username](const auto& form) {
-        return signon_realm == form->signon_realm &&
+      forms, [&gaia_signon_realm, &sync_username](const auto& form) {
+        return gaia_signon_realm == GURL(form->signon_realm) &&
                gaia::AreEmailsSame(sync_username,
                                    base::UTF16ToUTF8(form->username_value));
       });
@@ -396,6 +428,15 @@ void ReportMultiStoreMetrics(
   }
 }
 
+void ReportBiometricAuthenticationBeforeFillingMetrics(PrefService* prefs) {
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+  base::UmaHistogramBoolean(
+      base::StrCat({kPasswordManager, ".BiometricAuthBeforeFillingEnabled"}),
+      prefs->GetBoolean(
+          password_manager::prefs::kBiometricAuthenticationBeforeFilling));
+#endif
+}
+
 }  // namespace
 
 StoreMetricsReporter::StoreMetricsReporter(
@@ -448,6 +489,8 @@ StoreMetricsReporter::StoreMetricsReporter(
   base::UmaHistogramBoolean(
       base::StrCat({kPasswordManager, ".Enabled3"}),
       prefs->GetBoolean(password_manager::prefs::kCredentialsEnableService));
+
+  ReportBiometricAuthenticationBeforeFillingMetrics(prefs);
 
   // May be null in tests.
   if (profile_store) {
@@ -526,6 +569,7 @@ void StoreMetricsReporter::ReportStoreMetrics(
   ReportLoginsWithSchemesMetrics(is_account_store, results);
   ReportTimesPasswordUsedMetrics(is_account_store,
                                  custom_passphrase_sync_enabled_, results);
+  ReportPasswordNotesMetrics(is_account_store, results);
 
   // The remaining metrics are not recorded for the account store:
   // - SyncingAccountState2 just doesn't make sense, since syncing users only

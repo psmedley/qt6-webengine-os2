@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,6 +42,7 @@ enum PermissionType {
   kContacts        = 5,
   kStorage         = 6,
   kPrinting        = 7,
+  kFileHandling    = 8,
 };
 
 enum TriState {
@@ -76,6 +77,8 @@ enum InstallReason {
   kSync,       // Installed by sync.
   kUser,       // Installed by user action.
   kSubApp,     // Installed by the SubApp API call.
+  kKiosk,      // Installed by Kiosk on Chrome OS.
+  kCommandLine,     // Installed by the command line argument.
 };
 
 // Where the app was installed from.
@@ -143,11 +146,15 @@ struct App {
   bool hide_pin_to_shelf;
   bool is_preferred_app;
   WindowMode window_mode;
+  bool hide_window_mode;
   bool resize_locked;
   bool hide_resize_locked;
   array<string> supported_links;
   RunOnOsLogin? run_on_os_login;
   FileHandlingState? file_handling_state;
+  string? app_size;
+  string? data_size;
+  string publisher_id;
 };
 
 // Extension-based apps primarily use install-time permissions that cannot be

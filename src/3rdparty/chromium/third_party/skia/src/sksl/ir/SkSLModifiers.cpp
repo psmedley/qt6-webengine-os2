@@ -7,13 +7,17 @@
 
 #include "include/private/SkSLModifiers.h"
 
+#include "include/core/SkTypes.h"
 #include "include/sksl/SkSLErrorReporter.h"
+#include "include/sksl/SkSLPosition.h"
 #include "src/sksl/SkSLContext.h"
 
 namespace SkSL {
 
-bool Modifiers::checkPermitted(const Context& context, Position pos, int permittedModifierFlags,
-        int permittedLayoutFlags) const {
+bool Modifiers::checkPermitted(const Context& context,
+                               Position pos,
+                               int permittedModifierFlags,
+                               int permittedLayoutFlags) const {
     static constexpr struct { Modifiers::Flag flag; const char* name; } kModifierFlags[] = {
         { Modifiers::kConst_Flag,          "const" },
         { Modifiers::kIn_Flag,             "in" },
@@ -21,13 +25,18 @@ bool Modifiers::checkPermitted(const Context& context, Position pos, int permitt
         { Modifiers::kUniform_Flag,        "uniform" },
         { Modifiers::kFlat_Flag,           "flat" },
         { Modifiers::kNoPerspective_Flag,  "noperspective" },
-        { Modifiers::kHasSideEffects_Flag, "sk_has_side_effects" },
+        { Modifiers::kPure_Flag,           "$pure" },
         { Modifiers::kInline_Flag,         "inline" },
         { Modifiers::kNoInline_Flag,       "noinline" },
         { Modifiers::kHighp_Flag,          "highp" },
         { Modifiers::kMediump_Flag,        "mediump" },
         { Modifiers::kLowp_Flag,           "lowp" },
+        { Modifiers::kExport_Flag,         "$export" },
         { Modifiers::kES3_Flag,            "$es3" },
+        { Modifiers::kThreadgroup_Flag,    "threadgroup" },
+        { Modifiers::kReadOnly_Flag,       "readonly" },
+        { Modifiers::kWriteOnly_Flag,      "writeonly" },
+        { Modifiers::kBuffer_Flag,         "buffer" },
     };
 
     bool success = true;

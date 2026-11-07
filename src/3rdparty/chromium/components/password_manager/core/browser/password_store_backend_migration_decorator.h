@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,8 +30,7 @@ class PasswordStoreBackendMigrationDecorator : public PasswordStoreBackend {
   PasswordStoreBackendMigrationDecorator(
       std::unique_ptr<PasswordStoreBackend> built_in_backend,
       std::unique_ptr<PasswordStoreBackend> android_backend,
-      PrefService* prefs,
-      SyncDelegate* sync_delegate);
+      PrefService* prefs);
   PasswordStoreBackendMigrationDecorator(
       const PasswordStoreBackendMigrationDecorator&) = delete;
   PasswordStoreBackendMigrationDecorator(
@@ -57,23 +56,24 @@ class PasswordStoreBackendMigrationDecorator : public PasswordStoreBackend {
     // Clears cached prefs when they are not needed anymore.
     void ResetCachedPrefs();
 
+    void set_migrator(BuiltInBackendToAndroidBackendMigrator* migrator) {
+      migrator_ = migrator;
+    }
+
    private:
     // syncer::SyncServiceObserver implementation.
     void OnStateChanged(syncer::SyncService* sync) override;
-
-    // Updates migration prefs to indicate that migration is needed because
-    // of password sync settings change and caches old pref values in case the
-    // user will change settings multiple times.
-    void UpdatePrefsToTriggerMigration();
-
-    // Restore prefs if the user changed the setting back and forth.
-    void RestoreMigrationPrefsFromCacheIfNeeded();
+    void OnSyncCycleCompleted(syncer::SyncService* sync) override;
 
     // Pref service.
     const raw_ptr<PrefService> prefs_ = nullptr;
 
     // Set when sync_service is already initialized and can be interacted with.
-    raw_ptr<syncer::SyncService> sync_service_ = nullptr;
+    raw_ptr<const syncer::SyncService> sync_service_ = nullptr;
+
+    // Migrator object to use in case observed sync service events should
+    // trigger migration.
+    raw_ptr<BuiltInBackendToAndroidBackendMigrator> migrator_ = nullptr;
 
     // Cached value of the configured password sync setting. Updated when the
     // user is changing sync settings, and may from
@@ -85,15 +85,8 @@ class PasswordStoreBackendMigrationDecorator : public PasswordStoreBackend {
     // changing sync settings. Updated when new settings take action.
     bool password_sync_applied_setting_ = false;
 
-    // Cached value of last migration version pref. May be used to restore the
-    // previously reset prefs when user changes settings multiple times before
-    // applying them.
-    absl::optional<int> last_migration_version_setting_;
-
-    // Cached value of last migration attempt time pref. May be used to restore
-    // the previously reset prefs when user changes settings multiple times
-    // before applying them.
-    absl::optional<double> last_migration_time_setting_;
+    // If the first sync cycle after the startup has completed.
+    bool is_waiting_for_the_first_sync_cycle_ = true;
   };
 
   // Implements PasswordStoreBackend interface.
@@ -106,25 +99,25 @@ class PasswordStoreBackendMigrationDecorator : public PasswordStoreBackend {
   void GetAllLoginsForAccountAsync(absl::optional<std::string> account,
                                    LoginsOrErrorReply callback) override;
   void FillMatchingLoginsAsync(
-      LoginsReply callback,
+      LoginsOrErrorReply callback,
       bool include_psl,
       const std::vector<PasswordFormDigest>& forms) override;
   void AddLoginAsync(const PasswordForm& form,
-                     PasswordStoreChangeListReply callback) override;
+                     PasswordChangesOrErrorReply callback) override;
   void UpdateLoginAsync(const PasswordForm& form,
-                        PasswordStoreChangeListReply callback) override;
+                        PasswordChangesOrErrorReply callback) override;
   void RemoveLoginAsync(const PasswordForm& form,
-                        PasswordStoreChangeListReply callback) override;
+                        PasswordChangesOrErrorReply callback) override;
   void RemoveLoginsByURLAndTimeAsync(
       const base::RepeatingCallback<bool(const GURL&)>& url_filter,
       base::Time delete_begin,
       base::Time delete_end,
       base::OnceCallback<void(bool)> sync_completion,
-      PasswordStoreChangeListReply callback) override;
+      PasswordChangesOrErrorReply callback) override;
   void RemoveLoginsCreatedBetweenAsync(
       base::Time delete_begin,
       base::Time delete_end,
-      PasswordStoreChangeListReply callback) override;
+      PasswordChangesOrErrorReply callback) override;
   void DisableAutoSignInForOriginsAsync(
       const base::RepeatingCallback<bool(const GURL&)>& origin_filter,
       base::OnceClosure completion) override;
@@ -151,9 +144,7 @@ class PasswordStoreBackendMigrationDecorator : public PasswordStoreBackend {
 
   const raw_ptr<PrefService> prefs_ = nullptr;
 
-  // |sync_delegate| lives inside |android_backend|. So it should always be
-  // destroyed before |android_backend_|.
-  const raw_ptr<SyncDelegate> sync_delegate_;
+  raw_ptr<const syncer::SyncService> sync_service_ = nullptr;
 
   std::unique_ptr<BuiltInBackendToAndroidBackendMigrator> migrator_;
 

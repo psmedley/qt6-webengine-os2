@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/callback_helpers.h"
 #include "base/containers/span.h"
 #include "base/notreached.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "net/base/net_errors.h"
 #include "third_party/blink/public/mojom/direct_sockets/direct_sockets.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits.h"
@@ -19,6 +20,7 @@
 #include "third_party/blink/renderer/core/streams/readable_stream.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_piece.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
+#include "third_party/blink/renderer/modules/direct_sockets/stream_wrapper.h"
 #include "third_party/blink/renderer/modules/direct_sockets/udp_writable_stream_wrapper.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -73,13 +75,9 @@ class StreamCreator : public GarbageCollected<StreamCreator> {
 
     auto* script_state = scope.GetScriptState();
     stream_wrapper_ = MakeGarbageCollected<UDPReadableStreamWrapper>(
-        script_state, udp_socket,
-        WTF::Bind(&StreamCreator::Close, WrapPersistent(this)),
-        /*high_water_mark=*/1);
+        script_state, base::DoNothing(), udp_socket);
     return stream_wrapper_;
   }
-
-  void Close(bool error) { stream_wrapper_->CloseStream(error); }
 
   void Trace(Visitor* visitor) const { visitor->Trace(stream_wrapper_); }
 
@@ -257,7 +255,7 @@ TEST(UDPReadableStreamWrapperTest, CancelStreamFromReader) {
   EXPECT_FALSE(message);
 }
 
-TEST(UDPReadableStreamWrapperTest, CancelStreamFromWrapper) {
+TEST(UDPReadableStreamWrapperTest, ReadRejectsOnError) {
   V8TestingScope scope;
 
   auto* stream_creator = MakeGarbageCollected<StreamCreator>();
@@ -273,18 +271,12 @@ TEST(UDPReadableStreamWrapperTest, CancelStreamFromWrapper) {
       udp_readable_stream_wrapper->Readable()->GetDefaultReaderForTesting(
           script_state, ASSERT_NO_EXCEPTION);
 
-  udp_readable_stream_wrapper->CloseStream(/*error=*/false);
+  udp_readable_stream_wrapper->ErrorStream(net::ERR_UNEXPECTED);
 
   ScriptPromiseTester read_tester(
       script_state, reader->read(script_state, ASSERT_NO_EXCEPTION));
   read_tester.WaitUntilSettled();
-  EXPECT_TRUE(read_tester.IsFulfilled());
-
-  auto [message, done] =
-      UnpackPromiseResult(scope, read_tester.Value().V8Value());
-
-  EXPECT_TRUE(done);
-  EXPECT_FALSE(message);
+  EXPECT_TRUE(read_tester.IsRejected());
 }
 
 }  // namespace

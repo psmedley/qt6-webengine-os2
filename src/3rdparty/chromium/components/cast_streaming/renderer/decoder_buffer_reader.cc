@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,14 @@ DecoderBufferReader::DecoderBufferReader(
       mojo_buffer_reader_(std::move(data_pipe)),
       weak_factory_(this) {
   DCHECK(new_buffer_cb_);
+}
+
+DecoderBufferReader::DecoderBufferReader(
+    DecoderBufferReader&& other,
+    mojo::ScopedDataPipeConsumerHandle data_pipe)
+    : DecoderBufferReader(std::move(other.new_buffer_cb_),
+                          std::move(data_pipe)) {
+  is_read_pending_ = other.is_read_pending_;
 }
 
 DecoderBufferReader::~DecoderBufferReader() = default;

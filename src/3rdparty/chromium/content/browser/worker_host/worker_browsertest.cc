@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #include "base/callback.h"
 #include "base/check.h"
 #include "base/path_service.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
@@ -38,7 +39,6 @@
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "content/test/content_browser_test_utils_internal.h"
-#include "net/base/escape.h"
 #include "net/base/features.h"
 #include "net/base/filename_util.h"
 #include "net/cookies/canonical_cookie.h"
@@ -349,7 +349,7 @@ IN_PROC_BROWSER_TEST_P(WorkerTestWithAllowFileAccessFromFiles,
 IN_PROC_BROWSER_TEST_P(WorkerTest, HttpPageCantCreateFileWorker) {
   GURL url = GetTestURL(
       "single_worker.html",
-      "workerUrl=" + net::EscapeQueryParamValue(
+      "workerUrl=" + base::EscapeQueryParamValue(
                          GetTestFileURL("worker_common.js").spec(), true));
   RunTest(url, /*expect_failure=*/true);
 }
@@ -374,7 +374,7 @@ IN_PROC_BROWSER_TEST_P(WorkerTest, SharedWorkerInCOEPRequireCorpDocument) {
   EXPECT_TRUE(NavigateToURL(
       shell(), ssl_server()->GetURL("a.test", "/cross-origin-isolated.html")));
   RenderFrameHostImpl* page_rfh = static_cast<RenderFrameHostImpl*>(
-      shell()->web_contents()->GetMainFrame());
+      shell()->web_contents()->GetPrimaryMainFrame());
   auto page_lock =
       ProcessLock::FromSiteInfo(page_rfh->GetSiteInstance()->GetSiteInfo());
   EXPECT_TRUE(page_lock.GetWebExposedIsolationInfo().is_isolated());
@@ -461,7 +461,7 @@ IN_PROC_BROWSER_TEST_P(WorkerTest, SharedWorkerInCOEPCredentiallessDocument) {
       shell(), ssl_server()->GetURL(
                    "a.test", "/cross-origin-isolated-credentialless.html")));
   RenderFrameHostImpl* page_rfh = static_cast<RenderFrameHostImpl*>(
-      shell()->web_contents()->GetMainFrame());
+      shell()->web_contents()->GetPrimaryMainFrame());
   auto page_lock =
       ProcessLock::FromSiteInfo(page_rfh->GetSiteInstance()->GetSiteInfo());
   EXPECT_TRUE(page_lock.GetWebExposedIsolationInfo().is_isolated());
@@ -580,7 +580,7 @@ IN_PROC_BROWSER_TEST_P(WorkerTest, WorkerTlsClientAuthImportScripts) {
   RunTest(GetTestURL(
       "worker_tls_client_auth.html",
       "test=import&url=" +
-          net::EscapeQueryParamValue(https_server.GetURL("/").spec(), true)));
+          base::EscapeQueryParamValue(https_server.GetURL("/").spec(), true)));
   EXPECT_EQ(1, select_certificate_count());
 }
 
@@ -598,7 +598,7 @@ IN_PROC_BROWSER_TEST_P(WorkerTest, WorkerTlsClientAuthFetch) {
   RunTest(GetTestURL(
       "worker_tls_client_auth.html",
       "test=fetch&url=" +
-          net::EscapeQueryParamValue(https_server.GetURL("/").spec(), true)));
+          base::EscapeQueryParamValue(https_server.GetURL("/").spec(), true)));
   EXPECT_EQ(1, select_certificate_count());
 }
 
@@ -620,7 +620,7 @@ IN_PROC_BROWSER_TEST_P(WorkerTest, SharedWorkerTlsClientAuthImportScripts) {
   RunTest(GetTestURL(
       "worker_tls_client_auth.html",
       "test=import&shared=true&url=" +
-          net::EscapeQueryParamValue(https_server.GetURL("/").spec(), true)));
+          base::EscapeQueryParamValue(https_server.GetURL("/").spec(), true)));
   EXPECT_EQ(0, select_certificate_count());
 }
 
@@ -808,7 +808,7 @@ IN_PROC_BROWSER_TEST_P(WorkerTest,
 
   const char kSubframeName[] = "foo";
   EvalJsResult result = EvalJs(
-      shell()->web_contents()->GetMainFrame(),
+      shell()->web_contents()->GetPrimaryMainFrame(),
       JsReplace(
           "createFrame($1, $2)",
           ssl_server()
@@ -850,7 +850,7 @@ IN_PROC_BROWSER_TEST_P(WorkerTest,
 
   const char kSubframeName[] = "foo";
   EvalJsResult result = EvalJs(
-      shell()->web_contents()->GetMainFrame(),
+      shell()->web_contents()->GetPrimaryMainFrame(),
       JsReplace(
           "createFrame($1, $2)",
           ssl_server()
@@ -934,7 +934,7 @@ IN_PROC_BROWSER_TEST_P(WorkerFromAnonymousIframeNikBrowserTest,
     EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
     RenderFrameHostImpl* main_rfh = static_cast<RenderFrameHostImpl*>(
-        shell()->web_contents()->GetMainFrame());
+        shell()->web_contents()->GetPrimaryMainFrame());
 
     // Create an iframe.
     EXPECT_TRUE(ExecJs(main_rfh,
@@ -946,20 +946,21 @@ IN_PROC_BROWSER_TEST_P(WorkerFromAnonymousIframeNikBrowserTest,
     WaitForLoadStop(shell()->web_contents());
     EXPECT_EQ(1U, main_rfh->child_count());
     RenderFrameHostImpl* iframe = main_rfh->child_at(0)->current_frame_host();
-    EXPECT_EQ(anonymous, iframe->anonymous());
-    EXPECT_EQ(anonymous, EvalJs(iframe, "window.anonymous"));
+    EXPECT_EQ(anonymous, iframe->IsAnonymous());
+    EXPECT_EQ(anonymous, EvalJs(iframe, "window.anonymouslyFramed"));
     ResetNetworkState();
 
     GURL worker_url = embedded_test_server()->GetURL("/workers/worker.js");
 
-    // Preconnect a socket with the NetworkIsolationKey of the main frame.
+    // Preconnect a socket with the NetworkAnonymizationKey of the main frame.
     shell()
         ->web_contents()
         ->GetBrowserContext()
         ->GetDefaultStoragePartition()
         ->GetNetworkContext()
         ->PreconnectSockets(1, worker_url.DeprecatedGetOriginAsURL(), true,
-                            main_rfh->GetNetworkIsolationKey());
+                            main_rfh->GetIsolationInfoForSubresources()
+                                .network_anonymization_key());
 
     connection_tracker_->WaitForAcceptedConnections(1);
     EXPECT_EQ(1u, connection_tracker_->GetAcceptedSocketCount());

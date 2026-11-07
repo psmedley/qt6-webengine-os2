@@ -69,7 +69,7 @@ sk_sp<GrD3DAttachment> GrD3DAttachment::MakeStencil(GrD3DGpu* gpu,
                                                       format, resourceDesc, info,
                                                       std::move(state),
                                                       view,
-                                                      /*label=*/{}));
+                                                      /*label=*/"D3DAttachment_MakeStencil"));
 }
 
 void GrD3DAttachment::onRelease() {
@@ -89,4 +89,12 @@ void GrD3DAttachment::onAbandon() {
 GrD3DGpu* GrD3DAttachment::getD3DGpu() const {
     SkASSERT(!this->wasDestroyed());
     return static_cast<GrD3DGpu*>(this->getGpu());
+}
+
+void GrD3DAttachment::onSetLabel() {
+    SkASSERT(this->d3dResource());
+    if (!this->getLabel().empty()) {
+        const std::wstring label = L"_Skia_" + GrD3DMultiByteToWide(this->getLabel());
+        this->d3dResource()->SetName(label.c_str());
+    }
 }

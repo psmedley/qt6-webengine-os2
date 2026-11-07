@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,8 @@
 #include "base/rand_util.h"
 #include "base/ranges/algorithm.h"
 #include "base/values.h"
-#include "net/base/address_list.h"
+#include "net/base/ip_address.h"
+#include "net/base/ip_endpoint.h"
 #include "net/dns/address_sorter.h"
 #include "net/dns/dns_session.h"
 #include "net/dns/dns_transaction.h"
@@ -175,7 +176,7 @@ class DnsClientImpl : public DnsClient {
     return &config->hosts;
   }
 
-  absl::optional<AddressList> GetPresetAddrs(
+  absl::optional<std::vector<IPEndPoint>> GetPresetAddrs(
       const url::SchemeHostPort& endpoint) const override {
     DCHECK(endpoint.IsValid());
     if (!session_)
@@ -191,8 +192,13 @@ class DnsClientImpl : public DnsClient {
     });
     if (it == servers.end())
       return absl::nullopt;
-    // TODO(crbug.com/1200908): Read preset IPs from the server config.
-    return absl::nullopt;
+    std::vector<IPEndPoint> combined;
+    for (const IPAddressList& ips : it->endpoints()) {
+      for (const IPAddress& ip : ips) {
+        combined.emplace_back(ip, endpoint.port());
+      }
+    }
+    return combined;
   }
 
   DnsTransactionFactory* GetTransactionFactory() override {
@@ -288,8 +294,9 @@ class DnsClientImpl : public DnsClient {
     if (new_effective_config) {
       DCHECK(new_effective_config.value().IsValid());
 
-      session_ = new DnsSession(std::move(new_effective_config).value(),
-                                rand_int_callback_, net_log_);
+      session_ = base::MakeRefCounted<DnsSession>(
+          std::move(new_effective_config).value(), rand_int_callback_,
+          net_log_);
       factory_ = DnsTransactionFactory::CreateFactory(session_.get());
     }
   }

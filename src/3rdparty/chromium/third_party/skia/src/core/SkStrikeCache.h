@@ -16,8 +16,8 @@
 #include "include/private/SkTemplates.h"
 #include "src/core/SkDescriptor.h"
 #include "src/core/SkScalerCache.h"
-#include "src/core/SkStrikeForGPU.h"
 #include "src/core/SkStrikeSpec.h"
+#include "src/text/StrikeForGPU.h"
 
 class SkTraceMemoryDump;
 class SkStrikeCache;
@@ -36,9 +36,10 @@ class SkStrikePinner {
 public:
     virtual ~SkStrikePinner() = default;
     virtual bool canDelete() = 0;
+    virtual void assertValid() {}
 };
 
-class SkStrike final : public SkRefCnt, public SkStrikeForGPU {
+class SkStrike final : public SkRefCnt, public sktext::StrikeForGPU {
 public:
     SkStrike(SkStrikeCache* strikeCache,
              const SkStrikeSpec& strikeSpec,
@@ -128,23 +129,30 @@ public:
     }
 
     void verifyPinnedStrike() const {
-        SkASSERT_RELEASE(fPinner == nullptr || !fPinner->canDelete());
+        if (fPinner != nullptr) {
+            fPinner->assertValid();
+        }
     }
 
 #if SK_SUPPORT_GPU
-    sk_sp<GrTextStrike> findOrCreateGrStrike(GrStrikeCache* grStrikeCache) const;
+    sk_sp<sktext::gpu::TextStrike> findOrCreateTextStrike(
+            sktext::gpu::StrikeCache* gpuStrikeCache) const;
 #endif
 
-    void prepareForMaskDrawing(
-            SkDrawableGlyphBuffer* accepted, SkSourceGlyphBuffer* rejected) override {
-        size_t increase = fScalerCache.prepareForMaskDrawing(accepted, rejected);
+    SkRect prepareForMaskDrawing(SkDrawableGlyphBuffer* accepted,
+                                 SkSourceGlyphBuffer* rejected) override {
+        auto [rect, increase] = fScalerCache.prepareForMaskDrawing(accepted, rejected);
         this->updateDelta(increase);
+        return rect;
     }
 
-    void prepareForSDFTDrawing(
-            SkDrawableGlyphBuffer* accepted, SkSourceGlyphBuffer* rejected) override {
-        size_t increase = fScalerCache.prepareForSDFTDrawing(accepted, rejected);
+    SkRect prepareForSDFTDrawing(SkScalar strikeToSourceScale,
+                                 SkDrawableGlyphBuffer* accepted,
+                                 SkSourceGlyphBuffer* rejected) override {
+        auto [rect, increase] = fScalerCache.prepareForSDFTDrawing(
+                strikeToSourceScale, accepted, rejected);
         this->updateDelta(increase);
+        return rect;
     }
 
     void prepareForPathDrawing(
@@ -153,10 +161,30 @@ public:
         this->updateDelta(increase);
     }
 
+    void glyphIDsToPaths(SkSpan<sktext::IDOrPath> idsOrPaths) {
+        size_t increase = fScalerCache.glyphIDsToPaths(idsOrPaths);
+        this->updateDelta(increase);
+    }
+
     void prepareForDrawableDrawing(
             SkDrawableGlyphBuffer* accepted, SkSourceGlyphBuffer* rejected) override {
         size_t increase = fScalerCache.prepareForDrawableDrawing(accepted, rejected);
         this->updateDelta(increase);
+    }
+
+    void glyphIDsToDrawables(SkSpan<sktext::IDOrDrawable> idsOrDrawables) {
+        size_t increase = fScalerCache.glyphIDsToDrawables(idsOrDrawables);
+        this->updateDelta(increase);
+    }
+
+    sktext::SkStrikePromise strikePromise() override {
+        return sktext::SkStrikePromise(sk_ref_sp<SkStrike>(this));
+    }
+
+    SkScalar findMaximumGlyphDimension(SkSpan<const SkGlyphID> glyphs) override {
+        auto [maxDimension, increase] = fScalerCache.findMaximumGlyphDimension(glyphs);
+        this->updateDelta(increase);
+        return maxDimension;
     }
 
     void onAboutToExitScope() override {
@@ -179,7 +207,7 @@ public:
     bool                            fRemoved{false};
 };  // SkStrike
 
-class SkStrikeCache final : public SkStrikeForGPUCacheInterface {
+class SkStrikeCache final : public sktext::StrikeForGPUCacheInterface {
 public:
     SkStrikeCache() = default;
 
@@ -194,7 +222,7 @@ public:
 
     sk_sp<SkStrike> findOrCreateStrike(const SkStrikeSpec& strikeSpec) SK_EXCLUDES(fLock);
 
-    SkScopedStrikeForGPU findOrCreateScopedStrike(
+    sktext::ScopedStrikeForGPU findOrCreateScopedStrike(
             const SkStrikeSpec& strikeSpec) override SK_EXCLUDES(fLock);
 
     static void PurgeAll();

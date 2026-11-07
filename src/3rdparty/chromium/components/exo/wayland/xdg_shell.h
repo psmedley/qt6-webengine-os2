@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define COMPONENTS_EXO_WAYLAND_XDG_SHELL_H_
 
 #include <stdint.h>
+#include <memory>
 
 struct wl_client;
 struct wl_resource;
@@ -14,6 +15,7 @@ namespace exo {
 class Display;
 class ShellSurfaceBase;
 class ShellSurface;
+class XdgShellSurface;
 
 namespace wayland {
 class SerialTracker;
@@ -29,6 +31,21 @@ struct WaylandXdgShell {
   Display* const display;
 
   // Owned by Server, which always outlives xdg_shell.
+  SerialTracker* const serial_tracker;
+};
+
+struct WaylandXdgSurface {
+  WaylandXdgSurface(std::unique_ptr<XdgShellSurface> shell_surface,
+                    SerialTracker* const serial_tracker);
+
+  ~WaylandXdgSurface();
+
+  WaylandXdgSurface(const WaylandXdgSurface&) = delete;
+  WaylandXdgSurface& operator=(const WaylandXdgSurface&) = delete;
+
+  std::unique_ptr<XdgShellSurface> shell_surface;
+
+  // Owned by Server, which always outlives this surface.
   SerialTracker* const serial_tracker;
 };
 

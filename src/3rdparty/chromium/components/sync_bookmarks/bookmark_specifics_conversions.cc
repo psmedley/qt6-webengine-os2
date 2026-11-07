@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,8 +20,10 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node.h"
+#include "components/bookmarks/common/bookmark_metrics.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/sync/base/unique_position.h"
 #include "components/sync/protocol/bookmark_specifics.pb.h"
@@ -298,6 +300,10 @@ sync_pb::EntitySpecifics CreateSpecificsFromBookmarkNode(
   bm_specifics->set_creation_time_us(
       node->date_added().ToDeltaSinceWindowsEpoch().InMicroseconds());
   *bm_specifics->mutable_unique_position() = unique_position;
+  if (!node->is_folder() && node->date_last_used() != base::Time()) {
+    bm_specifics->set_last_used_time_us(
+        node->date_last_used().ToDeltaSinceWindowsEpoch().InMicroseconds());
+  }
 
   if (node->GetMetaInfoMap()) {
     UpdateBookmarkSpecificsMetaInfo(node->GetMetaInfoMap(), bm_specifics);
@@ -346,6 +352,7 @@ const bookmarks::BookmarkNode* CreateBookmarkNodeFromSpecifics(
   DCHECK(model);
   DCHECK(favicon_service);
   DCHECK(IsValidBookmarkSpecifics(specifics));
+  TRACE_EVENT0("sync", "CreateBookmarkNodeFromSpecifics");
 
   const base::GUID guid = base::GUID::ParseLowercase(specifics.guid());
   DCHECK(guid.is_valid());
@@ -372,6 +379,15 @@ const bookmarks::BookmarkNode* CreateBookmarkNodeFromSpecifics(
       const bookmarks::BookmarkNode* node =
           model->AddURL(parent, index, NodeTitleFromSpecifics(specifics),
                         GURL(specifics.url()), &metainfo, creation_time, guid);
+      if (specifics.has_last_used_time_us()) {
+        const int64_t last_used_time_us = specifics.last_used_time_us();
+        const base::Time last_used_time =
+            base::Time::FromDeltaSinceWindowsEpoch(
+                // Use FromDeltaSinceWindowsEpoch because last_used_time_us has
+                // always used the Windows epoch.
+                base::Microseconds(last_used_time_us));
+        model->UpdateLastUsedTime(node, last_used_time);
+      }
       SetBookmarkFaviconFromSpecifics(specifics, node, favicon_service);
       return node;
     }
@@ -398,12 +414,23 @@ void UpdateBookmarkNodeFromSpecifics(
   base::GUID guid = base::GUID::ParseLowercase(specifics.guid());
   DCHECK(!guid.is_valid() || guid == node->guid());
 
-  model->SetTitle(node, NodeTitleFromSpecifics(specifics));
+  model->SetTitle(node, NodeTitleFromSpecifics(specifics),
+                  bookmarks::metrics::BookmarkEditSource::kOther);
   model->SetNodeMetaInfoMap(node, GetBookmarkMetaInfo(specifics));
 
   if (!node->is_folder()) {
-    model->SetURL(node, GURL(specifics.url()));
+    model->SetURL(node, GURL(specifics.url()),
+                  bookmarks::metrics::BookmarkEditSource::kOther);
     SetBookmarkFaviconFromSpecifics(specifics, node, favicon_service);
+
+    if (specifics.has_last_used_time_us()) {
+      const int64_t last_used_time_us = specifics.last_used_time_us();
+      const base::Time last_used_time = base::Time::FromDeltaSinceWindowsEpoch(
+          // Use FromDeltaSinceWindowsEpoch because last_used_time_us has
+          // always used the Windows epoch.
+          base::Microseconds(last_used_time_us));
+      model->UpdateLastUsedTime(node, last_used_time);
+    }
   }
 }
 
@@ -438,13 +465,14 @@ const bookmarks::BookmarkNode* ReplaceBookmarkNodeGUID(
   const bookmarks::BookmarkNode* new_node = nullptr;
   if (node->is_folder()) {
     new_node = model->AddFolder(
-        node->parent(), node->parent()->GetIndexOf(node), node->GetTitle(),
-        node->GetMetaInfoMap(), node->date_added(), guid);
+        node->parent(), node->parent()->GetIndexOf(node).value(),
+        node->GetTitle(), node->GetMetaInfoMap(), node->date_added(), guid);
     MoveAllChildren(model, node, new_node);
   } else {
-    new_node = model->AddURL(node->parent(), node->parent()->GetIndexOf(node),
-                             node->GetTitle(), node->url(),
-                             node->GetMetaInfoMap(), node->date_added(), guid);
+    new_node =
+        model->AddURL(node->parent(), node->parent()->GetIndexOf(node).value(),
+                      node->GetTitle(), node->url(), node->GetMetaInfoMap(),
+                      node->date_added(), guid);
   }
 
   model->Remove(node);

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -367,7 +367,7 @@ void MediaNotificationViewImpl::GetAccessibleNodeData(
           IDS_MEDIA_MESSAGE_CENTER_MEDIA_NOTIFICATION_ACCESSIBLE_NAME));
 
   if (!accessible_name_.empty())
-    node_data->SetName(accessible_name_);
+    node_data->SetNameChecked(accessible_name_);
 }
 
 void MediaNotificationViewImpl::UpdateWithMediaSessionInfo(
@@ -406,6 +406,7 @@ void MediaNotificationViewImpl::UpdateWithMediaMetadata(
       metadata.source_title.empty() ? default_app_name_ : metadata.source_title;
 
   if (header_row_) {
+    header_row_->SetAppNameElideBehavior(gfx::ELIDE_HEAD);
     header_row_->SetAppName(app_name);
     header_row_->SetSummaryText(metadata.album);
   } else {

@@ -24,6 +24,7 @@
 #include "third_party/blink/public/common/loader/referrer_utils.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/renderer/core/css/css_markup.h"
+#include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -91,7 +92,7 @@ FetchParameters CSSImageValue::PrepareFetch(
     resource_request.SetIsAdResource();
   ExecutionContext* execution_context = document.GetExecutionContext();
   ResourceLoaderOptions options(execution_context->GetCurrentWorld());
-  options.initiator_info.name = initiator_name_.IsEmpty()
+  options.initiator_info.name = initiator_name_.empty()
                                     ? fetch_initiator_type_names::kCSS
                                     : initiator_name_;
   if (referrer_.referrer != Referrer::ClientReferrerString())
@@ -104,7 +105,8 @@ FetchParameters CSSImageValue::PrepareFetch(
   }
 
   bool is_lazily_loaded =
-      image_request_behavior == FetchParameters::kDeferImageLoad &&
+      image_request_behavior ==
+          FetchParameters::ImageRequestBehavior::kDeferImageLoad &&
       // Only http/https images are eligible to be lazily loaded.
       params.Url().ProtocolIsInHTTPFamily();
   if (is_lazily_loaded)
@@ -121,15 +123,13 @@ StyleImage* CSSImageValue::CacheImage(
     FetchParameters::ImageRequestBehavior image_request_behavior,
     CrossOriginAttributeValue cross_origin) {
   if (!cached_image_) {
-    if (absolute_url_.IsEmpty())
+    if (absolute_url_.empty())
       ReResolveURL(document);
 
     FetchParameters params =
         PrepareFetch(document, image_request_behavior, cross_origin);
-    cached_image_ = MakeGarbageCollected<StyleFetchedImage>(
-        ImageResourceContent::Fetch(params, document.Fetcher()), document,
-        params.GetImageRequestBehavior() == FetchParameters::kDeferImageLoad,
-        origin_clean_ == OriginClean::kTrue, is_ad_related_, params.Url());
+    cached_image_ = document.GetStyleEngine().CacheStyleImage(
+        params, origin_clean_, is_ad_related_);
   }
   return cached_image_.Get();
 }
@@ -145,8 +145,8 @@ void CSSImageValue::RestoreCachedResourceIfNeeded(
 
   cached_content->EmulateLoadStartedForInspector(
       document.Fetcher(), KURL(absolute_url_),
-      initiator_name_.IsEmpty() ? fetch_initiator_type_names::kCSS
-                                : initiator_name_);
+      initiator_name_.empty() ? fetch_initiator_type_names::kCSS
+                              : initiator_name_);
 }
 
 bool CSSImageValue::HasFailedOrCanceledSubresources() const {
@@ -158,7 +158,7 @@ bool CSSImageValue::HasFailedOrCanceledSubresources() const {
 }
 
 bool CSSImageValue::Equals(const CSSImageValue& other) const {
-  if (absolute_url_.IsEmpty() && other.absolute_url_.IsEmpty())
+  if (absolute_url_.empty() && other.absolute_url_.empty())
     return relative_url_ == other.relative_url_;
   return absolute_url_ == other.absolute_url_;
 }

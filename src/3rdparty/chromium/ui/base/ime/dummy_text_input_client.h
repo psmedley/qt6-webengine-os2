@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,7 @@ class DummyTextInputClient : public TextInputClient {
 
   // Overriden from TextInputClient.
   void SetCompositionText(const CompositionText& composition) override;
-  uint32_t ConfirmCompositionText(bool keep_selection) override;
+  size_t ConfirmCompositionText(bool keep_selection) override;
   void ClearCompositionText() override;
   void InsertText(const std::u16string& text,
                   InsertTextCursorBehavior cursor_behavior) override;
@@ -42,7 +42,7 @@ class DummyTextInputClient : public TextInputClient {
   bool CanComposeInline() const override;
   gfx::Rect GetCaretBounds() const override;
   gfx::Rect GetSelectionBoundingBox() const override;
-  bool GetCompositionCharacterBounds(uint32_t index,
+  bool GetCompositionCharacterBounds(size_t index,
                                      gfx::Rect* rect) const override;
   bool HasCompositionText() const override;
   ui::TextInputClient::FocusReason GetFocusReason() const override;
@@ -50,7 +50,9 @@ class DummyTextInputClient : public TextInputClient {
   bool GetCompositionTextRange(gfx::Range* range) const override;
   bool GetEditableSelectionRange(gfx::Range* range) const override;
   bool SetEditableSelectionRange(const gfx::Range& range) override;
+#if BUILDFLAG(IS_MAC)
   bool DeleteRange(const gfx::Range& range) override;
+#endif
   bool GetTextFromRange(const gfx::Range& range,
                         std::u16string* text) const override;
   void OnInputMethodChanged() override;
@@ -69,12 +71,11 @@ class DummyTextInputClient : public TextInputClient {
       const std::vector<ui::ImeTextSpan>& ui_ime_text_spans) override;
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   gfx::Range GetAutocorrectRange() const override;
   gfx::Rect GetAutocorrectCharacterBounds() const override;
   bool SetAutocorrectRange(const gfx::Range& range) override;
-  absl::optional<GrammarFragment> GetGrammarFragment(
-      const gfx::Range& range) override;
+  absl::optional<GrammarFragment> GetGrammarFragmentAtCursor() const override;
   bool ClearGrammarFragments(const gfx::Range& range) override;
   bool AddGrammarFragments(
       const std::vector<GrammarFragment>& fragments) override;
@@ -108,6 +109,13 @@ class DummyTextInputClient : public TextInputClient {
     return grammar_fragments_;
   }
 
+  void set_autocorrect_enabled(bool enabled) {
+    autocorrect_enabled_ = enabled;
+    if (!enabled) {
+      autocorrect_range_ = gfx::Range();
+    }
+  }
+
   TextInputType text_input_type_;
   TextInputMode text_input_mode_;
 
@@ -119,6 +127,8 @@ class DummyTextInputClient : public TextInputClient {
   std::vector<gfx::Range> selection_history_;
   gfx::Range autocorrect_range_;
   std::vector<GrammarFragment> grammar_fragments_;
+  gfx::Range cursor_range_ = gfx::Range::InvalidRange();
+  bool autocorrect_enabled_;
 };
 
 }  // namespace ui

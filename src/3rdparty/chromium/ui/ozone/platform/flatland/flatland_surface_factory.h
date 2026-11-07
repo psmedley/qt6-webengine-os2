@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -74,13 +74,14 @@ class FlatlandSurfaceFactory : public SurfaceFactoryOzone {
   // Registers a surface for a |widget|.
   //
   // Must be called on the thread that owns the surface.
-  void AddSurface(gfx::AcceleratedWidget widget, FlatlandSurface* surface)
+  virtual void AddSurface(gfx::AcceleratedWidget widget,
+                          FlatlandSurface* surface)
       LOCKS_EXCLUDED(surface_lock_);
 
   // Removes a surface for a |widget|.
   //
   // Must be called on the thread that owns the surface.
-  void RemoveSurface(gfx::AcceleratedWidget widget)
+  virtual void RemoveSurface(gfx::AcceleratedWidget widget)
       LOCKS_EXCLUDED(surface_lock_);
 
   // Returns the surface for a |widget|.

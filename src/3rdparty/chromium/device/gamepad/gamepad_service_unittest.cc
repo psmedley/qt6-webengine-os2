@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -389,7 +389,8 @@ TEST_F(GamepadServiceTest, ConnectAndDisconnectWhileInactiveTest) {
   WaitForData();
 }
 
-TEST_F(GamepadServiceTest, DisconnectWhileInactiveTest) {
+// https://crbug.com/1346527 Flaky on Android and Linux.
+TEST_F(GamepadServiceTest, DISABLED_DisconnectWhileInactiveTest) {
   // Create two active consumers.
   auto* consumer1 = CreateConsumer();
   auto* consumer2 = CreateConsumer();

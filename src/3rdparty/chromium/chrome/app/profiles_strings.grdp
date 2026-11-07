@@ -150,6 +150,9 @@
   <message name="IDS_PROFILES_MANAGE_PROFILES_BUTTON_TOOLTIP" desc="Button in the avatar menu bubble view for launching the profile picker.">
     Manage profiles
   </message>
+  <message name="IDS_PROFILES_MANAGE_PROFILES_MANAGED_TOOLTIP" desc="Icon in the avatar menu bubble view explaining why selecting other profiles is disabled.">
+    Your administrator has disabled other profiles
+  </message>
   <message name="IDS_PROFILES_CUSTOMIZE_PROFILE_BUTTON_TOOLTIP" desc="Button in the avatar menu bubble view for editing the current profile.">
     Customize profile
   </message>
@@ -486,9 +489,12 @@
   </if>
 
   <if expr="not chromeos_ash and not is_android">
-    <!-- Profile customization bubble -->
+    <!-- Profile Customization Web UI -->
     <message name="IDS_PROFILE_CUSTOMIZATION_DONE_BUTTON_LABEL" desc="Text for the Done button on the profile customization bubble">
       Done
+    </message>
+    <message name="IDS_PROFILE_CUSTOMIZATION_THEMES_CONTAINER_LABEL" desc="The accessibility label description read by the screen reader for the section to choose a theme for the profile">
+      Pick a theme color
     </message>
     <message name="IDS_PROFILE_CUSTOMIZATION_WELCOME" desc="Title of the profile customization bubble">
       Welcome, <ph name="USERNAME">$1<ex>Bob</ex></ph>
@@ -496,21 +502,51 @@
     <message name="IDS_PROFILE_CUSTOMIZATION_INPUT_LABEL" desc="Not displayed. Used by screen readers to describe the input used to rename the profile.">
       Rename your profile
     </message>
+    <message name="IDS_PROFILE_CUSTOMIZATION_INPUT_PLACEHOLDER" desc="Placeholder text for the input used to rename the profile.">
+      Add a name or label, like Work or Personal
+    </message>
+    <message name="IDS_PROFILE_CUSTOMIZATION_INPUT_ERROR_MESSAGE" desc="Error message for the input used to rename the profile.">
+      Enter a profile name
+    </message>
+    <message name="IDS_PROFILE_CUSTOMIZATION_SKIP_BUTTON_LABEL" desc="Text for the Skip button on the profile customization dialog">
+      Skip
+    </message>
+    <message name="IDS_PROFILE_CUSTOMIZATION_DELETE_PROFILE_BUTTON_LABEL" desc="Text for the Delete profile button on the profile customization dialog for local profile creation. This aborts the ongoing profile creation process.">
+      Delete profile
+    </message>
+    <message name="IDS_PROFILE_CUSTOMIZATION_LOCAL_PROFILE_CREATION_TITLE" desc="Title of the profile customization dialog for local profile creation (user is not signed-in)">
+      Welcome!
+    </message>
+    <message name="IDS_PROFILE_CUSTOMIZATION_AVATAR_SELECTION_BACK_BUTTON_LABEL" desc="Accessibility label for the Back icon button on the avatar selection dialog in the profile customization when the back icon is focused and is not rendered.">
+      Back from avatar selection page
+    </message>
 
     <!-- Enterprise profile welcome screen -->
-    <message name="IDS_ENTERPRISE_PROFILE_WELCOME_TITLE" desc="Title of the enteprise profile welcome screen. It is part of the profile creation flow, shown after sign-in to enterprise users.">
+    <message name="IDS_ENTERPRISE_PROFILE_WELCOME_TITLE" desc="Title of the enterprise profile welcome screen. It is part of the profile creation flow, shown after sign-in to enterprise users.">
       Welcome to your new profile
     </message>
     <message name="IDS_ENTERPRISE_PROFILE_WELCOME_ACCOUNT_MANAGED_BY" desc="Subtitle of the enteprise profile welcome screen, informing that the account is managed by an administrator.">
       This account is managed by <ph name="PROFILE_NAME">$1<ex>example.com</ex></ph>
     </message>
-    <message name="IDS_ENTERPRISE_PROFILE_WELCOME_ACCOUNT_EMAIL_MANAGED_BY" desc="Subtitle of the enteprise profile welcome screen for a signin interception, informing that the account is managed by an administrator.">
+    <message name="IDS_ENTERPRISE_PROFILE_WELCOME_PROFILE_MANAGED_STRICT_SEPARATION" desc="Subtitle of the enterprise profile welcome screen for a signin interception, informing that the profile is managed by an administrator and requires a new profile for other managed accounts.">
+      This profile is managed by <ph name="PROFILE_MANAGER">$1<ex>example.com</ex></ph> and requires you to create a separate profile for the account <ph name="USER_EMAIL_ADDRESS">$2<ex>john.doe@example.com</ex></ph>
+    </message>
+    <message name="IDS_ENTERPRISE_PROFILE_WELCOME_PROFILE_MANAGED_SEPARATION" desc="Subtitle of the enterprise profile welcome screen for a signin interception, informing that the profile is managed by an administrator and the new account that is trying to signin is required to have a new profile by its administrator.">
+      This profile is managed by <ph name="PROFILE_MANAGER">$1<ex>example.com</ex></ph>. A new profile is required for account <ph name="USER_EMAIL_ADDRESS">$2<ex>john.doe@example.com</ex></ph> by <ph name="ACCOUNT_MANAGER">$3<ex>example2.com</ex></ph>
+    </message>
+    <message name="IDS_ENTERPRISE_PROFILE_WELCOME_PROFILE_SEPARATION_DEVICE_MANAGED" desc="Subtitle of the enterprise profile welcome screen for a signin interception, informing that the device is managed by an administrator that requires a new profile for managed accounts.">
+      This device is managed. A new profile is required for account <ph name="USER_EMAIL_ADDRESS">$1<ex>john.doe@example.com</ex></ph> by your device administrator
+    </message>
+    <message name="IDS_ENTERPRISE_PROFILE_WELCOME_PROFILE_SEPARATION_DEVICE_MANAGED_BY" desc="Subtitle of the enterprise profile welcome screen for a signin interception, informing that the device is managed by an administrator that requires a new profile for managed accounts.">
+      This device is managed by <ph name="DEVICE_MANAGER">$1<ex>example.com</ex></ph>. A new profile is required for account <ph name="USER_EMAIL_ADDRESS">$2<ex>john.doe@example.com</ex></ph> by <ph name="DEVICE_MANAGER">$1<ex>example.com</ex></ph>
+    </message>
+    <message name="IDS_ENTERPRISE_PROFILE_WELCOME_ACCOUNT_EMAIL_MANAGED_BY" desc="Subtitle of the enterprise profile welcome screen for a signin interception, informing that the account is managed by an administrator.">
       This account (<ph name="USER_EMAIL_ADDRESS">$1<ex>john.doe@example.com</ex></ph>) is managed by <ph name="PROFILE_NAME">$2<ex>example.com</ex></ph>
     </message>
-    <message name="IDS_ENTERPRISE_PROFILE_WELCOME_DEVICE_MANAGED_BY" desc="Subtitle of the enteprise profile welcome screen, informing that the device is managed by an administrator.">
+    <message name="IDS_ENTERPRISE_PROFILE_WELCOME_DEVICE_MANAGED_BY" desc="Subtitle of the enterprise profile welcome screen, informing that the device is managed by an administrator.">
       Your device is managed by <ph name="PROFILE_NAME">$1<ex>example.com</ex></ph>
     </message>
-    <message name="IDS_ENTERPRISE_PROFILE_WELCOME_DEVICE_MANAGED" desc="Subtitle of the enteprise profile welcome screen, informing that the device is managed.">
+    <message name="IDS_ENTERPRISE_PROFILE_WELCOME_DEVICE_MANAGED" desc="Subtitle of the enterprise profile welcome screen, informing that the device is managed.">
       Your device is managed by your organization
     </message>
     <message name="IDS_ENTERPRISE_PROFILE_WELCOME_MANAGED_DESCRIPTION_WITH_SYNC" desc="Disclaimer when creating a profile with a managed account (when sync is enabled by the administrator).">
@@ -519,10 +555,10 @@
     <message name="IDS_ENTERPRISE_PROFILE_WELCOME_MANAGED_DESCRIPTION_WITHOUT_SYNC" desc="Disclaimer when creating a profile with a managed account (when sync is disabled by the administrator).">
       You’re adding a managed profile to this browser. Your administrator has control over the profile and can access its data.
     </message>
-    <message name="IDS_ENTERPRISE_WELCOME_PROFILE_REQUIRED_TITLE" desc="Title of the enteprise profile welcome screen when a profile is required. It is shown after a user signs into a managed account outside of the profile creation flow.">
+    <message name="IDS_ENTERPRISE_WELCOME_PROFILE_REQUIRED_TITLE" desc="Title of the enterprise profile welcome screen when a profile is required. It is shown after a user signs into a managed account outside of the profile creation flow.">
       Your organization requires a profile
     </message>
-    <message name="IDS_ENTERPRISE_WELCOME_PROFILE_WILL_BE_MANAGED_TITLE" desc="Title of the enteprise profile welcome screen when a managed profile will be created. It is shown after a user signs into a managed account outside of the profile creation flow.">
+    <message name="IDS_ENTERPRISE_WELCOME_PROFILE_WILL_BE_MANAGED_TITLE" desc="Title of the enterprise profile welcome screen when a managed profile will be created. It is shown after a user signs into a managed account outside of the profile creation flow.">
       Your organization will manage this profile
     </message>
     <message name="IDS_ENTERPRISE_PROFILE_WELCOME_CREATE_PROFILE_BUTTON" desc="Label of the proceed button on the enterprise profile welcome screen when a user signed in an enterprise account outside of the profile creation flow. The label informs the user that a profile will be created.">
@@ -664,9 +700,6 @@
       <message name="IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_SESSION_MANAGED_DESCRIPTION" desc="Disclaimer on the first profile creation screen, informing that the session is managed.">
         Your session is managed by your organization. Administrators can delete your profile and also monitor your network traffic.
       </message>
-      <message name="IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_SIGNIN_BUTTON_LABEL_LACROS" desc="Label for a button that prompts user to sign in">
-        Next
-      </message>
       <message name="IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_ACCOUNT_SELECTION_LACROS_TITLE" desc="Profile picker, account selection screen title">
         Choose an account
       </message>
@@ -689,22 +722,41 @@
         Delete this profile and browsing data?
       </message>
       <message name="IDS_PROFILE_PICKER_REMOVE_WARNING_SIGNED_IN_PROFILE_LACROS" desc="Remove warning message shown for signed in profiles shown when the user selects remove from the 3 dotted menu">
-          This will permanently delete browsing data from this device. The Google Accounts in this profile may be used by other apps on your Chromebook. You can remove these accounts in <ph name="BEGIN_LINK">&lt;a is="action-link" target="_blank"&gt;</ph><ph name="SETTING_SECTION">$1<ex>Settings</ex></ph> > <ph name="ACCOUNTS_SECTION">$2<ex>Accounts</ex></ph><ph name="END_LINK">&lt;/a&gt;</ph>.
-      </message>
-      <message name="IDS_PRIMARY_PROFILE_FIRST_RUN_TITLE" desc="Title of the landing screen in first run experience for the primary profile. The screen promotes Chrome sync.">
-        Welcome to Chrome, <ph name="ACCOUNT_FIRST_NAME">$1<ex>Jane</ex></ph>
-      </message>
-      <message name="IDS_PRIMARY_PROFILE_FIRST_RUN_NO_NAME_TITLE" desc="Title of the screen shown when the user runs Chrome for the first time. A simple, generic welcome message.">
-        Welcome to Chrome
-      </message>
-      <message name="IDS_PRIMARY_PROFILE_FIRST_RUN_SUBTITLE" desc="Subtitle of the landing screen in first run experience for the primary profile. The screen promotes Chrome sync.">
-        Access your Chrome browser stuff from <ph name="ACCOUNT_EMAIL">$1<ex>Jane.Doe@gmail.com</ex></ph>
+        This will permanently delete browsing data from this device. The Google Accounts in this profile may be used by other apps on your <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph>. You can remove these accounts in <ph name="BEGIN_LINK">&lt;a is="action-link" target="_blank"&gt;</ph><ph name="SETTING_SECTION">$2<ex>Settings</ex></ph> > <ph name="ACCOUNTS_SECTION">$3<ex>Accounts</ex></ph><ph name="END_LINK">&lt;/a&gt;</ph>.
       </message>
       <message name="IDS_PRIMARY_PROFILE_FIRST_RUN_NEXT_BUTTON_LABEL" desc="Label of the 'next' button of the landing screen in first run experience for the primary profile. The screen promotes Chrome sync.">
         Let's go
       </message>
-      <message name="IDS_PRIMARY_PROFILE_FIRST_RUN_SESSION_MANAGED_BY_DESCRIPTION" desc="Disclaimer on the landing screen in first run experience for the primary profile, informing that the session is managed by an administrator.">
-        Your account is managed by <ph name="MANAGER_NAME">$1<ex>example.com</ex></ph>. Your administrator can see and edit this Chrome browser profile and its data. Your data includes bookmarks, history, and passwords.
+    </if>
+
+    <!-- First Run Experience strings -->
+    <if expr="not chromeos_lacros">
+      <message name="IDS_FRE_SIGN_IN_TITLE" desc="The title for the sign in page explaining to the users the benefits of signing in to Chrome">
+        Sign in for more benefits
+      </message>
+      <message name="IDS_FRE_DEVICES_CARD_TITLE" desc="The title of the benefits card explaining to the the users that they can continue their work on any of their signed in devices">
+        Across devices
+      </message>
+      <message name="IDS_FRE_DEVICES_CARD_DESCRIPTION" desc="The description of the benefits card explaining to the users that they can continue their work on any of their signed in devices">
+        Pick up where you left off on any device
+      </message>
+      <message name="IDS_FRE_SECURITY_CARD_TITLE" desc="The title of the benefits card explaining to the users that signing in to Chrome offers strong security features">
+        Stronger security
+      </message>
+      <message name="IDS_FRE_SECURITY_CARD_DESCRIPTION" desc="The description of the benefits card explaining to the users that signing in to Chrome will grant them more security thus protecting their passwords and more">
+        Extra protection to your passwords and more
+      </message>
+      <message name="IDS_FRE_BACKUP_CARD_TITLE" desc="The title of the benefits card explaining to the users that they can back up their stuff and use them across all signed in devices">
+        Back up your stuff
+      </message>
+      <message name="IDS_FRE_BACKUP_CARD_DESCRIPTION" desc="The description of the benefits card giving users examples of data they can back up when they sign in">
+        Store your bookmarks and more with sync
+      </message>
+      <message name="IDS_FRE_DECLINE_SIGN_IN_BUTTON_TITLE" desc="The title of the button giving the users the choice not to sign in to Chrome">
+        Don't sign in
+      </message>
+      <message name="IDS_FRE_ACCEPT_SIGN_IN_BUTTON_TITLE" desc="The title of the button giving the users the choice to sign in to Chrome">
+        Sign in
       </message>
     </if>
 

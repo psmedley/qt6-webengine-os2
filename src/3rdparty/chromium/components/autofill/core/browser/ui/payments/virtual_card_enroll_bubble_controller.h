@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,10 @@
 #include "components/autofill/core/browser/payments/virtual_card_enrollment_manager.h"
 #include "components/autofill/core/browser/ui/payments/payments_bubble_closed_reasons.h"
 #include "url/gurl.h"
+
+#if BUILDFLAG(IS_ANDROID)
+#include "base/android/scoped_java_ref.h"
+#endif
 
 #ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_UI_PAYMENTS_VIRTUAL_CARD_ENROLL_BUBBLE_CONTROLLER_H_
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_UI_PAYMENTS_VIRTUAL_CARD_ENROLL_BUBBLE_CONTROLLER_H_
@@ -68,6 +72,15 @@ class VirtualCardEnrollBubbleController {
 
   // Returns whether the omnibox icon should be visible.
   virtual bool IsIconVisible() const = 0;
+
+#if BUILDFLAG(IS_ANDROID)
+  // Returns either the fully initialized java delegate object or a is_null()
+  // reference if the creation failed. By using this method, the controller will
+  // try to recreate the java object if it failed previously (e.g. because there
+  // was no native window available).
+  virtual base::android::ScopedJavaGlobalRef<jobject>
+  GetOrCreateJavaDelegate() = 0;
+#endif
 };
 
 }  // namespace autofill

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,8 +80,6 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityContextManager {
   // Called by the Monitor during initialization. Should be called exactly once.
   // |uploader_| needs to be set before any contexts are created.
   void SetUploader(DomainReliabilityUploader* uploader);
-
-  base::Value GetWebUIData() const;
 
   size_t contexts_size_for_testing() const { return contexts_.size(); }
 

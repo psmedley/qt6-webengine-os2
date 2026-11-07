@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -113,7 +113,7 @@ ValueStoreCache* StorageFrontend::GetValueStoreCache(
   auto it = caches_.find(settings_namespace);
   if (it != caches_.end())
     return it->second;
-  return NULL;
+  return nullptr;
 }
 
 bool StorageFrontend::IsStorageEnabled(
@@ -199,17 +199,17 @@ void StorageFrontend::OnSettingsChanged(const std::string& extension_id,
       event_router->ExtensionHasEventListener(extension_id, area_event_name);
 
   auto make_changed_event = [&namespace_string](base::Value changes) {
-    std::vector<base::Value> args;
-    args.emplace_back(std::move(changes));
-    args.emplace_back(base::Value(namespace_string));
+    base::Value::List args;
+    args.Append(std::move(changes));
+    args.Append(namespace_string);
     return std::make_unique<Event>(events::STORAGE_ON_CHANGED,
                                    api::storage::OnChanged::kEventName,
                                    std::move(args));
   };
   auto make_area_changed_event = [&storage_area,
                                   &area_event_name](base::Value changes) {
-    std::vector<base::Value> args;
-    args.push_back(std::move(changes));
+    base::Value::List args;
+    args.Append(std::move(changes));
     return std::make_unique<Event>(StorageAreaToEventHistogram(storage_area),
                                    area_event_name, std::move(args));
   };

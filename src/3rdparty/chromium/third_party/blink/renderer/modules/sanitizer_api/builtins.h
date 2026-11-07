@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,11 +18,7 @@ namespace blink {
 const SanitizerConfigImpl& GetDefaultConfig();
 const SanitizerConfigImpl::ElementList& GetBaselineAllowElements();
 const SanitizerConfigImpl::AttributeList& GetBaselineAllowAttributes();
-
-// We derive a map of lower-case to mixed-case names from the built-ins, for
-// use in name normalization.
-const HashMap<String, String>& GetMixedCaseElementNames();
-const HashMap<String, String>& GetMixedCaseAttributeNames();
+const SanitizerConfigImpl::AttributeList& GetKnownAttributes();
 
 }  // namespace blink
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 #include "base/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "components/services/storage/public/mojom/indexed_db_control.mojom.h"
+#include "components/services/storage/privileged/mojom/indexed_db_control.mojom.h"
 #include "components/services/storage/public/mojom/storage_usage_info.mojom.h"
 
 namespace blink {
@@ -62,7 +62,7 @@ class IndexedDBHelper : public base::RefCountedThreadSafe<IndexedDBHelper> {
   // Enumerates all indexed database files in the IndexedDB thread.
   void IndexedDBUsageInfoReceived(
       FetchCallback callback,
-      std::vector<storage::mojom::StorageUsageInfoPtr> origins);
+      std::vector<storage::mojom::StorageUsageInfoPtr> usages);
 };
 
 // This class is an implementation of IndexedDBHelper that does

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Generate report files to view and/or compare (diff) milestones.
@@ -90,6 +90,11 @@ _DESIRED_VERSIONS = [
     '99.0.4844.7',
     '100.0.4896.12',
     '101.0.4951.20',
+    '102.0.5005.37',
+    '103.0.5060.9',
+    '104.0.5112.9',
+    '105.0.5195.7',
+    '106.0.5249.7',
 ]
 
 

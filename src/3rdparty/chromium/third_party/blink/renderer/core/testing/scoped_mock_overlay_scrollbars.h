@@ -1,10 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_TESTING_SCOPED_MOCK_OVERLAY_SCROLLBARS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_TESTING_SCOPED_MOCK_OVERLAY_SCROLLBARS_H_
 
+#include "base/check_op.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"

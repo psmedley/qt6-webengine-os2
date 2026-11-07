@@ -1,4 +1,4 @@
-# Copyright 2022 The Chromium Authors. All rights reserved.
+# Copyright 2022 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -10,7 +10,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 class MotionMark(browserbench.BrowserBench):
   def __init__(self):
-    super(MotionMark, self).__init__('motionmark1.2')
+    super(MotionMark, self).__init__('motionmark', '1.2')
 
   def AddExtraParserOptions(self, parser):
     parser.add_option('-s',

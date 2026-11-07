@@ -14,13 +14,36 @@
 
 #include "src/tint/ast/int_literal_expression.h"
 
+#include "src/tint/program_builder.h"
+
 TINT_INSTANTIATE_TYPEINFO(tint::ast::IntLiteralExpression);
 
 namespace tint::ast {
 
-IntLiteralExpression::IntLiteralExpression(ProgramID pid, const Source& src)
-    : Base(pid, src) {}
+IntLiteralExpression::IntLiteralExpression(ProgramID pid,
+                                           NodeID nid,
+                                           const Source& src,
+                                           int64_t val,
+                                           Suffix suf)
+    : Base(pid, nid, src), value(val), suffix(suf) {}
 
 IntLiteralExpression::~IntLiteralExpression() = default;
+
+const IntLiteralExpression* IntLiteralExpression::Clone(CloneContext* ctx) const {
+    // Clone arguments outside of create() call to have deterministic ordering
+    auto src = ctx->Clone(source);
+    return ctx->dst->create<IntLiteralExpression>(src, value, suffix);
+}
+
+std::ostream& operator<<(std::ostream& out, IntLiteralExpression::Suffix suffix) {
+    switch (suffix) {
+        default:
+            return out;
+        case IntLiteralExpression::Suffix::kI:
+            return out << "i";
+        case IntLiteralExpression::Suffix::kU:
+            return out << "u";
+    }
+}
 
 }  // namespace tint::ast

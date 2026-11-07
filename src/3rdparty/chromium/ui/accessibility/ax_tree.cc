@@ -1,11 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/accessibility/ax_tree.h"
 
 #include <stddef.h>
-#include <algorithm>
 #include <numeric>
 #include <utility>
 
@@ -22,6 +21,7 @@
 #include "base/notreached.h"
 #include "base/observer_list.h"
 #include "base/strings/stringprintf.h"
+#include "base/timer/elapsed_timer.h"
 #include "components/crash/core/common/crash_key.h"
 #include "ui/accessibility/accessibility_switches.h"
 #include "ui/accessibility/ax_enums.mojom.h"
@@ -30,6 +30,7 @@
 #include "ui/accessibility/ax_node.h"
 #include "ui/accessibility/ax_node_position.h"
 #include "ui/accessibility/ax_role_properties.h"
+#include "ui/accessibility/ax_selection.h"
 #include "ui/accessibility/ax_table_info.h"
 #include "ui/accessibility/ax_tree_observer.h"
 #include "ui/gfx/geometry/transform.h"
@@ -736,13 +737,6 @@ bool AXTree::ComputeNodeIsIgnoredChanged(
 }
 
 AXTree::AXTree() {
-  AXNodeData root;
-  root.id = kInvalidAXNodeID;
-
-  AXTreeUpdate initial_state;
-  initial_state.root_id = kInvalidAXNodeID;
-  initial_state.nodes.push_back(root);
-  CHECK(Unserialize(initial_state)) << error();
   // TODO(chrishall): should language_detection_manager be a member or pointer?
   // TODO(chrishall): do we want to initialize all the time, on demand, or only
   //                  when feature flag is set?
@@ -780,7 +774,7 @@ void AXTree::RemoveObserver(AXTreeObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-AXTreeID AXTree::GetAXTreeID() const {
+const AXTreeID& AXTree::GetAXTreeID() const {
   return data().tree_id;
 }
 
@@ -789,11 +783,15 @@ const AXTreeData& AXTree::data() const {
 }
 
 AXNode* AXTree::GetFromId(AXNodeID id) const {
+  if (id == ui::kInvalidAXNodeID)
+    return nullptr;
   auto iter = id_map_.find(id);
   return iter != id_map_.end() ? iter->second.get() : nullptr;
 }
 
 void AXTree::Destroy() {
+  base::ElapsedThreadTimer timer;
+
   table_info_map_.clear();
   if (!root_)
     return;
@@ -802,10 +800,13 @@ void AXTree::Destroy() {
 
   {
     ScopedTreeUpdateInProgressStateSetter tree_update_in_progress(*this);
-
-    DestroyNodeAndSubtree(root_, nullptr);
-    root_ = nullptr;
+    // ExtractAsDangling clears the underlying pointer and returns another
+    // raw_ptr instance that is allowed to dangle.
+    DestroyNodeAndSubtree(root_.ExtractAsDangling(), nullptr);
   }  // tree_update_in_progress.
+
+  UMA_HISTOGRAM_TIMES("Accessibility.Performance.AXTree.Destroy",
+                      timer.Elapsed());
 }
 
 void AXTree::UpdateDataForTesting(const AXTreeData& new_data) {
@@ -822,6 +823,7 @@ gfx::RectF AXTree::RelativeToTreeBoundsInternal(const AXNode* node,
                                                 gfx::RectF bounds,
                                                 bool* offscreen,
                                                 bool clip_bounds,
+                                                bool skip_container_offset,
                                                 bool allow_recursion) const {
   // If |bounds| is uninitialized, which is not the same as empty,
   // start with the node bounds.
@@ -838,16 +840,17 @@ gfx::RectF AXTree::RelativeToTreeBoundsInternal(const AXNode* node,
         ui::AXNode* child = node->children()[i];
 
         bool ignore_offscreen;
-        gfx::RectF child_bounds = RelativeToTreeBoundsInternal(
-            child, gfx::RectF(), &ignore_offscreen, clip_bounds,
-            /* allow_recursion = */ false);
+        gfx::RectF child_bounds =
+            RelativeToTreeBoundsInternal(child, gfx::RectF(), &ignore_offscreen,
+                                         clip_bounds, skip_container_offset,
+                                         /* allow_recursion = */ false);
         bounds.Union(child_bounds);
       }
       if (bounds.width() > 0 && bounds.height() > 0) {
         return bounds;
       }
     }
-  } else {
+  } else if (!skip_container_offset) {
     bounds.Offset(node->data().relative_bounds.bounds.x(),
                   node->data().relative_bounds.bounds.y());
   }
@@ -855,7 +858,7 @@ gfx::RectF AXTree::RelativeToTreeBoundsInternal(const AXNode* node,
   const AXNode* original_node = node;
   while (node != nullptr) {
     if (node->data().relative_bounds.transform)
-      node->data().relative_bounds.transform->TransformRect(&bounds);
+      bounds = node->data().relative_bounds.transform->MapRect(bounds);
     // Apply any transforms and offsets for each node and then walk up to
     // its offset container. If no offset container is specified, coordinates
     // are relative to the root node.
@@ -863,7 +866,7 @@ gfx::RectF AXTree::RelativeToTreeBoundsInternal(const AXNode* node,
         GetFromId(node->data().relative_bounds.offset_container_id);
     if (!container && container != root())
       container = root();
-    if (!container || container == node)
+    if (!container || container == node || skip_container_offset)
       break;
 
     gfx::RectF container_bounds = container->data().relative_bounds.bounds;
@@ -950,6 +953,7 @@ gfx::RectF AXTree::RelativeToTreeBoundsInternal(const AXNode* node,
       bool ignore_offscreen;
       ancestor_bounds = RelativeToTreeBoundsInternal(
           ancestor, gfx::RectF(), &ignore_offscreen, clip_bounds,
+          skip_container_offset,
           /* allow_recursion = */ false);
 
       gfx::RectF original_bounds = original_node->data().relative_bounds.bounds;
@@ -971,10 +975,11 @@ gfx::RectF AXTree::RelativeToTreeBoundsInternal(const AXNode* node,
 gfx::RectF AXTree::RelativeToTreeBounds(const AXNode* node,
                                         gfx::RectF bounds,
                                         bool* offscreen,
-                                        bool clip_bounds) const {
+                                        bool clip_bounds,
+                                        bool skip_container_offset) const {
   bool allow_recursion = true;
   return RelativeToTreeBoundsInternal(node, bounds, offscreen, clip_bounds,
-                                      allow_recursion);
+                                      skip_container_offset, allow_recursion);
 }
 
 gfx::RectF AXTree::GetTreeBounds(const AXNode* node,
@@ -1031,6 +1036,12 @@ const std::set<AXTreeID> AXTree::GetAllChildTreeIds() const {
 }
 
 bool AXTree::Unserialize(const AXTreeUpdate& update) {
+#if DCHECK_IS_ON()
+  for (const auto& new_data : update.nodes)
+    DCHECK(new_data.id != kInvalidAXNodeID)
+        << "AXTreeUpdate contains invalid node: " << update.ToString();
+#endif
+
   event_data_ = std::make_unique<AXEvent>();
   event_data_->event_from = update.event_from;
   event_data_->event_from_action = update.event_from_action;
@@ -1041,6 +1052,8 @@ bool AXTree::Unserialize(const AXTreeUpdate& update) {
 
   AXTreeUpdateState update_state(*this, update);
   const AXNodeID old_root_id = root_ ? root_->id() : kInvalidAXNodeID;
+  DCHECK(old_root_id != kInvalidAXNodeID || update.root_id != kInvalidAXNodeID)
+      << "Tree must have a valid root or update must have a valid root.";
 
   // Accumulates the work that will be required to update the AXTree.
   // This allows us to notify observers of structure changes when the
@@ -1154,7 +1167,8 @@ bool AXTree::Unserialize(const AXTreeUpdate& update) {
       }
     }
 
-    DCHECK_EQ(!GetFromId(update.root_id), update_state.root_will_be_created);
+    DCHECK_EQ(update.root_id != kInvalidAXNodeID && !GetFromId(update.root_id),
+              update_state.root_will_be_created);
 
     // Update all of the nodes in the update.
     for (const AXNodeData& updated_node_data : update_state.updated_nodes) {
@@ -1167,7 +1181,7 @@ bool AXTree::Unserialize(const AXTreeUpdate& update) {
     if (!root_) {
       ACCESSIBILITY_TREE_UNSERIALIZE_ERROR_HISTOGRAM(
           AXTreeUnserializeError::kNoRoot);
-      RecordError("Tree has no root.");
+      RecordError(update_state, "Tree has no root.");
       return false;
     }
 
@@ -1285,18 +1299,21 @@ bool AXTree::Unserialize(const AXTreeUpdate& update) {
   }
 
   // Now that the unignored cached values are up to date, notify observers of
-  // the nodes that were deleted from the tree but not reparented.
-  for (AXNodeID node_id : update_state.removed_node_ids) {
-    if (!update_state.IsCreatedNode(node_id))
-      NotifyNodeHasBeenDeleted(node_id);
-  }
-
-  // Now that the unignored cached values are up to date, notify observers of
-  // new nodes in the tree.
+  // new nodes in the tree. This is done before notifications of deleted nodes,
+  // because deleting nodes can cause events to be fired, which will need to
+  // access the root, and therefore the BrowserAccessibilityManager needs to be
+  // aware of any newly created root as soon as possible.
   for (AXNodeID node_id : update_state.new_node_ids) {
     AXNode* node = GetFromId(node_id);
     if (node)
       NotifyNodeHasBeenReparentedOrCreated(node, &update_state);
+  }
+
+  // Now that the unignored cached values are up to date, notify observers of
+  // the nodes that were deleted from the tree but not reparented.
+  for (AXNodeID node_id : update_state.removed_node_ids) {
+    if (!update_state.IsCreatedNode(node_id))
+      NotifyNodeHasBeenDeleted(node_id);
   }
 
   // Now that the unignored cached values are up to date, notify observers of
@@ -1380,6 +1397,7 @@ AXNode* AXTree::CreateNode(AXNode* parent,
   // |update_state| must already contain information about all of the expected
   // changes and invalidations to apply. If any of these are missing, observers
   // may not be notified of changes.
+  SANITIZER_CHECK(id != kInvalidAXNodeID);
   DCHECK(!GetFromId(id));
   DCHECK_GT(update_state->GetPendingCreateNodeCount(id), 0);
   DCHECK(update_state->InvalidatesUnignoredCachedValues(id));
@@ -1464,11 +1482,8 @@ bool AXTree::ComputePendingChanges(const AXTreeUpdate& update,
           GetFromId(update_state->old_tree_data->focus_id);
       if (old_focus &&
           update_state->ShouldPendingNodeExistInTree(old_focus->id()) &&
-          std::find_if(update_state->updated_nodes.begin(),
-                       update_state->updated_nodes.end(),
-                       [old_focus](const AXNodeData& data) {
-                         return data.id == old_focus->id();
-                       }) == update_state->updated_nodes.end()) {
+          !base::Contains(update_state->updated_nodes, old_focus->id(),
+                          &AXNodeData::id)) {
         update_state->updated_nodes.push_back(old_focus->data());
       }
     }
@@ -1478,23 +1493,24 @@ bool AXTree::ComputePendingChanges(const AXTreeUpdate& update,
           GetFromId(update_state->new_tree_data->focus_id);
       if (new_focus &&
           update_state->ShouldPendingNodeExistInTree(new_focus->id()) &&
-          std::find_if(update_state->updated_nodes.begin(),
-                       update_state->updated_nodes.end(),
-                       [new_focus](const AXNodeData& data) {
-                         return data.id == new_focus->id();
-                       }) == update_state->updated_nodes.end()) {
+          !base::Contains(update_state->updated_nodes, new_focus->id(),
+                          &AXNodeData::id)) {
         update_state->updated_nodes.push_back(new_focus->data());
       }
     }
   }
 
-  update_state->root_will_be_created =
-      !GetFromId(update.root_id) ||
-      !update_state->ShouldPendingNodeExistInTree(update.root_id);
+  if (update.root_id != kInvalidAXNodeID) {
+    update_state->root_will_be_created =
+        !GetFromId(update.root_id) ||
+        !update_state->ShouldPendingNodeExistInTree(update.root_id);
+  }
 
   // Populate |update_state| with all of the changes that will be performed
   // on the tree during the update.
   for (const AXNodeData& new_data : update_state->updated_nodes) {
+    if (new_data.id == kInvalidAXNodeID)
+      continue;
     bool is_new_root =
         update_state->root_will_be_created && new_data.id == update.root_id;
     if (!ComputePendingChangesToNode(new_data, is_new_root, update_state)) {
@@ -1526,8 +1542,10 @@ bool AXTree::ComputePendingChangesToNode(const AXNodeData& new_data,
     if (!is_new_root) {
       ACCESSIBILITY_TREE_UNSERIALIZE_ERROR_HISTOGRAM(
           AXTreeUnserializeError::kNotInTree);
-      RecordError(base::StringPrintf(
-          "%d will not be in the tree and is not the new root", new_data.id));
+      RecordError(*update_state,
+                  base::StringPrintf(
+                      "%d will not be in the tree and is not the new root",
+                      new_data.id));
       return false;
     }
 
@@ -1537,9 +1555,11 @@ bool AXTree::ComputePendingChangesToNode(const AXNodeData& new_data,
                                                        absl::nullopt)) {
       ACCESSIBILITY_TREE_UNSERIALIZE_ERROR_HISTOGRAM(
           AXTreeUnserializeError::kCreationPending);
-      RecordError(base::StringPrintf(
-          "Node %d is already pending for creation, cannot be the new root",
-          new_data.id));
+      RecordError(
+          *update_state,
+          base::StringPrintf(
+              "Node %d is already pending for creation, cannot be the new root",
+              new_data.id));
       return false;
     }
     if (update_state->pending_root_id) {
@@ -1555,7 +1575,8 @@ bool AXTree::ComputePendingChangesToNode(const AXNodeData& new_data,
     if (base::Contains(new_child_id_set, new_child_id)) {
       ACCESSIBILITY_TREE_UNSERIALIZE_ERROR_HISTOGRAM(
           AXTreeUnserializeError::kDuplicateChild);
-      RecordError(base::StringPrintf("Node %d has duplicate child id %d",
+      RecordError(*update_state,
+                  base::StringPrintf("Node %d has duplicate child id %d",
                                      new_data.id, new_child_id));
       return false;
     }
@@ -1580,9 +1601,10 @@ bool AXTree::ComputePendingChangesToNode(const AXNodeData& new_data,
                                                          new_data.id)) {
         ACCESSIBILITY_TREE_UNSERIALIZE_ERROR_HISTOGRAM(
             AXTreeUnserializeError::kCreationPendingForChild);
-        RecordError(base::StringPrintf(
-            "Node %d is already pending for creation, cannot be a new child",
-            child_id));
+        RecordError(*update_state,
+                    base::StringPrintf("Node %d is already pending for "
+                                       "creation, cannot be a new child",
+                                       child_id));
         return false;
       }
     }
@@ -1624,9 +1646,10 @@ bool AXTree::ComputePendingChangesToNode(const AXNodeData& new_data,
       if (update_state->ShouldPendingNodeExistInTree(child_id)) {
         ACCESSIBILITY_TREE_UNSERIALIZE_ERROR_HISTOGRAM(
             AXTreeUnserializeError::kReparent);
-        RecordError(base::StringPrintf(
-            "Node %d is not marked for destruction, would be reparented to %d",
-            child_id, new_data.id));
+        RecordError(*update_state,
+                    base::StringPrintf("Node %d is not marked for destruction, "
+                                       "would be reparented to %d",
+                                       child_id, new_data.id));
         return false;
       }
 
@@ -1637,9 +1660,10 @@ bool AXTree::ComputePendingChangesToNode(const AXNodeData& new_data,
                                                          new_data.id)) {
         ACCESSIBILITY_TREE_UNSERIALIZE_ERROR_HISTOGRAM(
             AXTreeUnserializeError::kCreationPendingForChild);
-        RecordError(base::StringPrintf(
-            "Node %d is already pending for creation, cannot be a new child",
-            child_id));
+        RecordError(*update_state,
+                    base::StringPrintf("Node %d is already pending for "
+                                       "creation, cannot be a new child",
+                                       child_id));
         return false;
       }
     } else {
@@ -1678,8 +1702,9 @@ bool AXTree::UpdateNode(const AXNodeData& src,
     if (!is_new_root) {
       ACCESSIBILITY_TREE_UNSERIALIZE_ERROR_HISTOGRAM(
           AXTreeUnserializeError::kNotInTree);
-      RecordError(base::StringPrintf(
-          "%d is not in the tree and not the new root", src.id));
+      RecordError(*update_state,
+                  base::StringPrintf(
+                      "%d is not in the tree and not the new root", src.id));
       return false;
     }
 
@@ -1821,8 +1846,18 @@ void AXTree::NotifyNodeAttributesHaveBeenChanged(
     const AXTreeData* optional_new_tree_data,
     const AXNodeData& new_data) {
   DCHECK(!GetTreeUpdateInProgressState());
-  if (node->id() == kInvalidAXNodeID)
+  DCHECK(node);
+  DCHECK(node->id() != kInvalidAXNodeID);
+
+  // Do not fire generated events for initial empty document:
+  // The initial empty document and changes to it are uninteresting. It is a
+  // bit of a hack that may not need to exist in the future
+  // TODO(accessibility) Find a way to remove the initial empty document and the
+  // need for this special case.
+  if (node->GetRole() == ax::mojom::Role::kRootWebArea &&
+      old_data.child_ids.empty() && !node->GetParentCrossingTreeBoundary()) {
     return;
+  }
 
   for (AXTreeObserver& observer : observers_)
     observer.OnNodeDataChanged(this, old_data, new_data);
@@ -2003,7 +2038,7 @@ bool AXTree::ValidatePendingChangesComplete(
     std::string error = "Nodes left pending by the update:";
     for (const AXNodeID pending_id : update_state.pending_node_ids)
       error += base::StringPrintf(" %d", pending_id);
-    RecordError(error);
+    RecordError(update_state, error);
     return false;
   }
 
@@ -2029,11 +2064,13 @@ bool AXTree::ValidatePendingChangesComplete(
     if (has_pending_changes) {
       ACCESSIBILITY_TREE_UNSERIALIZE_ERROR_HISTOGRAM(
           AXTreeUnserializeError::kPendingChanges);
-      RecordError(base::StringPrintf(
-          "Changes left pending by the update; "
-          "destroy subtrees: %s, destroy nodes: %s, create nodes: %s",
-          destroy_subtree_ids.c_str(), destroy_node_ids.c_str(),
-          create_node_ids.c_str()));
+      RecordError(
+          update_state,
+          base::StringPrintf(
+              "Changes left pending by the update; "
+              "destroy subtrees: %s, destroy nodes: %s, create nodes: %s",
+              destroy_subtree_ids.c_str(), destroy_node_ids.c_str(),
+              create_node_ids.c_str()));
     }
     return !has_pending_changes;
   }
@@ -2079,17 +2116,18 @@ void AXTree::DestroySubtree(AXNode* node,
 
 void AXTree::DestroyNodeAndSubtree(AXNode* node,
                                    AXTreeUpdateState* update_state) {
+  AXNodeID id = node->id();
+
   DCHECK(GetTreeUpdateInProgressState());
-  DCHECK(!update_state ||
-         update_state->GetPendingDestroyNodeCount(node->id()) > 0);
+  DCHECK(!update_state || update_state->GetPendingDestroyNodeCount(id) > 0);
 
   // Clear out any reverse relations.
   AXNodeData empty_data;
-  empty_data.id = node->id();
+  empty_data.id = id;
   UpdateReverseRelations(node, empty_data);
 
-  AXNodeID id = node->id();
   auto iter = id_map_.find(id);
+  DCHECK(iter != id_map_.end());
   std::unique_ptr<AXNode> node_to_delete = std::move(iter->second);
   id_map_.erase(iter);
   node = nullptr;
@@ -2142,7 +2180,8 @@ bool AXTree::CreateNewChildVector(AXNode* node,
         // If this case occurs, continue so this node isn't left in an
         // inconsistent state, but return failure at the end.
         if (child->parent()) {
-          RecordError(base::StringPrintf("Node %d reparented from %d to %d",
+          RecordError(*update_state,
+                      base::StringPrintf("Node %d reparented from %d to %d",
                                          child->id(), child->parent()->id(),
                                          node->id()));
         } else {
@@ -2381,11 +2420,11 @@ void AXTree::ComputeSetSizePosInSetAndCache(const AXNode& node,
   OrderedSetItemsMap items_map_to_be_populated;
   PopulateOrderedSetItemsMap(node, ordered_set, &items_map_to_be_populated);
 
-  // If ordered_set role is kPopUpButton and it wraps a kMenuListPopUp, then we
-  // would like it to inherit the SetSize from the kMenuListPopUp it wraps. To
-  // do this, we treat the kMenuListPopUp as the ordered_set and eventually
-  // assign its SetSize value to the kPopUpButton.
-  if (node.GetRole() == ax::mojom::Role::kPopUpButton &&
+  // If ordered_set role is kComboBoxSelect and it wraps a kMenuListPopUp, then
+  // we would like it to inherit the SetSize from the kMenuListPopUp it wraps.
+  // To do this, we treat the kMenuListPopUp as the ordered_set and eventually
+  // assign its SetSize value to the kComboBoxSelect.
+  if (node.GetRole() == ax::mojom::Role::kComboBoxSelect &&
       node.GetUnignoredChildCount() > 0) {
     // kPopUpButtons are only allowed to contain one kMenuListPopUp.
     // The single element is guaranteed to be a kMenuListPopUp because that is
@@ -2502,7 +2541,8 @@ void AXTree::ComputeSetSizePosInSetAndCacheHelper(
 }
 
 absl::optional<int> AXTree::GetPosInSet(const AXNode& node) {
-  if (node.GetRole() == ax::mojom::Role::kPopUpButton &&
+  if ((node.GetRole() == ax::mojom::Role::kComboBoxSelect ||
+       node.GetRole() == ax::mojom::Role::kPopUpButton) &&
       node.GetUnignoredChildCount() == 0 &&
       node.HasIntAttribute(ax::mojom::IntAttribute::kPosInSet)) {
     return node.GetIntAttribute(ax::mojom::IntAttribute::kPosInSet);
@@ -2536,7 +2576,8 @@ absl::optional<int> AXTree::GetPosInSet(const AXNode& node) {
 }
 
 absl::optional<int> AXTree::GetSetSize(const AXNode& node) {
-  if (node.GetRole() == ax::mojom::Role::kPopUpButton &&
+  if ((node.GetRole() == ax::mojom::Role::kComboBoxSelect ||
+       node.GetRole() == ax::mojom::Role::kPopUpButton) &&
       node.GetUnignoredChildCount() == 0 &&
       node.HasIntAttribute(ax::mojom::IntAttribute::kSetSize)) {
     return node.GetIntAttribute(ax::mojom::IntAttribute::kSetSize);
@@ -2570,7 +2611,8 @@ absl::optional<int> AXTree::GetSetSize(const AXNode& node) {
 
   // For popup buttons that control a single element, inherit the controlled
   // item's SetSize. Skip this block if the popup button controls itself.
-  if (node.GetRole() == ax::mojom::Role::kPopUpButton) {
+  if (node.GetRole() == ax::mojom::Role::kPopUpButton ||
+      node.GetRole() == ax::mojom::Role::kComboBoxSelect) {
     const auto& controls_ids =
         node.GetIntListAttribute(ax::mojom::IntListAttribute::kControlsIds);
     if (controls_ids.size() == 1 && GetFromId(controls_ids[0]) &&
@@ -2595,113 +2637,15 @@ absl::optional<int> AXTree::GetSetSize(const AXNode& node) {
   return set_size;
 }
 
-namespace {
-
-// Helper for GetUnignoredSelection. Creates a position using |node_id|,
-// |offset| and |affinity|, and if it's ignored, updates these arguments so
-// that they represent a non-null non-ignored position, according to
-// |adjustment_behavior|. Returns true on success, false on failure. Note that
-// if the position is initially null, it's not ignored and it's a success.
-bool ComputeUnignoredSelectionEndpoint(
-    const AXTree& tree,
-    AXPositionAdjustmentBehavior adjustment_behavior,
-    AXNodeID& node_id,
-    int32_t& offset,
-    ax::mojom::TextAffinity& affinity) {
-  AXNode* node = tree.GetFromId(node_id);
-  if (!node) {
-    node_id = kInvalidAXNodeID;
-    offset = -1;
-    affinity = ax::mojom::TextAffinity::kDownstream;
-    return false;
-  }
-
-  AXNodePosition::AXPositionInstance position =
-      AXNodePosition::CreatePosition(*node, offset, affinity);
-
-  // Null positions are never ignored, but must be considered successful, or
-  // these Android tests would fail:
-  // org.chromium.content.browser.accessibility.AssistViewStructureTest#*
-  // The reason is that |position| becomes null because no AXTreeManager is
-  // registered for that |tree|'s AXTreeID.
-  // TODO(accessibility): investigate and fix this if needed.
-  if (!position->IsIgnored())
-    return true;  // We assume that unignored positions are already valid.
-
-  position =
-      position->AsValidPosition()->AsUnignoredPosition(adjustment_behavior);
-
-  // Moving to an unignored position might have placed the position on a leaf
-  // node. Any selection endpoint that is inside a leaf node is expressed as a
-  // text position in AXTreeData. (Note that in this context "leaf node" means
-  // a node with no children or with only ignored children. This does not
-  // refer to a platform leaf.)
-  if (position->IsLeafTreePosition())
-    position = position->AsTextPosition();
-
-  // We do not expect the selection to have an endpoint on an inline text
-  // box as this will create issues with parts of the code that don't use
-  // inline text boxes.
-  if (position->IsTextPosition() &&
-      position->GetRole() == ax::mojom::Role::kInlineTextBox) {
-    position = position->CreateParentPosition();
-  }
-
-  switch (position->kind()) {
-    case AXPositionKind::NULL_POSITION:
-      node_id = kInvalidAXNodeID;
-      offset = -1;
-      affinity = ax::mojom::TextAffinity::kDownstream;
-      return false;
-    case AXPositionKind::TREE_POSITION:
-      node_id = position->anchor_id();
-      offset = position->child_index();
-      affinity = ax::mojom::TextAffinity::kDownstream;
-      return true;
-    case AXPositionKind::TEXT_POSITION:
-      node_id = position->anchor_id();
-      offset = position->text_offset();
-      affinity = position->affinity();
-      return true;
-  }
+AXSelection AXTree::GetSelection() const {
+  // TODO(accessibility): do not create a selection object every time it's
+  // requested. Either switch AXSelection to getters that computes selection
+  // data upon request or provide an invalidation mechanism.
+  return AXSelection(*this);
 }
 
-}  // namespace
-
-AXTree::Selection AXTree::GetUnignoredSelection() const {
-  Selection unignored_selection = {
-      data().sel_is_backward,     data().sel_anchor_object_id,
-      data().sel_anchor_offset,   data().sel_anchor_affinity,
-      data().sel_focus_object_id, data().sel_focus_offset,
-      data().sel_focus_affinity};
-
-  // If one of the selection endpoints is invalid, then the other endpoint
-  // should also be unset.
-  if (!ComputeUnignoredSelectionEndpoint(
-          *this,
-          unignored_selection.is_backward
-              ? AXPositionAdjustmentBehavior::kMoveForward
-              : AXPositionAdjustmentBehavior::kMoveBackward,
-          unignored_selection.anchor_object_id,
-          unignored_selection.anchor_offset,
-          unignored_selection.anchor_affinity)) {
-    unignored_selection.focus_object_id = kInvalidAXNodeID;
-    unignored_selection.focus_offset = -1;
-    unignored_selection.focus_affinity = ax::mojom::TextAffinity::kDownstream;
-  } else if (!ComputeUnignoredSelectionEndpoint(
-                 *this,
-                 unignored_selection.is_backward
-                     ? AXPositionAdjustmentBehavior::kMoveBackward
-                     : AXPositionAdjustmentBehavior::kMoveForward,
-                 unignored_selection.focus_object_id,
-                 unignored_selection.focus_offset,
-                 unignored_selection.focus_affinity)) {
-    unignored_selection.anchor_object_id = kInvalidAXNodeID;
-    unignored_selection.anchor_offset = -1;
-    unignored_selection.anchor_affinity = ax::mojom::TextAffinity::kDownstream;
-  }
-
-  return unignored_selection;
+AXSelection AXTree::GetUnignoredSelection() const {
+  return GetSelection().ToUnignoredSelection();
 }
 
 bool AXTree::GetTreeUpdateInProgressState() const {
@@ -2724,18 +2668,39 @@ void AXTree::NotifyTreeManagerWillBeRemoved(AXTreeID previous_tree_id) {
     observer.OnTreeManagerWillBeRemoved(previous_tree_id);
 }
 
-void AXTree::RecordError(std::string new_error) {
+void AXTree::RecordError(const AXTreeUpdateState& update_state,
+                         std::string new_error) {
   if (!error_.empty())
     error_ = error_ + "\n";  // Add visual separation between errors.
   error_ = error_ + new_error;
 
-  if (!error_.empty()) {
-    // Add a crash key so we can figure out why this is happening.
-    static crash_reporter::CrashKeyString<256> ax_tree_error(
-        "ax_tree_unserialize_error");
-    ax_tree_error.Set(error_);
-    LOG(ERROR) << error_;
-  }
+  LOG(ERROR) << new_error;
+
+  if (disallow_fail_fast_)
+    return;
+
+  static auto* const ax_tree_error_key = base::debug::AllocateCrashKeyString(
+      "ax_tree_error", base::debug::CrashKeySize::Size256);
+  static auto* const ax_tree_update_key = base::debug::AllocateCrashKeyString(
+      "ax_tree_update", base::debug::CrashKeySize::Size256);
+  static auto* const ax_tree_key = base::debug::AllocateCrashKeyString(
+      "ax_tree", base::debug::CrashKeySize::Size256);
+  static auto* const ax_tree_data_key = base::debug::AllocateCrashKeyString(
+      "ax_tree_data", base::debug::CrashKeySize::Size256);
+
+  // Log additional crash keys so we can debug bad tree updates.
+  base::debug::SetCrashKeyString(ax_tree_error_key, new_error);
+  base::debug::SetCrashKeyString(ax_tree_update_key,
+                                 update_state.pending_tree_update.ToString());
+  base::debug::SetCrashKeyString(ax_tree_key, TreeToStringHelper(root_, 1));
+  base::debug::SetCrashKeyString(ax_tree_data_key, data().ToString());
+
+  // In fast-failing-builds, crash immediately with a message, otherwise
+  // rely on AccessibilityFatalError(), which will not crash until multiple
+  // errors occur.
+  SANITIZER_NOTREACHED() << new_error << "\n"
+                         << update_state.pending_tree_update.ToString() << "\n"
+                         << ToString();
 }
 
 }  // namespace ui

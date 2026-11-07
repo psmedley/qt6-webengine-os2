@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -154,15 +154,11 @@ static bool IsVaapiSupportedJpeg(const JpegParseResult& jpeg) {
 
   // Validate the coded size.
   gfx::Size min_jpeg_resolution;
-  if (!VaapiWrapper::GetDecodeMinResolution(VAProfileJPEGBaseline,
-                                            &min_jpeg_resolution)) {
-    DLOG(ERROR) << "Could not get the minimum resolution";
-    return false;
-  }
   gfx::Size max_jpeg_resolution;
-  if (!VaapiWrapper::GetDecodeMaxResolution(VAProfileJPEGBaseline,
-                                            &max_jpeg_resolution)) {
-    DLOG(ERROR) << "Could not get the maximum resolution";
+  if (!VaapiWrapper::GetSupportedResolutions(
+          VAProfileJPEGBaseline, VaapiWrapper::CodecMode::kDecode,
+          min_jpeg_resolution, max_jpeg_resolution)) {
+    DLOG(ERROR) << "Could not get the minimum and maximum resolutions";
     return false;
   }
   const int actual_jpeg_coded_width =

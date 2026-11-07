@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,9 +28,6 @@ namespace webrtc {
 namespace {
 constexpr base::TimeDelta kTaskLatencySampleDuration = base::Seconds(3);
 }
-
-const base::Feature kThreadWrapperUsesMetronome{
-    "ThreadWrapperUsesMetronome", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Class intended to conditionally live for the duration of ThreadWrapper
 // that periodically captures task latencies (definition in docs for
@@ -85,16 +82,12 @@ class ThreadWrapper::PostTaskLatencySampler {
 };
 
 struct ThreadWrapper::PendingSend {
-  explicit PendingSend(const rtc::Message& message_value)
-      : sending_thread(ThreadWrapper::current()),
-        message(message_value),
+  explicit PendingSend(rtc::FunctionView<void()> functor)
+      : functor(functor),
         done_event(base::WaitableEvent::ResetPolicy::MANUAL,
-                   base::WaitableEvent::InitialState::NOT_SIGNALED) {
-    DCHECK(sending_thread);
-  }
+                   base::WaitableEvent::InitialState::NOT_SIGNALED) {}
 
-  raw_ptr<ThreadWrapper> sending_thread;
-  rtc::Message message;
+  rtc::FunctionView<void()> functor;
   base::WaitableEvent done_event;
 };
 
@@ -139,8 +132,6 @@ ThreadWrapper::ThreadWrapper(
     : Thread(std::make_unique<rtc::PhysicalSocketServer>()),
       task_runner_(task_runner),
       send_allowed_(false),
-      use_metronome_(base::FeatureList::IsEnabled(kThreadWrapperUsesMetronome)),
-      last_task_id_(0),
       pending_send_event_(base::WaitableEvent::ResetPolicy::MANUAL,
                           base::WaitableEvent::InitialState::NOT_SIGNALED) {
   DCHECK(task_runner->BelongsToCurrentThread());
@@ -159,93 +150,25 @@ ThreadWrapper::~ThreadWrapper() {
   rtc::ThreadManager::Remove(this);
   g_jingle_thread_wrapper.Get().Set(nullptr);
 
-  Clear(nullptr, rtc::MQID_ANY, nullptr);
+  CHECK(pending_send_messages_.empty());
   coalesced_tasks_.Clear();
+}
+
+rtc::SocketServer* ThreadWrapper::SocketServer() {
+  return rtc::Thread::socketserver();
 }
 
 void ThreadWrapper::WillDestroyCurrentMessageLoop() {
   delete this;
 }
 
-void ThreadWrapper::Post(const rtc::Location& posted_from,
-                         rtc::MessageHandler* handler,
-                         uint32_t message_id,
-                         rtc::MessageData* data,
-                         bool time_sensitive) {
-  PostTaskInternal(posted_from, 0, handler, message_id, data);
-}
-
-void ThreadWrapper::PostDelayed(const rtc::Location& posted_from,
-                                int delay_ms,
-                                rtc::MessageHandler* handler,
-                                uint32_t message_id,
-                                rtc::MessageData* data) {
-  PostTaskInternal(posted_from, delay_ms, handler, message_id, data);
-}
-
-void ThreadWrapper::Clear(rtc::MessageHandler* handler,
-                          uint32_t id,
-                          rtc::MessageList* removed) {
-  base::AutoLock auto_lock(lock_);
-
-  for (MessagesQueue::iterator it = messages_.begin(); it != messages_.end();) {
-    MessagesQueue::iterator next = it;
-    ++next;
-
-    if (it->second.Match(handler, id)) {
-      if (removed) {
-        removed->push_back(it->second);
-      } else {
-        delete it->second.pdata;
-      }
-      messages_.erase(it);
-    }
-
-    it = next;
-  }
-
-  for (std::list<PendingSend*>::iterator it = pending_send_messages_.begin();
-       it != pending_send_messages_.end();) {
-    std::list<PendingSend*>::iterator next = it;
-    ++next;
-
-    if ((*it)->message.Match(handler, id)) {
-      if (removed) {
-        removed->push_back((*it)->message);
-      } else {
-        delete (*it)->message.pdata;
-      }
-      (*it)->done_event.Signal();
-      pending_send_messages_.erase(it);
-    }
-
-    it = next;
-  }
-}
-
-void ThreadWrapper::Dispatch(rtc::Message* message) {
-  TRACE_EVENT2("webrtc", "ThreadWrapper::Dispatch", "src_file_and_line",
-               message->posted_from.file_and_line(), "src_func",
-               message->posted_from.function_name());
-  message->phandler->OnMessage(message);
-}
-
-void ThreadWrapper::Send(const rtc::Location& posted_from,
-                         rtc::MessageHandler* handler,
-                         uint32_t id,
-                         rtc::MessageData* data) {
+void ThreadWrapper::BlockingCall(rtc::FunctionView<void()> functor) {
   ThreadWrapper* current_thread = ThreadWrapper::current();
-  DCHECK(current_thread != nullptr) << "Send() can be called only from a "
-                                       "thread that has ThreadWrapper.";
-
-  rtc::Message message;
-  message.posted_from = posted_from;
-  message.phandler = handler;
-  message.message_id = id;
-  message.pdata = data;
+  DCHECK(current_thread != nullptr) << "BlockingCall() can be called only from "
+                                       "a thread that has ThreadWrapper.";
 
   if (current_thread == this) {
-    Dispatch(&message);
+    functor();
     return;
   }
 
@@ -257,7 +180,7 @@ void ThreadWrapper::Send(const rtc::Location& posted_from,
       << "Send()'ing synchronous "
          "messages is not allowed from the current thread.";
 
-  PendingSend pending_send(message);
+  PendingSend pending_send(functor);
   {
     base::AutoLock auto_lock(lock_);
     pending_send_messages_.push_back(&pending_send);
@@ -296,78 +219,40 @@ void ThreadWrapper::ProcessPendingSends() {
       }
     }
     if (pending_send) {
-      Dispatch(&pending_send->message);
+      pending_send->functor();
       pending_send->done_event.Signal();
     }
   }
 }
 
-void ThreadWrapper::PostTaskInternal(const rtc::Location& posted_from,
-                                     int delay_ms,
-                                     rtc::MessageHandler* handler,
-                                     uint32_t message_id,
-                                     rtc::MessageData* data) {
-  int task_id;
-  rtc::Message message;
-  message.posted_from = posted_from;
-  message.phandler = handler;
-  message.message_id = message_id;
-  message.pdata = data;
-  {
-    base::AutoLock auto_lock(lock_);
-    task_id = ++last_task_id_;
-    messages_.insert(std::pair<int, rtc::Message>(task_id, message));
-  }
-
-  if (delay_ms <= 0) {
-    task_runner_->PostTask(
-        FROM_HERE, base::BindOnce(&ThreadWrapper::RunTask, weak_ptr_, task_id));
-  } else {
-    task_runner_->PostDelayedTaskAt(
-        base::subtle::PostDelayedTaskPassKey(), FROM_HERE,
-        base::BindOnce(&ThreadWrapper::RunTask, weak_ptr_, task_id),
-        base::TimeTicks::Now() + base::Milliseconds(delay_ms),
-        base::subtle::DelayPolicy::kPrecise);
-  }
-}
-
-void ThreadWrapper::PostTask(std::unique_ptr<webrtc::QueuedTask> task) {
+void ThreadWrapper::PostTask(absl::AnyInvocable<void() &&> task) {
   task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&ThreadWrapper::RunTaskQueueTask, weak_ptr_,
                                 std::move(task)));
 }
 
-void ThreadWrapper::PostDelayedTask(std::unique_ptr<webrtc::QueuedTask> task,
-                                    uint32_t milliseconds) {
+void ThreadWrapper::PostDelayedTask(absl::AnyInvocable<void() &&> task,
+                                    TimeDelta delay) {
   base::TimeTicks target_time =
-      base::TimeTicks::Now() + base::Milliseconds(milliseconds);
-  if (use_metronome_) {
-    // Coalesce tasks onto the metronome.
-    base::TimeTicks snapped_target_time =
-        blink::MetronomeSource::TimeSnappedToNextTick(target_time);
-    if (coalesced_tasks_.QueueDelayedTask(target_time, std::move(task),
-                                          snapped_target_time)) {
-      task_runner_->PostDelayedTaskAt(
-          base::subtle::PostDelayedTaskPassKey(), FROM_HERE,
-          base::BindOnce(&ThreadWrapper::RunCoalescedTaskQueueTasks, weak_ptr_,
-                         snapped_target_time),
-          snapped_target_time, base::subtle::DelayPolicy::kPrecise);
-    }
-    return;
+      base::TimeTicks::Now() + base::Microseconds(delay.us());
+  // Coalesce low precision tasks onto the metronome.
+  base::TimeTicks snapped_target_time =
+      blink::MetronomeSource::TimeSnappedToNextTick(target_time);
+  if (coalesced_tasks_.QueueDelayedTask(target_time, std::move(task),
+                                        snapped_target_time)) {
+    task_runner_->PostDelayedTaskAt(
+        base::subtle::PostDelayedTaskPassKey(), FROM_HERE,
+        base::BindOnce(&ThreadWrapper::RunCoalescedTaskQueueTasks, weak_ptr_,
+                       snapped_target_time),
+        snapped_target_time, base::subtle::DelayPolicy::kPrecise);
   }
-  // Do not coalesce tasks onto the metronome.
-  task_runner_->PostDelayedTaskAt(
-      base::subtle::PostDelayedTaskPassKey(), FROM_HERE,
-      base::BindOnce(&ThreadWrapper::RunTaskQueueTask, weak_ptr_,
-                     std::move(task)),
-      target_time, base::subtle::DelayPolicy::kPrecise);
 }
 
 void ThreadWrapper::PostDelayedHighPrecisionTask(
-    std::unique_ptr<webrtc::QueuedTask> task,
-    uint32_t milliseconds) {
+    absl::AnyInvocable<void() &&> task,
+    webrtc::TimeDelta delay) {
   base::TimeTicks target_time =
-      base::TimeTicks::Now() + base::Milliseconds(milliseconds);
+      base::TimeTicks::Now() + base::Microseconds(delay.us());
   task_runner_->PostDelayedTaskAt(
       base::subtle::PostDelayedTaskPassKey(), FROM_HERE,
       base::BindOnce(&ThreadWrapper::RunTaskQueueTask, weak_ptr_,
@@ -388,15 +273,11 @@ absl::optional<base::TimeTicks> ThreadWrapper::PrepareRunTask() {
   return task_start_timestamp;
 }
 
-void ThreadWrapper::RunTaskQueueTask(std::unique_ptr<webrtc::QueuedTask> task) {
+void ThreadWrapper::RunTaskQueueTask(absl::AnyInvocable<void() &&> task) {
   absl::optional<base::TimeTicks> task_start_timestamp = PrepareRunTask();
 
-  // Follow QueuedTask::Run() semantics: delete if it returns true, release
-  // otherwise.
-  if (task->Run())
-    task.reset();
-  else
-    task.release();
+  std::move(task)();
+  task = nullptr;
 
   FinalizeRunTask(std::move(task_start_timestamp));
 }
@@ -412,45 +293,14 @@ void ThreadWrapper::RunCoalescedTaskQueueTasks(base::TimeTicks scheduled_time) {
                           base::Unretained(this)));
 }
 
-void ThreadWrapper::RunTask(int task_id) {
-  absl::optional<base::TimeTicks> task_start_timestamp = PrepareRunTask();
-
-  RunTaskInternal(task_id);
-
-  FinalizeRunTask(std::move(task_start_timestamp));
-}
-
 void ThreadWrapper::FinalizeRunTask(
     absl::optional<base::TimeTicks> task_start_timestamp) {
   if (task_start_timestamp.has_value())
     task_duration_callback_.Run(base::TimeTicks::Now() - *task_start_timestamp);
 }
 
-void ThreadWrapper::RunTaskInternal(int task_id) {
-  bool have_message = false;
-  rtc::Message message;
-  {
-    base::AutoLock auto_lock(lock_);
-    MessagesQueue::iterator it = messages_.find(task_id);
-    if (it != messages_.end()) {
-      have_message = true;
-      message = it->second;
-      messages_.erase(it);
-    }
-  }
-
-  if (have_message) {
-    if (message.message_id == rtc::MQID_DISPOSE) {
-      DCHECK(message.phandler == nullptr);
-      delete message.pdata;
-    } else {
-      Dispatch(&message);
-    }
-  }
-}
-
 bool ThreadWrapper::IsQuitting() {
-  NOTIMPLEMENTED_LOG_ONCE();
+  NOTREACHED();
   return false;
 }
 
@@ -462,16 +312,6 @@ void ThreadWrapper::Quit() {
 
 void ThreadWrapper::Restart() {
   NOTREACHED();
-}
-
-bool ThreadWrapper::Get(rtc::Message*, int, bool) {
-  NOTREACHED();
-  return false;
-}
-
-bool ThreadWrapper::Peek(rtc::Message*, int) {
-  NOTREACHED();
-  return false;
 }
 
 int ThreadWrapper::GetDelay() {

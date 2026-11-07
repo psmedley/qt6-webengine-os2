@@ -202,11 +202,11 @@ static const AVClass hevc_nvenc_class = {
 
 const FFCodec ff_hevc_nvenc_encoder = {
     .p.name         = "hevc_nvenc",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("NVIDIA NVENC hevc encoder"),
+    CODEC_LONG_NAME("NVIDIA NVENC hevc encoder"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_HEVC,
     .init           = ff_nvenc_encode_init,
-    .receive_packet = ff_nvenc_receive_packet,
+    FF_CODEC_RECEIVE_PACKET_CB(ff_nvenc_receive_packet),
     .close          = ff_nvenc_encode_close,
     .flush          = ff_nvenc_encode_flush,
     .priv_data_size = sizeof(NvencContext),
@@ -215,7 +215,8 @@ const FFCodec ff_hevc_nvenc_encoder = {
     .p.pix_fmts     = ff_nvenc_pix_fmts,
     .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_HARDWARE |
                       AV_CODEC_CAP_ENCODER_FLUSH | AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE |
+                      FF_CODEC_CAP_INIT_CLEANUP,
     .p.wrapper_name = "nvenc",
     .hw_configs     = ff_nvenc_hw_configs,
 };

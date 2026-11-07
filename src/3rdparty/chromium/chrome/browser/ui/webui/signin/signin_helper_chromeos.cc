@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,21 @@
 
 #include "ash/constants/ash_features.h"
 #include "base/feature_list.h"
+#include "base/metrics/histogram_functions.h"
 #include "chrome/browser/ash/account_manager/account_apps_availability.h"
 #include "components/account_manager_core/account.h"
 #include "components/account_manager_core/account_addition_result.h"
 #include "components/account_manager_core/chromeos/account_manager.h"
 #include "components/account_manager_core/chromeos/account_manager_mojo_service.h"
+#include "components/user_manager/user_manager.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
 
 namespace chromeos {
+
+namespace {
+constexpr char kSecondaryGoogleAccountUsageHistogramName[] =
+    "Enterprise.SecondaryGoogleAccountUsage.PolicyFetch.Status";
+}  // namespace
 
 using SigninRestrictionPolicyFetcher =
     ::ash::UserCloudSigninRestrictionPolicyFetcherChromeOS;
@@ -68,8 +75,7 @@ SigninHelper::SigninHelper(
 
   if (ash::AccountAppsAvailability::IsArcAccountRestrictionsEnabled())
     DCHECK(arc_helper_);
-
-  if (IsSecondaryGoogleAccountUsageEnabled()) {
+  if (!IsInitialPrimaryAccount() && IsSecondaryGoogleAccountUsageEnabled()) {
     DCHECK(show_signin_blocked_error_);
     restriction_fetcher_ =
         std::make_unique<ash::UserCloudSigninRestrictionPolicyFetcherChromeOS>(
@@ -84,7 +90,7 @@ SigninHelper::~SigninHelper() = default;
 
 void SigninHelper::OnClientOAuthSuccess(const ClientOAuthResult& result) {
   refresh_token_ = result.refresh_token;
-  if (IsSecondaryGoogleAccountUsageEnabled()) {
+  if (!IsInitialPrimaryAccount() && IsSecondaryGoogleAccountUsageEnabled()) {
     restriction_fetcher_->GetSecondaryGoogleAccountUsage(
         /*access_token_fetcher=*/GaiaAccessTokenFetcher::
             CreateExchangeRefreshTokenForAccessTokenInstance(
@@ -95,7 +101,6 @@ void SigninHelper::OnClientOAuthSuccess(const ClientOAuthResult& result) {
             weak_factory_.GetWeakPtr()));
     return;
   }
-
   UpsertAccount(refresh_token_);
   CloseDialogAndExit();
 }
@@ -153,6 +158,9 @@ void SigninHelper::OnGetSecondaryGoogleAccountUsage(
     SigninRestrictionPolicyFetcher::Status status,
     absl::optional<std::string> policy_result,
     const std::string& hosted_domain) {
+  base::UmaHistogramEnumeration(kSecondaryGoogleAccountUsageHistogramName,
+                                status);
+
   if (status ==
       SigninRestrictionPolicyFetcher::Status::kUnsupportedAccountTypeError) {
     // SecondaryGoogleAccountUsage policy does not apply to non enterprise
@@ -163,7 +171,7 @@ void SigninHelper::OnGetSecondaryGoogleAccountUsage(
   }
 
   if (status != SigninRestrictionPolicyFetcher::Status::kSuccess) {
-    // TODO(b/227166207): Display error something went wrong.
+    ShowSigninBlockedErrorPageAndExit(/*hosted_domain=*/std::string());
     return;
   }
 
@@ -208,6 +216,13 @@ void SigninHelper::OnOAuth2RevokeTokenCompleted(
                   "returned with an error";
   }
   Exit();
+}
+
+bool SigninHelper::IsInitialPrimaryAccount() {
+  return user_manager::UserManager::Get()
+             ->GetPrimaryUser()
+             ->GetAccountId()
+             .GetGaiaId() == account_key_.id();
 }
 
 account_manager::AccountManager* SigninHelper::GetAccountManager() {

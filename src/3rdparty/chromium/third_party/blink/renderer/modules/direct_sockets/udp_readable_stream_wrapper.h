@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "third_party/blink/renderer/modules/direct_sockets/stream_wrapper.h"
 #include "third_party/blink/renderer/modules/direct_sockets/udp_socket_mojo_remote.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/heap/prefinalizer.h"
@@ -19,31 +18,29 @@
 
 namespace blink {
 
+class ScriptState;
+
 class MODULES_EXPORT UDPReadableStreamWrapper
     : public GarbageCollected<UDPReadableStreamWrapper>,
       public ReadableStreamWrapper {
  public:
-  UDPReadableStreamWrapper(ScriptState* script_state,
-                           const Member<UDPSocketMojoRemote> udp_socket,
-                           base::OnceCallback<void(bool)> on_close,
-                           uint32_t high_water_mark);
+  UDPReadableStreamWrapper(ScriptState*,
+                           CloseOnceCallback,
+                           const Member<UDPSocketMojoRemote>);
 
+  // ReadableStreamWrapper:
   void Pull() override;
-
   bool Push(base::span<const uint8_t> data,
             const absl::optional<net::IPEndPoint>& src_addr) override;
-
-  void CloseStream(bool error) override;
-  void CloseSocket(bool error) override;
-
-  void Trace(Visitor* visitor) const override;
+  void CloseStream() override;
+  void ErrorStream(int32_t error_code) override;
+  void Trace(Visitor*) const override;
 
  private:
   class UDPUnderlyingSource;
 
+  CloseOnceCallback on_close_;
   const Member<UDPSocketMojoRemote> udp_socket_;
-  base::OnceCallback<void(bool)> on_close_;
-
   int32_t pending_receive_requests_ = 0;
 };
 

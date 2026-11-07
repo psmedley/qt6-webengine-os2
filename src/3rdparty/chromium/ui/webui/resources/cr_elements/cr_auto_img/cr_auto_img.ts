@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,15 +15,23 @@
  *
  *      <img is="cr-auto-img" auto-src="https://foo.com/bar.png">
  *
- *      If your image needs to be fetched using cookies, you can use the
- *      with-cookies attribute as follows:
+ *      If your image URL points to Google Photos storage, meaning it needs an
+ *      auth token to be downloaded, you can use the is-google-photos attribute
+ *      as follows:
  *
- *      <img is="cr-auto-img" auto-src="https://foo.com/bar.png" with-cookies>
+ *      <img is="cr-auto-img" auto-src="https://foo.com/bar.png"
+ *          is-google-photos>
  *
  *      If you want the image to reset to an empty state when auto-src changes
  *      and the new image is still loading, set the clear-src attribute:
  *
  *      <img is="cr-auto-img" auto-src="[[calculateSrc()]]" clear-src>
+ *
+ *      If you want your image to be always encoded as static PNG image (even if
+ *      the source image is animated), set the static-encode attribute:
+ *
+ *      <img is="cr-auto-img" auto-src="https://foo.com/bar.png"
+ *          static-encode>
  *
  * NOTE: Since <cr-auto-img> may use the chrome://image data source some images
  * may be transcoded to PNG.
@@ -33,22 +41,25 @@ const AUTO_SRC: string = 'auto-src';
 
 const CLEAR_SRC: string = 'clear-src';
 
-const WITH_COOKIES: string = 'with-cookies';
+const IS_GOOGLE_PHOTOS: string = 'is-google-photos';
+
+const STATIC_ENCODE: string = 'static-encode';
 
 export class CrAutoImgElement extends HTMLImageElement {
   static get observedAttributes() {
-    return [AUTO_SRC, WITH_COOKIES];
+    return [AUTO_SRC, IS_GOOGLE_PHOTOS, STATIC_ENCODE];
   }
 
   attributeChangedCallback(
       name: string, oldValue: string|null, newValue: string|null) {
-    if (name !== AUTO_SRC && name !== WITH_COOKIES) {
+    if (name !== AUTO_SRC && name !== IS_GOOGLE_PHOTOS &&
+        name !== STATIC_ENCODE) {
       return;
     }
 
-    // Changes to |WITH_COOKIES| are only interesting when the attribute is
+    // Changes to |IS_GOOGLE_PHOTOS| are only interesting when the attribute is
     // being added or removed.
-    if (name === WITH_COOKIES &&
+    if (name === IS_GOOGLE_PHOTOS &&
         ((oldValue === null) === (newValue === null))) {
       return;
     }
@@ -70,13 +81,24 @@ export class CrAutoImgElement extends HTMLImageElement {
       // Loading chrome-untrusted:// via the chrome://image data source
       // results in a broken image.
       this.removeAttribute('src');
-    } else if (url.protocol === 'data:' || url.protocol === 'chrome:') {
+      return;
+    }
+    if (url.protocol === 'data:' || url.protocol === 'chrome:') {
       this.src = url.href;
-    } else if (this.hasAttribute(WITH_COOKIES)) {
-      this.src =
-          `chrome://image?url=${encodeURIComponent(url.href)}&withCookies=true`;
-    } else {
+      return;
+    }
+    if (!this.hasAttribute(IS_GOOGLE_PHOTOS) &&
+        !this.hasAttribute(STATIC_ENCODE)) {
       this.src = 'chrome://image?' + url.href;
+      return;
+    }
+
+    this.src = `chrome://image?url=${encodeURIComponent(url.href)}`;
+    if (this.hasAttribute(IS_GOOGLE_PHOTOS)) {
+      this.src += `&isGooglePhotos=true`;
+    }
+    if (this.hasAttribute(STATIC_ENCODE)) {
+      this.src += `&staticEncode=true`;
     }
   }
 
@@ -96,16 +118,28 @@ export class CrAutoImgElement extends HTMLImageElement {
     return this.getAttribute(CLEAR_SRC)!;
   }
 
-  set withCookies(enabled: boolean) {
+  set isGooglePhotos(enabled: boolean) {
     if (enabled) {
-      this.setAttribute(WITH_COOKIES, '');
+      this.setAttribute(IS_GOOGLE_PHOTOS, '');
     } else {
-      this.removeAttribute(WITH_COOKIES);
+      this.removeAttribute(IS_GOOGLE_PHOTOS);
     }
   }
 
-  get withCookies(): boolean {
-    return this.hasAttribute(WITH_COOKIES);
+  get isGooglePhotos(): boolean {
+    return this.hasAttribute(IS_GOOGLE_PHOTOS);
+  }
+
+  set staticEncode(enabled: boolean) {
+    if (enabled) {
+      this.setAttribute(STATIC_ENCODE, '');
+    } else {
+      this.removeAttribute(STATIC_ENCODE);
+    }
+  }
+
+  get staticEncode(): boolean {
+    return this.hasAttribute(STATIC_ENCODE);
   }
 }
 

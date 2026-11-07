@@ -43,7 +43,8 @@ constexpr base::SockFamily kHostSockFamily =
 base::CrashKey g_crash_key_uid("ipc_uid");
 
 uid_t GetPosixPeerUid(base::UnixSocket* sock) {
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_FUCHSIA)
   base::ignore_result(sock);
   // Unsupported. Must be != kInvalidUid or the PacketValidator will fail.
   return 0;
@@ -83,6 +84,12 @@ std::unique_ptr<Host> Host::CreateInstance(base::ScopedSocketHandle socket_fd,
   return std::unique_ptr<Host>(std::move(host));
 }
 
+// static
+std::unique_ptr<Host> Host::CreateInstance_Fuchsia(
+    base::TaskRunner* task_runner) {
+  return std::unique_ptr<HostImpl>(new HostImpl(task_runner));
+}
+
 HostImpl::HostImpl(base::ScopedSocketHandle socket_fd,
                    base::TaskRunner* task_runner)
     : task_runner_(task_runner), weak_ptr_factory_(this) {
@@ -101,6 +108,11 @@ HostImpl::HostImpl(const char* socket_name, base::TaskRunner* task_runner)
   }
 }
 
+HostImpl::HostImpl(base::TaskRunner* task_runner)
+    : task_runner_(task_runner), weak_ptr_factory_(this) {
+  PERFETTO_DCHECK_THREAD(thread_checker_);
+}
+
 HostImpl::~HostImpl() = default;
 
 bool HostImpl::ExposeService(std::unique_ptr<Service> service) {
@@ -114,6 +126,25 @@ bool HostImpl::ExposeService(std::unique_ptr<Service> service) {
   ExposedService exposed_service(sid, service_name, std::move(service));
   services_.emplace(sid, std::move(exposed_service));
   return true;
+}
+
+void HostImpl::AdoptConnectedSocket_Fuchsia(
+    base::ScopedSocketHandle connected_socket,
+    std::function<bool(int)> send_fd_cb) {
+  PERFETTO_DCHECK_THREAD(thread_checker_);
+  PERFETTO_DCHECK(connected_socket);
+  // Should not be used in conjunction with listen sockets.
+  PERFETTO_DCHECK(!sock_);
+
+  auto unix_socket = base::UnixSocket::AdoptConnected(
+      std::move(connected_socket), this, task_runner_, kHostSockFamily,
+      base::SockType::kStream);
+
+  auto* unix_socket_ptr = unix_socket.get();
+  OnNewIncomingConnection(nullptr, std::move(unix_socket));
+  ClientConnection* client_connection = clients_by_socket_[unix_socket_ptr];
+  client_connection->send_fd_cb_fuchsia = std::move(send_fd_cb);
+  PERFETTO_DCHECK(client_connection->send_fd_cb_fuchsia);
 }
 
 void HostImpl::OnNewIncomingConnection(
@@ -275,6 +306,18 @@ void HostImpl::SendFrame(ClientConnection* client, const Frame& frame, int fd) {
   auto scoped_key = g_crash_key_uid.SetScoped(static_cast<int64_t>(peer_uid));
 
   std::string buf = BufferedFrameDeserializer::Serialize(frame);
+
+  // On Fuchsia, |send_fd_cb_fuchsia_| is used to send the FD to the client
+  // and therefore must be set.
+  PERFETTO_DCHECK(!PERFETTO_BUILDFLAG(PERFETTO_OS_FUCHSIA) ||
+                  client->send_fd_cb_fuchsia);
+  if (client->send_fd_cb_fuchsia && fd != base::ScopedFile::kInvalid) {
+    if (!client->send_fd_cb_fuchsia(fd)) {
+      client->sock->Shutdown(true);
+      return;
+    }
+    fd = base::ScopedFile::kInvalid;
+  }
 
   // When a new Client connects in OnNewClientConnection we set a timeout on
   // Send (see call to SetTxTimeout).

@@ -105,6 +105,10 @@ const UIStrings = {
   *@description Text for the viewing the help options
   */
   help: 'Help',
+  /**
+  *@description Text describing how to navigate the dock side menu
+  */
+  dockSideNaviation: 'Use left and right arrow keys to navigate the options',
 };
 const str_ = i18n.i18n.registerUIStrings('entrypoints/main/MainImpl.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
@@ -148,10 +152,7 @@ export class MainImpl {
     this.createSettings(prefs);
     await this.requestAndRegisterLocaleData();
 
-    if (Root.Runtime.experiments.isEnabled(Root.Runtime.ExperimentName.SYNC_SETTINGS)) {
-      Host.userMetrics.syncSetting(
-          Common.Settings.Settings.instance().moduleSetting<boolean>('sync_preferences').get());
-    }
+    Host.userMetrics.syncSetting(Common.Settings.Settings.instance().moduleSetting<boolean>('sync_preferences').get());
 
     void this.#createAppUI();
   }
@@ -292,14 +293,13 @@ export class MainImpl {
         'recordCoverageWithPerformanceTracing', 'Record coverage while performance tracing');
     Root.Runtime.experiments.register('samplingHeapProfilerTimeline', 'Sampling heap profiler timeline', true);
     Root.Runtime.experiments.register(
-        'showOptionToNotTreatGlobalObjectsAsRoots',
-        'Show option to take heap snapshot where globals are not treated as root');
+        'showOptionToExposeInternalsInHeapSnapshot', 'Show option to expose internals in heap snapshots');
     Root.Runtime.experiments.register(
         'sourceOrderViewer', 'Source order viewer', undefined,
         'https://developer.chrome.com/blog/new-in-devtools-92/#source-order');
     Root.Runtime.experiments.register('webauthnPane', 'WebAuthn Pane');
     Root.Runtime.experiments.register(
-        'keyboardShortcutEditor', 'Enable keyboard shortcut editor', true,
+        'keyboardShortcutEditor', 'Enable keyboard shortcut editor', false,
         'https://developer.chrome.com/blog/new-in-devtools-88/#keyboard-shortcuts');
 
     // Back/forward cache
@@ -312,7 +312,6 @@ export class MainImpl {
     Root.Runtime.experiments.register('timelineShowAllEvents', 'Timeline: show all events', true);
     Root.Runtime.experiments.register(
         'timelineV8RuntimeCallStats', 'Timeline: V8 Runtime Call Stats on Timeline', true);
-    Root.Runtime.experiments.register('timelineWebGL', 'Timeline: WebGL-based flamechart');
     Root.Runtime.experiments.register('timelineReplayEvent', 'Timeline: Replay input events', true);
 
     // Debugging
@@ -322,6 +321,10 @@ export class MainImpl {
     Root.Runtime.experiments.register(
         'evaluateExpressionsWithSourceMaps', 'Console: Resolve variable names in expressions using source maps',
         undefined);
+    Root.Runtime.experiments.register('instrumentationBreakpoints', 'Enable instrumentation breakpoints', true);
+    Root.Runtime.experiments.register(
+        Root.Runtime.ExperimentName.BREAKPOINT_VIEW, 'Enable re-designed Breakpoint Sidebar Pane in the Sources Panel',
+        true);
 
     // Dual-screen
     Root.Runtime.experiments.register(
@@ -338,7 +341,8 @@ export class MainImpl {
     // Full Accessibility Tree
     Root.Runtime.experiments.register(
         'fullAccessibilityTree', 'Enable full accessibility tree view in the Elements panel', undefined,
-        'https://developer.chrome.com/blog/new-in-devtools-90/#accesibility-tree');
+        'https://developer.chrome.com/blog/new-in-devtools-90/#accesibility-tree',
+        'https://g.co/devtools/a11y-tree-feedback');
 
     // Font Editor
     Root.Runtime.experiments.register(
@@ -354,25 +358,12 @@ export class MainImpl {
     Root.Runtime.experiments.register('experimentalCookieFeatures', 'Enable experimental cookie features');
 
     // Hide Issues Feature.
-    Root.Runtime.experiments.register(
-        'hideIssuesFeature', 'Enable experimental hide issues menu', undefined,
-        'https://developer.chrome.com/blog/new-in-devtools-94/#hide-issues');
-
-    // Hide Issues Feature.
     Root.Runtime.experiments.register('groupAndHideIssuesByKind', 'Allow grouping and hiding of issues by IssueKind');
-
-    // Checkbox in the Settings UI to enable Chrome Sync is behind this experiment.
-    Root.Runtime.experiments.register(
-        Root.Runtime.ExperimentName.SYNC_SETTINGS, 'Sync DevTools settings with Chrome Sync');
-
-    // Debugging of Reporting API
-    Root.Runtime.experiments.register('reportingApiDebugging', 'Enable Reporting API panel in the Application panel');
 
     // CSS <length> authoring tool.
     Root.Runtime.experiments.register(
-        'cssTypeComponentLength',
-        'Enable CSS <length> authoring tool in the Styles pane (https://goo.gle/length-feedback)', undefined,
-        'https://developer.chrome.com/blog/new-in-devtools-96/#length');
+        'cssTypeComponentLength', 'Enable CSS <length> authoring tool in the Styles pane', undefined,
+        'https://developer.chrome.com/blog/new-in-devtools-96/#length', 'https://g.co/devtools/length-feedback');
 
     // Display precise changes in the Changes tab.
     Root.Runtime.experiments.register(
@@ -386,25 +377,45 @@ export class MainImpl {
     Root.Runtime.experiments.register(
         Root.Runtime.ExperimentName.HEADER_OVERRIDES, 'Local overrides for response headers');
 
+    // Enable CSS Authoring hints for inactive rules, deprecated properties, etc.
+    Root.Runtime.experiments.register(
+        Root.Runtime.ExperimentName.CSS_AUTHORING_HINTS,
+        'Enable CSS Authoring hints for inactive rules, deprecated properties, etc.');
+
     // New Lighthouse panel with timespan and snapshot mode
     Root.Runtime.experiments.register('lighthousePanelFR', 'Use Lighthouse panel with timespan and snapshot modes');
-
-    // Tooling for CSS layers in Styles sidebar pane.
-    Root.Runtime.experiments.register(
-        Root.Runtime.ExperimentName.CSS_LAYERS, 'Tooling for CSS layers in the Styles pane');
 
     // Enable color picking outside the browser window (using Eyedropper API)
     Root.Runtime.experiments.register(
         Root.Runtime.ExperimentName.EYEDROPPER_COLOR_PICKER, 'Enable color picking outside the browser window');
 
+    // Change grouping of sources panel to use Authored/Deployed trees
+    Root.Runtime.experiments.register(
+        Root.Runtime.ExperimentName.AUTHORED_DEPLOYED_GROUPING, 'Group sources into Authored and Deployed trees',
+        undefined, 'https://goo.gle/authored-deployed', 'https://goo.gle/authored-deployed-feedback');
+
+    // Hide third party code (as determined by ignore lists or source maps)
+    Root.Runtime.experiments.register(
+        Root.Runtime.ExperimentName.JUST_MY_CODE, 'Hide ignore-listed code in sources tree view');
+
+    // Highlight important DOM properties in the Object Properties viewer.
+    Root.Runtime.experiments.register(
+        Root.Runtime.ExperimentName.IMPORTANT_DOM_PROPERTIES,
+        'Highlight important DOM properties in the Object Properties viewer');
+
     Root.Runtime.experiments.enableExperimentsByDefault([
       'sourceOrderViewer',
-      'hideIssuesFeature',
       'cssTypeComponentLength',
       Root.Runtime.ExperimentName.PRECISE_CHANGES,
-      'reportingApiDebugging',
-      Root.Runtime.ExperimentName.SYNC_SETTINGS,
-      Root.Runtime.ExperimentName.CSS_LAYERS,
+      ...('EyeDropper' in window ? [Root.Runtime.ExperimentName.EYEDROPPER_COLOR_PICKER] : []),
+      'lighthousePanelFR',
+      'keyboardShortcutEditor',
+      'groupAndHideIssuesByKind',
+      Root.Runtime.ExperimentName.CSS_AUTHORING_HINTS,
+    ]);
+
+    Root.Runtime.experiments.setNonConfigurableExperiments([
+      ...(!('EyeDropper' in window) ? [Root.Runtime.ExperimentName.EYEDROPPER_COLOR_PICKER] : []),
     ]);
 
     Root.Runtime.experiments.cleanUpStaleExperiments();
@@ -417,6 +428,7 @@ export class MainImpl {
       'backgroundServicesNotifications',
       'backgroundServicesPushMessaging',
       'backgroundServicesPaymentHandler',
+      'bfcacheDisplayTree',
       'webauthnPane',
       'developerResourcesView',
     ]);
@@ -554,6 +566,8 @@ export class MainImpl {
     self.Persistence.networkPersistenceManager =
         Persistence.NetworkPersistenceManager.NetworkPersistenceManager.instance(
             {forceNew: true, workspace: Workspace.Workspace.WorkspaceImpl.instance()});
+    // @ts-ignore layout test global
+    self.Host.Platform = Host.Platform;
 
     new ExecutionContextSelector(SDK.TargetManager.TargetManager.instance(), UI.Context.Context.instance());
     // @ts-ignore layout test global
@@ -610,6 +624,7 @@ export class MainImpl {
 
     // Initialize ARIAUtils.alert Element
     UI.ARIAUtils.alertElementInstance();
+    UI.DockController.DockController.instance().announceDockLocation();
 
     // Allow UI cycles to repaint prior to creating connection.
     window.setTimeout(this.#initializeTarget.bind(this), 0);
@@ -711,7 +726,7 @@ export class MainImpl {
     // @ts-ignore Used in ElementsTreeOutline
     eventCopy['original'] = event;
     const document = event.target && (event.target as HTMLElement).ownerDocument;
-    const target = document ? document.deepActiveElement() : null;
+    const target = document ? Platform.DOMUtilities.deepActiveElement(document) : null;
     if (target) {
       target.dispatchEvent(eventCopy);
     }
@@ -797,7 +812,9 @@ export class SearchActionDelegate implements UI.ActionRegistration.ActionDelegat
   }
 
   handleAction(context: UI.Context.Context, actionId: string): boolean {
-    let searchableView = UI.SearchableView.SearchableView.fromElement(document.deepActiveElement());
+    let searchableView = UI.SearchableView.SearchableView.fromElement(
+        Platform.DOMUtilities.deepActiveElement(document),
+    );
     if (!searchableView) {
       const currentPanel = (UI.InspectorView.InspectorView.instance().currentPanelDeprecated() as UI.Panel.Panel);
       if (currentPanel && currentPanel.searchableView) {
@@ -850,8 +867,9 @@ export class MainMenuItem implements UI.Toolbar.Provider {
       const dockItemElement = document.createElement('div');
       dockItemElement.classList.add('flex-centered');
       dockItemElement.classList.add('flex-auto');
+      dockItemElement.classList.add('location-menu');
       dockItemElement.tabIndex = -1;
-      UI.ARIAUtils.setAccessibleName(dockItemElement, UIStrings.dockSide);
+      UI.ARIAUtils.setAccessibleName(dockItemElement, UIStrings.dockSide + UIStrings.dockSideNaviation);
       const titleElement = dockItemElement.createChild('span', 'dockside-title');
       titleElement.textContent = i18nString(UIStrings.dockSide);
       const toggleDockSideShorcuts =
@@ -893,6 +911,10 @@ export class MainMenuItem implements UI.Toolbar.Provider {
           dir = -1;
         } else if (event.key === 'ArrowRight') {
           dir = 1;
+        } else if (event.key === 'ArrowDown') {
+          const contextMenuElement = dockItemElement.closest('.soft-context-menu');
+          contextMenuElement?.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown'}));
+          return;
         } else {
           return;
         }

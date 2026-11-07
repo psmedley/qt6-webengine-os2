@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,9 @@
 #include "components/app_restore/restore_data.h"
 #include "components/app_restore/window_info.h"
 #include "components/app_restore/window_properties.h"
-#include "components/services/app_service/public/mojom/types.mojom.h"
+#include "components/services/app_service/public/cpp/app_launch_util.h"
+#include "components/services/app_service/public/cpp/intent.h"
+#include "components/services/app_service/public/cpp/intent_util.h"
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/client/aura_constants.h"
@@ -281,7 +283,9 @@ class FullRestoreReadAndSaveTest : public testing::Test {
   }
 
   std::unique_ptr<views::Widget> CreateLacrosWidget(
-      const std::string& lacros_window_id) {
+      const std::string& lacros_window_id,
+      int32_t restore_session_id,
+      int32_t restore_window_id) {
     views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
 
     params.bounds = gfx::Rect(5, 5, 20, 20);
@@ -292,6 +296,12 @@ class FullRestoreReadAndSaveTest : public testing::Test {
         aura::client::kAppType, static_cast<int>(ash::AppType::LACROS));
     params.init_properties_container.SetProperty(app_restore::kLacrosWindowId,
                                                  lacros_window_id);
+
+    params.init_properties_container.SetProperty(app_restore::kWindowIdKey,
+                                                 restore_session_id);
+    params.init_properties_container.SetProperty(
+        app_restore::kRestoreWindowIdKey, restore_window_id);
+
     auto widget = std::make_unique<views::Widget>();
     widget->Init(std::move(params));
 
@@ -300,13 +310,17 @@ class FullRestoreReadAndSaveTest : public testing::Test {
   }
 
   std::unique_ptr<aura::Window> CreateLacrosWindow(
-      const std::string& lacros_window_id) {
+      const std::string& lacros_window_id,
+      int32_t restore_session_id,
+      int32_t restore_window_id) {
     auto window = std::make_unique<aura::Window>(
         nullptr, aura::client::WINDOW_TYPE_NORMAL);
     window->SetProperty(aura::client::kAppType,
                         static_cast<int>(ash::AppType::LACROS));
     window->SetProperty(app_restore::kLacrosWindowId,
                         std::string(kLacrosWindowId));
+    window->SetProperty(app_restore::kWindowIdKey, restore_session_id);
+    window->SetProperty(app_restore::kRestoreWindowIdKey, restore_window_id);
     return window;
   }
 
@@ -800,6 +814,11 @@ TEST_F(FullRestoreReadAndSaveTest, ArcWindowRestore) {
   ASSERT_TRUE(restore_data);
 
   FullRestoreReadHandler* read_handler = FullRestoreReadHandler::GetInstance();
+  // The following is necessary for making `ShouldUseFullRestoreArcData()` and
+  // `read_handler->IsFullRestoreRunning()` return true;
+  read_handler->SetActiveProfilePath(GetPath());
+  read_handler->SetStartTimeForProfile(GetPath());
+
   FullRestoreReadHandlerTestApi read_test_api(read_handler);
   ASSERT_TRUE(read_test_api.GetArcReadHander());
   EXPECT_EQ(1u, read_test_api.GetArcWindowIdMap().size());
@@ -948,12 +967,10 @@ TEST_F(FullRestoreReadAndSaveTest, LacrosBrowserWindowSavingCreateWindowFirst) {
   ASSERT_TRUE(lacros_save_handler);
 
   // Create a browser window first, then OnLacrosWindowAdded is called later.
-  auto widget = CreateLacrosWidget(kLacrosWindowId);
+  auto widget = CreateLacrosWidget(kLacrosWindowId, kBrowserSessionId,
+                                   /*restored_browser_session_id=*/0);
   auto* window = widget->GetNativeWindow();
   SaveWindowInfo(window, kActivationIndex1);
-  app_restore::OnLacrosWindowAdded(window, kBrowserSessionId,
-                                   /*restored_browser_session_id=*/0,
-                                   /*is_browser_app=*/false);
 
   // Verify the browser window is saved.
   EXPECT_EQ(app_constants::kLacrosAppId,
@@ -984,7 +1001,7 @@ TEST_F(FullRestoreReadAndSaveTest, LacrosBrowserWindowSavingCreateWindowFirst) {
   EXPECT_TRUE(restore_data->app_id_to_launch_list().empty());
 }
 
-// Verify the Lacros Chrome app window is saved correctly when
+// Verify the Lacros browser window is saved correctly when
 // OnLacrosWindowAdded is called first, then the window is init later.
 TEST_F(FullRestoreReadAndSaveTest,
        LacrosBrowserWindowSavingOnLacrosWindowAddedCalledFirst) {
@@ -997,10 +1014,8 @@ TEST_F(FullRestoreReadAndSaveTest,
   ASSERT_TRUE(lacros_save_handler);
 
   // OnLacrosWindowAdded is called first, then init the browser window later.
-  auto window = CreateLacrosWindow(kLacrosWindowId);
-  app_restore::OnLacrosWindowAdded(window.get(), kBrowserSessionId,
-                                   /*restored_browser_session_id=*/0,
-                                   /*is_browser_app=*/false);
+  auto window = CreateLacrosWindow(kLacrosWindowId, kBrowserSessionId,
+                                   /*restored_browser_session_id=*/0);
   window->Init(ui::LAYER_NOT_DRAWN);
 
   SaveWindowInfo(window.get(), kActivationIndex1);
@@ -1044,7 +1059,7 @@ TEST_F(FullRestoreReadAndSaveTest,
   // Add a Chrome app launch info.
   SaveAppLaunchInfo(
       GetPath(), std::make_unique<app_restore::AppLaunchInfo>(
-                     kAppId, apps::mojom::LaunchContainer::kLaunchContainerNone,
+                     kAppId, apps::LaunchContainer::kLaunchContainerNone,
                      WindowOpenDisposition::UNKNOWN, display::kInvalidDisplayId,
                      std::vector<base::FilePath>{}, nullptr));
   const LacrosSaveHandler* lacros_save_handler = test_api.GetLacrosSaveHander();
@@ -1052,7 +1067,8 @@ TEST_F(FullRestoreReadAndSaveTest,
 
   // Create a Chrome app window first, then the crosapi OnAppWindowAdded is
   // called later.
-  auto widget = CreateLacrosWidget(kLacrosWindowId);
+  auto widget = CreateLacrosWidget(kLacrosWindowId, kBrowserSessionId,
+                                   /*restored_browser_session_id=*/0);
   auto* window = widget->GetNativeWindow();
   EXPECT_FALSE(test_api.GetLacrosWindowCandidates().empty());
   SaveWindowInfo(window, kActivationIndex1);
@@ -1100,12 +1116,12 @@ TEST_F(FullRestoreReadAndSaveTest,
   base::OneShotTimer* timer = save_handler->GetTimerForTesting();
 
   // Add a Chrome app launch info.
-  auto intent = apps::mojom::Intent::New();
+  auto intent = std::make_unique<apps::Intent>(apps_util::kIntentActionSend);
   intent->activity_name = "activity_name";
   SaveAppLaunchInfo(
       GetPath(),
       std::make_unique<app_restore::AppLaunchInfo>(
-          kAppId, apps::mojom::LaunchContainer::kLaunchContainerNone,
+          kAppId, apps::LaunchContainer::kLaunchContainerNone,
           WindowOpenDisposition::CURRENT_TAB, display::kInvalidDisplayId,
           std::vector<base::FilePath>{base::FilePath(kFilePath1),
                                       base::FilePath(kFilePath2)},
@@ -1117,7 +1133,8 @@ TEST_F(FullRestoreReadAndSaveTest,
   // window later.
   OnLacrosChromeAppWindowAdded(kAppId, kLacrosWindowId);
   EXPECT_FALSE(test_api.GetLacrosWindowIdToAppIdMap().empty());
-  auto widget = CreateLacrosWidget(kLacrosWindowId);
+  auto widget = CreateLacrosWidget(kLacrosWindowId, kBrowserSessionId,
+                                   /*restored_browser_session_id=*/0);
   auto* window = widget->GetNativeWindow();
   EXPECT_FALSE(test_api.GetLacrosWindowCandidates().empty());
   SaveWindowInfo(window, kActivationIndex1);

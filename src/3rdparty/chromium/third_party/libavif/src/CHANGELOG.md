@@ -6,11 +6,130 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+There are incompatible ABI changes in this release. The alphaRange member was
+removed from avifImage struct. The chromaDownsampling and avoidLibYUV members
+were added to the avifRGBImage struct. The imageDimensionLimit member was added
+to the avifDecoder struct. avifImageCopy() and avifImageAllocatePlanes()
+signatures changed. It is necessary to recompile your code. Also check the
+return values of avifImageCopy() and avifImageAllocatePlanes().
 
 ### Changed
+* Update aom.cmd: v3.5.0
+* Update rav1e.cmd: v0.5.1
+* Update svt.cmd/svt.sh: v1.2.1
+* Update libgav1.cmd: v0.18.0
+* Update libyuv.cmd: f9fda6e7 (version 1844)
+* avifImageCopy() and avifImageAllocatePlanes() now return avifResult instead of
+  void to report invalid parameters or memory allocation failures.
+* avifImageRGBToYUV() now uses libyuv fast paths by default. It may slightly
+  change conversion results. The old behavior can be restored by setting
+  avifRGBImage::chromaDownsampling to AVIF_CHROMA_DOWNSAMPLING_BEST_QUALITY
+  and avifRGBImage::avoidLibYUV to AVIF_TRUE.
+* avifRGBImage::chromaUpsampling now only applies to conversions that need
+  upsampling chroma from 4:2:0 or 4:2:2 and has no impact on the use of libyuv.
+  Set avifRGBImage::avoidLibYUV accordingly to control the use of libyuv.
+* Exif and XMP metadata is imported from PNG and JPEG files.
+* avifImageSetMetadataExif() parses the Exif metadata and converts any Exif
+  orientation found into transformFlags, irot and imir values.
+
+### Removed
+* alphaRange field was removed from the avifImage struct. It it presumed that
+  alpha plane is always full range.
+
+### Added
+* Add avifChromaDownsampling enum
+* Add chromaDownsampling field to avifRGBImage struct
+* Add imageDimensionLimit field to avifDecoder struct
+* Add autoTiling field to avifEncoder struct
+* Add AVIF_CHROMA_DOWNSAMPLING_SHARP_YUV value to avifChromaDownsampling enum
+* avifdec: Add --dimension-limit, which specifies the image dimension limit
+  (width or height) that should be tolerated
+* avifenc: Add --sharpyuv, which enables "sharp" RGB to YUV420 conversion, which
+  reduces artifacts caused by 420 chroma downsampling. Needs libsharpyuv (part
+  of the libwebp repository) at compile time.
+* avifenc: Add --ignore-exif and --ignore-xmp flags.
+* avifenc: Add --autotiling, which sets --tilerowslog2 and --tilecolslog2
+  automatically.
+* avifenc: Input Exif orientation is converted to irot/imir by default.
+
+## [0.10.1] - 2022-04-11
+
+### Changed
+* tests/docker/build.sh: Build SVT-AV1 using cmake and ninja directly
+* Fix a Visual Studio 2017 compiler warning in src\reformat.c: warning C4204:
+  nonstandard extension used: non-constant aggregate initializer
+* Fix the help message of avifdec: --index takes a value
+
+## [0.10.0] - 2022-04-06
+
+There is an incompatible ABI change in this release. New members were added to
+the avifDecoder and avifRGBImage structs. It is necessary to recompile your
+code.
+
+### Added
+* Support F16 Half Float conversion in avifRGBImage: new isFloat member
+* Incremental decoding of AVIF grid tiles: new allowIncremental member in
+  avifDecoder and new avifDecoderDecodedRowCount() function
+* Support parsing of version 3 of ItemInfoEntry
+* Add new avifResult code AVIF_RESULT_OUT_OF_MEMORY
+* Document the "[Strict]" prefix in error strings
+* Document that SVT-AV1 doesn't support lossless yet
+* CI: Add CIFuzz integration
+* Add Docker build CI pipeline
+* Add SVT-AV1 to CI and build scripts
+* ci.yml: Build examples and apps
+
+### Changed
+* Print the item type in the diagnostic messages for missing mandatory av1C or
+  pixi property
 * Update aom.cmd: v3.3.0
 * Update dav1d.cmd: 1.0.0
+* Update libgav1.cmd: 0.17.0
+* Update rav1e.cmd: 0.5.0
+* Update svt.cmd/svt.sh: v0.9.1
+* Update zlibpng.cmd: zlib v1.2.12
+* findrav1e: add LDFLAGS to LIBRARIES
+* rav1e: add bcrypt.lib to list of extra libs
+* Fix y4m read/write for images of non-standard dimensions
+* Fix y4mRead() and y4mWrite() for 4:0:0
+* Fix compilation with Clang 13 and 14
+* Remove the obsolete script fuzz.sh
+* Support local android builds for libgav1
+* Add Android JNI bindings
+* Delay failures of AV1 codecs not existing to frame decoding, to allow libavif
+  to perform AVIF parsing without any AV1 codecs
+* Change encoder speed in gdk-pixbuf plug-in
+* Fix compilation with 1755 <= LIBYUV_VERSION < 1774
+* Remove JSON-based tests (as they are unreliable), along with associated
+  helper code (cJSON, compare)
+* CMakeLists.txt: Move codec enabled message after check passed
+* Fix alpha copy in aomCodecEncodeImage()
+* Support SVT-AV1 v0.9.0 or later
+* Call svt_av1_get_version() for SVT-AV1 v0.9.0 or later
+* Handle avifArrayCreate() failures
+* Only consider a frame index to be a keyframe if all tiles/planes are sync
+  frames
+* Move checks to avifAreGridDimensionsValid()
+* avifArrayPop() should zero the popped element
+* avifDecoderReset() should not return AVIF_FALSE
+* Handle avifDecoderDataCreateTile() failures
+* Fix endian dependent parameters to avifRWStreamWrite
+* Mark the input images of an image grid as hidden
+* Write ccst box in Sample Entry for animated images
+* Add iso8 to compatible_brands for animated images
+* Compare with snapshot of AOM_EXT_PART_ABI_VERSION
+* Handle the new AOM_IMG_FMT_NV12 enum conditionally in a switch statement in
+  aomCodecGetNextImage()
+* Fix avifpng.c for libpng 1.4
+* Fix -Wformat / -Wformat-non-iso on MinGW UCRT
+* Replace some memcpy calls with struct assignments
+* Remove unnecessary memcpy() calls in src/utils.c
+* Split CMakeLists.txt into tests/CMakeLists.txt
+* Use bilinear chroma upsampling in libyuv when possible
+* Call libyuv functions to convert 10bpc YUV to 8bpc RGB
+* Prepare avif example for non-aborting avifAlloc()
+* Handle the tileRowsLog2 and tileColsLog2 members of avifEncoder correctly for
+  SVT-AV1.
 
 ## [0.9.3] - 2021-10-20
 
@@ -709,7 +828,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Constants `AVIF_VERSION`, `AVIF_VERSION_MAJOR`, `AVIF_VERSION_MINOR`, `AVIF_VERSION_PATCH`
 - `avifVersion()` function
 
-[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/AOMediaCodec/libavif/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/AOMediaCodec/libavif/compare/v0.10.0...v0.10.1
+[0.10.0]: https://github.com/AOMediaCodec/libavif/compare/v0.9.3...v0.10.0
 [0.9.3]: https://github.com/AOMediaCodec/libavif/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/AOMediaCodec/libavif/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/AOMediaCodec/libavif/compare/v0.9.0...v0.9.1

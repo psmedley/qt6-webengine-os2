@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,14 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/check_op.h"
+#include "base/memory/raw_ptr.h"
 #include "base/task/thread_pool.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/mock_callback.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "gpu/config/gpu_driver_bug_workarounds.h"
 #include "media/base/cdm_context.h"
 #include "media/base/media_util.h"
 #include "media/base/mock_filters.h"
@@ -71,8 +73,6 @@ class MockVideoFramePool : public DmabufVideoFramePool {
   bool IsFakeVideoFramePool() override { return true; }
 };
 
-constexpr gfx::Size kCodedSize(48, 36);
-
 class MockDecoder : public VideoDecoderMixin {
  public:
   MockDecoder()
@@ -107,8 +107,13 @@ class MockChromeOsCdmContext : public chromeos::ChromeOsCdmContext {
                void(const DecryptConfig*,
                     const std::vector<uint8_t>&,
                     chromeos::ChromeOsCdmContext::GetHwKeyDataCB));
+  MOCK_METHOD1(GetHwConfigData,
+               void(chromeos::ChromeOsCdmContext::GetHwConfigDataCB));
+  MOCK_METHOD1(GetScreenResolutions,
+               void(chromeos::ChromeOsCdmContext::GetScreenResolutionsCB));
   MOCK_METHOD0(GetCdmContextRef, std::unique_ptr<CdmContextRef>());
   MOCK_CONST_METHOD0(UsingArcCdm, bool());
+  MOCK_CONST_METHOD0(IsRemoteCdm, bool());
 };
 // A real implementation of this class would actually hold onto a reference of
 // the owner of the CdmContext to ensure it is not destructed before the
@@ -150,6 +155,16 @@ struct DecoderPipelineTestParams {
   DecoderStatus::Codes status_code;
 };
 
+constexpr gfx::Size kMinSupportedResolution(64, 64);
+constexpr gfx::Size kMaxSupportedResolution(2048, 1088);
+constexpr gfx::Size kCodedSize(128, 128);
+
+static_assert(kMinSupportedResolution.width() <= kCodedSize.width() &&
+                  kMinSupportedResolution.height() <= kCodedSize.height() &&
+                  kCodedSize.width() <= kMaxSupportedResolution.width() &&
+                  kCodedSize.height() <= kMaxSupportedResolution.height(),
+              "kCodedSize must be within the supported resolutions.");
+
 class VideoDecoderPipelineTest
     : public testing::TestWithParam<DecoderPipelineTestParams> {
  public:
@@ -168,10 +183,18 @@ class VideoDecoderPipelineTest
     auto pool = std::make_unique<MockVideoFramePool>();
     pool_ = pool.get();
     decoder_ = base::WrapUnique(new VideoDecoderPipeline(
-        base::ThreadTaskRunnerHandle::Get(), std::move(pool),
-        std::move(converter_), std::make_unique<MockMediaLog>(),
+        gpu::GpuDriverBugWorkarounds(), base::ThreadTaskRunnerHandle::Get(),
+        std::move(pool), std::move(converter_),
+        std::make_unique<MockMediaLog>(),
         // This callback needs to be configured in the individual tests.
         base::BindOnce(&VideoDecoderPipelineTest::CreateNullMockDecoder)));
+
+    SetSupportedVideoDecoderConfigs({SupportedVideoDecoderConfig(
+        /*profile_min,=*/VP8PROFILE_ANY,
+        /*profile_max=*/VP8PROFILE_ANY, kMinSupportedResolution,
+        kMaxSupportedResolution,
+        /*allow_encrypted=*/true,
+        /*require_encrypted=*/false)});
   }
   ~VideoDecoderPipelineTest() override = default;
 
@@ -304,6 +327,11 @@ class VideoDecoderPipelineTest
     return decoder_->decoder_.get();
   }
 
+  void SetSupportedVideoDecoderConfigs(
+      const SupportedVideoDecoderConfigs& configs) {
+    decoder_->supported_configs_for_testing_ = configs;
+  }
+
   void DetachDecoderSequenceChecker() NO_THREAD_SAFETY_ANALYSIS {
     // |decoder_| will be destroyed on its |decoder_task_runner| via
     // DestroyAsync(). This will trip its |decoder_sequence_checker_| if it has
@@ -350,7 +378,7 @@ class VideoDecoderPipelineTest
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
   std::unique_ptr<VideoFrameConverter> converter_;
   std::unique_ptr<VideoDecoderPipeline> decoder_;
-  MockVideoFramePool* pool_;
+  raw_ptr<MockVideoFramePool> pool_;
 };
 
 // Verifies the status code for several typical CreateDecoderFunctionCB cases.
@@ -392,6 +420,24 @@ const struct DecoderPipelineTestParams kDecoderPipelineTestParams[] = {
 INSTANTIATE_TEST_SUITE_P(All,
                          VideoDecoderPipelineTest,
                          testing::ValuesIn(kDecoderPipelineTestParams));
+
+// Verifies that trying to Initialize() with a non-supported config fails.
+TEST_F(VideoDecoderPipelineTest, InitializeFailsDueToNotSupportedConfig) {
+  // Configure the supported configs to something that we know is not supported,
+  // e.g. making the smallest supported resolution larger than the |config_|
+  // we'll be requesting.
+  SetSupportedVideoDecoderConfigs({SupportedVideoDecoderConfig(
+      /*profile_min=*/config_.profile(),
+      /*profile_max=*/config_.profile(),
+      /*coded_size_min=*/config_.coded_size() + gfx::Size(1, 1),
+      kMaxSupportedResolution,
+      /*allow_encrypted=*/true,
+      /*require_encrypted=*/false)});
+
+  InitializeDecoder(
+      base::BindOnce(&VideoDecoderPipelineTest::CreateGoodMockDecoder),
+      DecoderStatus::Codes::kUnsupportedConfig);
+}
 
 // Verifies the Reset sequence.
 TEST_F(VideoDecoderPipelineTest, Reset) {

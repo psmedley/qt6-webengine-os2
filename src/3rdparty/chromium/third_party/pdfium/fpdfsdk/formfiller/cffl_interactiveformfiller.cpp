@@ -24,7 +24,6 @@
 #include "fpdfsdk/formfiller/cffl_textfield.h"
 #include "public/fpdf_fwlevent.h"
 #include "third_party/base/check.h"
-#include "third_party/base/check_op.h"
 #include "third_party/base/cxx17_backports.h"
 
 CFFL_InteractiveFormFiller::CFFL_InteractiveFormFiller(
@@ -98,7 +97,7 @@ void CFFL_InteractiveFormFiller::OnMouseEnter(
     ObservedPtr<CPDFSDK_Widget>& pWidget,
     Mask<FWL_EVENTFLAG> nFlag) {
   if (!m_bNotifying) {
-    if (pWidget->GetAAction(CPDF_AAction::kCursorEnter).GetDict()) {
+    if (pWidget->GetAAction(CPDF_AAction::kCursorEnter).HasDict()) {
       uint32_t nValueAge = pWidget->GetValueAge();
       pWidget->ClearAppModified();
       DCHECK(pPageView);
@@ -131,7 +130,7 @@ void CFFL_InteractiveFormFiller::OnMouseExit(
     ObservedPtr<CPDFSDK_Widget>& pWidget,
     Mask<FWL_EVENTFLAG> nFlag) {
   if (!m_bNotifying) {
-    if (pWidget->GetAAction(CPDF_AAction::kCursorExit).GetDict()) {
+    if (pWidget->GetAAction(CPDF_AAction::kCursorExit).HasDict()) {
       uint32_t nValueAge = pWidget->GetValueAge();
       pWidget->ClearAppModified();
       DCHECK(pPageView);
@@ -167,7 +166,7 @@ bool CFFL_InteractiveFormFiller::OnLButtonDown(
     const CFX_PointF& point) {
   if (!m_bNotifying) {
     if (Annot_HitTest(pWidget.Get(), point) &&
-        pWidget->GetAAction(CPDF_AAction::kButtonDown).GetDict()) {
+        pWidget->GetAAction(CPDF_AAction::kButtonDown).HasDict()) {
       uint32_t nValueAge = pWidget->GetValueAge();
       pWidget->ClearAppModified();
       DCHECK(pPageView);
@@ -245,7 +244,7 @@ bool CFFL_InteractiveFormFiller::OnButtonUp(
   if (m_bNotifying)
     return false;
 
-  if (!pWidget->GetAAction(CPDF_AAction::kButtonUp).GetDict())
+  if (!pWidget->GetAAction(CPDF_AAction::kButtonUp).HasDict())
     return false;
 
   uint32_t nAge = pWidget->GetAppearanceAge();
@@ -357,7 +356,7 @@ bool CFFL_InteractiveFormFiller::OnSetFocus(
     return false;
 
   if (!m_bNotifying) {
-    if (pWidget->GetAAction(CPDF_AAction::kGetFocus).GetDict()) {
+    if (pWidget->GetAAction(CPDF_AAction::kGetFocus).HasDict()) {
       uint32_t nValueAge = pWidget->GetValueAge();
       pWidget->ClearAppModified();
 
@@ -413,7 +412,7 @@ bool CFFL_InteractiveFormFiller::OnKillFocus(
   if (m_bNotifying)
     return true;
 
-  if (!pWidget->GetAAction(CPDF_AAction::kLoseFocus).GetDict())
+  if (!pWidget->GetAAction(CPDF_AAction::kLoseFocus).HasDict())
     return true;
 
   pWidget->ClearAppModified();
@@ -548,8 +547,39 @@ void CFFL_InteractiveFormFiller::UnregisterFormField(CPDFSDK_Widget* pWidget) {
   m_Map.erase(it);
 }
 
+void CFFL_InteractiveFormFiller::InvalidateRect(PerWindowData* pWidgetData,
+                                                const CFX_FloatRect& rect) {
+  auto* pPrivateData = static_cast<CFFL_PerWindowData*>(pWidgetData);
+  CPDFSDK_Widget* pWidget = pPrivateData->GetWidget();
+  if (!pWidget)
+    return;
+
+  GetCallbackIface()->InvalidateRect(pWidget, rect);
+}
+
+void CFFL_InteractiveFormFiller::OutputSelectedRect(PerWindowData* pWidgetData,
+                                                    const CFX_FloatRect& rect) {
+  auto* pPrivateData = static_cast<CFFL_PerWindowData*>(pWidgetData);
+  if (!pPrivateData)
+    return;
+
+  CFFL_FormField* pFormField = pPrivateData->GetFormField();
+  if (!pFormField)
+    return;
+
+  GetCallbackIface()->OutputSelectedRect(pFormField, rect);
+}
+
+bool CFFL_InteractiveFormFiller::IsSelectionImplemented() const {
+  return GetCallbackIface()->IsSelectionImplemented();
+}
+
+void CFFL_InteractiveFormFiller::SetCursor(CursorStyle nCursorStyle) {
+  GetCallbackIface()->SetCursor(nCursorStyle);
+}
+
 void CFFL_InteractiveFormFiller::QueryWherePopup(
-    const IPWL_SystemHandler::PerWindowData* pAttached,
+    const IPWL_FillerNotify::PerWindowData* pAttached,
     float fPopupMin,
     float fPopupMax,
     bool* bBottom,
@@ -616,7 +646,7 @@ bool CFFL_InteractiveFormFiller::OnKeyStrokeCommit(
   if (m_bNotifying)
     return true;
 
-  if (!pWidget->GetAAction(CPDF_AAction::kKeyStroke).GetDict())
+  if (!pWidget->GetAAction(CPDF_AAction::kKeyStroke).HasDict())
     return true;
 
   DCHECK(pPageView);
@@ -650,7 +680,7 @@ bool CFFL_InteractiveFormFiller::OnValidate(
   if (m_bNotifying)
     return true;
 
-  if (!pWidget->GetAAction(CPDF_AAction::kValidate).GetDict())
+  if (!pWidget->GetAAction(CPDF_AAction::kValidate).HasDict())
     return true;
 
   DCHECK(pPageView);
@@ -830,7 +860,7 @@ bool CFFL_InteractiveFormFiller::IsValidAnnot(const CPDFSDK_PageView* pPageView,
 }
 
 std::pair<bool, bool> CFFL_InteractiveFormFiller::OnBeforeKeyStroke(
-    const IPWL_SystemHandler::PerWindowData* pAttached,
+    const IPWL_FillerNotify::PerWindowData* pAttached,
     WideString& strChange,
     const WideString& strChangeEx,
     int nSelStart,
@@ -853,7 +883,7 @@ std::pair<bool, bool> CFFL_InteractiveFormFiller::OnBeforeKeyStroke(
 #endif  // PDF_ENABLE_XFA
 
   if (m_bNotifying ||
-      !pWidget->GetAAction(CPDF_AAction::kKeyStroke).GetDict()) {
+      !pWidget->GetAAction(CPDF_AAction::kKeyStroke).HasDict()) {
     return {true, false};
   }
 
@@ -887,13 +917,11 @@ std::pair<bool, bool> CFFL_InteractiveFormFiller::OnBeforeKeyStroke(
 
   bool bExit = false;
   if (nAge != pWidget->GetAppearanceAge()) {
-    CPWL_Wnd* pWnd = pFormField->ResetPWLWindowForValueAge(
-        pPageView, pWidget.Get(), nValueAge);
-    if (!pWnd)
+    pFormField->ResetPWLWindowForValueAge(pPageView, pWidget.Get(), nValueAge);
+    pPrivateData = pFormField->GetPerPWLWindowData(pPageView);
+    if (!pPrivateData)
       return {true, true};
 
-    pPrivateData =
-        static_cast<const CFFL_PerWindowData*>(pWnd->GetAttachedData());
     pWidget.Reset(pPrivateData->GetWidget());
     pPageView = pPrivateData->GetPageView();
     bExit = true;
@@ -911,7 +939,7 @@ std::pair<bool, bool> CFFL_InteractiveFormFiller::OnBeforeKeyStroke(
 }
 
 bool CFFL_InteractiveFormFiller::OnPopupPreOpen(
-    const IPWL_SystemHandler::PerWindowData* pAttached,
+    const IPWL_FillerNotify::PerWindowData* pAttached,
     Mask<FWL_EVENTFLAG> nFlag) {
 #ifdef PDF_ENABLE_XFA
   auto* pData = static_cast<const CFFL_PerWindowData*>(pAttached);
@@ -925,7 +953,7 @@ bool CFFL_InteractiveFormFiller::OnPopupPreOpen(
 }
 
 bool CFFL_InteractiveFormFiller::OnPopupPostOpen(
-    const IPWL_SystemHandler::PerWindowData* pAttached,
+    const IPWL_FillerNotify::PerWindowData* pAttached,
     Mask<FWL_EVENTFLAG> nFlag) {
 #ifdef PDF_ENABLE_XFA
   auto* pData = static_cast<const CFFL_PerWindowData*>(pAttached);

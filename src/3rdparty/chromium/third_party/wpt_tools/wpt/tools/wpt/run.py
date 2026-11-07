@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import argparse
 import os
 import platform
@@ -106,7 +108,9 @@ otherwise install OpenSSL and ensure that it's on your $PATH.""")
 
 
 def check_environ(product):
-    if product not in ("android_weblayer", "android_webview", "chrome", "chrome_android", "firefox", "firefox_android", "servo"):
+    if product not in ("android_weblayer", "android_webview", "chrome",
+                       "chrome_android", "chrome_ios", "content_shell",
+                       "firefox", "firefox_android", "servo"):
         config_builder = serve.build_config(os.path.join(wpt_root, "config.json"))
         # Override the ports to avoid looking for free ports
         config_builder.ssl = {"type": "none"}
@@ -392,6 +396,22 @@ class Chrome(BrowserSetup):
             kwargs["binary_args"].append("--no-sandbox")
 
 
+class ContentShell(BrowserSetup):
+    name = "content_shell"
+    browser_cls = browser.ContentShell
+    experimental_channels = ("dev", "canary", "nightly")
+
+    def setup_kwargs(self, kwargs):
+        browser_channel = kwargs["browser_channel"]
+        if kwargs["binary"] is None:
+            binary = self.browser.find_binary(venv_path=self.venv.path, channel=browser_channel)
+            if binary:
+                kwargs["binary"] = binary
+            else:
+                raise WptrunError(f"Unable to locate {self.name.capitalize()} binary")
+
+        kwargs["enable_webtransport_h3"] = True
+
 class Chromium(Chrome):
     name = "chromium"
     browser_cls = browser.Chromium  # type: ClassVar[Type[browser.ChromeChromiumBase]]
@@ -404,6 +424,8 @@ class ChromeAndroidBase(BrowserSetup):
     def setup_kwargs(self, kwargs):
         if kwargs.get("device_serial"):
             self.browser.device_serial = kwargs["device_serial"]
+        if kwargs.get("adb_binary"):
+            self.browser.adb_binary = kwargs["adb_binary"]
         browser_channel = kwargs["browser_channel"]
         if kwargs["package_name"] is None:
             kwargs["package_name"] = self.browser.find_binary(
@@ -709,6 +731,7 @@ product_setup = {
     "chrome_android": ChromeAndroid,
     "chrome_ios": ChromeiOS,
     "chromium": Chromium,
+    "content_shell": ContentShell,
     "edgechromium": EdgeChromium,
     "edge": Edge,
     "edge_webdriver": EdgeWebDriver,

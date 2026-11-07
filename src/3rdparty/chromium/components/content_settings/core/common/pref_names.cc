@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,8 @@ const char kContentSettingsWindowLastTabIndex[] =
 // content settings.
 const char kManagedDefaultAdsSetting[] =
     "profile.managed_default_content_settings.ads";
+const char kManagedDefaultClipboardSetting[] =
+    "profile.managed_default_content_settings.clipboard";
 const char kManagedDefaultCookiesSetting[] =
     "profile.managed_default_content_settings.cookies";
 const char kManagedDefaultGeolocationSetting[] =
@@ -66,6 +68,10 @@ const char kManagedDefaultLocalFontsSetting[] =
 
 // Preferences that are exclusively used to store managed
 // content settings patterns.
+const char kManagedClipboardAllowedForUrls[] =
+    "profile.managed_clipboard_allowed_for_urls";
+const char kManagedClipboardBlockedForUrls[] =
+    "profile.managed_clipboard_blocked_for_urls";
 const char kManagedAutoSelectCertificateForUrls[] =
     "profile.managed_auto_select_certificate_for_urls";
 const char kManagedCookiesAllowedForUrls[] =
@@ -161,6 +167,13 @@ const char kQuietNotificationPermissionUiDisabledTime[] =
 #if BUILDFLAG(IS_ANDROID)
 // Enable vibration for web notifications.
 const char kNotificationsVibrateEnabled[] = "notifications.vibrate_enabled";
+// Peripheral setting for request desktop site. When enabled, we will always
+// request desktop site if a keyboard, trackpad, or mouse is attached.
+const char kDesktopSitePeripheralSettingEnabled[] =
+    "desktop_site.peripheral_setting";
+// Display setting for request desktop site. When enabled, we will always
+// request desktop site if a monitor is connected.
+const char kDesktopSiteDisplaySettingEnabled[] = "desktop_site.display_setting";
 #endif
 
 }  // namespace prefs

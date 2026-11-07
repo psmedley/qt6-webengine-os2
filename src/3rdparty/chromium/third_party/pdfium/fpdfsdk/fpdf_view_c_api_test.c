@@ -52,8 +52,10 @@ int CheckPDFiumCApi() {
     CHK(FPDFAnnot_GetFocusableSubtypes);
     CHK(FPDFAnnot_GetFocusableSubtypesCount);
     CHK(FPDFAnnot_GetFontSize);
+    CHK(FPDFAnnot_GetFormAdditionalActionJavaScript);
     CHK(FPDFAnnot_GetFormControlCount);
     CHK(FPDFAnnot_GetFormControlIndex);
+    CHK(FPDFAnnot_GetFormFieldAlternateName);
     CHK(FPDFAnnot_GetFormFieldAtPoint);
     CHK(FPDFAnnot_GetFormFieldExportValue);
     CHK(FPDFAnnot_GetFormFieldFlags);
@@ -133,6 +135,7 @@ int CheckPDFiumCApi() {
     CHK(FPDFAction_GetURIPath);
     CHK(FPDFBookmark_Find);
     CHK(FPDFBookmark_GetAction);
+    CHK(FPDFBookmark_GetCount);
     CHK(FPDFBookmark_GetDest);
     CHK(FPDFBookmark_GetFirstChild);
     CHK(FPDFBookmark_GetNextSibling);
@@ -159,9 +162,11 @@ int CheckPDFiumCApi() {
     CHK(FPDFFont_GetAscent);
     CHK(FPDFFont_GetDescent);
     CHK(FPDFFont_GetFlags);
+    CHK(FPDFFont_GetFontData);
     CHK(FPDFFont_GetFontName);
     CHK(FPDFFont_GetGlyphPath);
     CHK(FPDFFont_GetGlyphWidth);
+    CHK(FPDFFont_GetIsEmbedded);
     CHK(FPDFFont_GetItalicAngle);
     CHK(FPDFFont_GetWeight);
     CHK(FPDFFormObj_CountObjects);
@@ -205,6 +210,7 @@ int CheckPDFiumCApi() {
     CHK(FPDFPageObj_GetLineJoin);
     CHK(FPDFPageObj_GetMark);
     CHK(FPDFPageObj_GetMatrix);
+    CHK(FPDFPageObj_GetRotatedBounds);
     CHK(FPDFPageObj_GetStrokeColor);
     CHK(FPDFPageObj_GetStrokeWidth);
     CHK(FPDFPageObj_GetType);
@@ -246,6 +252,7 @@ int CheckPDFiumCApi() {
     CHK(FPDFPath_SetDrawMode);
     CHK(FPDFTextObj_GetFont);
     CHK(FPDFTextObj_GetFontSize);
+    CHK(FPDFTextObj_GetRenderedBitmap);
     CHK(FPDFTextObj_GetText);
     CHK(FPDFTextObj_GetTextRenderMode);
     CHK(FPDFTextObj_SetTextRenderMode);

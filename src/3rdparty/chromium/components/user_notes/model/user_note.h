@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,20 +19,26 @@ namespace user_notes {
 // Model class for a note.
 class UserNote {
  public:
-  explicit UserNote(const base::UnguessableToken& id,
-                    std::unique_ptr<UserNoteMetadata> metadata,
-                    std::unique_ptr<UserNoteBody> body,
-                    std::unique_ptr<UserNoteTarget> target);
+  static std::unique_ptr<UserNote> Clone(const UserNote* note);
+
+  UserNote(const base::UnguessableToken& id,
+           std::unique_ptr<UserNoteMetadata> metadata,
+           std::unique_ptr<UserNoteBody> body,
+           std::unique_ptr<UserNoteTarget> target);
+
   ~UserNote();
   UserNote(const UserNote&) = delete;
   UserNote& operator=(const UserNote&) = delete;
 
-  base::SafeRef<UserNote> GetSafeRef();
+  base::SafeRef<UserNote> GetSafeRef() const;
 
   const base::UnguessableToken& id() const { return id_; }
   const UserNoteMetadata& metadata() const { return *metadata_; }
   const UserNoteBody& body() const { return *body_; }
   const UserNoteTarget& target() const { return *target_; }
+
+  // Consumes the provided model to update this one.
+  void Update(std::unique_ptr<UserNote> new_model);
 
  private:
   // The unique (among the user's notes) ID for this note.

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -156,7 +156,7 @@ class PrintBackendServiceManager {
 
  private:
   friend base::NoDestructor<PrintBackendServiceManager>;
-  friend class PrintBackendPrintBrowserTestBase;
+  friend class SystemAccessProcessPrintBrowserTestBase;
   FRIEND_TEST_ALL_PREFIXES(PrintBackendServiceManagerTest,
                            IsIdleTimeoutUpdateNeededForRegisteredClient);
   FRIEND_TEST_ALL_PREFIXES(PrintBackendServiceManagerTest,

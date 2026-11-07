@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 
 #include "base/files/file_path.h"
 #include "base/strings/string_piece.h"
-#include "cc/test/pixel_test_utils.h"
 #include "pdf/pdfium/pdfium_engine.h"
 #include "pdf/pdfium/pdfium_engine_exports.h"
 #include "pdf/pdfium/pdfium_test_base.h"
@@ -20,7 +19,9 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/web/web_print_params.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size_f.h"
 #include "ui/gfx/geometry/skia_conversions.h"
@@ -39,8 +40,8 @@ constexpr gfx::Rect kPrintableAreaRect = {{18, 18}, {576, 733}};
 using ExpectedDimensions = std::vector<gfx::SizeF>;
 
 base::FilePath GetReferenceFilePath(base::StringPiece test_filename) {
-  return GetTestDataFilePath(base::FilePath(FILE_PATH_LITERAL("pdfium_print"))
-                                 .AppendASCII(test_filename));
+  return base::FilePath(FILE_PATH_LITERAL("pdfium_print"))
+      .AppendASCII(test_filename);
 }
 
 blink::WebPrintParams GetDefaultPrintParams() {
@@ -97,10 +98,8 @@ void CheckPdfRendering(const std::vector<uint8_t>& pdf_data,
   ASSERT_TRUE(exports.RenderPDFPageToBitmap(pdf_data, page_number, settings,
                                             page_bitmap.getPixels()));
 
-  EXPECT_TRUE(cc::MatchesPNGFile(
-      page_bitmap, GetReferenceFilePath(expected_png_filename),
-      cc::ExactPixelComparator(/*discard_alpha=*/false)))
-      << "Reference: " << expected_png_filename;
+  EXPECT_TRUE(MatchesPngFile(page_bitmap.asImage().get(),
+                             GetReferenceFilePath(expected_png_filename)));
 }
 
 }  // namespace
@@ -150,18 +149,7 @@ TEST_F(PDFiumPrintTest, Basic) {
   }
 }
 
-// Tests fail on mac11-arm-64-rel-tests (https://crbug.com/1291973)
-#if BUILDFLAG(IS_MAC)
-#define MAYBE_AlterScalingDefault DISABLED_AlterScalingDefault
-#define MAYBE_AlterScalingFitPaper DISABLED_AlterScalingFitPaper
-#define MAYBE_AlterScalingFitPrintable DISABLED_AlterScalingFitPrintable
-#else
-#define MAYBE_AlterScalingDefault AlterScalingDefault
-#define MAYBE_AlterScalingFitPaper AlterScalingFitPaper
-#define MAYBE_AlterScalingFitPrintable AlterScalingFitPrintable
-#endif
-
-TEST_F(PDFiumPrintTest, MAYBE_AlterScalingDefault) {
+TEST_F(PDFiumPrintTest, AlterScalingDefault) {
   TestClient client;
   std::unique_ptr<PDFiumEngine> engine =
       InitializeEngine(&client, FILE_PATH_LITERAL("rectangles.pdf"));
@@ -186,7 +174,7 @@ TEST_F(PDFiumPrintTest, MAYBE_AlterScalingDefault) {
                     "alter_scaling_default_raster.png");
 }
 
-TEST_F(PDFiumPrintTest, MAYBE_AlterScalingFitPaper) {
+TEST_F(PDFiumPrintTest, AlterScalingFitPaper) {
   TestClient client;
   std::unique_ptr<PDFiumEngine> engine =
       InitializeEngine(&client, FILE_PATH_LITERAL("rectangles.pdf"));
@@ -213,7 +201,7 @@ TEST_F(PDFiumPrintTest, MAYBE_AlterScalingFitPaper) {
                     "alter_scaling_fit-paper_raster.png");
 }
 
-TEST_F(PDFiumPrintTest, MAYBE_AlterScalingFitPrintable) {
+TEST_F(PDFiumPrintTest, AlterScalingFitPrintable) {
   TestClient client;
   std::unique_ptr<PDFiumEngine> engine =
       InitializeEngine(&client, FILE_PATH_LITERAL("rectangles.pdf"));

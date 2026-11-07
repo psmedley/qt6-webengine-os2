@@ -52,6 +52,8 @@ public:
     SkSL::GLSLGeneration glslGeneration() const { return fGLContext->glslGeneration(); }
     const GrGLCaps& glCaps() const { return *fGLContext->caps(); }
 
+    GrStagingBufferManager* stagingBufferManager() override { return fStagingBufferManager.get(); }
+
     // Used by GrGLProgram to configure OpenGL state.
     void bindTexture(int unitIdx, GrSamplerState samplerState, const skgpu::Swizzle&, GrGLTexture*);
 
@@ -120,8 +122,8 @@ public:
     // equal to the proxy bounds. This is because the render pass will have to do a full size
     // resolve back into the single sample FBO when rendering is complete.
     void drawSingleIntoMSAAFBO(GrGLRenderTarget* rt, const SkIRect& drawBounds) {
-        this->copySurfaceAsDraw(rt, true/*drawToMultisampleFBO*/, rt, drawBounds,
-                                drawBounds.topLeft());
+        this->copySurfaceAsDraw(rt, true/*drawToMultisampleFBO*/, rt, drawBounds, drawBounds,
+                                GrSamplerState::Filter::kNearest);
     }
 
     // The GrGLOpsRenderPass does not buffer up draws before submitting them to the gpu.
@@ -180,11 +182,13 @@ public:
     void resetShaderCacheForTesting() const override { fProgramCache->reset(); }
 #endif
 
+    void willExecute() override;
+
     void submit(GrOpsRenderPass* renderPass) override;
 
     GrFence SK_WARN_UNUSED_RESULT insertFence() override;
     bool waitFence(GrFence) override;
-    void deleteFence(GrFence) const override;
+    void deleteFence(GrFence) override;
 
     std::unique_ptr<GrSemaphore> SK_WARN_UNUSED_RESULT makeSemaphore(bool isOwned) override;
     std::unique_ptr<GrSemaphore> wrapBackendSemaphore(const GrBackendSemaphore&,
@@ -203,17 +207,19 @@ public:
 
     std::unique_ptr<GrSemaphore> prepareTextureForCrossContextUsage(GrTexture*) override;
 
-    void deleteSync(GrGLsync) const;
+    void deleteSync(GrGLsync);
 
     void bindFramebuffer(GrGLenum fboTarget, GrGLuint fboid);
     void deleteFramebuffer(GrGLuint fboid);
-
-    void insertManualFramebufferBarrier() override;
 
     void flushProgram(sk_sp<GrGLProgram>);
 
     // Version for programs that aren't GrGLProgram.
     void flushProgram(GrGLuint);
+
+    // GrGLOpsRenderPass directly makes GL draws. GrGLGpu uses this notification to mark the
+    // destination surface dirty if color writes are enabled.
+    void didDrawTo(GrRenderTarget*);
 
 private:
     GrGLGpu(std::unique_ptr<GrGLContext>, GrDirectContext*);
@@ -223,7 +229,8 @@ private:
                                             const GrBackendFormat&,
                                             GrRenderable,
                                             GrMipmapped,
-                                            GrProtected) override;
+                                            GrProtected,
+                                            std::string_view label) override;
 
     GrBackendTexture onCreateCompressedBackendTexture(SkISize dimensions,
                                                       const GrBackendFormat&,
@@ -252,7 +259,8 @@ private:
                                      SkBudgeted,
                                      GrProtected,
                                      int mipLevelCount,
-                                     uint32_t levelClearMask) override;
+                                     uint32_t levelClearMask,
+                                     std::string_view label) override;
     sk_sp<GrTexture> onCreateCompressedTexture(SkISize dimensions,
                                                const GrBackendFormat&,
                                                SkBudgeted,
@@ -260,8 +268,7 @@ private:
                                                GrProtected,
                                                const void* data, size_t dataSize) override;
 
-    sk_sp<GrGpuBuffer> onCreateBuffer(size_t size, GrGpuBufferType intendedType, GrAccessPattern,
-                                      const void* data) override;
+    sk_sp<GrGpuBuffer> onCreateBuffer(size_t size, GrGpuBufferType, GrAccessPattern) override;
 
     sk_sp<GrTexture> onWrapBackendTexture(const GrBackendTexture&,
                                           GrWrapOwnership,
@@ -301,7 +308,8 @@ private:
                            GrRenderable,
                            GrGLTextureParameters::SamplerOverriddenState*,
                            int mipLevelCount,
-                           GrProtected isProtected);
+                           GrProtected isProtected,
+                           std::string_view label);
 
     GrGLuint createCompressedTexture2D(SkISize dimensions,
                                        SkImage::CompressionType compression,
@@ -323,6 +331,12 @@ private:
                        const GrMipLevel[],
                        int mipLevelCount,
                        bool prepForTexSampling) override;
+
+    bool onTransferFromBufferToBuffer(sk_sp<GrGpuBuffer> src,
+                                      size_t srcOffset,
+                                      sk_sp<GrGpuBuffer> dst,
+                                      size_t dstOffset,
+                                      size_t size) override;
 
     bool onTransferPixelsTo(GrTexture*,
                             SkIRect,
@@ -357,14 +371,14 @@ private:
 
     bool onRegenerateMipMapLevels(GrTexture*) override;
 
-    bool onCopySurface(GrSurface* dst, GrSurface* src, const SkIRect& srcRect,
-                       const SkIPoint& dstPoint) override;
+    bool onCopySurface(GrSurface* dst, const SkIRect& dstRect,
+                       GrSurface* src, const SkIRect& srcRect,
+                       GrSamplerState::Filter) override;
 
     // binds texture unit in GL
     void setTextureUnit(int unitIdx);
 
-    void flushBlendAndColorWrite(const GrXferProcessor::BlendInfo& blendInfo,
-                                 const skgpu::Swizzle&);
+    void flushBlendAndColorWrite(const skgpu::BlendInfo&, const skgpu::Swizzle&);
 
     void addFinishedProc(GrGpuFinishedProc finishedProc,
                          GrGpuFinishedContext finishedContext) override;
@@ -384,11 +398,11 @@ private:
     bool waitSync(GrGLsync, uint64_t timeout, bool flush);
 
     bool copySurfaceAsDraw(GrSurface* dst, bool drawToMultisampleFBO, GrSurface* src,
-                           const SkIRect& srcRect, const SkIPoint& dstPoint);
+                           const SkIRect& srcRect, const SkIRect& dstRect, GrSamplerState::Filter);
     void copySurfaceAsCopyTexSubImage(GrSurface* dst, GrSurface* src, const SkIRect& srcRect,
                                       const SkIPoint& dstPoint);
     bool copySurfaceAsBlitFramebuffer(GrSurface* dst, GrSurface* src, const SkIRect& srcRect,
-                                      const SkIPoint& dstPoint);
+                                      const SkIRect& dstRect, GrSamplerState::Filter);
 
     class ProgramCache : public GrThreadSafePipelineBuilder {
     public:
@@ -422,8 +436,6 @@ private:
         SkLRUCache<GrProgramDesc, std::unique_ptr<Entry>, DescHash> fMap;
     };
 
-    void flushPatchVertexCount(uint8_t count);
-
     void flushColorWrite(bool writeColor);
     void flushClearColor(std::array<float, 4>);
 
@@ -440,7 +452,7 @@ private:
     void flushWindowRectangles(const GrWindowRectsState&, const GrGLRenderTarget*, GrSurfaceOrigin);
     void disableWindowRectangles();
 
-    int numTextureUnits() const { return this->caps()->shaderCaps()->maxFragmentSamplers(); }
+    int numTextureUnits() const { return this->caps()->shaderCaps()->fMaxFragmentSamplers; }
 
     // Binds a texture to a target on the "scratch" texture unit to use for texture operations
     // other than usual draw flow (i.e. a GrGLProgram derived from a GrPipeline used to draw). It
@@ -448,14 +460,7 @@ private:
     // and the binding for 'target' will change.
     void bindTextureToScratchUnit(GrGLenum target, GrGLint textureID);
 
-    // The passed bounds contains the render target's color values that will subsequently be
-    // written.
-    void flushRenderTarget(GrGLRenderTarget*, bool useMultisampleFBO, GrSurfaceOrigin,
-                           const SkIRect& bounds);
-    // This version has an implicit bounds of the entire render target.
     void flushRenderTarget(GrGLRenderTarget*, bool useMultisampleFBO);
-    // This version can be used when the render target's colors will not be written.
-    void flushRenderTargetNoColorWrites(GrGLRenderTarget*, bool useMultisampleFBO);
 
     void flushStencil(const GrStencilSettings&, GrSurfaceOrigin);
     void disableStencil();
@@ -674,8 +679,6 @@ private:
         GrGLVertexArray*     fCoreProfileVertexArray;
     } fHWVertexArrayState;
 
-    uint8_t fHWPatchVertexCount;
-
     struct {
         GrGLenum                fGLTarget;
         GrGpuResource::UniqueID fBoundBufferUniqueID;
@@ -689,7 +692,7 @@ private:
 
     auto* hwBufferState(GrGpuBufferType type) {
         unsigned typeAsUInt = static_cast<unsigned>(type);
-        SkASSERT(typeAsUInt < SK_ARRAY_COUNT(fHWBufferState));
+        SkASSERT(typeAsUInt < std::size(fHWBufferState));
         SkASSERT(type != GrGpuBufferType::kUniform);
         return &fHWBufferState[typeAsUInt];
     }
@@ -792,6 +795,9 @@ private:
     std::unique_ptr<SamplerObjectCache> fSamplerObjectCache;
 
     std::unique_ptr<GrGLOpsRenderPass> fCachedOpsRenderPass;
+
+    std::unique_ptr<GrStagingBufferManager> fStagingBufferManager;
+
     GrFinishCallbacks fFinishCallbacks;
 
     // If we've called a command that requires us to call glFlush than this will be set to true

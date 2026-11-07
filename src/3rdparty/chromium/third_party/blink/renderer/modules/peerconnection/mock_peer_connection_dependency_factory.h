@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -189,6 +189,8 @@ class MockPeerConnectionDependencyFactory
                                                     int sdp_mline_index,
                                                     const String& sdp) override;
 
+  scoped_refptr<base::SingleThreadTaskRunner> GetWebRtcNetworkTaskRunner()
+      override;
   scoped_refptr<base::SingleThreadTaskRunner> GetWebRtcSignalingTaskRunner()
       override;
 
@@ -199,7 +201,7 @@ class MockPeerConnectionDependencyFactory
 
  private:
   // TODO(crbug.com/787254): Replace with the appropriate Blink class.
-  base::Thread signaling_thread_;
+  base::Thread thread_;
   bool fail_to_create_session_description_ = false;
 };
 

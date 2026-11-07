@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,8 @@ class DomDistillerViewerSourceTest;
 // Serves HTML and resources for viewing distilled articles.
 class DomDistillerViewerSource : public content::URLDataSource {
  public:
-  DomDistillerViewerSource(DomDistillerServiceInterface* dom_distiller_service,
-                           const std::string& scheme);
+  explicit DomDistillerViewerSource(
+      DomDistillerServiceInterface* dom_distiller_service);
   ~DomDistillerViewerSource() override;
 
   class RequestViewerHandle;
@@ -33,7 +33,7 @@ class DomDistillerViewerSource : public content::URLDataSource {
       const GURL& url,
       const content::WebContents::Getter& wc_getter,
       content::URLDataSource::GotDataCallback callback) override;
-  std::string GetMimeType(const std::string& path) override;
+  std::string GetMimeType(const GURL& url) override;
   bool ShouldServiceRequest(const GURL& url,
                             content::BrowserContext* browser_context,
                             int render_process_id) override;

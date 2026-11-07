@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@ class NET_EXPORT_PRIVATE SocketPerformanceWatcherFactory {
   SocketPerformanceWatcherFactory& operator=(
       const SocketPerformanceWatcherFactory&) = delete;
 
-  virtual ~SocketPerformanceWatcherFactory() {}
+  virtual ~SocketPerformanceWatcherFactory() = default;
 
   // Creates a socket performance watcher that will record statistics for a
   // single socket that uses |protocol| as the transport layer protocol.
@@ -40,7 +40,7 @@ class NET_EXPORT_PRIVATE SocketPerformanceWatcherFactory {
                                  const AddressList& address_list) = 0;
 
  protected:
-  SocketPerformanceWatcherFactory() {}
+  SocketPerformanceWatcherFactory() = default;
 };
 
 }  // namespace net

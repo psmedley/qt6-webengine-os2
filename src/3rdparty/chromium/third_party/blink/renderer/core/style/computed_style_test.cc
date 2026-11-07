@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -141,7 +141,7 @@ TEST_F(ComputedStyleTest,
 }
 
 TEST_F(ComputedStyleTest,
-       UpdatePropertySpecificDifferencesCompositingReasonsTransforom) {
+       UpdatePropertySpecificDifferencesCompositingReasonsTransform) {
   scoped_refptr<ComputedStyle> style = CreateComputedStyle();
   scoped_refptr<ComputedStyle> other = ComputedStyle::Clone(*style);
 
@@ -159,6 +159,36 @@ TEST_F(ComputedStyleTest,
   style->UpdatePropertySpecificDifferences(*other, diff);
   EXPECT_FALSE(diff.TransformChanged());
   EXPECT_TRUE(diff.CompositingReasonsChanged());
+}
+
+TEST_F(ComputedStyleTest,
+       UpdatePropertySpecificDifferencesRespectsScaleAnimation) {
+  scoped_refptr<ComputedStyle> style = CreateComputedStyle();
+  scoped_refptr<ComputedStyle> other = ComputedStyle::Clone(*style);
+  other->SetHasCurrentScaleAnimation(true);
+  StyleDifference diff;
+  style->UpdatePropertySpecificDifferences(*other, diff);
+  EXPECT_TRUE(diff.TransformChanged());
+}
+
+TEST_F(ComputedStyleTest,
+       UpdatePropertySpecificDifferencesRespectsRotateAnimation) {
+  scoped_refptr<ComputedStyle> style = CreateComputedStyle();
+  scoped_refptr<ComputedStyle> other = ComputedStyle::Clone(*style);
+  other->SetHasCurrentRotateAnimation(true);
+  StyleDifference diff;
+  style->UpdatePropertySpecificDifferences(*other, diff);
+  EXPECT_TRUE(diff.TransformChanged());
+}
+
+TEST_F(ComputedStyleTest,
+       UpdatePropertySpecificDifferencesRespectsTranslateAnimation) {
+  scoped_refptr<ComputedStyle> style = CreateComputedStyle();
+  scoped_refptr<ComputedStyle> other = ComputedStyle::Clone(*style);
+  other->SetHasCurrentTranslateAnimation(true);
+  StyleDifference diff;
+  style->UpdatePropertySpecificDifferences(*other, diff);
+  EXPECT_TRUE(diff.TransformChanged());
 }
 
 TEST_F(ComputedStyleTest,
@@ -252,39 +282,6 @@ TEST_F(ComputedStyleTest,
   EXPECT_TRUE(diff.CompositingReasonsChanged());
 }
 
-TEST_F(ComputedStyleTest, UpdateBackgroundColorDifferencesHasAlpha) {
-  scoped_refptr<ComputedStyle> style = CreateComputedStyle();
-  scoped_refptr<ComputedStyle> other = ComputedStyle::Clone(*style);
-
-  StyleDifference diff;
-  style->AdjustDiffForBackgroundVisuallyEqual(*other, diff);
-  EXPECT_FALSE(diff.HasAlphaChanged());
-
-  style->SetBackgroundColor(StyleColor(Color(255, 255, 255, 255)));
-  other->SetBackgroundColor(StyleColor(Color(255, 255, 255, 128)));
-
-  EXPECT_FALSE(
-      style->VisitedDependentColor(GetCSSPropertyBackgroundColor()).HasAlpha());
-  EXPECT_TRUE(
-      other->VisitedDependentColor(GetCSSPropertyBackgroundColor()).HasAlpha());
-
-  style->AdjustDiffForBackgroundVisuallyEqual(*other, diff);
-  EXPECT_TRUE(diff.HasAlphaChanged());
-}
-
-TEST_F(ComputedStyleTest, UpdateBackgroundLayerDifferencesHasAlpha) {
-  scoped_refptr<ComputedStyle> style = CreateComputedStyle();
-  scoped_refptr<ComputedStyle> other = ComputedStyle::Clone(*style);
-
-  StyleDifference diff;
-  style->AdjustDiffForBackgroundVisuallyEqual(*other, diff);
-  EXPECT_FALSE(diff.HasAlphaChanged());
-
-  other->AccessBackgroundLayers().EnsureNext();
-  style->AdjustDiffForBackgroundVisuallyEqual(*other, diff);
-  EXPECT_TRUE(diff.HasAlphaChanged());
-}
-
 TEST_F(ComputedStyleTest, HasOutlineWithCurrentColor) {
   scoped_refptr<ComputedStyle> style = CreateComputedStyle();
   EXPECT_FALSE(style->HasOutline());
@@ -314,9 +311,10 @@ TEST_F(ComputedStyleTest, CursorList) {
   auto* gradient = MakeGarbageCollected<cssvalue::CSSLinearGradientValue>(
       nullptr, nullptr, nullptr, nullptr, nullptr, cssvalue::kRepeating);
 
-  auto* image_value = MakeGarbageCollected<StyleGeneratedImage>(*gradient);
-  auto* other_image_value =
-      MakeGarbageCollected<StyleGeneratedImage>(*gradient);
+  auto* image_value = MakeGarbageCollected<StyleGeneratedImage>(
+      *gradient, StyleGeneratedImage::ContainerSizes());
+  auto* other_image_value = MakeGarbageCollected<StyleGeneratedImage>(
+      *gradient, StyleGeneratedImage::ContainerSizes());
 
   EXPECT_TRUE(base::ValuesEquivalent(image_value, other_image_value));
 
@@ -461,11 +459,17 @@ TEST_F(ComputedStyleTest, BorderStyle) {
 TEST_F(ComputedStyleTest, AnimationFlags) {
   Persistent<Document> document = Document::CreateForTest();
   TEST_ANIMATION_FLAG(HasCurrentTransformAnimation, kNonInherited);
+  TEST_ANIMATION_FLAG(HasCurrentScaleAnimation, kNonInherited);
+  TEST_ANIMATION_FLAG(HasCurrentRotateAnimation, kNonInherited);
+  TEST_ANIMATION_FLAG(HasCurrentTranslateAnimation, kNonInherited);
   TEST_ANIMATION_FLAG(HasCurrentOpacityAnimation, kNonInherited);
   TEST_ANIMATION_FLAG(HasCurrentFilterAnimation, kNonInherited);
   TEST_ANIMATION_FLAG(HasCurrentBackdropFilterAnimation, kNonInherited);
   TEST_ANIMATION_FLAG(SubtreeWillChangeContents, kInherited);
   TEST_ANIMATION_FLAG_NO_DIFF(IsRunningTransformAnimationOnCompositor);
+  TEST_ANIMATION_FLAG_NO_DIFF(IsRunningScaleAnimationOnCompositor);
+  TEST_ANIMATION_FLAG_NO_DIFF(IsRunningRotateAnimationOnCompositor);
+  TEST_ANIMATION_FLAG_NO_DIFF(IsRunningTranslateAnimationOnCompositor);
   TEST_ANIMATION_FLAG_NO_DIFF(IsRunningOpacityAnimationOnCompositor);
   TEST_ANIMATION_FLAG_NO_DIFF(IsRunningFilterAnimationOnCompositor);
   TEST_ANIMATION_FLAG_NO_DIFF(IsRunningBackdropFilterAnimationOnCompositor);
@@ -668,7 +672,8 @@ TEST_F(ComputedStyleTest, ApplyColorSchemeLightOnDark) {
   color_scheme_helper.SetPreferredColorScheme(
       mojom::blink::PreferredColorScheme::kDark);
   StyleResolverState state(document, *document.documentElement(),
-                           StyleRecalcContext(), StyleRequest(initial.get()));
+                           nullptr /* StyleRecalcContext */,
+                           StyleRequest(initial.get()));
 
   scoped_refptr<ComputedStyle> style = CreateComputedStyle();
   state.SetStyle(style);
@@ -701,7 +706,8 @@ TEST_F(ComputedStyleTest, ApplyInternalLightDarkColor) {
   color_scheme_helper.SetPreferredColorScheme(
       mojom::blink::PreferredColorScheme::kDark);
   StyleResolverState state(document, *document.documentElement(),
-                           StyleRecalcContext(), StyleRequest(initial.get()));
+                           nullptr /* StyleRecalcContext */,
+                           StyleRequest(initial.get()));
 
   scoped_refptr<ComputedStyle> style = CreateComputedStyle();
   state.SetStyle(style);
@@ -743,7 +749,8 @@ TEST_F(ComputedStyleTest, ApplyInternalLightDarkBackgroundImage) {
   color_scheme_helper.SetPreferredColorScheme(
       mojom::blink::PreferredColorScheme::kDark);
   StyleResolverState state(document, *document.documentElement(),
-                           StyleRecalcContext(), StyleRequest(initial.get()));
+                           nullptr /* StyleRecalcContext */,
+                           StyleRequest(initial.get()));
 
   scoped_refptr<ComputedStyle> style = CreateComputedStyle();
   state.SetStyle(style);
@@ -778,7 +785,8 @@ TEST_F(ComputedStyleTest, StrokeWidthZoomAndCalc) {
       document.GetStyleResolver().InitialStyleForElement();
 
   StyleResolverState state(document, *document.documentElement(),
-                           StyleRecalcContext(), StyleRequest(initial.get()));
+                           nullptr /* StyleRecalcContext */,
+                           StyleRequest(initial.get()));
 
   scoped_refptr<ComputedStyle> style = CreateComputedStyle();
   style->SetEffectiveZoom(1.5);
@@ -802,7 +810,7 @@ TEST_F(ComputedStyleTest, StrokeWidthZoomAndCalc) {
 
 TEST_F(ComputedStyleTest, InitialVariableNamesEmpty) {
   scoped_refptr<ComputedStyle> style = CreateComputedStyle();
-  EXPECT_TRUE(style->GetVariableNames().IsEmpty());
+  EXPECT_TRUE(style->GetVariableNames().empty());
 }
 
 TEST_F(ComputedStyleTest, InitialVariableNames) {
@@ -813,7 +821,8 @@ TEST_F(ComputedStyleTest, InitialVariableNames) {
   PropertyRegistry* registry = MakeGarbageCollected<PropertyRegistry>();
   registry->RegisterProperty("--x", *CreateLengthRegistration("--x", 1));
   registry->RegisterProperty("--y", *CreateLengthRegistration("--y", 2));
-  style->SetInitialData(StyleInitialData::Create(*registry));
+  style->SetInitialData(
+      StyleInitialData::Create(*Document::CreateForTest(), *registry));
 
   EXPECT_EQ(2u, style->GetVariableNames().size());
   EXPECT_TRUE(style->GetVariableNames().Contains("--x"));
@@ -875,7 +884,8 @@ TEST_F(ComputedStyleTest, InitialAndInheritedAndNonInheritedVariableNames) {
   PropertyRegistry* registry = MakeGarbageCollected<PropertyRegistry>();
   registry->RegisterProperty("--b", *CreateLengthRegistration("--b", 1));
   registry->RegisterProperty("--e", *CreateLengthRegistration("--e", 2));
-  style->SetInitialData(StyleInitialData::Create(*registry));
+  style->SetInitialData(
+      StyleInitialData::Create(*Document::CreateForTest(), *registry));
 
   const bool inherited = true;
   style->SetVariableData("--a", CreateVariableData("foo"), inherited);
@@ -935,7 +945,8 @@ TEST_F(ComputedStyleTest, GetVariableNamesWithInitialData_Invalidation) {
   {
     PropertyRegistry* registry = MakeGarbageCollected<PropertyRegistry>();
     registry->RegisterProperty("--x", *CreateLengthRegistration("--x", 1));
-    style->SetInitialData(StyleInitialData::Create(*registry));
+    style->SetInitialData(
+        StyleInitialData::Create(*Document::CreateForTest(), *registry));
   }
   EXPECT_EQ(style->GetVariableNames().size(), 1u);
   EXPECT_TRUE(style->GetVariableNames().Contains("--x"));
@@ -945,7 +956,8 @@ TEST_F(ComputedStyleTest, GetVariableNamesWithInitialData_Invalidation) {
     PropertyRegistry* registry = MakeGarbageCollected<PropertyRegistry>();
     registry->RegisterProperty("--y", *CreateLengthRegistration("--y", 2));
     registry->RegisterProperty("--z", *CreateLengthRegistration("--z", 3));
-    style->SetInitialData(StyleInitialData::Create(*registry));
+    style->SetInitialData(
+        StyleInitialData::Create(*Document::CreateForTest(), *registry));
   }
   EXPECT_EQ(style->GetVariableNames().size(), 2u);
   EXPECT_TRUE(style->GetVariableNames().Contains("--y"));
@@ -960,7 +972,8 @@ TEST_F(ComputedStyleTest, BorderWidthZoom) {
       document.GetStyleResolver().InitialStyleForElement();
 
   StyleResolverState state(document, *document.documentElement(),
-                           StyleRecalcContext(), StyleRequest(initial.get()));
+                           nullptr /* StyleRecalcContext */,
+                           StyleRequest(initial.get()));
 
   scoped_refptr<ComputedStyle> style = CreateComputedStyle();
   style->SetEffectiveZoom(2);
@@ -1008,7 +1021,8 @@ TEST_F(ComputedStyleTest,
       document.GetStyleResolver().InitialStyleForElement();
 
   StyleResolverState state(document, *document.documentElement(),
-                           StyleRecalcContext(), StyleRequest(initial.get()));
+                           nullptr /* StyleRecalcContext */,
+                           StyleRequest(initial.get()));
 
   scoped_refptr<ComputedStyle> style = CreateComputedStyle();
 
@@ -1048,7 +1062,8 @@ TEST_F(ComputedStyleTest, TextDecorationNotEqualRequiresRecomputeInkOverflow) {
       document.GetStyleResolver().InitialStyleForElement();
 
   StyleResolverState state(document, *document.documentElement(),
-                           StyleRecalcContext(), StyleRequest(initial.get()));
+                           nullptr /* StyleRecalcContext */,
+                           StyleRequest(initial.get()));
 
   scoped_refptr<ComputedStyle> style = CreateComputedStyle();
 
@@ -1156,7 +1171,8 @@ TEST_F(ComputedStyleTest, ApplyInitialAnimationNameAndTransitionProperty) {
       document.GetStyleResolver().InitialStyleForElement();
 
   StyleResolverState state(document, *document.documentElement(),
-                           StyleRecalcContext(), StyleRequest(initial.get()));
+                           nullptr /* StyleRecalcContext */,
+                           StyleRequest(initial.get()));
 
   scoped_refptr<ComputedStyle> style = CreateComputedStyle();
   state.SetStyle(style);
@@ -1311,5 +1327,65 @@ TEST_F(ComputedStyleTest, DebugDiffFields) {
 }
 
 #endif  // #if DCHECK_IS_ON()
+
+TEST_F(ComputedStyleTest, LogicalScrollPaddingUtils) {
+  scoped_refptr<ComputedStyle> style = CreateComputedStyle();
+
+  Length left = Length::Fixed(1.0f);
+  Length right = Length::Fixed(2.0f);
+  Length top = Length::Fixed(3.0f);
+  Length bottom = Length::Fixed(4.0f);
+
+  style->SetScrollPaddingLeft(left);
+  style->SetScrollPaddingRight(right);
+  style->SetScrollPaddingTop(top);
+  style->SetScrollPaddingBottom(bottom);
+
+  // ltr
+
+  style->SetDirection(TextDirection::kLtr);
+  style->SetWritingMode(WritingMode::kHorizontalTb);
+  EXPECT_EQ(left, style->ScrollPaddingInlineStart());
+  EXPECT_EQ(right, style->ScrollPaddingInlineEnd());
+  EXPECT_EQ(top, style->ScrollPaddingBlockStart());
+  EXPECT_EQ(bottom, style->ScrollPaddingBlockEnd());
+
+  style->SetDirection(TextDirection::kLtr);
+  style->SetWritingMode(WritingMode::kVerticalLr);
+  EXPECT_EQ(top, style->ScrollPaddingInlineStart());
+  EXPECT_EQ(bottom, style->ScrollPaddingInlineEnd());
+  EXPECT_EQ(left, style->ScrollPaddingBlockStart());
+  EXPECT_EQ(right, style->ScrollPaddingBlockEnd());
+
+  style->SetDirection(TextDirection::kLtr);
+  style->SetWritingMode(WritingMode::kVerticalRl);
+  EXPECT_EQ(top, style->ScrollPaddingInlineStart());
+  EXPECT_EQ(bottom, style->ScrollPaddingInlineEnd());
+  EXPECT_EQ(right, style->ScrollPaddingBlockStart());
+  EXPECT_EQ(left, style->ScrollPaddingBlockEnd());
+
+  // rtl
+
+  style->SetDirection(TextDirection::kRtl);
+  style->SetWritingMode(WritingMode::kHorizontalTb);
+  EXPECT_EQ(right, style->ScrollPaddingInlineStart());
+  EXPECT_EQ(left, style->ScrollPaddingInlineEnd());
+  EXPECT_EQ(top, style->ScrollPaddingBlockStart());
+  EXPECT_EQ(bottom, style->ScrollPaddingBlockEnd());
+
+  style->SetDirection(TextDirection::kRtl);
+  style->SetWritingMode(WritingMode::kVerticalLr);
+  EXPECT_EQ(bottom, style->ScrollPaddingInlineStart());
+  EXPECT_EQ(top, style->ScrollPaddingInlineEnd());
+  EXPECT_EQ(left, style->ScrollPaddingBlockStart());
+  EXPECT_EQ(right, style->ScrollPaddingBlockEnd());
+
+  style->SetDirection(TextDirection::kRtl);
+  style->SetWritingMode(WritingMode::kVerticalRl);
+  EXPECT_EQ(bottom, style->ScrollPaddingInlineStart());
+  EXPECT_EQ(top, style->ScrollPaddingInlineEnd());
+  EXPECT_EQ(right, style->ScrollPaddingBlockStart());
+  EXPECT_EQ(left, style->ScrollPaddingBlockEnd());
+}
 
 }  // namespace blink

@@ -423,16 +423,17 @@ static const FFCodecDefault xavs_defaults[] = {
 
 const FFCodec ff_libxavs_encoder = {
     .p.name         = "libxavs",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("libxavs Chinese AVS (Audio Video Standard)"),
+    CODEC_LONG_NAME("libxavs Chinese AVS (Audio Video Standard)"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_CAVS,
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
                       AV_CODEC_CAP_OTHER_THREADS,
     .priv_data_size = sizeof(XavsContext),
     .init           = XAVS_init,
-    .encode2        = XAVS_frame,
+    FF_CODEC_ENCODE_CB(XAVS_frame),
     .close          = XAVS_close,
-    .caps_internal  = FF_CODEC_CAP_AUTO_THREADS,
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE |
+                      FF_CODEC_CAP_AUTO_THREADS,
     .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE },
     .p.priv_class   = &xavs_class,
     .defaults       = xavs_defaults,

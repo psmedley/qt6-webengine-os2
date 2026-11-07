@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "chrome/browser/status_icons/status_icon_menu_model.h"
 #include "content/public/browser/media_stream_request.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
+#include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace content {
@@ -86,7 +87,7 @@ class MediaStreamCaptureIndicator
   // |ui| is used to display custom UI while the stream is captured.
   std::unique_ptr<content::MediaStreamUI> RegisterMediaStream(
       content::WebContents* web_contents,
-      const blink::MediaStreamDevices& devices,
+      const blink::mojom::StreamDevices& devices,
       std::unique_ptr<MediaStreamUI> ui = nullptr,
       const std::u16string application_title = std::u16string());
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,7 +68,7 @@ class SerialPortImpl : public mojom::SerialPort {
   void ConfigurePort(mojom::SerialConnectionOptionsPtr options,
                      ConfigurePortCallback callback) override;
   void GetPortInfo(GetPortInfoCallback callback) override;
-  void Close(CloseCallback callback) override;
+  void Close(bool flush, CloseCallback callback) override;
 
   void OpenPort(const mojom::SerialConnectionOptions& options,
                 OpenCallback callback);

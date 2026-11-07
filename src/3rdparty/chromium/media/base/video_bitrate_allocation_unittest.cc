@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,19 +12,19 @@ namespace media {
 TEST(VideoBitrateAllocationTest, Constructor_DefaultsModeConstant) {
   VideoBitrateAllocation allocation;
 
-  ASSERT_EQ(allocation.GetSumBitrate().mode(), Bitrate::Mode::kConstant);
+  ASSERT_EQ(allocation.GetMode(), Bitrate::Mode::kConstant);
 }
 
 TEST(VideoBitrateAllocationTest, Constructor_ConstantBitrate_CorrectMode) {
   VideoBitrateAllocation allocation(Bitrate::Mode::kConstant);
 
-  ASSERT_EQ(allocation.GetSumBitrate().mode(), Bitrate::Mode::kConstant);
+  ASSERT_EQ(allocation.GetMode(), Bitrate::Mode::kConstant);
 }
 
 TEST(VideoBitrateAllocationTest, Constructor_VariableBitrate_CorrectMode) {
   VideoBitrateAllocation allocation(Bitrate::Mode::kVariable);
 
-  ASSERT_EQ(allocation.GetSumBitrate().mode(), Bitrate::Mode::kVariable);
+  ASSERT_EQ(allocation.GetMode(), Bitrate::Mode::kVariable);
 }
 
 TEST(VideoBitrateAllocationTest,

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,6 @@
 #include "build/build_config.h"
 #include "chrome/browser/ui/webui/feedback/feedback_dialog.h"
 #include "content/public/browser/web_ui_message_handler.h"
-
-namespace base {
-class ListValue;
-}  // namespace base
 
 class FeedbackHandler : public content::WebUIMessageHandler {
  public:
@@ -25,13 +21,13 @@ class FeedbackHandler : public content::WebUIMessageHandler {
   void RegisterMessages() override;
 
  private:
-  void HandleShowDialog(const base::ListValue* args);
+  void HandleShowDialog(const base::Value::List& args);
 #if BUILDFLAG(IS_CHROMEOS)
-  void HandleShowAssistantLogsInfo(const base::ListValue* args);
-  void HandleShowBluetoothLogsInfo(const base::ListValue* args);
+  void HandleShowAssistantLogsInfo(const base::Value::List& args);
+  void HandleShowBluetoothLogsInfo(const base::Value::List& args);
 #endif  // BUILDFLAG(IS_CHROMEOS)
-  void HandleShowMetrics(const base::ListValue* args);
-  void HandleShowSystemInfo(const base::ListValue* args);
+  void HandleShowMetrics(const base::Value::List& args);
+  void HandleShowSystemInfo(const base::Value::List& args);
 
   raw_ptr<const FeedbackDialog> dialog_;
 };

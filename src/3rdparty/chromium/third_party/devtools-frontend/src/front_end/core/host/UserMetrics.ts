@@ -246,6 +246,11 @@ export class UserMetrics {
         EnumeratedHistogram.RecordingReplayFinished, value, RecordingReplayFinished.MaxValue);
   }
 
+  recordingReplaySpeed(value: RecordingReplaySpeed): void {
+    InspectorFrontendHostInstance.recordEnumeratedHistogram(
+        EnumeratedHistogram.RecordingReplaySpeed, value, RecordingReplaySpeed.MaxValue);
+  }
+
   recordingReplayStarted(value: RecordingReplayStarted): void {
     InspectorFrontendHostInstance.recordEnumeratedHistogram(
         EnumeratedHistogram.RecordingReplayStarted, value, RecordingReplayStarted.MaxValue);
@@ -264,6 +269,18 @@ export class UserMetrics {
   styleTextCopied(value: StyleTextCopied): void {
     InspectorFrontendHostInstance.recordEnumeratedHistogram(
         EnumeratedHistogram.StyleTextCopied, value, StyleTextCopied.MaxValue);
+  }
+
+  manifestSectionSelected(sectionTitle: string): void {
+    const code =
+        ManifestSectionCodes[sectionTitle as keyof typeof ManifestSectionCodes] || ManifestSectionCodes.OtherSection;
+    InspectorFrontendHostInstance.recordEnumeratedHistogram(
+        EnumeratedHistogram.ManifestSectionSelected, code, ManifestSectionCodes.MaxValue);
+  }
+
+  cssHintShown(type: CSSHintType): void {
+    InspectorFrontendHostInstance.recordEnumeratedHistogram(
+        EnumeratedHistogram.CSSHintShown, type, CSSHintType.MaxValue);
   }
 }
 
@@ -339,7 +356,9 @@ export enum Action {
   ConsoleSidebarOpened = 53,
   PerfPanelTraceImported = 54,
   PerfPanelTraceExported = 55,
-  MaxValue = 56,
+  StackFrameRestarted = 56,
+  CaptureTestProtocolClicked = 57,
+  MaxValue = 58,
 }
 
 /* eslint-disable @typescript-eslint/naming-convention */
@@ -549,7 +568,8 @@ export enum KeyboardShortcutAction {
   'layers.left' = 104,
   'layers.right' = 105,
   'help.report-translation-issue' = 106,
-  MaxValue = 107,
+  'rendering.toggle-prefers-color-scheme' = 107,
+  MaxValue = 108,
 }
 /* eslint-enable @typescript-eslint/naming-convention */
 
@@ -586,14 +606,13 @@ export enum DevtoolsExperiments {
   'developerResourcesView' = 15,
   'recordCoverageWithPerformanceTracing' = 16,
   'samplingHeapProfilerTimeline' = 17,
-  'showOptionToNotTreatGlobalObjectsAsRoots' = 18,
+  'showOptionToExposeInternalsInHeapSnapshot' = 18,
   'sourceOrderViewer' = 20,
   'webauthnPane' = 22,
   'timelineEventInitiators' = 24,
   'timelineInvalidationTracking' = 26,
   'timelineShowAllEvents' = 27,
   'timelineV8RuntimeCallStats' = 28,
-  'timelineWebGL' = 29,
   'timelineReplayEvent' = 30,
   'wasmDWARFDebugging' = 31,
   'dualScreenSupport' = 32,
@@ -605,9 +624,6 @@ export enum DevtoolsExperiments {
   'ignoreListJSFramesOnTimeline' = 43,
   'contrastIssues' = 44,
   'experimentalCookieFeatures' = 45,
-  'hideIssuesFeature' = 48,
-  'reportingApiDebugging' = 49,
-  'syncSettings' = 50,
   'groupAndHideIssuesByKind' = 51,
   'cssTypeComponentLength' = 52,
   'preciseChanges' = 53,
@@ -616,10 +632,15 @@ export enum DevtoolsExperiments {
   'headerOverrides' = 56,
   'lighthousePanelFR' = 57,
   'evaluateExpressionsWithSourceMaps' = 58,
-  'cssLayers' = 59,
   'eyedropperColorPicker' = 60,
+  'instrumentationBreakpoints' = 61,
+  'cssAuthoringHints' = 62,
+  'authoredDeployedGrouping' = 63,
+  'importantDOMProperties' = 64,
+  'justMyCode' = 65,
+  'breakpointView' = 66,
   // Increment this when new experiments are added.
-  'MaxValue' = 61,
+  'MaxValue' = 67,
 }
 /* eslint-enable @typescript-eslint/naming-convention */
 
@@ -894,6 +915,16 @@ export enum RecordingReplayFinished {
 
 // TODO(crbug.com/1167717): Make this a const enum again
 // eslint-disable-next-line rulesdir/const_enum
+export enum RecordingReplaySpeed {
+  Normal = 1,
+  Slow = 2,
+  VerySlow = 3,
+  ExtremelySlow = 4,
+  MaxValue = 5,
+}
+
+// TODO(crbug.com/1167717): Make this a const enum again
+// eslint-disable-next-line rulesdir/const_enum
 export enum RecordingReplayStarted {
   ReplayOnly = 1,
   ReplayWithPerformanceTracing = 2,
@@ -921,7 +952,10 @@ export enum RecordingEdited {
 export enum RecordingExported {
   ToPuppeteer = 1,
   ToJSON = 2,
-  MaxValue = 3,
+  ToPuppeteerReplay = 3,
+  ToExtension = 4,
+  ToLighthouse = 5,
+  MaxValue = 6,
 }
 
 /* eslint-disable @typescript-eslint/naming-convention */
@@ -946,6 +980,35 @@ export enum StyleTextCopied {
   AllDeclarationsViaContextMenu = 8,
   AllDeclarationsAsJSViaContextMenu = 9,
   SelectorViaContextMenu = 10,
+  MaxValue = 11,
+}
+
+// TODO(crbug.com/1167717): Make this a const enum again
+// eslint-disable-next-line rulesdir/const_enum
+export enum ManifestSectionCodes {
+  OtherSection = 0,
+  'Identity' = 1,
+  'Presentation' = 2,
+  'Protocol Handlers' = 3,
+  'Icons' = 4,
+  MaxValue = 5,
+}
+
+// The names here match the CSSRuleValidator names in CSSRuleValidator.ts.
+// TODO(crbug.com/1167717): Make this a const enum again
+// eslint-disable-next-line rulesdir/const_enum
+export enum CSSHintType {
+  Other = 0,
+  AlignContent = 1,
+  FlexItem = 2,
+  FlexContainer = 3,
+  GridContainer = 4,
+  GridItem = 5,
+  FlexGrid = 6,
+  MulticolFlexGrid = 7,
+  Padding = 8,
+  Position = 9,
+  ZIndex = 10,
   MaxValue = 11,
 }
 

@@ -19,8 +19,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
 
 #include "libavutil/mem_internal.h"
@@ -29,7 +27,7 @@
 #include "avcodec.h"
 #include "blockdsp.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include "get_bits.h"
 #include "bytestream.h"
 #include "bswapdsp.h"
@@ -135,7 +133,7 @@ static av_cold int mimic_decode_init(AVCodecContext *avctx)
     ctx->prev_index = 0;
     ctx->cur_index  = 15;
 
-    ff_blockdsp_init(&ctx->bdsp, avctx);
+    ff_blockdsp_init(&ctx->bdsp);
     ff_bswapdsp_init(&ctx->bbdsp);
     ff_hpeldsp_init(&ctx->hdsp, avctx->flags);
     ff_idctdsp_init(&ctx->idsp, avctx);
@@ -268,8 +266,9 @@ static int decode(MimicContext *ctx, int quality, int num_coeffs,
         const int qscale    = av_clip(10000 - quality, is_chroma ? 1000 : 2000,
                                       10000) << 2;
         const int stride    = ctx->frames[ctx->cur_index ].f->linesize[plane];
-        const uint8_t *src  = ctx->frames[ctx->prev_index].f->data[plane];
         uint8_t       *dst  = ctx->frames[ctx->cur_index ].f->data[plane];
+        /* src is unused for I frames; set to avoid UB pointer arithmetic. */
+        const uint8_t *src  = is_iframe ? dst : ctx->frames[ctx->prev_index].f->data[plane];
 
         for (y = 0; y < ctx->num_vblocks[plane]; y++) {
             for (x = 0; x < ctx->num_hblocks[plane]; x++) {
@@ -339,7 +338,7 @@ static void flip_swap_frame(AVFrame *f)
         f->linesize[i] *= -1;
 }
 
-static int mimic_decode_frame(AVCodecContext *avctx, void *data,
+static int mimic_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
                               int *got_frame, AVPacket *avpkt)
 {
     const uint8_t *buf = avpkt->data;
@@ -425,11 +424,11 @@ static int mimic_decode_frame(AVCodecContext *avctx, void *data,
         return res;
     }
 
-    if ((res = av_frame_ref(data, ctx->frames[ctx->cur_index].f)) < 0)
+    if ((res = av_frame_ref(rframe, ctx->frames[ctx->cur_index].f)) < 0)
         return res;
     *got_frame      = 1;
 
-    flip_swap_frame(data);
+    flip_swap_frame(rframe);
 
     ctx->prev_index = ctx->next_prev_index;
     ctx->cur_index  = ctx->next_cur_index;
@@ -439,15 +438,15 @@ static int mimic_decode_frame(AVCodecContext *avctx, void *data,
 
 const FFCodec ff_mimic_decoder = {
     .p.name                = "mimic",
-    .p.long_name           = NULL_IF_CONFIG_SMALL("Mimic"),
+    CODEC_LONG_NAME("Mimic"),
     .p.type                = AVMEDIA_TYPE_VIDEO,
     .p.id                  = AV_CODEC_ID_MIMIC,
     .priv_data_size        = sizeof(MimicContext),
     .init                  = mimic_decode_init,
     .close                 = mimic_decode_end,
-    .decode                = mimic_decode_frame,
+    FF_CODEC_DECODE_CB(mimic_decode_frame),
     .p.capabilities        = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
-    .update_thread_context = ONLY_IF_THREADS_ENABLED(mimic_decode_update_thread_context),
+    UPDATE_THREAD_CONTEXT(mimic_decode_update_thread_context),
     .caps_internal         = FF_CODEC_CAP_ALLOCATE_PROGRESS |
-                             FF_CODEC_CAP_INIT_CLEANUP | FF_CODEC_CAP_INIT_THREADSAFE,
+                             FF_CODEC_CAP_INIT_CLEANUP,
 };

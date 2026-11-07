@@ -1,40 +1,49 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/public/browser/stable_video_decoder_factory.h"
 
-#include "base/threading/sequence_local_storage_slot.h"
+#include "build/chromeos_buildflags.h"
+#include "content/public/browser/gpu_utils.h"
 #include "content/public/browser/service_process_host.h"
 #include "media/mojo/mojom/stable/stable_video_decoder.mojom.h"
-#include "mojo/public/cpp/bindings/remote.h"
+#include "ui/ozone/public/ozone_switches.h"
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chromeos/lacros/lacros_service.h"
+#endif
 
 namespace content {
 
-media::stable::mojom::StableVideoDecoderFactory&
-GetStableVideoDecoderFactory() {
-  // NOTE: We use sequence-local storage to limit the lifetime of this Remote to
-  // that of the UI-thread sequence. This ensures that the Remote is destroyed
-  // when the task environment is torn down and reinitialized, e.g. between unit
-  // tests.
-  static base::SequenceLocalStorageSlot<
-      mojo::Remote<media::stable::mojom::StableVideoDecoderFactory>>
-      remote_slot;
-  auto& remote = remote_slot.GetOrCreateValue();
-  remote.reset_on_disconnect();
-  [[maybe_unused]] auto receiver = remote.BindNewPipeAndPassReceiver();
-  if (!remote) {
+void LaunchStableVideoDecoderFactory(
+    mojo::PendingReceiver<media::stable::mojom::StableVideoDecoderFactory>
+        receiver) {
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-    // TODO(pmolinalopez): for LaCrOS, we need to use crosapi to establish a
-    // StableVideoDecoderFactory connection to ash-chrome.
-    NOTIMPLEMENTED();
+  // For LaCrOS, we need to use crosapi to establish a
+  // StableVideoDecoderFactory connection to ash-chrome.
+  auto* lacros_service = chromeos::LacrosService::Get();
+  if (lacros_service && lacros_service->IsStableVideoDecoderFactoryAvailable())
+    lacros_service->BindStableVideoDecoderFactory(std::move(receiver));
 #else
-    ServiceProcessHost::Launch(
-        std::move(receiver),
-        ServiceProcessHost::Options().WithDisplayName("Video Decoder").Pass());
-#endif
+  std::vector<std::string> extra_switches;
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  gpu::GpuPreferences gpu_preferences =
+      content::GetGpuPreferencesFromCommandLine();
+  if (!gpu_preferences.enable_chromeos_direct_video_decoder) {
+    // TODO(b/195769334): consider passing |gpu_preferences|.ToSwitchValue() to
+    // the utility process instead.
+    extra_switches.push_back(
+        switches::kPlatformDisallowsChromeOSDirectVideoDecoder);
   }
-  return *remote.get();
+#endif
+  ServiceProcessHost::Launch(
+      std::move(receiver),
+      ServiceProcessHost::Options()
+          .WithDisplayName("Video Decoder")
+          .WithExtraCommandLineSwitches(std::move(extra_switches))
+          .Pass());
+#endif
 }
 
 }  // namespace content

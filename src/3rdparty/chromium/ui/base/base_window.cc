@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,23 +6,10 @@
 
 namespace ui {
 
-namespace {
-bool g_is_fullscreen_faked_for_testing = false;
-}  // namespace
-
 bool BaseWindow::IsRestored(const BaseWindow& window) {
   return !window.IsMaximized() &&
      !window.IsMinimized() &&
      !window.IsFullscreen();
-}
-
-void BaseWindow::SetFullscreenFakedForTesting(
-    bool is_fullscreen_faked_for_testing) {
-  g_is_fullscreen_faked_for_testing = is_fullscreen_faked_for_testing;
-}
-
-bool BaseWindow::IsFullscreenFakedForTesting() {
-  return g_is_fullscreen_faked_for_testing;
 }
 
 }  // namespace ui

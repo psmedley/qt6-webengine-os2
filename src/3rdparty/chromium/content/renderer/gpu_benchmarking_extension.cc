@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,7 +40,6 @@
 #include "content/public/renderer/v8_value_converter.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_thread_impl.h"
-#include "content/renderer/render_view_impl.h"
 #include "content/renderer/skia_benchmarking_extension.h"
 #include "gin/arguments.h"
 #include "gin/handle.h"
@@ -51,6 +50,7 @@
 #include "third_party/blink/public/common/input/web_mouse_event.h"
 #include "third_party/blink/public/mojom/page/page_visibility_state.mojom.h"
 #include "third_party/blink/public/web/blink.h"
+#include "third_party/blink/public/web/modules/canvas/canvas_test_utils.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_image_cache.h"
 #include "third_party/blink/public/web/web_local_frame.h"
@@ -268,7 +268,7 @@ void RunCallbackHelper(CallbackAndContext* callback_and_context,
   if (frame && !callback.IsEmpty()) {
     if (value.has_value()) {
       v8::Local<v8::Value> v8_value =
-          V8ValueConverter::Create()->ToV8Value(&value.value(), context);
+          V8ValueConverter::Create()->ToV8Value(*value, context);
       v8::Local<v8::Value> argv[] = {v8_value};
       frame->CallFunctionEvenIfScriptDisabled(
           callback, v8::Object::New(isolate), /*argc=*/1, argv);
@@ -684,7 +684,9 @@ gin::ObjectTemplateBuilder GpuBenchmarking::GetObjectTemplateBuilder(
                  &GpuBenchmarking::AddCoreAnimationStatusEventListener)
 #endif
       .SetMethod("addSwapCompletionEventListener",
-                 &GpuBenchmarking::AddSwapCompletionEventListener);
+                 &GpuBenchmarking::AddSwapCompletionEventListener)
+      .SetMethod("isAcceleratedCanvasImageSource",
+                 &GpuBenchmarking::IsAcceleratedCanvasImageSource);
 }
 
 void GpuBenchmarking::SetNeedsDisplayOnAllLayers() {
@@ -1431,8 +1433,9 @@ void GpuBenchmarking::Freeze() {
   GpuBenchmarkingContext context(render_frame_.get());
   // TODO(fmeawad): Instead of forcing a visibility change, only allow
   // freezing a page if it was already hidden.
-  context.web_view()->SetVisibilityState(PageVisibilityState::kHidden,
-                                         /*is_initial_state=*/false);
+  context.web_view()->SetVisibilityState(
+      blink::mojom::PageVisibilityState::kHidden,
+      /*is_initial_state=*/false);
   context.web_view()->SetPageFrozen(true);
 }
 
@@ -1471,5 +1474,16 @@ int GpuBenchmarking::AddCoreAnimationStatusEventListener(gin::Arguments* args) {
   return true;
 }
 #endif
+
+bool GpuBenchmarking::IsAcceleratedCanvasImageSource(gin::Arguments* args) {
+  GpuBenchmarkingContext context(render_frame_.get());
+
+  v8::Local<v8::Value> value;
+  if (!args->GetNext(&value)) {
+    args->ThrowError();
+    return false;
+  }
+  return blink::IsAcceleratedCanvasImageSource(args->isolate(), value);
+}
 
 }  // namespace content

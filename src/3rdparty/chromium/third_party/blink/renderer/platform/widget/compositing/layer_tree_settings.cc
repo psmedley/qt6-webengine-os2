@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "build/build_config.h"
 #include "cc/base/features.h"
 #include "cc/base/switches.h"
+#include "cc/tiles/image_decode_cache_utils.h"
 #include "components/viz/common/display/de_jelly.h"
 #include "components/viz/common/features.h"
 #include "components/viz/common/switches.h"
@@ -31,8 +32,9 @@ namespace blink {
 
 namespace {
 
-const base::Feature kUnpremultiplyAndDitherLowBitDepthTiles = {
-    "UnpremultiplyAndDitherLowBitDepthTiles", base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kUnpremultiplyAndDitherLowBitDepthTiles,
+             "UnpremultiplyAndDitherLowBitDepthTiles",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_ANDROID)
 // With 32 bit pixels, this would mean less than 400kb per buffer. Much less
@@ -146,25 +148,23 @@ cc::ManagedMemoryPolicy GetGpuMemoryPolicy(
   if (display_width >= kLargeDisplayThreshold)
     actual.bytes_limit_when_visible *= 2;
 #endif
-
-  // If the feature `kScaleTileMemoryLimitFactor` is not enabled,
-  // `kScaleTileMemoryLimitFactor` will default to 1.
-  actual.bytes_limit_when_visible =
-      static_cast<size_t>(actual.bytes_limit_when_visible *
-                          features::kScaleTileMemoryLimitFactor.Get());
-
   return actual;
 }
 
 // static
 cc::LayerTreeSettings GenerateLayerTreeSettings(
     bool is_threaded,
-    bool for_child_local_root_frame,
+    bool is_for_embedded_frame,
+    bool is_for_scalable_page,
     const gfx::Size& initial_screen_size,
     float initial_device_scale_factor) {
   const base::CommandLine& cmd = *base::CommandLine::ForCurrentProcess();
   cc::LayerTreeSettings settings;
 
+  settings.skip_commits_if_not_synchronizing_compositor_state =
+      base::FeatureList::IsEnabled(
+          ::features::kSkipCommitsIfNotSynchronizingCompositorState) &&
+      !RuntimeEnabledFeatures::DocumentTransitionEnabled();
   settings.enable_synchronized_scrolling =
       base::FeatureList::IsEnabled(::features::kSynchronizedScrolling);
   Platform* platform = Platform::Current();
@@ -178,7 +178,8 @@ cc::LayerTreeSettings GenerateLayerTreeSettings(
       base::FeatureList::IsEnabled(media::kUseR16Texture);
 
   settings.commit_to_active_tree = !is_threaded;
-  settings.is_layer_tree_for_subframe = for_child_local_root_frame;
+  settings.is_for_embedded_frame = is_for_embedded_frame;
+  settings.is_for_scalable_page = is_for_scalable_page;
 
   settings.main_frame_before_activation_enabled =
       cmd.HasSwitch(cc::switches::kEnableMainFrameBeforeActivation);
@@ -367,11 +368,11 @@ cc::LayerTreeSettings GenerateLayerTreeSettings(
   settings.initial_debug_state.show_web_vital_metrics =
       base::FeatureList::IsEnabled(
           ::features::kHudDisplayForPerformanceMetrics) &&
-      !for_child_local_root_frame;
+      !is_for_embedded_frame;
   settings.initial_debug_state.show_smoothness_metrics =
       base::FeatureList::IsEnabled(
           ::features::kHudDisplayForPerformanceMetrics) &&
-      !for_child_local_root_frame;
+      !is_for_embedded_frame;
 
   settings.initial_debug_state.SetRecordRenderingStats(
       cmd.HasSwitch(cc::switches::kEnableGpuBenchmarking));
@@ -388,7 +389,7 @@ cc::LayerTreeSettings GenerateLayerTreeSettings(
   // This is default overlay scrollbar settings for Android and DevTools mobile
   // emulator. Aura Overlay Scrollbar will override below.
   settings.scrollbar_animator = cc::LayerTreeSettings::ANDROID_OVERLAY;
-  settings.solid_color_scrollbar_color = SkColorSetARGB(128, 128, 128, 128);
+  settings.solid_color_scrollbar_color = {0.5f, 0.5f, 0.5f, 0.5f};
   settings.scrollbar_fade_delay = base::Milliseconds(300);
   settings.scrollbar_fade_duration = base::Milliseconds(300);
 
@@ -405,10 +406,10 @@ cc::LayerTreeSettings GenerateLayerTreeSettings(
   }
 
 #if BUILDFLAG(IS_ANDROID)
-  // Synchronous compositing is used only for the root frame.
+  // Synchronous compositing is used only for the outermost main frame.
   bool use_synchronous_compositor =
       platform->IsSynchronousCompositingEnabledForAndroidWebView() &&
-      !for_child_local_root_frame;
+      !is_for_embedded_frame;
   // Do not use low memory policies for Android WebView.
   bool using_low_memory_policy =
       base::SysInfo::IsLowEndDevice() && !IsSmallScreen(screen_size) &&
@@ -422,7 +423,7 @@ cc::LayerTreeSettings GenerateLayerTreeSettings(
     // hide_scrollbars setting because supporting -webkit custom scrollbars is
     // still desired on sublayers.
     settings.scrollbar_animator = cc::LayerTreeSettings::NO_ANIMATOR;
-    settings.solid_color_scrollbar_color = SK_ColorTRANSPARENT;
+    settings.solid_color_scrollbar_color = SkColors::kTransparent;
 
     // Early damage check works in combination with synchronous compositor.
     settings.enable_early_damage_check =
@@ -444,7 +445,7 @@ cc::LayerTreeSettings GenerateLayerTreeSettings(
   settings.create_low_res_tiling = true;
 
 #else   // BUILDFLAG(IS_ANDROID)
-  bool using_low_memory_policy = base::SysInfo::IsLowEndDevice();
+  const bool using_low_memory_policy = base::SysInfo::IsLowEndDevice();
 
   if (ui::IsOverlayScrollbarEnabled()) {
     settings.scrollbar_animator = cc::LayerTreeSettings::AURA_OVERLAY;
@@ -455,19 +456,12 @@ cc::LayerTreeSettings GenerateLayerTreeSettings(
     settings.scrollbar_flash_after_any_scroll_update = true;
   }
 
-  // If there's over 4GB of RAM, increase the working set size to 256MB for both
-  // gpu and software.
-  const int kImageDecodeMemoryThresholdMB = 4 * 1024;
-  if (using_low_memory_policy) {
-    settings.decoded_image_working_set_budget_bytes = 32 * 1024 * 1024;
-  } else if (base::SysInfo::AmountOfPhysicalMemoryMB() >=
-             kImageDecodeMemoryThresholdMB) {
-    settings.decoded_image_working_set_budget_bytes = 256 * 1024 * 1024;
-  } else {
-    // This is the default, but recorded here as well.
-    settings.decoded_image_working_set_budget_bytes = 128 * 1024 * 1024;
-  }
+  settings.enable_fluent_scrollbar = ui::IsFluentScrollbarEnabled();
 #endif  // BUILDFLAG(IS_ANDROID)
+
+  settings.decoded_image_working_set_budget_bytes =
+      cc::ImageDecodeCacheUtils::GetWorkingSetBytesForImageDecode(
+          /*for_renderer=*/true);
 
   if (using_low_memory_policy) {
     // RGBA_4444 textures are only enabled:
@@ -541,6 +535,12 @@ cc::LayerTreeSettings GenerateLayerTreeSettings(
 
   settings.enable_backface_visibility_interop =
       RuntimeEnabledFeatures::BackfaceVisibilityInteropEnabled();
+
+  settings.enable_scroll_update_optimizations =
+      RuntimeEnabledFeatures::ScrollUpdateOptimizationsEnabled();
+
+  settings.disable_frame_rate_limit =
+      cmd.HasSwitch(::switches::kDisableFrameRateLimit);
 
   return settings;
 }

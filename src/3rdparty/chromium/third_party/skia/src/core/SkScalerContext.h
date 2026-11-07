@@ -20,7 +20,6 @@
 #include "src/core/SkGlyph.h"
 #include "src/core/SkMask.h"
 #include "src/core/SkMaskGamma.h"
-#include "src/core/SkStrikeForGPU.h"
 #include "src/core/SkSurfacePriv.h"
 #include "src/core/SkWriteBuffer.h"
 
@@ -38,12 +37,6 @@ enum class SkScalerContextFlags : uint32_t {
     kFakeGammaAndBoostContrast = kFakeGamma | kBoostContrast,
 };
 SK_MAKE_BITFIELD_OPS(SkScalerContextFlags)
-
-enum class SkAxisAlignment : uint32_t {
-    kNone,
-    kX,
-    kY,
-};
 
 /*
  *  To allow this to be forward-declared, it must be its own typename, rather

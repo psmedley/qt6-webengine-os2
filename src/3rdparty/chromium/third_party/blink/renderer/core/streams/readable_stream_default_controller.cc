@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -332,6 +332,12 @@ StreamPromiseResolver* ReadableStreamDefaultController::PullSteps(
 
   // 5. Return pendingPromise.
   return pendingPromise;
+}
+
+void ReadableStreamDefaultController::ReleaseSteps() {
+  // https://streams.spec.whatwg.org/#abstract-opdef-readablestreamdefaultcontroller-releasesteps
+  // 1. Return.
+  return;
 }
 
 //

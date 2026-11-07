@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,10 +49,11 @@ class NET_EXPORT NetworkConnection
  private:
   // Cache the connection type to avoid calling the potentially expensive
   // NetworkChangeNotifier::GetConnectionType() function.
-  NetworkChangeNotifier::ConnectionType connection_type_;
+  NetworkChangeNotifier::ConnectionType connection_type_ =
+      NetworkChangeNotifier::CONNECTION_UNKNOWN;
   // Cache the connection description string to avoid calling the expensive
   // GetWifiPHYLayerProtocol() function.
-  const char* connection_description_;
+  const char* connection_description_ = nullptr;
 };
 
 }  // namespace net

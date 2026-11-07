@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,9 +50,6 @@ class CONTENT_EXPORT BrowserTaskQueues {
 
     // For tasks on the critical path up to issuing the initial navigation.
     kBootstrap,
-
-    // For preconnection-related tasks.
-    kPreconnection,
 
     // base::TaskPriority::kUserBlocking maps to this task queue. It's for tasks
     // that affect the UI immediately after a user interaction. Has the same
@@ -146,7 +143,9 @@ class CONTENT_EXPORT BrowserTaskQueues {
 
     // |outer_| can only be safely used from a task posted to one of the
     // runners.
-    raw_ptr<BrowserTaskQueues> outer_ = nullptr;
+    //
+    // TODO(crbug.com/1298696): Breaks events_unittests.
+    raw_ptr<BrowserTaskQueues, DegradeToNoOpWhenMTE> outer_ = nullptr;
     scoped_refptr<base::SingleThreadTaskRunner> control_task_runner_;
     scoped_refptr<base::SingleThreadTaskRunner> default_task_runner_;
     std::array<scoped_refptr<base::SingleThreadTaskRunner>, kNumQueueTypes>

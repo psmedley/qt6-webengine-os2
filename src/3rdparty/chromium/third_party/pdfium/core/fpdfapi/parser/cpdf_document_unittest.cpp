@@ -25,17 +25,18 @@ namespace {
 
 const int kNumTestPages = 7;
 
-CPDF_Dictionary* CreatePageTreeNode(RetainPtr<CPDF_Array> kids,
-                                    CPDF_Document* pDoc,
-                                    int count) {
-  CPDF_Array* pUnowned = pDoc->AddIndirectObject(std::move(kids))->AsArray();
-  CPDF_Dictionary* pageNode = pDoc->NewIndirect<CPDF_Dictionary>();
+RetainPtr<CPDF_Dictionary> CreatePageTreeNode(RetainPtr<CPDF_Array> kids,
+                                              CPDF_Document* pDoc,
+                                              int count) {
+  CPDF_Array* pUnowned =
+      pDoc->AddIndirectObject(std::move(kids))->AsMutableArray();
+  auto pageNode = pDoc->NewIndirect<CPDF_Dictionary>();
   pageNode->SetNewFor<CPDF_Name>("Type", "Pages");
   pageNode->SetNewFor<CPDF_Reference>("Kids", pDoc, pUnowned->GetObjNum());
   pageNode->SetNewFor<CPDF_Number>("Count", count);
   for (size_t i = 0; i < pUnowned->size(); i++) {
-    pUnowned->GetDictAt(i)->SetNewFor<CPDF_Reference>("Parent", pDoc,
-                                                      pageNode->GetObjNum());
+    pUnowned->GetMutableDictAt(i)->SetNewFor<CPDF_Reference>(
+        "Parent", pDoc, pageNode->GetObjNum());
   }
   return pageNode;
 }
@@ -58,14 +59,14 @@ class CPDF_TestDocumentForPages final : public CPDF_TestDocument {
         this, AddIndirectObject(CreateNumberedPage(1))->GetObjNum());
     zeroToTwo->AppendNew<CPDF_Reference>(
         this, AddIndirectObject(CreateNumberedPage(2))->GetObjNum());
-    CPDF_Dictionary* branch1 =
+    RetainPtr<CPDF_Dictionary> branch1 =
         CreatePageTreeNode(std::move(zeroToTwo), this, 3);
 
     auto zeroToThree = pdfium::MakeRetain<CPDF_Array>();
     zeroToThree->AppendNew<CPDF_Reference>(this, branch1->GetObjNum());
     zeroToThree->AppendNew<CPDF_Reference>(
         this, AddIndirectObject(CreateNumberedPage(3))->GetObjNum());
-    CPDF_Dictionary* branch2 =
+    RetainPtr<CPDF_Dictionary> branch2 =
         CreatePageTreeNode(std::move(zeroToThree), this, 4);
 
     auto fourFive = pdfium::MakeRetain<CPDF_Array>();
@@ -73,27 +74,30 @@ class CPDF_TestDocumentForPages final : public CPDF_TestDocument {
         this, AddIndirectObject(CreateNumberedPage(4))->GetObjNum());
     fourFive->AppendNew<CPDF_Reference>(
         this, AddIndirectObject(CreateNumberedPage(5))->GetObjNum());
-    CPDF_Dictionary* branch3 = CreatePageTreeNode(std::move(fourFive), this, 2);
+    RetainPtr<CPDF_Dictionary> branch3 =
+        CreatePageTreeNode(std::move(fourFive), this, 2);
 
     auto justSix = pdfium::MakeRetain<CPDF_Array>();
     justSix->AppendNew<CPDF_Reference>(
         this, AddIndirectObject(CreateNumberedPage(6))->GetObjNum());
-    CPDF_Dictionary* branch4 = CreatePageTreeNode(std::move(justSix), this, 1);
+    RetainPtr<CPDF_Dictionary> branch4 =
+        CreatePageTreeNode(std::move(justSix), this, 1);
 
     auto allPages = pdfium::MakeRetain<CPDF_Array>();
     allPages->AppendNew<CPDF_Reference>(this, branch2->GetObjNum());
     allPages->AppendNew<CPDF_Reference>(this, branch3->GetObjNum());
     allPages->AppendNew<CPDF_Reference>(this, branch4->GetObjNum());
-    CPDF_Dictionary* pagesDict =
+    RetainPtr<CPDF_Dictionary> pagesDict =
         CreatePageTreeNode(std::move(allPages), this, kNumTestPages);
 
     SetRootForTesting(NewIndirect<CPDF_Dictionary>());
-    GetRoot()->SetNewFor<CPDF_Reference>("Pages", this, pagesDict->GetObjNum());
+    GetMutableRoot()->SetNewFor<CPDF_Reference>("Pages", this,
+                                                pagesDict->GetObjNum());
     ResizePageListForTesting(kNumTestPages);
   }
 
   void SetTreeSize(int size) {
-    GetRoot()->SetNewFor<CPDF_Number>("Count", size);
+    GetMutableRoot()->SetNewFor<CPDF_Number>("Count", size);
     ResizePageListForTesting(size);
   }
 };
@@ -108,18 +112,20 @@ class CPDF_TestDocumentWithPageWithoutPageNum final : public CPDF_TestDocument {
     allPages->AppendNew<CPDF_Reference>(
         this, AddIndirectObject(CreateNumberedPage(1))->GetObjNum());
     // Page without pageNum.
-    inlined_page_ = allPages->Append(CreateNumberedPage(2));
-    CPDF_Dictionary* pagesDict =
+    inlined_page_ = CreateNumberedPage(2);
+    allPages->Append(inlined_page_);
+    RetainPtr<CPDF_Dictionary> pagesDict =
         CreatePageTreeNode(std::move(allPages), this, 3);
     SetRootForTesting(NewIndirect<CPDF_Dictionary>());
-    GetRoot()->SetNewFor<CPDF_Reference>("Pages", this, pagesDict->GetObjNum());
+    GetMutableRoot()->SetNewFor<CPDF_Reference>("Pages", this,
+                                                pagesDict->GetObjNum());
     ResizePageListForTesting(3);
   }
 
-  const CPDF_Object* inlined_page() const { return inlined_page_; }
+  const CPDF_Object* inlined_page() const { return inlined_page_.Get(); }
 
  private:
-  const CPDF_Object* inlined_page_;
+  RetainPtr<CPDF_Object> inlined_page_;
 };
 
 class TestLinearized final : public CPDF_LinearizedHeader {
@@ -131,12 +137,13 @@ class TestLinearized final : public CPDF_LinearizedHeader {
 class CPDF_TestDocPagesWithoutKids final : public CPDF_TestDocument {
  public:
   CPDF_TestDocPagesWithoutKids() {
-    CPDF_Dictionary* pagesDict = NewIndirect<CPDF_Dictionary>();
+    auto pagesDict = NewIndirect<CPDF_Dictionary>();
     pagesDict->SetNewFor<CPDF_Name>("Type", "Pages");
     pagesDict->SetNewFor<CPDF_Number>("Count", 3);
     ResizePageListForTesting(10);
     SetRootForTesting(NewIndirect<CPDF_Dictionary>());
-    GetRoot()->SetNewFor<CPDF_Reference>("Pages", this, pagesDict->GetObjNum());
+    GetMutableRoot()->SetNewFor<CPDF_Reference>("Pages", this,
+                                                pagesDict->GetObjNum());
   }
 };
 
@@ -155,22 +162,24 @@ TEST_F(DocumentTest, GetPages) {
   std::unique_ptr<CPDF_TestDocumentForPages> document =
       std::make_unique<CPDF_TestDocumentForPages>();
   for (int i = 0; i < kNumTestPages; i++) {
-    CPDF_Dictionary* page = document->GetPageDictionary(i);
+    RetainPtr<const CPDF_Dictionary> page = document->GetPageDictionary(i);
     ASSERT_TRUE(page);
     ASSERT_TRUE(page->KeyExist("PageNumbering"));
     EXPECT_EQ(i, page->GetIntegerFor("PageNumbering"));
   }
-  CPDF_Dictionary* page = document->GetPageDictionary(kNumTestPages);
+  RetainPtr<const CPDF_Dictionary> page =
+      document->GetPageDictionary(kNumTestPages);
   EXPECT_FALSE(page);
 }
 
 TEST_F(DocumentTest, GetPageWithoutObjNumTwice) {
   auto document = std::make_unique<CPDF_TestDocumentWithPageWithoutPageNum>();
-  CPDF_Dictionary* page = document->GetPageDictionary(2);
+  RetainPtr<const CPDF_Dictionary> page = document->GetPageDictionary(2);
   ASSERT_TRUE(page);
   ASSERT_EQ(document->inlined_page(), page);
 
-  CPDF_Dictionary* second_call_page = document->GetPageDictionary(2);
+  RetainPtr<const CPDF_Dictionary> second_call_page =
+      document->GetPageDictionary(2);
   EXPECT_TRUE(second_call_page);
   EXPECT_EQ(page, second_call_page);
 }
@@ -179,12 +188,13 @@ TEST_F(DocumentTest, GetPagesReverseOrder) {
   std::unique_ptr<CPDF_TestDocumentForPages> document =
       std::make_unique<CPDF_TestDocumentForPages>();
   for (int i = 6; i >= 0; i--) {
-    CPDF_Dictionary* page = document->GetPageDictionary(i);
+    RetainPtr<const CPDF_Dictionary> page = document->GetPageDictionary(i);
     ASSERT_TRUE(page);
     ASSERT_TRUE(page->KeyExist("PageNumbering"));
     EXPECT_EQ(i, page->GetIntegerFor("PageNumbering"));
   }
-  CPDF_Dictionary* page = document->GetPageDictionary(kNumTestPages);
+  RetainPtr<const CPDF_Dictionary> page =
+      document->GetPageDictionary(kNumTestPages);
   EXPECT_FALSE(page);
 }
 
@@ -192,7 +202,7 @@ TEST_F(DocumentTest, GetPagesInDisorder) {
   std::unique_ptr<CPDF_TestDocumentForPages> document =
       std::make_unique<CPDF_TestDocumentForPages>();
 
-  CPDF_Dictionary* page = document->GetPageDictionary(1);
+  RetainPtr<const CPDF_Dictionary> page = document->GetPageDictionary(1);
   ASSERT_TRUE(page);
   ASSERT_TRUE(page->KeyExist("PageNumbering"));
   EXPECT_EQ(1, page->GetIntegerFor("PageNumbering"));
@@ -229,8 +239,8 @@ TEST_F(DocumentTest, IsValidPageObject) {
   EXPECT_FALSE(CPDF_Document::IsValidPageObject(
       document.AddIndirectObject(dict_type_name_font)));
 
-  CPDF_Object* obj_no_type = document.NewIndirect<CPDF_Dictionary>();
-  EXPECT_FALSE(CPDF_Document::IsValidPageObject(obj_no_type));
+  auto obj_no_type = document.NewIndirect<CPDF_Dictionary>();
+  EXPECT_FALSE(CPDF_Document::IsValidPageObject(obj_no_type.Get()));
 }
 
 TEST_F(DocumentTest, UseCachedPageObjNumIfHaveNotPagesDict) {
@@ -262,11 +272,11 @@ TEST_F(DocumentTest, UseCachedPageObjNumIfHaveNotPagesDict) {
   document.LoadPages();
 
   ASSERT_EQ(kPageCount, document.GetPageCount());
-  CPDF_Object* page_stub = document.NewIndirect<CPDF_Dictionary>();
+  auto page_stub = document.NewIndirect<CPDF_Dictionary>();
   const uint32_t obj_num = page_stub->GetObjNum();
 
   EXPECT_FALSE(document.IsPageLoaded(kTestPageNum));
-  EXPECT_EQ(nullptr, document.GetPageDictionary(kTestPageNum));
+  EXPECT_FALSE(document.GetPageDictionary(kTestPageNum));
 
   document.SetPageObjNum(kTestPageNum, obj_num);
   EXPECT_TRUE(document.IsPageLoaded(kTestPageNum));

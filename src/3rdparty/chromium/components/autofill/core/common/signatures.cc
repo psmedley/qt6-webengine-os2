@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,11 +134,11 @@ uint32_t StrToHash32Bit(base::StringPiece str) {
   return PackBytes(base::make_span(digest).subspan<0, 4>());
 }
 
-int64_t HashFormSignature(autofill::FormSignature form_signature) {
+int64_t HashFormSignature(FormSignature form_signature) {
   return static_cast<uint64_t>(form_signature.value()) % 1021;
 }
 
-int64_t HashFieldSignature(autofill::FieldSignature field_signature) {
+int64_t HashFieldSignature(FieldSignature field_signature) {
   return static_cast<uint64_t>(field_signature.value()) % 1021;
 }
 

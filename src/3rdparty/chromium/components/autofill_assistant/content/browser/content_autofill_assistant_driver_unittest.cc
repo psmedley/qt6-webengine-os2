@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,8 +48,11 @@ class ContentAutofillAssistantDriverTest : public testing::Test {
         &browser_context_, nullptr);
     // Constructor of ContentAutofillAssistantDriver is private, cannot use
     // std::make_unique.
-    driver_ = base::WrapUnique(
-        new ContentAutofillAssistantDriver(web_contents_->GetMainFrame()));
+    driver_ = base::WrapUnique(new ContentAutofillAssistantDriver(
+        web_contents_->GetPrimaryMainFrame()));
+  }
+
+  void SetUp() override {
     driver_->SetAnnotateDomModelService(annotate_dom_model_service_.get());
   }
 
@@ -67,29 +70,29 @@ class ContentAutofillAssistantDriverTest : public testing::Test {
   std::unique_ptr<ContentAutofillAssistantDriver> driver_;
   std::unique_ptr<AnnotateDomModelService> annotate_dom_model_service_;
   base::File model_file_;
+
+  base::MockCallback<base::OnceCallback<
+      void(mojom::ModelStatus, base::File, const std::string&)>>
+      callback_;
 };
 
 TEST_F(ContentAutofillAssistantDriverTest, GetLoadedModelFromService) {
   // Model has been loaded before.
   annotate_dom_model_service_->SetModelFileForTest(model_file_.Duplicate());
 
-  base::MockCallback<base::OnceCallback<void(mojom::ModelStatus, base::File)>>
-      callback;
-  EXPECT_CALL(callback, Run(mojom::ModelStatus::kSuccess, _));
+  EXPECT_CALL(callback_, Run(mojom::ModelStatus::kSuccess, _, _));
 
   driver_->GetAnnotateDomModel(/* timeout= */ base::Milliseconds(1000),
-                               callback.Get());
+                               callback_.Get());
 
   EXPECT_FALSE(HasPendingCallbacks());
 }
 
 TEST_F(ContentAutofillAssistantDriverTest, GetModelFromServiceAfterLoading) {
-  base::MockCallback<base::OnceCallback<void(mojom::ModelStatus, base::File)>>
-      callback;
-  EXPECT_CALL(callback, Run(mojom::ModelStatus::kSuccess, _));
+  EXPECT_CALL(callback_, Run(mojom::ModelStatus::kSuccess, _, _));
 
   driver_->GetAnnotateDomModel(/* timeout= */ base::Milliseconds(1000),
-                               callback.Get());
+                               callback_.Get());
 
   // Model loaded after being requested.
   annotate_dom_model_service_->SetModelFileForTest(model_file_.Duplicate());
@@ -98,12 +101,10 @@ TEST_F(ContentAutofillAssistantDriverTest, GetModelFromServiceAfterLoading) {
 }
 
 TEST_F(ContentAutofillAssistantDriverTest, GetModelTimesOut) {
-  base::MockCallback<base::OnceCallback<void(mojom::ModelStatus, base::File)>>
-      callback;
-  EXPECT_CALL(callback, Run(mojom::ModelStatus::kTimeout, _));
+  EXPECT_CALL(callback_, Run(mojom::ModelStatus::kTimeout, _, _));
 
   driver_->GetAnnotateDomModel(/* timeout= */ base::Milliseconds(1000),
-                               callback.Get());
+                               callback_.Get());
 
   // Model does not get loaded.
   task_environment_.FastForwardBy(base::Seconds(2));
@@ -112,19 +113,47 @@ TEST_F(ContentAutofillAssistantDriverTest, GetModelTimesOut) {
 }
 
 TEST_F(ContentAutofillAssistantDriverTest, MultipleParallelCalls) {
-  base::MockCallback<base::OnceCallback<void(mojom::ModelStatus, base::File)>>
-      callback;
-  EXPECT_CALL(callback, Run(mojom::ModelStatus::kTimeout, _)).Times(3);
+  EXPECT_CALL(callback_, Run(mojom::ModelStatus::kTimeout, _, _)).Times(3);
 
   driver_->GetAnnotateDomModel(/* timeout= */ base::Milliseconds(1000),
-                               callback.Get());
+                               callback_.Get());
   driver_->GetAnnotateDomModel(/* timeout= */ base::Milliseconds(1000),
-                               callback.Get());
+                               callback_.Get());
   driver_->GetAnnotateDomModel(/* timeout= */ base::Milliseconds(1000),
-                               callback.Get());
+                               callback_.Get());
 
   // Model does not get loaded.
   task_environment_.FastForwardBy(base::Seconds(2));
+
+  EXPECT_FALSE(HasPendingCallbacks());
+}
+
+TEST_F(ContentAutofillAssistantDriverTest, EmptyOverrides) {
+  EXPECT_CALL(callback_, Run(mojom::ModelStatus::kSuccess, _, std::string()));
+
+  driver_->GetAnnotateDomModel(/* timeout= */ base::Milliseconds(1000),
+                               callback_.Get());
+
+  // Model loaded after being requested.
+  annotate_dom_model_service_->SetModelFileForTest(model_file_.Duplicate());
+
+  EXPECT_FALSE(HasPendingCallbacks());
+}
+
+class ContentAutofillAssistantDriverMissingDomServiceTest
+    : public ContentAutofillAssistantDriverTest {
+  // Do not set the dom model service.
+  void SetUp() override {}
+};
+
+TEST_F(ContentAutofillAssistantDriverMissingDomServiceTest,
+       MissingDomModelService) {
+  EXPECT_CALL(callback_,
+              Run(mojom::ModelStatus::kUnexpectedError, _, std::string()))
+      .Times(1);
+
+  driver_->GetAnnotateDomModel(/* timeout= */ base::Milliseconds(1000),
+                               callback_.Get());
 
   EXPECT_FALSE(HasPendingCallbacks());
 }

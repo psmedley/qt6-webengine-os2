@@ -15,14 +15,13 @@
 #ifndef SRC_TINT_SEM_MODULE_H_
 #define SRC_TINT_SEM_MODULE_H_
 
-#include <vector>
-
+#include "src/tint/ast/extension.h"
 #include "src/tint/sem/node.h"
+#include "src/tint/utils/vector.h"
 
 // Forward declarations
 namespace tint::ast {
 class Node;
-class Module;
 }  // namespace tint::ast
 
 namespace tint::sem {
@@ -30,21 +29,26 @@ namespace tint::sem {
 /// Module holds the top-level semantic types, functions and global variables
 /// used by a Program.
 class Module final : public Castable<Module, Node> {
- public:
-  /// Constructor
-  /// @param dep_ordered_decls the dependency-ordered module-scope declarations
-  explicit Module(std::vector<const ast::Node*> dep_ordered_decls);
+  public:
+    /// Constructor
+    /// @param dep_ordered_decls the dependency-ordered module-scope declarations
+    /// @param extensions the list of enabled extensions in the module
+    Module(utils::VectorRef<const ast::Node*> dep_ordered_decls, ast::Extensions extensions);
 
-  /// Destructor
-  ~Module() override;
+    /// Destructor
+    ~Module() override;
 
-  /// @returns the dependency-ordered global declarations for the module
-  const std::vector<const ast::Node*>& DependencyOrderedDeclarations() const {
-    return dep_ordered_decls_;
-  }
+    /// @returns the dependency-ordered global declarations for the module
+    const utils::Vector<const ast::Node*, 64>& DependencyOrderedDeclarations() const {
+        return dep_ordered_decls_;
+    }
 
- private:
-  const std::vector<const ast::Node*> dep_ordered_decls_;
+    /// @returns the list of enabled extensions in the module
+    const ast::Extensions& Extensions() const { return extensions_; }
+
+  private:
+    const utils::Vector<const ast::Node*, 64> dep_ordered_decls_;
+    ast::Extensions extensions_;
 };
 
 }  // namespace tint::sem

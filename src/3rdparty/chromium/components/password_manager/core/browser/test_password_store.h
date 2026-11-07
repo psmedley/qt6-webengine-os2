@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,7 +48,6 @@ class TestPasswordStore : public PasswordStore {
   bool IsEmpty() const;
 
   // TODO(crbug.com/1294735): Clean up non-essential methods.
-  int fill_matching_logins_calls() const;
   const TestPasswordStore::PasswordMap& stored_passwords() const;
   ::password_manager::IsAccountStore IsAccountStore() const;
 

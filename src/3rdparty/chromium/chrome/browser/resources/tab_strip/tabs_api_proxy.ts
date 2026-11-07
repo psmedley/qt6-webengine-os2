@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,11 +36,6 @@ export interface TabsApiProxy {
   ungroupTab(tabId: number): void;
 
   isVisible(): boolean;
-
-  /**
-   * @return Object with CSS variables as keys and rgba strings as values
-   */
-  getColors(): Promise<{colors: {[key: string]: string}}>;
 
   /**
    * @return Object with CSS variables as keys and pixel lengths as values
@@ -130,10 +125,6 @@ export class TabsApiProxyImpl implements TabsApiProxy {
     // TODO(crbug.com/1234500): Move this call out of tabs_api_proxy
     // since it's not related to tabs API.
     return document.visibilityState === 'visible';
-  }
-
-  getColors() {
-    return this.handler.getThemeColors();
   }
 
   getLayout() {

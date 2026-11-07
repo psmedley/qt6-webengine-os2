@@ -38,8 +38,8 @@ class Document;
 
 // This class represents an <image> that loads a single image resource (the
 // url(...) function.)
-class StyleFetchedImage final : public StyleImage,
-                                public ImageResourceObserver {
+class CORE_EXPORT StyleFetchedImage final : public StyleImage,
+                                            public ImageResourceObserver {
   USING_PRE_FINALIZER(StyleFetchedImage, Prefinalize);
 
  public:
@@ -82,6 +82,8 @@ class StyleFetchedImage final : public StyleImage,
       RespectImageOrientationEnum default_orientation) const override;
 
   void Trace(Visitor*) const override;
+
+  bool IsOriginClean() const { return origin_clean_; }
 
  private:
   bool IsEqual(const StyleImage&) const override;

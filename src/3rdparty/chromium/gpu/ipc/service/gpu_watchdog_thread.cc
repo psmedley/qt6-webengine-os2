@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,7 @@
 
 namespace gpu {
 
-base::TimeDelta GetGpuWatchdogTimeout() {
+base::TimeDelta GetGpuWatchdogTimeout(bool software_rendering) {
   std::string timeout_str =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kGpuWatchdogTimeoutSeconds);
@@ -50,17 +50,22 @@ base::TimeDelta GetGpuWatchdogTimeout() {
                  << timeout_str;
   }
 
+  base::TimeDelta timeout = kGpuWatchdogTimeout;
 #if BUILDFLAG(IS_WIN)
   if (base::win::GetVersion() >= base::win::Version::WIN10) {
     int num_of_processors = base::SysInfo::NumberOfProcessors();
-    if (num_of_processors > 8)
-      return (kGpuWatchdogTimeout - base::Seconds(10));
-    else if (num_of_processors <= 4)
-      return kGpuWatchdogTimeout + base::Seconds(5);
+    if (num_of_processors > 8) {
+      timeout -= base::Seconds(10);
+    } else if (num_of_processors <= 4) {
+      timeout += base::Seconds(5);
+    }
   }
 #endif
 
-  return kGpuWatchdogTimeout;
+  if (software_rendering) {
+    timeout *= kSoftwareRenderingFactor;
+  }
+  return timeout;
 }
 
 GpuWatchdogThread::GpuWatchdogThread(base::TimeDelta timeout,
@@ -106,9 +111,9 @@ GpuWatchdogThread::GpuWatchdogThread(base::TimeDelta timeout,
   }
 #endif
 
-#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMECAST)
-  tty_file_ = base::OpenFile(
-      base::FilePath(FILE_PATH_LITERAL("/sys/class/tty/tty0/active")), "r");
+#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CASTOS)
+  tty_file_.reset(base::OpenFile(
+      base::FilePath(FILE_PATH_LITERAL("/sys/class/tty/tty0/active")), "r"));
   UpdateActiveTTY();
   host_tty_ = active_tty_;
 #endif
@@ -133,11 +138,6 @@ GpuWatchdogThread::~GpuWatchdogThread() {
   if (watched_thread_handle_)
     CloseHandle(watched_thread_handle_);
 #endif
-
-#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMECAST)
-  if (tty_file_)
-    fclose(tty_file_);
-#endif
 }
 
 // static
@@ -161,9 +161,22 @@ std::unique_ptr<GpuWatchdogThread> GpuWatchdogThread::Create(
 // static
 std::unique_ptr<GpuWatchdogThread> GpuWatchdogThread::Create(
     bool start_backgrounded,
+    bool software_rendering,
     const std::string& thread_name) {
-  return Create(start_backgrounded, GetGpuWatchdogTimeout(), kInitFactor,
-                kRestartFactor, /*test_mode=*/false, thread_name);
+  return Create(start_backgrounded, GetGpuWatchdogTimeout(software_rendering),
+                kInitFactor, kRestartFactor, /*test_mode=*/false, thread_name);
+}
+
+// static
+std::unique_ptr<GpuWatchdogThread> GpuWatchdogThread::Create(
+    bool start_backgrounded,
+    const GpuWatchdogThread* existing_watchdog,
+    const std::string& thread_name) {
+  DCHECK(existing_watchdog);
+  return Create(start_backgrounded, existing_watchdog->watchdog_timeout_,
+                existing_watchdog->watchdog_init_factor_,
+                existing_watchdog->watchdog_restart_factor_,
+                /*test_mode=*/false, thread_name);
 }
 
 // Android Chrome goes to the background. Called from the gpu io thread.
@@ -226,6 +239,22 @@ void GpuWatchdogThread::ResumeWatchdog() {
   task_runner()->PostTask(
       FROM_HERE, base::BindOnce(&GpuWatchdogThread::RestartWatchdogTimeoutTask,
                                 base::Unretained(this), kGeneralGpuFlow));
+}
+// Called from the watched GPU thread.
+void GpuWatchdogThread::EnableReportOnlyMode() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(watched_thread_sequence_checker_);
+
+  task_runner()->PostTask(
+      FROM_HERE, base::BindOnce(&GpuWatchdogThread::SetReportOnlyModeTask,
+                                base::Unretained(this), true));
+}
+// Called from the watched GPU thread.
+void GpuWatchdogThread::DisableReportOnlyMode() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(watched_thread_sequence_checker_);
+
+  task_runner()->PostTask(
+      FROM_HERE, base::BindOnce(&GpuWatchdogThread::SetReportOnlyModeTask,
+                                base::Unretained(this), false));
 }
 
 // Running on the watchdog thread.
@@ -400,6 +429,12 @@ void GpuWatchdogThread::StopWatchdogTimeoutTask(
 }
 
 // On the watchdog thread only.
+void GpuWatchdogThread::SetReportOnlyModeTask(bool enabled) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(watchdog_thread_sequence_checker_);
+  in_report_only_mode_ = enabled;
+}
+
+// On the watchdog thread only.
 void GpuWatchdogThread::UpdateInitializationFlag() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(watchdog_thread_sequence_checker_);
   in_gpu_initialization_ = false;
@@ -468,7 +503,7 @@ void GpuWatchdogThread::OnWatchdogTimeout() {
   if (foregrounded_event_)
     num_of_timeout_after_foregrounded_++;
 
-#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMECAST)
+#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CASTOS)
   UpdateActiveTTY();
 #endif
 
@@ -489,9 +524,10 @@ void GpuWatchdogThread::OnWatchdogTimeout() {
     return;
   }
 
-  // If the watched thread makes a progress after crash dump, the GPU process
-  // will not be killed and every thing continues after this function.
-  // Otherwise, this is the end of the GPU process.
+  // If the watched thread makes a progress after crash dump, or report only
+  // mode is enabled, the GPU process will not be killed and every thing
+  // continues after this function. Otherwise, this is the end of the GPU
+  // process.
   DeliberatelyTerminateToRecoverFromHang();
 }
 
@@ -591,8 +627,9 @@ base::ThreadTicks GpuWatchdogThread::GetWatchedThreadTime() {
 
     // Need to bit_cast to fix alignment, then divide by 10 to convert
     // 100-nanoseconds to microseconds.
-    int64_t user_time_us = bit_cast<int64_t, FILETIME>(user_time) / 10;
-    int64_t kernel_time_us = bit_cast<int64_t, FILETIME>(kernel_time) / 10;
+    int64_t user_time_us = base::bit_cast<int64_t, FILETIME>(user_time) / 10;
+    int64_t kernel_time_us =
+        base::bit_cast<int64_t, FILETIME>(kernel_time) / 10;
 
     return base::ThreadTicks() +
            base::Microseconds(user_time_us + kernel_time_us);
@@ -606,7 +643,11 @@ void GpuWatchdogThread::DeliberatelyTerminateToRecoverFromHang() {
   // If this is for gpu testing, do not terminate the gpu process.
   // Just signal and quit.
   if (is_test_mode_) {
-    test_result_timeout_and_gpu_hang_.Set();
+    if (in_report_only_mode_) {
+      test_result_timeout_and_gpu_hang_without_kill_.Set();
+    } else {
+      test_result_timeout_and_gpu_hang_.Set();
+    }
     return;
   }
 
@@ -660,6 +701,17 @@ void GpuWatchdogThread::DeliberatelyTerminateToRecoverFromHang() {
   auto last_arm_disarm_counter = ReadArmDisarmCounter();
   base::debug::Alias(&last_arm_disarm_counter);
 
+  // Record whether we are in report only mode in the crash
+  static crash_reporter::CrashKeyString<16> report_only_crash_key(
+      "gpu_hang_report_only");
+  report_only_crash_key.Set(in_report_only_mode_ ? "enabled" : "disabled");
+
+  // Short term investigation into report only mode, bug tracking report only
+  // mode can be found at crbug.com/1356196. The Catan team has not seen the
+  // expected rampup in crashes where report only mode is enabled.
+  // TODO(crbug.com/1356196): remove this when investigation is over.
+  UMA_HISTOGRAM_BOOLEAN("GPU.ReportOnlyModeStatusAtHang", in_report_only_mode_);
+
   // Create a crash dump first
   base::debug::DumpWithoutCrashing();
 
@@ -672,7 +724,7 @@ void GpuWatchdogThread::DeliberatelyTerminateToRecoverFromHang() {
   // Final check after the crash dump. If the watched thread makes a progress
   // (disarmed) during generating crash dump, no need to crash the GPU process.
   bool gpu_hang = IsArmed();
-  if (gpu_hang) {
+  if (gpu_hang && !in_report_only_mode_) {
     // Still armed without any progress. The GPU process is now killed.
     GpuWatchdogThreadEventHistogram(GpuWatchdogThreadEvent::kGpuWatchdogKill);
 #if BUILDFLAG(IS_WIN)
@@ -792,14 +844,14 @@ bool GpuWatchdogThread::WithinOneMinFromForegrounded() {
   return foregrounded_event_ && num_of_timeout_after_foregrounded_ <= count;
 }
 
-#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMECAST)
+#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CASTOS)
 void GpuWatchdogThread::UpdateActiveTTY() {
   last_active_tty_ = active_tty_;
 
   active_tty_ = -1;
   char tty_string[8] = {0};
-  if (tty_file_ && !fseek(tty_file_, 0, SEEK_SET) &&
-      fread(tty_string, 1, 7, tty_file_)) {
+  if (tty_file_ && !fseek(tty_file_.get(), 0, SEEK_SET) &&
+      fread(tty_string, 1, 7, tty_file_.get())) {
     int tty_number;
     if (sscanf(tty_string, "tty%d\n", &tty_number) == 1) {
       active_tty_ = tty_number;
@@ -809,7 +861,7 @@ void GpuWatchdogThread::UpdateActiveTTY() {
 #endif
 
 bool GpuWatchdogThread::ContinueOnNonHostX11ServerTty() {
-#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMECAST)
+#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CASTOS)
   if (host_tty_ == -1 || active_tty_ == -1)
     return false;
 
@@ -830,6 +882,13 @@ bool GpuWatchdogThread::ContinueOnNonHostX11ServerTty() {
 bool GpuWatchdogThread::IsGpuHangDetectedForTesting() {
   DCHECK(is_test_mode_);
   return test_result_timeout_and_gpu_hang_.IsSet();
+}
+
+// For gpu testing only. Return whether a GPU hang was detected or not while in
+// report only mode.
+bool GpuWatchdogThread::IsGpuHangDetectedWithoutKillForTesting() {
+  DCHECK(is_test_mode_);
+  return test_result_timeout_and_gpu_hang_without_kill_.IsSet();
 }
 
 }  // namespace gpu

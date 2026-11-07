@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -109,7 +109,6 @@ template("generate_installer") {
       packed_files_rc_file,
     ]
 
-    configs -= [ "//build/config/compiler:cet_shadow_stack" ]
     configs += [ "//build/config/win:windowed" ]
 
     libs = [ "setupapi.lib" ]
@@ -119,6 +118,7 @@ template("generate_installer") {
       ":lib",
       ":version",
       "//build/win:default_exe_manifest",
+      "//chrome/updater:base",
     ]
   }
 }

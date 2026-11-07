@@ -23,23 +23,21 @@ namespace tint::ast {
 
 /// Base statement class
 class Statement : public Castable<Statement, Node> {
- public:
-  ~Statement() override;
+  public:
+    ~Statement() override;
 
-  /// @returns the human readable name for the statement type.
-  const char* Name() const;
+    /// @returns the human readable name for the statement type.
+    const char* Name() const;
 
- protected:
-  /// Constructor
-  /// @param pid the identifier of the program that owns this node
-  /// @param src the source of the expression
-  Statement(ProgramID pid, const Source& src);
-  /// Move constructor
-  Statement(Statement&&);
+  protected:
+    /// Constructor
+    /// @param pid the identifier of the program that owns this node
+    /// @param nid the unique node identifier
+    /// @param src the source of the expression
+    Statement(ProgramID pid, NodeID nid, const Source& src);
+    /// Move constructor
+    Statement(Statement&&);
 };
-
-/// A list of statements
-using StatementList = std::vector<const Statement*>;
 
 }  // namespace tint::ast
 

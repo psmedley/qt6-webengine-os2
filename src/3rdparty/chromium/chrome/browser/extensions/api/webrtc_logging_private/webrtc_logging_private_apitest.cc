@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -401,7 +401,7 @@ class WebrtcLoggingPrivateApiTest : public extensions::ExtensionApiTest {
     auto* manager = WebRtcEventLogManager::GetInstance();
 
     content::RenderFrameHost* render_frame_host =
-        web_contents()->GetMainFrame();
+        web_contents()->GetPrimaryMainFrame();
     const content::GlobalRenderFrameHostId frame_id =
         render_frame_host->GetGlobalId();
     const base::ProcessId pid =
@@ -687,8 +687,8 @@ class WebrtcLoggingPrivateApiStartEventLoggingTestBase
   }
 
   void SetUpFeatures() {
-    std::vector<base::Feature> enabled;
-    std::vector<base::Feature> disabled;
+    std::vector<base::test::FeatureRef> enabled;
+    std::vector<base::test::FeatureRef> disabled;
 
     if (WebRtcEventLogCollectionFeature()) {
       enabled.push_back(features::kWebRtcRemoteEventLog);

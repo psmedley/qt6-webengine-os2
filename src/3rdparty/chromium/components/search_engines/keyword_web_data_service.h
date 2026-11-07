@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,8 +32,10 @@ struct WDKeywordsResult {
   // Identifies the ID of the TemplateURL that is the default search. A value of
   // 0 indicates there is no default search provider.
   int64_t default_search_provider_id = 0;
-  // Version of the built-in keywords. A value of 0 indicates a first run.
+  // Version of the built-in keywords and starter pack engines. A value of 0
+  // indicates a first run.
   int builtin_keyword_version = 0;
+  int starter_pack_version = 0;
 };
 
 class WebDataServiceConsumer;

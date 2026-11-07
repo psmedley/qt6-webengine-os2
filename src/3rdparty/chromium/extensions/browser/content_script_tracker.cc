@@ -1,10 +1,9 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/browser/content_script_tracker.h"
 
-#include <algorithm>
 #include <map>
 
 #include "base/containers/contains.h"
@@ -105,6 +104,8 @@ class RenderProcessHostUserData : public base::SupportsUserData::Data {
   void AddFrame(content::RenderFrameHost* frame) { frames_.insert(frame); }
   void RemoveFrame(content::RenderFrameHost* frame) { frames_.erase(frame); }
   const std::set<content::RenderFrameHost*>& frames() const { return frames_; }
+
+  const ExtensionIdSet& content_scripts() const { return content_scripts_; }
 
  private:
   explicit RenderProcessHostUserData(content::RenderProcessHost& process)
@@ -322,8 +323,7 @@ bool DoContentScriptsMatch(const Extension& extension,
               ExtensionIdForTracing(extension.id()));
   content::RenderProcessHost& process = *frame->GetProcess();
 
-  auto* guest = guest_view::GuestViewBase::FromWebContents(
-      content::WebContents::FromRenderFrameHost(frame));
+  auto* guest = guest_view::GuestViewBase::FromRenderFrameHost(frame);
   if (guest) {
     // Return true if `extension` is an owner of `guest` and it registered
     // content scripts using the `webview.addContentScripts` API.
@@ -332,8 +332,10 @@ bool DoContentScriptsMatch(const Extension& extension,
         owner_site_url.host_piece() == extension.id()) {
       WebViewContentScriptManager* script_manager =
           WebViewContentScriptManager::Get(frame->GetBrowserContext());
-      int embedder_process_id =
-          guest->owner_web_contents()->GetMainFrame()->GetProcess()->GetID();
+      int embedder_process_id = guest->owner_web_contents()
+                                    ->GetPrimaryMainFrame()
+                                    ->GetProcess()
+                                    ->GetID();
       std::set<std::string> script_ids = script_manager->GetContentScriptIDSet(
           embedder_process_id, guest->view_instance_id());
 
@@ -443,7 +445,33 @@ const Extension* FindExtensionByHostId(content::BrowserContext* browser_context,
   return extension;
 }
 
+void StoreExtensionsInjectingContentScripts(
+    const std::vector<const Extension*>& extensions_injecting_content_scripts,
+    content::RenderProcessHost& process) {
+  // Store `extensions_injecting_content_scripts` in `process_data`.
+  // ContentScriptTracker never removes entries from this set - once a renderer
+  // process gains an ability to talk on behalf of a content script, it retains
+  // this ability forever.  Note that the `process_data` will be destroyed
+  // together with the RenderProcessHost (see also a comment inside
+  // RenderProcessHostUserData::GetOrCreate).
+  auto& process_data = RenderProcessHostUserData::GetOrCreate(process);
+  for (const Extension* extension : extensions_injecting_content_scripts)
+    process_data.AddContentScript(extension->id());
+}
+
 }  // namespace
+
+// static
+ExtensionIdSet ContentScriptTracker::GetExtensionsThatRanScriptsInProcess(
+    const content::RenderProcessHost& process) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  const auto* process_data = RenderProcessHostUserData::Get(process);
+  if (!process_data)
+    return {};
+
+  return process_data->content_scripts();
+}
 
 // static
 bool ContentScriptTracker::DidProcessRunContentScriptFromExtension(
@@ -467,27 +495,61 @@ void ContentScriptTracker::ReadyToCommitNavigation(
     content::NavigationHandle* navigation) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  content::RenderProcessHost* process =
-      navigation->GetRenderFrameHost()->GetProcess();
+  content::RenderProcessHost& process =
+      *navigation->GetRenderFrameHost()->GetProcess();
   TRACE_EVENT("extensions", "ContentScriptTracker::ReadyToCommitNavigation",
-              ChromeTrackEvent::kRenderProcessHost, *process);
+              ChromeTrackEvent::kRenderProcessHost, process);
 
-  // Store `extensions_injecting_content_scripts` in
-  // `process_data`.  ContentScriptTracker never removes entries
-  // from this set - once a renderer process gains an ability to talk on behalf
-  // of a content script, it retains this ability forever.  Note that the
-  // `process_data`
-  // will be destroyed together with the RenderProcessHost (see also a comment
-  // inside RenderProcessHostUserData::GetOrCreate).
+  // Need to call StoreExtensionsInjectingContentScripts at
+  // ReadyToCommitNavigation time to deal with a (hypothetical, not confirmed by
+  // tests) race condition where Browser process sends Commit IPC and then
+  // immediately disables the extension.  In this scenario, the renderer may run
+  // some content scripts, even though at DidCommit time the Browser will see
+  // that the extension has been disabled.
   std::vector<const Extension*> extensions_injecting_content_scripts =
       GetExtensionsInjectingContentScripts(navigation);
-  auto& process_data = RenderProcessHostUserData::GetOrCreate(*process);
-  for (const Extension* extension : extensions_injecting_content_scripts)
-    process_data.AddContentScript(extension->id());
+  StoreExtensionsInjectingContentScripts(extensions_injecting_content_scripts,
+                                         process);
 
+  // Notify URLLoaderFactoryManager - this needs to happen at
+  // ReadyToCommitNavigation time (i.e. before constructing a URLLoaderFactory
+  // that will be sent to the Renderer in a Commit IPC).
   URLLoaderFactoryManager::WillInjectContentScriptsWhenNavigationCommits(
       base::PassKey<ContentScriptTracker>(), navigation,
       extensions_injecting_content_scripts);
+}
+
+// static
+void ContentScriptTracker::DidFinishNavigation(
+    base::PassKey<ExtensionWebContentsObserver> pass_key,
+    content::NavigationHandle* navigation) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  // Only consider cross-document navigations that actually commit.  (Documents
+  // associated with same-document navigations should have already been
+  // processed by an earlier DidFinishNavigation.  Navigations that don't
+  // commit/load won't inject content scripts.  Content script injections are
+  // primarily driven by URL matching and therefore failed navigations may still
+  // end up injecting content scripts into the error page. Pre-rendered pages
+  // already ran content scripts at the initial navigation and don't need to
+  // run them again on activation.)
+  if (!navigation->HasCommitted() || navigation->IsSameDocument() ||
+      navigation->IsPrerenderedPageActivation()) {
+    return;
+  }
+
+  content::RenderProcessHost& process =
+      *navigation->GetRenderFrameHost()->GetProcess();
+  TRACE_EVENT("extensions", "ContentScriptTracker::DidFinishNavigation",
+              ChromeTrackEvent::kRenderProcessHost, process);
+
+  // Calling StoreExtensionsInjectingContentScripts in response to DidCommit IPC
+  // is required for correct handling of the race condition from
+  // https://crbug.com/1312125.
+  std::vector<const Extension*> extensions_injecting_content_scripts =
+      GetExtensionsInjectingContentScripts(navigation);
+  StoreExtensionsInjectingContentScripts(extensions_injecting_content_scripts,
+                                         process);
 }
 
 // static
@@ -568,12 +630,11 @@ void ContentScriptTracker::WillUpdateContentScriptsInRenderer(
   auto& process_data = RenderProcessHostUserData::GetOrCreate(process);
   const std::set<content::RenderFrameHost*>& frames_in_process =
       process_data.frames();
-  bool any_frame_matches_content_scripts =
-      std::any_of(frames_in_process.begin(), frames_in_process.end(),
-                  [extension](content::RenderFrameHost* frame) {
-                    return DoContentScriptsMatch(*extension, frame,
-                                                 frame->GetLastCommittedURL());
-                  });
+  bool any_frame_matches_content_scripts = base::ranges::any_of(
+      frames_in_process, [extension](content::RenderFrameHost* frame) {
+        return DoContentScriptsMatch(*extension, frame,
+                                     frame->GetLastCommittedURL());
+      });
   if (any_frame_matches_content_scripts) {
     process_data.AddContentScript(extension->id());
   } else {

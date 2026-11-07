@@ -1,12 +1,21 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 use rust_gtest_interop::prelude::*;
+use std::pin::Pin;
 
 #[gtest(Test, InTopModule)]
 fn test() {
     expect_true!(true);
+}
+
+#[gtest(Test, WithCustomMessage)]
+fn test() {
+    expect_true!(true, "foo");
+    expect_true!(true, "foo {}", 1);
+    expect_eq!(5, 5, "math stopped working");
+    expect_eq!(5 + 5, 10, "uh {}", "oh");
 }
 
 mod module1 {
@@ -62,7 +71,7 @@ fn test() -> std::result::Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// This test fails due to returning Err, and displays the message "uhoh."
+// This test intentionally fails due to returning Err, and displays the message "uhoh."
 #[gtest(Test, DISABLED_WithError)]
 fn test() -> std::result::Result<(), Box<dyn std::error::Error>> {
     expect_true!(true);
@@ -85,13 +94,47 @@ fn test() -> std::result::Result<(), Box<dyn std::error::Error>> {
 //     unsafe { COUNTER += 1 };
 // }
 
-extern "C" {
-    fn num_subclass_created() -> usize; // In test/test_factory.h.
+#[gtest(Test, WithTestSubclassAsTestSuite)]
+#[gtest_suite(rust_gtest_interop_test_support::TestSubclass)]
+fn test(mut suite: Pin<&mut rust_gtest_interop_test_support::TestSubclass>) {
+    expect_eq!(0, suite.as_ref().num_calls());
+    expect_true!(suite.as_mut().get_true());
+    expect_eq!(1, suite.as_ref().num_calls());
+    expect_false!(suite.as_mut().get_false());
+    expect_eq!(2, suite.as_ref().num_calls());
 }
 
-#[gtest(Test, WithTestSubclassAsTestSuite)]
-#[gtest_suite(test_subclass_factory)]
+#[gtest(Test, WithCustomTemplateTestSuite)]
+#[gtest_suite(rust_gtest_interop_test_support::TestSubclassWithCustomTemplate)]
+fn test(mut suite: Pin<&mut rust_gtest_interop_test_support::TestSubclassWithCustomTemplate>) {
+    expect_eq!(0, suite.as_ref().num_calls());
+    expect_eq!(3, suite.as_mut().get_three());
+    expect_eq!(1, suite.as_ref().num_calls());
+    expect_eq!(4, suite.as_mut().get_four());
+    expect_eq!(2, suite.as_ref().num_calls());
+}
+
+#[gtest(Test, Paths)]
 fn test() {
-    // TODO(danakj): Make the factory accessible to the test body.
-    expect_eq!(1, unsafe { num_subclass_created() });
+    expect_eq!(rust_gtest_interop::__private::make_canonical_file_path("foo/bar.rs"), "foo/bar.rs");
+    expect_eq!(
+        rust_gtest_interop::__private::make_canonical_file_path("../foo/bar.rs"),
+        "foo/bar.rs"
+    );
+    expect_eq!(
+        rust_gtest_interop::__private::make_canonical_file_path("../../foo/bar.rs"),
+        "foo/bar.rs"
+    );
+    expect_eq!(
+        rust_gtest_interop::__private::make_canonical_file_path("a/../foo/bar.rs"),
+        "foo/bar.rs"
+    );
+    expect_eq!(
+        rust_gtest_interop::__private::make_canonical_file_path("a/../../../foo/bar.rs"),
+        "foo/bar.rs"
+    );
+    expect_eq!(
+        rust_gtest_interop::__private::make_canonical_file_path("a/../b/../../foo/bar.rs"),
+        "foo/bar.rs"
+    );
 }

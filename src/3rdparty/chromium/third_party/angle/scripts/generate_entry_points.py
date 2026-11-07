@@ -10,7 +10,7 @@
 
 import sys, os, pprint, json
 import registry_xml
-from registry_xml import apis, script_relative, strip_api_prefix
+from registry_xml import apis, script_relative, strip_api_prefix, api_enums
 
 # Paths
 CL_STUBS_HEADER_PATH = "../src/libGLESv2/cl_stubs_autogen.h"
@@ -35,8 +35,9 @@ NO_EVENT_MARKER_EXCEPTIONS_LIST = sorted([
 # marked as such in the registry.  However, that is not correct for GLES where this entry point
 # comes from GL_EXT_multisampled_render_to_texture which is never promoted to core GLES.
 ALIASING_EXCEPTIONS = [
-    'glRenderbufferStorageMultisampleEXT',
-    'renderbufferStorageMultisampleEXT',
+    'glRenderbufferStorageMultisampleEXT', 'renderbufferStorageMultisampleEXT',
+    'drawArraysInstancedBaseInstanceANGLE', 'drawElementsInstancedBaseVertexBaseInstanceANGLE',
+    'glLogicOpANGLE', 'logicOpANGLE'
 ]
 
 # These are the entry points which potentially are used first by an application
@@ -173,13 +174,13 @@ void GL_APIENTRY GL_{name}({params})
 
     if ({valid_context_check})
     {{{packed_gl_enum_conversions}
-        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        SCOPED_SHARE_CONTEXT_LOCK(context);
         bool isCallValid = (context->skipValidation() || Validate{name}({validate_params}));
         if (isCallValid)
         {{
             context->{name_lower_no_suffix}({internal_params});
         }}
-        ANGLE_CAPTURE({name}, isCallValid, {capture_params});
+        ANGLE_CAPTURE_GL({name}, isCallValid, {capture_params});
     }}
     else
     {{
@@ -197,7 +198,7 @@ TEMPLATE_GLES_ENTRY_POINT_WITH_RETURN = """\
     {return_type} returnValue;
     if ({valid_context_check})
     {{{packed_gl_enum_conversions}
-        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        SCOPED_SHARE_CONTEXT_LOCK(context);
         bool isCallValid = (context->skipValidation() || Validate{name}({validate_params}));
         if (isCallValid)
         {{
@@ -207,7 +208,7 @@ TEMPLATE_GLES_ENTRY_POINT_WITH_RETURN = """\
         {{
             returnValue = GetDefaultReturnValue<angle::EntryPoint::GL{name}, {return_type}>();
     }}
-        ANGLE_CAPTURE({name}, isCallValid, {capture_params}, returnValue);
+        ANGLE_CAPTURE_GL({name}, isCallValid, {capture_params}, returnValue);
     }}
     else
     {{
@@ -431,6 +432,13 @@ TEMPLATE_EGL_ENTRY_POINT_EXPORT = """\
 }}
 """
 
+TEMPLATE_GLX_ENTRY_POINT_EXPORT = """\
+{return_type} GLXENTRY {name}({params})
+{{
+    return GLX_{name}({internal_params});
+}}
+"""
+
 TEMPLATE_GLEXT_FUNCTION_POINTER = """typedef {return_type}(GL_APIENTRYP PFN{name_upper}PROC)({params});"""
 TEMPLATE_GLEXT_FUNCTION_PROTOTYPE = """{apicall} {return_type}GL_APIENTRY {name}({params});"""
 
@@ -517,11 +525,11 @@ TEMPLATE_CAPTURE_HEADER = """\
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// capture_gles_{annotation_lower}_autogen.h:
+// capture_{annotation_lower}_autogen.h:
 //   Capture functions for the OpenGL ES {comment} entry points.
 
-#ifndef LIBANGLE_CAPTURE_GLES_{annotation_upper}_AUTOGEN_H_
-#define LIBANGLE_CAPTURE_GLES_{annotation_upper}_AUTOGEN_H_
+#ifndef LIBANGLE_CAPTURE_{annotation_upper}_AUTOGEN_H_
+#define LIBANGLE_CAPTURE_{annotation_upper}_AUTOGEN_H_
 
 #include "common/PackedEnums.h"
 #include "libANGLE/capture/FrameCapture.h"
@@ -531,7 +539,7 @@ namespace gl
 {prototypes}
 }}  // namespace gl
 
-#endif  // LIBANGLE_CAPTURE_GLES_{annotation_upper}_AUTOGEN_H_
+#endif  // LIBANGLE_CAPTURE_{annotation_upper}_AUTOGEN_H_
 """
 
 TEMPLATE_CAPTURE_SOURCE = """\
@@ -542,10 +550,10 @@ TEMPLATE_CAPTURE_SOURCE = """\
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// capture_gles_{annotation_with_dash}_autogen.cpp:
+// capture_{annotation_with_dash}_autogen.cpp:
 //   Capture functions for the OpenGL ES {comment} entry points.
 
-#include "libANGLE/capture/capture_gles_{annotation_with_dash}_autogen.h"
+#include "libANGLE/capture/capture_{annotation_with_dash}_autogen.h"
 
 #include "libANGLE/Context.h"
 #include "libANGLE/capture/FrameCapture.h"
@@ -588,7 +596,7 @@ CallCapture Capture{short_name}({params_with_type})
 
 TEMPLATE_PARAMETER_CAPTURE_VALUE = """paramBuffer.addValueParam("{name}", ParamType::T{type}, {name});"""
 
-TEMPLATE_PARAMETER_CAPTURE_GL_ENUM = """paramBuffer.addEnumParam("{name}", GLenumGroup::{group}, ParamType::T{type}, {name});"""
+TEMPLATE_PARAMETER_CAPTURE_GL_ENUM = """paramBuffer.addEnumParam("{name}", {api_enum}::{group}, ParamType::T{type}, {name});"""
 
 TEMPLATE_PARAMETER_CAPTURE_POINTER = """
     if (isCallValid)
@@ -844,11 +852,12 @@ DESKTOP_GL_HEADER_INCLUDES = """\
 """
 
 TEMPLATE_DESKTOP_GL_SOURCE_INCLUDES = """\
-#include "libGL/entry_points_{}_autogen.h"
+#include "libGLESv2/entry_points_{0}_autogen.h"
 
 #include "libANGLE/Context.h"
 #include "libANGLE/Context.inl.h"
 #include "libANGLE/capture/gl_enum_utils.h"
+#include "libANGLE/capture/capture_gl_{1}_autogen.h"
 #include "libANGLE/validationEGL.h"
 #include "libANGLE/validationES.h"
 #include "libANGLE/validationES1.h"
@@ -857,7 +866,7 @@ TEMPLATE_DESKTOP_GL_SOURCE_INCLUDES = """\
 #include "libANGLE/validationES31.h"
 #include "libANGLE/validationES32.h"
 #include "libANGLE/validationESEXT.h"
-#include "libANGLE/validationGL{}_autogen.h"
+#include "libANGLE/validationGL{1}_autogen.h"
 #include "libANGLE/entry_points_utils.h"
 #include "libGLESv2/global_state.h"
 
@@ -912,16 +921,12 @@ LIBGLESV2_EXPORT_INCLUDES = """
 #include "libGLESv2/entry_points_gles_3_2_autogen.h"
 #include "libGLESv2/entry_points_gles_ext_autogen.h"
 
-#include "common/event_tracer.h"
-"""
-
-LIBGL_EXPORT_INCLUDES = """
-#include "angle_gl.h"
-
-#include "libGL/entry_points_gl_1_autogen.h"
-#include "libGL/entry_points_gl_2_autogen.h"
-#include "libGL/entry_points_gl_3_autogen.h"
-#include "libGL/entry_points_gl_4_autogen.h"
+#if defined(ANGLE_ENABLE_GL_DESKTOP_FRONTEND)
+#   include "libGLESv2/entry_points_gl_1_autogen.h"
+#   include "libGLESv2/entry_points_gl_2_autogen.h"
+#   include "libGLESv2/entry_points_gl_3_autogen.h"
+#   include "libGLESv2/entry_points_gl_4_autogen.h"
+#endif
 
 #include "common/event_tracer.h"
 """
@@ -945,9 +950,9 @@ namespace
 bool gLoaded = false;
 void *gEntryPointsLib = nullptr;
 
-angle::GenericProc KHRONOS_APIENTRY GlobalLoad(const char *symbol)
+GenericProc KHRONOS_APIENTRY GlobalLoad(const char *symbol)
 {
-    return reinterpret_cast<angle::GenericProc>(angle::GetLibrarySymbol(gEntryPointsLib, symbol));
+    return reinterpret_cast<GenericProc>(angle::GetLibrarySymbol(gEntryPointsLib, symbol));
 }
 
 void EnsureEGLLoaded()
@@ -961,7 +966,7 @@ void EnsureEGLLoaded()
     gEntryPointsLib = OpenSystemLibraryAndGetError(ANGLE_GLESV2_LIBRARY_NAME, angle::SearchType::ModuleDir, &errorOut);
     if (gEntryPointsLib)
     {
-        angle::LoadEGL_EGL(GlobalLoad);
+        LoadLibEGL_EGL(GlobalLoad);
         gLoaded = true;
     }
     else
@@ -1383,7 +1388,7 @@ def is_unsigned_long_format(fmt):
     return fmt == UNSIGNED_LONG_LONG_FORMAT or fmt == HEX_LONG_LONG_FORMAT
 
 
-def param_print_argument(command_node, param):
+def param_print_argument(api, command_node, param):
     name_only = just_the_name(param)
     type_only = just_the_type(param)
 
@@ -1403,11 +1408,11 @@ def param_print_argument(command_node, param):
 
     if type_only == "GLbitfield":
         group_name = find_gl_enum_group_in_command(command_node, name_only)
-        return "GLbitfieldToString(GLenumGroup::%s, %s).c_str()" % (group_name, name_only)
+        return "GLbitfieldToString(%s::%s, %s).c_str()" % (api_enums[api], group_name, name_only)
 
     if type_only == "GLenum":
         group_name = find_gl_enum_group_in_command(command_node, name_only)
-        return "GLenumToString(GLenumGroup::%s, %s)" % (group_name, name_only)
+        return "GLenumToString(%s::%s, %s)" % (api_enums[api], group_name, name_only)
 
     return name_only
 
@@ -1547,7 +1552,7 @@ def format_entry_point_def(api, command_node, cmd_name, proto, params, cmd_packe
                 internal_type + ">(" + name + ");"
             ]
 
-    pass_params = [param_print_argument(command_node, param) for param in params]
+    pass_params = [param_print_argument(api, command_node, param) for param in params]
     format_params = [param_format_string(param) for param in params]
     return_type = proto[:-len(cmd_name)].strip()
     initialization = "InitBackEnds(%s);\n" % INIT_DICT[cmd_name] if cmd_name in INIT_DICT else ""
@@ -1667,7 +1672,10 @@ def format_capture_method(api, command, cmd_name, proto, params, all_param_types
         elif capture_param_type in ('GLenum', 'GLbitfield'):
             gl_enum_group = find_gl_enum_group_in_command(command, param_name)
             capture = TEMPLATE_PARAMETER_CAPTURE_GL_ENUM.format(
-                name=param_name, type=capture_param_type, group=gl_enum_group)
+                name=param_name,
+                type=capture_param_type,
+                api_enum=api_enums[api],
+                group=gl_enum_group)
         else:
             capture = TEMPLATE_PARAMETER_CAPTURE_VALUE.format(
                 name=param_name, type=capture_param_type)
@@ -1896,6 +1904,21 @@ class EGLEntryPoints(ANGLEEntryPoints):
         return cls._packed_enums
 
 
+class GLXEntryPoints(ANGLEEntryPoints):
+
+    all_param_types = set()
+
+    def __init__(self, xml, commands):
+        super().__init__(
+            apis.GLX,
+            xml,
+            commands,
+            GLXEntryPoints.all_param_types,
+            GLXEntryPoints.get_packed_enums(),
+            export_template=TEMPLATE_GLX_ENTRY_POINT_EXPORT,
+            packed_param_types=GLX_PACKED_TYPES)
+
+
 class CLEntryPoints(ANGLEEntryPoints):
 
     all_param_types = set()
@@ -1997,16 +2020,17 @@ def write_file(annotation, comment, template, entry_points, suffix, includes, li
         out.close()
 
 
-def write_export_files(entry_points, includes, source, lib_name, lib_description):
+def write_export_files(entry_points, includes, source, lib_name, lib_description, lib_dir=None):
     content = TEMPLATE_LIB_ENTRY_POINT_SOURCE.format(
         script_name=os.path.basename(sys.argv[0]),
         data_source_name=source,
         lib_name=lib_name,
         lib_description=lib_description,
         includes=includes,
-        entry_points=entry_points)
+        entry_points=entry_points,
+    )
 
-    path = path_to(lib_name, "{}_autogen.cpp".format(lib_name))
+    path = path_to(lib_name if not lib_dir else lib_dir, "{}_autogen.cpp".format(lib_name))
 
     with open(path, "w") as out:
         out.write(content)
@@ -2089,7 +2113,7 @@ def write_capture_header(annotation, comment, protos, capture_pointer_funcs):
         prototypes="\n".join(["\n// Method Captures\n"] + protos + ["\n// Parameter Captures\n"] +
                              capture_pointer_funcs))
 
-    path = path_to(os.path.join("libANGLE", "capture"), "capture_gles_%s_autogen.h" % annotation)
+    path = path_to(os.path.join("libANGLE", "capture"), "capture_%s_autogen.h" % annotation)
 
     with open(path, "w") as out:
         out.write(content)
@@ -2106,7 +2130,7 @@ def write_capture_source(annotation_with_dash, annotation_no_dash, comment, capt
         capture_methods="\n".join(capture_methods))
 
     path = path_to(
-        os.path.join("libANGLE", "capture"), "capture_gles_%s_autogen.cpp" % annotation_with_dash)
+        os.path.join("libANGLE", "capture"), "capture_%s_autogen.cpp" % annotation_with_dash)
 
     with open(path, "w") as out:
         out.write(content)
@@ -2643,6 +2667,14 @@ def main():
             '../src/libANGLE/Context_gles_3_1_autogen.h',
             '../src/libANGLE/Context_gles_3_2_autogen.h',
             '../src/libANGLE/Context_gles_ext_autogen.h',
+            '../src/libANGLE/capture/capture_gl_1_autogen.cpp',
+            '../src/libANGLE/capture/capture_gl_1_autogen.h',
+            '../src/libANGLE/capture/capture_gl_2_autogen.cpp',
+            '../src/libANGLE/capture/capture_gl_2_autogen.h',
+            '../src/libANGLE/capture/capture_gl_3_autogen.cpp',
+            '../src/libANGLE/capture/capture_gl_3_autogen.h',
+            '../src/libANGLE/capture/capture_gl_4_autogen.cpp',
+            '../src/libANGLE/capture/capture_gl_4_autogen.h',
             '../src/libANGLE/capture/capture_gles_1_0_autogen.cpp',
             '../src/libANGLE/capture/capture_gles_1_0_autogen.h',
             '../src/libANGLE/capture/capture_gles_2_0_autogen.cpp',
@@ -2694,16 +2726,14 @@ def main():
             '../src/libGLESv2/libGLESv2_autogen.def',
             '../src/libGLESv2/libGLESv2_no_capture_autogen.def',
             '../src/libGLESv2/libGLESv2_with_capture_autogen.def',
-            '../src/libGL/entry_points_gl_1_autogen.cpp',
-            '../src/libGL/entry_points_gl_1_autogen.h',
-            '../src/libGL/entry_points_gl_2_autogen.cpp',
-            '../src/libGL/entry_points_gl_2_autogen.h',
-            '../src/libGL/entry_points_gl_3_autogen.cpp',
-            '../src/libGL/entry_points_gl_3_autogen.h',
-            '../src/libGL/entry_points_gl_4_autogen.cpp',
-            '../src/libGL/entry_points_gl_4_autogen.h',
-            '../src/libGL/libGL_autogen.cpp',
-            '../src/libGL/libGL_autogen.def',
+            '../src/libGLESv2/entry_points_gl_1_autogen.cpp',
+            '../src/libGLESv2/entry_points_gl_1_autogen.h',
+            '../src/libGLESv2/entry_points_gl_2_autogen.cpp',
+            '../src/libGLESv2/entry_points_gl_2_autogen.h',
+            '../src/libGLESv2/entry_points_gl_3_autogen.cpp',
+            '../src/libGLESv2/entry_points_gl_3_autogen.h',
+            '../src/libGLESv2/entry_points_gl_4_autogen.cpp',
+            '../src/libGLESv2/entry_points_gl_4_autogen.h',
         ]
 
         if sys.argv[1] == 'inputs':
@@ -2731,6 +2761,9 @@ def main():
     # Stores core commands to keep track of duplicates
     all_commands_no_suffix = []
     all_commands_with_suffix = []
+
+    # Collect all GL+GLES validation declarations
+    glesv2_validation_protos = []
 
     # First run through the main GLES entry points.  Since ES2+ is the primary use
     # case, we go through those first and then add ES1-only APIs at the end.
@@ -2791,8 +2824,10 @@ def main():
         write_gl_validation_header(validation_annotation, "ES %s" % comment, eps.validation_protos,
                                    "gl.xml and gl_angle_ext.xml")
 
-        write_capture_header(version, comment, eps.capture_protos, eps.capture_pointer_funcs)
-        write_capture_source(version, validation_annotation, comment, eps.capture_methods)
+        write_capture_header('gles_' + version, comment, eps.capture_protos,
+                             eps.capture_pointer_funcs)
+        write_capture_source('gles_' + version, validation_annotation, comment,
+                             eps.capture_methods)
 
     # After we finish with the main entry points, we process the extensions.
     extension_decls = ["extern \"C\" {"]
@@ -2864,8 +2899,8 @@ def main():
     for major, _ in registry_xml.DESKTOP_GL_VERSIONS:
         desktop_gl_decls['core'][(major, "X")] = []
 
-    libgl_ep_defs = []
-    libgl_ep_exports = []
+    libgles_ep_defs.append('#if defined(ANGLE_ENABLE_GL_DESKTOP_FRONTEND)')
+    libgl_ep_exports = libgles_ep_exports.copy()
 
     glxml = registry_xml.RegistryXML('gl.xml')
 
@@ -2876,6 +2911,9 @@ def main():
         ver_decls = ["extern \"C\" {"]
         ver_defs = ["extern \"C\" {"]
         validation_protos = []
+        capture_protos = []
+        capture_pointer_funcs = []
+        capture_defs = []
 
         for _, minor_version in filter(is_major, registry_xml.DESKTOP_GL_VERSIONS):
             version = "{}_{}".format(major_version, minor_version)
@@ -2888,31 +2926,27 @@ def main():
             glxml.AddCommands(feature_name, version)
 
             all_libgl_commands = glxml.commands[version]
-
-            just_libgl_commands = [
-                cmd for cmd in all_libgl_commands if cmd not in all_commands_no_suffix
-            ]
             just_libgl_commands_suffix = [
                 cmd for cmd in all_libgl_commands if cmd not in all_commands_with_suffix
             ]
 
             # Validation duplicates handled with suffix
-            eps_suffix = GLEntryPoints(apis.GL, glxml, just_libgl_commands_suffix)
-            eps = GLEntryPoints(apis.GL, glxml, all_libgl_commands)
+            eps = GLEntryPoints(apis.GL, glxml, just_libgl_commands_suffix)
 
-            desktop_gl_decls['core'][(major_version,
-                                      "X")] += get_decls(apis.GL, CONTEXT_DECL_FORMAT,
-                                                         glxml.all_commands, just_libgl_commands,
-                                                         all_commands_no_suffix,
-                                                         GLEntryPoints.get_packed_enums())
+            desktop_gl_decls['core'][(major_version, "X")] += get_decls(
+                apis.GL, CONTEXT_DECL_FORMAT, glxml.all_commands, just_libgl_commands_suffix,
+                all_commands_no_suffix, GLEntryPoints.get_packed_enums())
 
             # Write the version as a comment before the first EP.
             cpp_comment = "\n// GL %s" % comment
             def_comment = "\n    ; GL %s" % comment
 
-            libgl_ep_defs += [cpp_comment] + eps.export_defs
+            libgles_ep_defs += [cpp_comment] + eps.export_defs
             libgl_ep_exports += [def_comment] + get_exports(all_libgl_commands)
-            validation_protos += [cpp_comment] + eps_suffix.validation_protos
+            validation_protos += [cpp_comment] + eps.validation_protos
+            capture_protos += [cpp_comment] + eps.capture_protos
+            capture_pointer_funcs += [cpp_comment] + eps.capture_pointer_funcs
+            capture_defs += [cpp_comment] + eps.capture_methods
             ver_decls += [cpp_comment] + eps.decls
             ver_defs += [cpp_comment] + eps.defs
 
@@ -2926,12 +2960,43 @@ def main():
 
         # Entry point files
         write_file(annotation, name, TEMPLATE_ENTRY_POINT_HEADER, "\n".join(ver_decls), "h",
-                   DESKTOP_GL_HEADER_INCLUDES, "libGL", "gl.xml")
+                   DESKTOP_GL_HEADER_INCLUDES, "libGLESv2", "gl.xml")
         write_file(annotation, name, TEMPLATE_ENTRY_POINT_SOURCE, "\n".join(ver_defs), "cpp",
-                   source_includes, "libGL", "gl.xml")
+                   source_includes, "libGLESv2", "gl.xml")
+
+        # Capture files
+        write_capture_header(annotation.lower(), name, capture_protos, capture_pointer_funcs)
+        write_capture_source(annotation.lower(), 'GL' + str(major_version) + '_autogen', name,
+                             capture_defs)
 
         # Validation files
         write_gl_validation_header("GL%s" % major_version, name, validation_protos, "gl.xml")
+
+    libgles_ep_defs.append('#endif // defined(ANGLE_ENABLE_GL_DESKTOP_FRONTEND)')
+
+    # GLX
+    glxxml = registry_xml.RegistryXML('glx.xml')
+    glx_validation_protos = []
+    glx_decls = ["namespace glx\n{"]
+    glx_defs = ["namespace glx\n{"]
+    libglx_ep_defs = []
+    glx_commands = []
+    for major_version, minor_version in registry_xml.GLX_VERSIONS:
+        version = "{}_{}".format(major_version, minor_version)
+        annotation = "GLX_{}".format(version)
+        name_prefix = "GLX_VERSION_"
+
+        comment = version.replace("_", ".")
+        feature_name = "{}{}".format(name_prefix, version)
+
+        glxxml.AddCommands(feature_name, version)
+        glx_version_commands = glxxml.commands[version]
+        glx_commands += glx_version_commands
+
+        if not glx_version_commands:
+            continue
+
+
 
     # OpenCL
     clxml = registry_xml.RegistryXML('cl.xml')
@@ -3100,7 +3165,6 @@ def main():
                        EGL_EXT_STUBS_HEADER_PATH, eglxml.all_commands, egl_ext_commands,
                        EGLEntryPoints.get_packed_enums(), EGL_PACKED_TYPES)
 
-    # WGL
     wglxml = registry_xml.RegistryXML('wgl.xml')
 
     name_prefix = "WGL_VERSION_"
@@ -3110,16 +3174,15 @@ def main():
     wglxml.AddCommands(feature_name, version)
     wgl_commands = wglxml.commands[version]
 
-    wgl_commands = [cmd if cmd[:3] == 'wgl' else 'wgl' + cmd for cmd in wgl_commands]
-
-    # Write the version as a comment before the first EP.
-    libgl_ep_exports.append("\n    ; WGL %s" % comment)
 
     # Other versions of these functions are used
     wgl_commands.remove("wglUseFontBitmaps")
     wgl_commands.remove("wglUseFontOutlines")
 
-    libgl_ep_exports += get_exports(wgl_commands)
+    # Formatting for outputting to def file
+    wgl_commands = [cmd if cmd.startswith('wgl') else 'wgl' + cmd for cmd in wgl_commands]
+    wgl_commands = ['\n    ; WGL 1.0'] + ['    {}'.format(cmd) for cmd in wgl_commands]
+
     extension_decls.append("} // extern \"C\"")
     extension_defs.append("} // extern \"C\"")
 
@@ -3132,8 +3195,8 @@ def main():
 
     write_gl_validation_header("ESEXT", "ES extension", ext_validation_protos,
                                "gl.xml and gl_angle_ext.xml")
-    write_capture_header("ext", "extension", ext_capture_protos, ext_capture_pointer_funcs)
-    write_capture_source("ext", "ESEXT", "extension", ext_capture_methods)
+    write_capture_header("gles_ext", "extension", ext_capture_protos, ext_capture_pointer_funcs)
+    write_capture_source("gles_ext", "ESEXT", "extension", ext_capture_methods)
 
     write_context_api_decls(glesdecls, "gles")
     write_context_api_decls(desktop_gl_decls, "gl")
@@ -3178,8 +3241,6 @@ def main():
 
     write_export_files("\n".join([item for item in libgles_ep_defs]), LIBGLESV2_EXPORT_INCLUDES,
                        "gl.xml and gl_angle_ext.xml", "libGLESv2", "OpenGL ES")
-    write_export_files("\n".join([item for item in libgl_ep_defs]), LIBGL_EXPORT_INCLUDES,
-                       "gl.xml and wgl.xml", "libGL", "Windows GL")
     write_export_files("\n".join([item for item in libegl_ep_defs]),
                        LIBEGL_EXPORT_INCLUDES_AND_PREAMBLE, "egl.xml and egl_angle_ext.xml",
                        "libEGL", "EGL")
@@ -3192,7 +3253,10 @@ def main():
 
     for lib in ["libGLESv2" + suffix for suffix in ["", "_no_capture", "_with_capture"]]:
         write_windows_def_file(everything, lib, lib, "libGLESv2", libgles_ep_exports)
-    write_windows_def_file(everything, "libGL", "openGL32", "libGL", libgl_ep_exports)
+
+    write_windows_def_file(everything, "opengl32_with_wgl", "opengl32", "libGLESv2",
+                           libgl_ep_exports + sorted(wgl_commands))
+    write_windows_def_file(everything, "opengl32", "opengl32", "libGLESv2", libgl_ep_exports)
     write_windows_def_file("egl.xml and egl_angle_ext.xml", "libEGL", "libEGL", "libEGL",
                            libegl_windows_def_exports)
 

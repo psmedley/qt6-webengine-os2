@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,28 +10,15 @@
 namespace media {
 
 BitstreamBuffer::BitstreamBuffer()
-    : BitstreamBuffer(-1, base::subtle::PlatformSharedMemoryRegion(), 0) {}
-
-BitstreamBuffer::BitstreamBuffer(
-    int32_t id,
-    base::subtle::PlatformSharedMemoryRegion region,
-    size_t size,
-    off_t offset,
-    base::TimeDelta presentation_timestamp)
-    : id_(id),
-      region_(std::move(region)),
-      size_(size),
-      offset_(offset),
-      presentation_timestamp_(presentation_timestamp) {}
+    : BitstreamBuffer(-1, base::UnsafeSharedMemoryRegion(), 0) {}
 
 BitstreamBuffer::BitstreamBuffer(int32_t id,
                                  base::UnsafeSharedMemoryRegion region,
                                  size_t size,
-                                 off_t offset,
+                                 uint64_t offset,
                                  base::TimeDelta presentation_timestamp)
     : id_(id),
-      region_(base::UnsafeSharedMemoryRegion::TakeHandleForSerialization(
-          std::move(region))),
+      region_(std::move(region)),
       size_(size),
       offset_(offset),
       presentation_timestamp_(presentation_timestamp) {}

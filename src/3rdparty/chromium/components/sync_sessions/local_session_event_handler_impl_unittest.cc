@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "components/sessions/core/serialized_navigation_entry.h"
 #include "components/sessions/core/serialized_navigation_entry_test_helper.h"
 #include "components/sync/base/time.h"
-#include "components/sync/model/sync_change.h"
 #include "components/sync/protocol/session_specifics.pb.h"
 #include "components/sync/protocol/sync_enums.pb.h"
 #include "components/sync_sessions/mock_sync_sessions_client.h"
@@ -29,12 +28,10 @@ using sessions::SerializedNavigationEntry;
 using sessions::SerializedNavigationEntryTestHelper;
 using testing::_;
 using testing::ByMove;
-using testing::Eq;
 using testing::IsEmpty;
 using testing::NiceMock;
 using testing::Pointee;
 using testing::Return;
-using testing::SizeIs;
 using testing::StrictMock;
 
 const char kFoo1[] = "http://foo1/";
@@ -131,8 +128,8 @@ class LocalSessionEventHandlerImplTest : public testing::Test {
 
   TestSyncedWindowDelegate* AddWindow(
       int window_id,
-      sync_pb::SessionWindow_BrowserType type =
-          sync_pb::SessionWindow_BrowserType_TYPE_TABBED) {
+      sync_pb::SyncEnums_BrowserType type =
+          sync_pb::SyncEnums_BrowserType_TYPE_TABBED) {
     return window_getter_.AddWindow(type,
                                     SessionID::FromSerializedValue(window_id));
   }
@@ -211,10 +208,10 @@ TEST_F(LocalSessionEventHandlerImplTest, GetTabSpecificsFromDelegate) {
 // Verifies SessionTab.browser_type is set correctly.
 TEST_F(LocalSessionEventHandlerImplTest, BrowserTypeInTabSpecifics) {
   // Create two windows with different browser types.
-  AddWindow(kWindowId1, sync_pb::SessionWindow_BrowserType_TYPE_TABBED);
+  AddWindow(kWindowId1, sync_pb::SyncEnums_BrowserType_TYPE_TABBED);
   TestSyncedTabDelegate* tab1 = AddTabWithTime(kWindowId1, kFoo1, kTime1);
   tab1->Navigate(kBar1, kTime2);
-  AddWindow(kWindowId2, sync_pb::SessionWindow_BrowserType_TYPE_CUSTOM_TAB);
+  AddWindow(kWindowId2, sync_pb::SyncEnums_BrowserType_TYPE_CUSTOM_TAB);
   TestSyncedTabDelegate* tab2 = AddTabWithTime(kWindowId2, kFoo1, kTime1);
   tab2->Navigate(kBar1, kTime2);
   InitHandler();
@@ -222,11 +219,11 @@ TEST_F(LocalSessionEventHandlerImplTest, BrowserTypeInTabSpecifics) {
   // Verify the browser types are propagated to the SessionTab.
   const sync_pb::SessionTab session_tab1 =
       handler_->GetTabSpecificsFromDelegateForTest(*tab1);
-  EXPECT_EQ(sync_pb::SessionWindow_BrowserType_TYPE_TABBED,
+  EXPECT_EQ(sync_pb::SyncEnums_BrowserType_TYPE_TABBED,
             session_tab1.browser_type());
   const sync_pb::SessionTab session_tab2 =
       handler_->GetTabSpecificsFromDelegateForTest(*tab2);
-  EXPECT_EQ(sync_pb::SessionWindow_BrowserType_TYPE_CUSTOM_TAB,
+  EXPECT_EQ(sync_pb::SyncEnums_BrowserType_TYPE_CUSTOM_TAB,
             session_tab2.browser_type());
 }
 
@@ -336,7 +333,7 @@ TEST_F(LocalSessionEventHandlerImplTest, AssociateWindowsAndTabsIfEmpty) {
   auto mock_batch = std::make_unique<StrictMock<MockWriteBatch>>();
   EXPECT_CALL(*mock_batch,
               Put(Pointee(MatchesHeader(kSessionTag, /*window_ids=*/IsEmpty(),
-                                        /*tabs_ids=*/IsEmpty()))));
+                                        /*tab_ids=*/IsEmpty()))));
   EXPECT_CALL(*mock_batch, Commit());
   EXPECT_CALL(mock_delegate_, CreateLocalSessionWriteBatch())
       .WillOnce(Return(ByMove(std::move(mock_batch))));
@@ -540,7 +537,7 @@ TEST_F(LocalSessionEventHandlerImplTest, AssociateCustomTab) {
               MatchesSyncedSession(kSessionTag, kInitialSession));
 
   // In the current session, all we have is a custom tab.
-  AddWindow(kWindowId3, sync_pb::SessionWindow_BrowserType_TYPE_CUSTOM_TAB);
+  AddWindow(kWindowId3, sync_pb::SyncEnums_BrowserType_TYPE_CUSTOM_TAB);
   AddTab(kWindowId3, kFoo1, kTabId2);
 
   auto mock_batch = std::make_unique<StrictMock<MockWriteBatch>>();
@@ -682,7 +679,7 @@ TEST_F(LocalSessionEventHandlerImplTest, PropagateNewCustomTab) {
       .WillOnce(Return(ByMove(std::move(tab_create_mock_batch))))
       .WillOnce(Return(ByMove(std::move(navigation_mock_batch))));
 
-  AddWindow(kWindowId1, sync_pb::SessionWindow_BrowserType_TYPE_CUSTOM_TAB);
+  AddWindow(kWindowId1, sync_pb::SyncEnums_BrowserType_TYPE_CUSTOM_TAB);
   AddTab(kWindowId1, kFoo1, kTabId1);
 }
 
@@ -748,10 +745,10 @@ TEST_F(LocalSessionEventHandlerImplTest,
   ASSERT_THAT(session_tracker_.LookupSession(kSessionTag),
               MatchesSyncedSession(kSessionTag, initial_session));
 
-  AddWindow(kWindowId1, sync_pb::SessionWindow_BrowserType_TYPE_CUSTOM_TAB);
+  AddWindow(kWindowId1, sync_pb::SyncEnums_BrowserType_TYPE_CUSTOM_TAB);
   TestSyncedTabDelegate* tab1 = AddTab(kWindowId1, kFoo1, kTabId1);
 
-  AddWindow(kWindowId2, sync_pb::SessionWindow_BrowserType_TYPE_CUSTOM_TAB);
+  AddWindow(kWindowId2, sync_pb::SyncEnums_BrowserType_TYPE_CUSTOM_TAB);
   AddTab(kWindowId2, kBar1, kTabId2);
 
   InitHandler();
@@ -806,7 +803,7 @@ TEST_F(LocalSessionEventHandlerImplTest, ShouldRemoveAllTabsOnEmptyWindow) {
   // been opened without restored tabs.
   // 2. This is the result of closing all tabs (normally on Android where the
   // window isn't closed when all tabs are closed).
-  AddWindow(kWindowId3, sync_pb::SessionWindow_BrowserType_TYPE_TABBED);
+  AddWindow(kWindowId3, sync_pb::SyncEnums_BrowserType_TYPE_TABBED);
 
   auto mock_batch = std::make_unique<StrictMock<MockWriteBatch>>();
   EXPECT_CALL(*mock_batch, Put(Pointee(MatchesHeader(kSessionTag, {}, {}))));

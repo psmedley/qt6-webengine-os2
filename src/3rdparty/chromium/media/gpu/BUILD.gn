@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -56,6 +56,7 @@ component("gpu") {
     "//media/gpu/vaapi/*",
     "//media/mojo/*",
     "//remoting/codec:encoder",
+    "//third_party/blink/renderer/modules:unit_tests",
 
     # TODO(crbug.com/1184041): Remove //remoting/host:common when the usage is removed.
     "//remoting/host:common",
@@ -141,6 +142,8 @@ component("gpu") {
       "android/media_codec_video_decoder.cc",
       "android/media_codec_video_decoder.h",
       "android/ndk_constants.cc",
+      "android/ndk_video_encode_accelerator.cc",
+      "android/ndk_video_encode_accelerator.h",
       "android/pooled_shared_image_video_provider.cc",
       "android/pooled_shared_image_video_provider.h",
       "android/promotion_hint_aggregator.h",
@@ -241,7 +244,7 @@ component("gpu") {
       "windows/supported_profile_helpers.cc",
       "windows/supported_profile_helpers.h",
     ]
-    if (enable_platform_hevc_decoding) {
+    if (enable_hevc_parser_and_hw_decoder) {
       sources += [
         "windows/d3d11_h265_accelerator.cc",
         "windows/d3d11_h265_accelerator.h",
@@ -301,7 +304,7 @@ source_set("common") {
     "vp9_reference_frame_vector.h",
   ]
 
-  if (enable_platform_hevc_decoding) {
+  if (enable_hevc_parser_and_hw_decoder) {
     sources += [
       "h265_decoder.cc",
       "h265_decoder.h",
@@ -342,10 +345,10 @@ source_set("common") {
 
   if (is_win || use_vaapi) {
     sources += [
+      "video_rate_control.cc",
+      "video_rate_control.h",
       "vp9_svc_layers.cc",
       "vp9_svc_layers.h",
-      "vpx_rate_control.cc",
-      "vpx_rate_control.h",
     ]
     configs += [ "//third_party/libvpx:libvpx_config" ]
     deps += [ "//third_party/libvpx:libvpxrc" ]
@@ -488,6 +491,7 @@ source_set("android_video_decode_accelerator_unittests") {
       "android/mock_promotion_hint_aggregator.h",
       "android/mock_shared_image_video_provider.cc",
       "android/mock_shared_image_video_provider.h",
+      "android/ndk_video_encode_accelerator_tests.cc",
       "android/pooled_shared_image_video_provider_unittest.cc",
       "android/promotion_hint_aggregator_impl_unittest.cc",
       "android/surface_chooser_helper_unittest.cc",
@@ -502,6 +506,7 @@ source_set("android_video_decode_accelerator_unittests") {
       "//media:test_support",
       "//testing/gmock",
       "//testing/gtest",
+      "//third_party/libyuv:libyuv",
       "//ui/gl",
       "//ui/gl/init",
     ]
@@ -537,7 +542,7 @@ source_set("unit_tests") {
     "//ui/gl:test_support",
   ]
   sources = [ "h264_decoder_unittest.cc" ]
-  if (enable_platform_hevc_decoding) {
+  if (enable_hevc_parser_and_hw_decoder) {
     sources += [ "h265_decoder_unittest.cc" ]
   }
   if (is_linux || is_chromeos) {
@@ -562,7 +567,7 @@ source_set("unit_tests") {
     sources += [ "vp8_decoder_unittest.cc" ]
   }
 
-  if (use_libgav1_parser) {
+  if (use_libgav1_parser && media_use_ffmpeg) {
     sources += [ "av1_decoder_unittest.cc" ]
     deps += [
       "//build:chromeos_buildflags",
@@ -609,7 +614,6 @@ if (use_v4l2_codec || use_vaapi) {
       "test:test_helpers",
       "test:video_player",
       "test:video_player_test_environment",
-      "test:video_player_thumbnail_renderer",
       "//media:test_support",
       "//testing/gtest",
     ]
@@ -667,7 +671,7 @@ if (use_v4l2_codec || use_vaapi) {
   }
 }
 
-if (enable_platform_hevc_decoding) {
+if (enable_hevc_parser_and_hw_decoder) {
   fuzzer_test("media_h265_decoder_fuzzer") {
     sources = [ "h265_decoder_fuzzertest.cc" ]
     deps = [

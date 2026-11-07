@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,7 @@ namespace {
 class MockDXGIDeviceManager : public DXGIDeviceManager {
  public:
   MockDXGIDeviceManager()
-      : DXGIDeviceManager(nullptr, 0),
+      : DXGIDeviceManager(nullptr, 0, CHROME_LUID{.LowPart = 0, .HighPart = 0}),
         mock_d3d_device_(new MockD3D11Device()) {}
 
   // Associates a new D3D device with the DXGI Device Manager

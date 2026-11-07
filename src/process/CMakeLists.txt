@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 if(NOT DEFINED WEBENGINE_ROOT_SOURCE_DIR)
     get_filename_component(WEBENGINE_ROOT_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../.." REALPATH)
 endif()
@@ -20,7 +23,7 @@ if(WIN32)
     set_property(TARGET ${qtWebEngineProcessName} PROPERTY WIN32_EXECUTABLE TRUE)
     # get libs rsp file, since cmake is not aware of PUBLIC libs for WebEngineCore
     get_target_property(libs_rsp WebEngineCore LIBS_RSP)
-    target_link_options(${qtWebEngineProcessName} PRIVATE "@${libs_rsp}")
+    target_link_options(${qtWebEngineProcessName} PRIVATE "@${libs_rsp}" "/STACK:0x800000")
 endif()
 
 if(MACOS)
@@ -66,6 +69,7 @@ if(isFramework)
     set_target_properties(${qtWebEngineProcessName} PROPERTIES
         MACOSX_BUNDLE TRUE
         INSTALL_RPATH "@loader_path/../../../../../../../"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info_mac.plist.in"
     )
 
     target_sources(${qtWebEngineProcessName} PRIVATE QtWebEngineProcess.entitlements)
@@ -84,7 +88,8 @@ if(isFramework)
         COMPONENT Runtime
     )
     qt_enable_separate_debug_info(${qtWebEngineProcessName}
-         "${INSTALL_LIBDIR}/QtWebEngineCore.framework/Versions/A/Helpers" QT_EXECUTABLE
+        "${INSTALL_LIBDIR}" QT_EXECUTABLE
+        DSYM_OUTPUT_DIR "${CMAKE_BINARY_DIR}/${INSTALL_LIBDIR}"
     )
 else()
     qt_apply_rpaths(TARGET ${qtWebEngineProcessName} INSTALL_PATH "${INSTALL_LIBEXECDIR}" RELATIVE_RPATH)

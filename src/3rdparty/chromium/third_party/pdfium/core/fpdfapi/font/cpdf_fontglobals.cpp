@@ -6,6 +6,8 @@
 
 #include "core/fpdfapi/font/cpdf_fontglobals.h"
 
+#include <utility>
+
 #include "core/fpdfapi/cmaps/CNS1/cmaps_cns1.h"
 #include "core/fpdfapi/cmaps/GB1/cmaps_gb1.h"
 #include "core/fpdfapi/cmaps/Japan1/cmaps_japan1.h"
@@ -74,14 +76,19 @@ RetainPtr<CPDF_Font> CPDF_FontGlobals::Find(
 
 void CPDF_FontGlobals::Set(CPDF_Document* pDoc,
                            CFX_FontMapper::StandardFont index,
-                           const RetainPtr<CPDF_Font>& pFont) {
-  if (!pdfium::Contains(m_StockMap, pDoc))
-    m_StockMap[pDoc] = std::make_unique<CFX_StockFontArray>();
-  m_StockMap[pDoc]->SetFont(index, pFont);
+                           RetainPtr<CPDF_Font> pFont) {
+  UnownedPtr<CPDF_Document> pKey(pDoc);
+  if (!pdfium::Contains(m_StockMap, pKey))
+    m_StockMap[pKey] = std::make_unique<CFX_StockFontArray>();
+  m_StockMap[pKey]->SetFont(index, std::move(pFont));
 }
 
 void CPDF_FontGlobals::Clear(CPDF_Document* pDoc) {
-  m_StockMap.erase(pDoc);
+  // Avoid constructing smart-pointer key as erase() doesn't invoke
+  // transparent lookup in the same way find() does.
+  auto it = m_StockMap.find(pDoc);
+  if (it != m_StockMap.end())
+    m_StockMap.erase(it);
 }
 
 void CPDF_FontGlobals::LoadEmbeddedGB1CMaps() {

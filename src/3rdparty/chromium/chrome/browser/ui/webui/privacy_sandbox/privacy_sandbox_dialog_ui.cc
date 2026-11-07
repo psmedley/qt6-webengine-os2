@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -92,17 +92,17 @@ void PrivacySandboxDialogUI::Initialize(
     base::OnceCallback<void(int)> resize_callback,
     base::OnceClosure show_dialog_callback,
     base::OnceClosure open_settings_callback,
-    PrivacySandboxService::DialogType dialog_type) {
+    PrivacySandboxService::PromptType prompt_type) {
   base::Value::Dict update;
   update.Set("isConsent",
-             dialog_type == PrivacySandboxService::DialogType::kConsent);
+             prompt_type == PrivacySandboxService::PromptType::kConsent);
   content::WebUIDataSource::Update(
       profile, chrome::kChromeUIPrivacySandboxDialogHost, std::move(update));
 
   auto handler = std::make_unique<PrivacySandboxDialogHandler>(
       std::move(close_callback), std::move(resize_callback),
       std::move(show_dialog_callback), std::move(open_settings_callback),
-      dialog_type);
+      prompt_type);
   web_ui()->AddMessageHandler(std::move(handler));
 }
 

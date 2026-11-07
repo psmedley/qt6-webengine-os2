@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -76,32 +76,31 @@ void StartupPagesHandler::OnJavascriptDisallowed() {
 }
 
 void StartupPagesHandler::OnModelChanged() {
-  base::ListValue startup_pages;
-  int page_count = startup_custom_pages_table_model_.RowCount();
+  base::Value::List startup_pages;
+  size_t page_count = startup_custom_pages_table_model_.RowCount();
   std::vector<GURL> urls = startup_custom_pages_table_model_.GetURLs();
-  for (int i = 0; i < page_count; ++i) {
-    std::unique_ptr<base::DictionaryValue> entry(new base::DictionaryValue());
-    entry->SetStringKey("title",
-                        startup_custom_pages_table_model_.GetText(i, 0));
-    entry->SetStringKey("url", urls[i].spec());
-    entry->SetStringKey("tooltip",
-                        startup_custom_pages_table_model_.GetTooltip(i));
-    entry->SetIntKey("modelIndex", i);
+  for (size_t i = 0; i < page_count; ++i) {
+    base::Value::Dict entry;
+    entry.Set("title", startup_custom_pages_table_model_.GetText(i, 0));
+    entry.Set("url", urls[i].spec());
+    entry.Set("tooltip", startup_custom_pages_table_model_.GetTooltip(i));
+    entry.Set("modelIndex", base::checked_cast<int>(i));
     startup_pages.Append(std::move(entry));
   }
 
-  FireWebUIListener("update-startup-pages", startup_pages);
+  FireWebUIListener("update-startup-pages",
+                    base::Value(std::move(startup_pages)));
 }
 
-void StartupPagesHandler::OnItemsChanged(int start, int length) {
+void StartupPagesHandler::OnItemsChanged(size_t start, size_t length) {
   OnModelChanged();
 }
 
-void StartupPagesHandler::OnItemsAdded(int start, int length) {
+void StartupPagesHandler::OnItemsAdded(size_t start, size_t length) {
   OnModelChanged();
 }
 
-void StartupPagesHandler::OnItemsRemoved(int start, int length) {
+void StartupPagesHandler::OnItemsRemoved(size_t start, size_t length) {
   OnModelChanged();
 }
 
@@ -133,7 +132,8 @@ void StartupPagesHandler::HandleEditStartupPage(const base::Value::List& args) {
   const base::Value& callback_id = args[0];
   int index = args[1].GetInt();
 
-  if (index < 0 || index >= startup_custom_pages_table_model_.RowCount()) {
+  if (index < 0 || static_cast<size_t>(index) >=
+                       startup_custom_pages_table_model_.RowCount()) {
     RejectJavascriptCallback(callback_id, base::Value());
     NOTREACHED();
     return;
@@ -167,8 +167,8 @@ void StartupPagesHandler::HandleRemoveStartupPage(
   }
   int selected_index = args[0].GetInt();
 
-  if (selected_index < 0 ||
-      selected_index >= startup_custom_pages_table_model_.RowCount()) {
+  if (selected_index < 0 || static_cast<size_t>(selected_index) >=
+                                startup_custom_pages_table_model_.RowCount()) {
     NOTREACHED();
     return;
   }

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ class AccessibilityHitTestingMacBrowserTest
  public:
   BrowserAccessibilityCocoa* GetWebContentRoot() {
     return GetRootBrowserAccessibilityManager()
-        ->GetRoot()
+        ->GetBrowserAccessibilityRoot()
         ->GetNativeViewAccessible();
   }
 };
@@ -46,7 +46,7 @@ IN_PROC_BROWSER_TEST_P(AccessibilityHitTestingMacBrowserTest,
   GURL url(embedded_test_server()->GetURL(
       "/accessibility/hit_testing/simple_rectangles.html"));
   EXPECT_TRUE(NavigateToURL(shell(), url));
-  waiter.WaitForNotification();
+  ASSERT_TRUE(waiter.WaitForNotification());
 
   WaitForAccessibilityTreeToContainNodeWithName(shell()->web_contents(),
                                                 "rectA");

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,11 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/webui_url_constants.h"
-#include "net/base/escape.h"
 #include "net/base/url_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/webui/web_ui_util.h"
@@ -123,7 +123,7 @@ void FileIconSource::StartDataRequest(
   FetchFileIcon(file_path, scale_factor, icon_size, std::move(callback));
 }
 
-std::string FileIconSource::GetMimeType(const std::string&) {
+std::string FileIconSource::GetMimeType(const GURL&) {
   // Rely on image decoder inferring the correct type.
   return std::string();
 }

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -102,7 +102,8 @@ void VirtualAuthenticator::SetUserPresence(bool is_user_present) {
       is_user_present);
 }
 
-std::unique_ptr<device::FidoDevice> VirtualAuthenticator::ConstructDevice() {
+std::unique_ptr<device::VirtualFidoDevice>
+VirtualAuthenticator::ConstructDevice() {
   switch (protocol_) {
     case device::ProtocolVersion::kU2f:
       return std::make_unique<device::VirtualU2fDevice>(state_);
@@ -146,14 +147,14 @@ void VirtualAuthenticator::GetLargeBlob(const std::vector<uint8_t>& key_handle,
     std::move(callback).Run(absl::nullopt);
     return;
   }
-  absl::optional<std::vector<uint8_t>> blob =
+  absl::optional<device::LargeBlob> blob =
       state_->GetLargeBlob(registration->second);
   if (!blob) {
     std::move(callback).Run(absl::nullopt);
     return;
   }
-  data_decoder_.GzipUncompress(
-      std::move(*blob),
+  data_decoder_.Inflate(
+      std::move(blob->compressed_data), blob->original_size,
       base::BindOnce(&VirtualAuthenticator::OnLargeBlobUncompressed,
                      weak_factory_.GetWeakPtr(), std::move(callback)));
 }
@@ -161,9 +162,9 @@ void VirtualAuthenticator::GetLargeBlob(const std::vector<uint8_t>& key_handle,
 void VirtualAuthenticator::SetLargeBlob(const std::vector<uint8_t>& key_handle,
                                         const std::vector<uint8_t>& blob,
                                         SetLargeBlobCallback callback) {
-  data_decoder_.GzipCompress(
+  data_decoder_.Deflate(
       blob, base::BindOnce(&VirtualAuthenticator::OnLargeBlobCompressed,
-                           weak_factory_.GetWeakPtr(), key_handle,
+                           weak_factory_.GetWeakPtr(), key_handle, blob.size(),
                            std::move(callback)));
 }
 
@@ -214,25 +215,32 @@ void VirtualAuthenticator::SetUserVerified(bool verified,
 
 void VirtualAuthenticator::OnLargeBlobUncompressed(
     GetLargeBlobCallback callback,
-    data_decoder::DataDecoder::ResultOrError<mojo_base::BigBuffer> result) {
-  std::move(callback).Run(
-      device::fido_parsing_utils::MaterializeOrNull(result.value));
+    base::expected<mojo_base::BigBuffer, std::string> result) {
+  absl::optional<mojo_base::BigBuffer> value;
+  if (result.has_value())
+    value = std::move(*result);
+
+  std::move(callback).Run(device::fido_parsing_utils::MaterializeOrNull(value));
 }
 
 void VirtualAuthenticator::OnLargeBlobCompressed(
     base::span<const uint8_t> key_handle,
+    uint64_t original_size,
     SetLargeBlobCallback callback,
-    data_decoder::DataDecoder::ResultOrError<mojo_base::BigBuffer> result) {
+    base::expected<mojo_base::BigBuffer, std::string> result) {
   auto registration = state_->registrations.find(key_handle);
   if (registration == state_->registrations.end()) {
     std::move(callback).Run(false);
     return;
   }
-  if (!result.value) {
+  if (!result.has_value()) {
     std::move(callback).Run(false);
     return;
   }
-  state_->InjectLargeBlob(&registration->second, *result.value);
+  state_->InjectLargeBlob(
+      &registration->second,
+      device::LargeBlob(device::fido_parsing_utils::Materialize(*result),
+                        original_size));
   std::move(callback).Run(true);
 }
 

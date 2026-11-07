@@ -10,11 +10,14 @@ import * as Components from '../../ui/legacy/components/utils/utils.js';
 import * as UI from '../../ui/legacy/legacy.js';
 import * as ThemeSupport from '../../ui/legacy/theme_support/theme_support.js';
 
-import type {NetworkNode} from './NetworkDataGridNode.js';
-import {NetworkRequestNode} from './NetworkDataGridNode.js';
-import type {NetworkLogView} from './NetworkLogView.js';
+import {NetworkRequestNode, type NetworkNode} from './NetworkDataGridNode.js';
+import {type NetworkLogView} from './NetworkLogView.js';
 import {NetworkManageCustomHeadersView} from './NetworkManageCustomHeadersView.js';
-import type {NetworkTimeCalculator, NetworkTransferDurationCalculator, NetworkTransferTimeCalculator} from './NetworkTimeCalculator.js';
+import {
+  type NetworkTimeCalculator,
+  type NetworkTransferDurationCalculator,
+  type NetworkTransferTimeCalculator,
+} from './NetworkTimeCalculator.js';
 import {NetworkWaterfallColumn} from './NetworkWaterfallColumn.js';
 import {RequestInitiatorView} from './RequestInitiatorView.js';
 
@@ -379,7 +382,8 @@ export class NetworkLogViewColumns {
     if (!this.waterfallColumn.isShowing()) {
       return;
     }
-    this.waterfallScrollerContent.style.height = this.dataGridScroller.scrollHeight + 'px';
+    this.waterfallScrollerContent.style.height =
+        this.dataGridScroller.scrollHeight - this.dataGridInternal.headerHeight() + 'px';
     this.updateScrollerWidthIfNeeded();
     this.dataGridScroller.scrollTop = this.waterfallScroller.scrollTop;
   }

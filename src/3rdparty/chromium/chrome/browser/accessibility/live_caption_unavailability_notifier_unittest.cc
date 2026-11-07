@@ -1,9 +1,10 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/accessibility/live_caption_unavailability_notifier.h"
 
+#include "base/memory/raw_ptr.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/test/navigation_simulator.h"
@@ -27,14 +28,12 @@ class LiveCaptionUnavailabilityNotifierTest
   LiveCaptionUnavailabilityNotifierTest& operator=(
       const LiveCaptionUnavailabilityNotifierTest&) = delete;
 
-  bool ShouldDisplayMediaFoundationRendererError() {
-    return notifier_->ShouldDisplayMediaFoundationRendererError();
-  }
+  bool ErrorSilencedForOrigin() { return notifier_->ErrorSilencedForOrigin(); }
 
   void OnMediaFoundationRendererErrorDoNotShowAgainCheckboxClicked(
       bool checked) {
     notifier_->OnMediaFoundationRendererErrorDoNotShowAgainCheckboxClicked(
-        CaptionBubbleErrorType::MEDIA_FOUNDATION_RENDERER_UNSUPPORTED, checked);
+        CaptionBubbleErrorType::kMediaFoundationRendererUnsupported, checked);
   }
 
  protected:
@@ -52,28 +51,28 @@ class LiveCaptionUnavailabilityNotifierTest
     // The LiveCaptionUnavailabilityNotifier is self-owned and is reset upon the
     // destruction of the mojo connection.
     notifier_ =
-        new LiveCaptionUnavailabilityNotifier(main_rfh(), std::move(receiver));
+        new LiveCaptionUnavailabilityNotifier(*main_rfh(), std::move(receiver));
   }
 
  private:
   mojo::Remote<media::mojom::MediaFoundationRendererNotifier> remote_;
-  LiveCaptionUnavailabilityNotifier* notifier_;
+  raw_ptr<LiveCaptionUnavailabilityNotifier> notifier_;
 };
 
 TEST_F(LiveCaptionUnavailabilityNotifierTest, MediaFoundationRendererCreated) {
-  ASSERT_TRUE(ShouldDisplayMediaFoundationRendererError());
+  ASSERT_FALSE(ErrorSilencedForOrigin());
 
   OnMediaFoundationRendererErrorDoNotShowAgainCheckboxClicked(true);
-  ASSERT_FALSE(ShouldDisplayMediaFoundationRendererError());
+  ASSERT_TRUE(ErrorSilencedForOrigin());
 
   NavigateAndCommit(GURL(kExampleSiteSameOrigin));
-  ASSERT_FALSE(ShouldDisplayMediaFoundationRendererError());
+  ASSERT_TRUE(ErrorSilencedForOrigin());
 
   OnMediaFoundationRendererErrorDoNotShowAgainCheckboxClicked(false);
-  ASSERT_TRUE(ShouldDisplayMediaFoundationRendererError());
+  ASSERT_FALSE(ErrorSilencedForOrigin());
 
   NavigateAndCommit(GURL(kExampleSiteDifferentOrigin));
-  ASSERT_TRUE(ShouldDisplayMediaFoundationRendererError());
+  ASSERT_FALSE(ErrorSilencedForOrigin());
 }
 
 }  // namespace captions

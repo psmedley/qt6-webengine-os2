@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/memory/raw_ptr.h"
 #include "ui/ozone/platform/wayland/host/wayland_connection.h"
 #include "ui/ozone/platform/wayland/host/wayland_zcr_cursor_shapes.h"
 
@@ -32,7 +33,7 @@ class WaylandConnectionTestApi {
   }
 
  private:
-  WaylandConnection* const impl_;
+  const raw_ptr<WaylandConnection> impl_;
 };
 
 }  // namespace ui

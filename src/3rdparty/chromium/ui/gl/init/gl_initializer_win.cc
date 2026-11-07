@@ -1,8 +1,7 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/gl/direct_composition_surface_win.h"
 #include "ui/gl/init/gl_initializer.h"
 
 #include <dwmapi.h>
@@ -17,10 +16,12 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/trace_event/trace_event.h"
 #include "base/win/windows_version.h"
+#include "ui/gl/direct_composition_support.h"
 #include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_display.h"
 #include "ui/gl/gl_egl_api_implementation.h"
 #include "ui/gl/gl_gl_api_implementation.h"
-#include "ui/gl/gl_surface_egl.h"
+#include "ui/gl/gl_utils.h"
 #include "ui/gl/gl_surface_wgl.h"
 #include "ui/gl/gl_wgl_api_implementation.h"
 #include "ui/gl/vsync_provider_win.h"
@@ -31,14 +32,6 @@ namespace init {
 namespace {
 
 const wchar_t kD3DCompiler[] = L"D3DCompiler_47.dll";
-
-#if defined(NDEBUG) || !defined(TOOLKIT_QT)
-const wchar_t kGLESv2Library[] = L"libglesv2.dll";
-const wchar_t kEGLLibrary[] = L"libegl.dll";
-#else
-const wchar_t kGLESv2Library[] = L"libglesv2d.dll";
-const wchar_t kEGLLibrary[] = L"libegld.dll";
-#endif
 
 bool LoadD3DXLibrary(const base::FilePath& module_path,
                      const base::FilePath::StringType& name) {
@@ -74,18 +67,18 @@ bool InitializeStaticEGLInternalFromLibrary(GLImplementation implementation) {
   // the former and if there is another version of libglesv2.dll in the dll
   // search path, it will get loaded instead.
   base::NativeLibrary gles_library =
-      base::LoadNativeLibrary(gles_path.Append(kGLESv2Library), nullptr);
+      base::LoadNativeLibrary(gles_path.Append(L"libglesv2.dll"), nullptr);
   if (!gles_library) {
-    DVLOG(1) << kGLESv2Library << "not found";
+    DVLOG(1) << "libglesv2.dll not found";
     return false;
   }
 
   // When using EGL, first try eglGetProcAddress and then Windows
   // GetProcAddress on both the EGL and GLES2 DLLs.
   base::NativeLibrary egl_library =
-      base::LoadNativeLibrary(gles_path.Append(kEGLLibrary), nullptr);
+      base::LoadNativeLibrary(gles_path.Append(L"libegl.dll"), nullptr);
   if (!egl_library) {
-    DVLOG(1) << kEGLLibrary << "not found.";
+    DVLOG(1) << "libegl.dll not found.";
     base::UnloadNativeLibrary(gles_library);
     return false;
   }
@@ -211,9 +204,10 @@ bool InitializeStaticWGLInternal() {
 }  // namespace
 
 #if !defined(TOOLKIT_QT)
-bool InitializeGLOneOffPlatform(uint64_t system_device_id) {
+GLDisplay* InitializeGLOneOffPlatform(uint64_t system_device_id) {
   VSyncProviderWin::InitializeOneOff();
 
+  GLDisplayEGL* display = GetDisplayEGL(system_device_id);
   switch (GetGLImplementation()) {
     case kGLImplementationDesktopGL:
       if (!GLSurfaceWGL::InitializeOneOff()) {
@@ -222,12 +216,11 @@ bool InitializeGLOneOffPlatform(uint64_t system_device_id) {
       }
       break;
     case kGLImplementationEGLANGLE:
-      if (!GLSurfaceEGL::InitializeOneOff(EGLDisplayPlatform(GetDC(nullptr)),
-                                          system_device_id)) {
-        LOG(ERROR) << "GLSurfaceEGL::InitializeOneOff failed.";
-        return false;
+      if (!display->Initialize(EGLDisplayPlatform(GetDC(nullptr)))) {
+        LOG(ERROR) << "GLDisplayEGL::Initialize failed.";
+        return nullptr;
       }
-      DirectCompositionSurfaceWin::InitializeOneOff();
+      InitializeDirectComposition(display);
       break;
     case kGLImplementationMockGL:
     case kGLImplementationStubGL:
@@ -235,7 +228,7 @@ bool InitializeGLOneOffPlatform(uint64_t system_device_id) {
     default:
       NOTREACHED();
   }
-  return true;
+  return display;
 }
 #endif
 
@@ -268,9 +261,10 @@ bool InitializeStaticGLBindings(GLImplementationParts implementation) {
   return false;
 }
 
-void ShutdownGLPlatform() {
-  DirectCompositionSurfaceWin::ShutdownOneOff();
-  GLSurfaceEGL::ShutdownOneOff();
+void ShutdownGLPlatform(GLDisplay* display) {
+  ShutdownDirectComposition();
+  if (display)
+    display->Shutdown();
   ClearBindingsEGL();
   ClearBindingsGL();
   ClearBindingsWGL();

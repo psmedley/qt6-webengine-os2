@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Updates expectations and baselines when updating web-platform-tests.
@@ -9,14 +9,10 @@ Specifically, this class fetches results from try bots for the current CL, then
 """
 
 import argparse
-import contextlib
 import copy
 import logging
-import os
 import re
-import shutil
 import sys
-import tempfile
 from collections import defaultdict, namedtuple
 
 from blinkpy.common.memoized import memoized
@@ -24,12 +20,9 @@ from blinkpy.common.net.git_cl import GitCL
 from blinkpy.common.path_finder import PathFinder
 from blinkpy.common.system.executive import ScriptError
 from blinkpy.common.system.log_utils import configure_logging
-from blinkpy.w3c.wpt_manifest import WPTManifest, BASE_MANIFEST_NAME
 from blinkpy.web_tests.models.test_expectations import (
     ParseError, SystemConfigurationRemover, TestExpectations)
 from blinkpy.web_tests.models.typ_types import ResultType
-from blinkpy.web_tests.port.android import (
-    PRODUCTS, PRODUCTS_TO_EXPECTATION_FILE_PATHS, WPT_SMOKE_TESTS_FILE)
 
 _log = logging.getLogger(__name__)
 
@@ -74,8 +67,8 @@ class WPTExpectationsUpdater(object):
                              for p in self.expectations_files()}
         self._test_expectations = TestExpectations(
             self.port, expectations_dict=expectations_dict)
-        self.testid_prefix = "ninja://:blink_web_tests/"
-        self.test_suite = "blink_web_tests"
+        self.testid_prefix = "ninja://:blink_wpt_tests/"
+        self.test_suite = "blink_wpt_tests"
 
     def expectations_files(self):
         """Returns list of expectations files.
@@ -85,8 +78,7 @@ class WPTExpectationsUpdater(object):
         for tests that were renamed. Also the files may have their expectations
         updated using builder results.
         """
-        return (list(self.port.all_expectations_dict().keys()) +
-                list(PRODUCTS_TO_EXPECTATION_FILE_PATHS.values()))
+        return list(self.port.all_expectations_dict().keys())
 
     def run(self):
         """Does required setup before calling update_expectations().
@@ -96,11 +88,6 @@ class WPTExpectationsUpdater(object):
         log_level = logging.DEBUG if self.options.verbose else logging.INFO
         configure_logging(logging_level=log_level, include_time=True)
 
-        if not (self.options.android_product
-                or self.options.update_android_expectations_only):
-            assert not self.options.include_unexpected_pass, (
-                'Command line argument --include-unexpected-pass is not '
-                'supported in desktop mode.')
         self.patchset = self.options.patchset
 
         if (self.options.clean_up_test_expectations or
@@ -139,17 +126,6 @@ class WPTExpectationsUpdater(object):
             help='Only cleanup expectations deleted or renamed in current CL. '
                  'If flag is not used then a full cleanup of deleted or '
                  'renamed tests will be done in expectations.')
-        # TODO(rmhasan): Move below arguments to the
-        # AndroidWPTExpectationsUpdater add_arguments implementation.
-        # Also look into using sub parsers to separate android and
-        # desktop specific arguments.
-        parser.add_argument(
-            '--update-android-expectations-only', action='store_true',
-            help='Update and clean up only Android test expectations.')
-        parser.add_argument(
-            '--android-product', action='append', default=[],
-            help='Android products whose baselines will be updated.',
-            choices=PRODUCTS)
         parser.add_argument(
             '--include-unexpected-pass',
             action='store_true',
@@ -158,10 +134,10 @@ class WPTExpectationsUpdater(object):
                  'as flaky.')
 
     def update_expectations_for_flag_specific(self, flag_specific):
-        """Downloads new baselines and adds test expectations lines.
+        """Adds test expectations lines for flag specific builders.
 
         Returns:
-            A pair: A set of tests that are rebaselined, and a dictionary
+            A pair: A set of tests that should be rebaselined, and a dictionary
             mapping tests that couldn't be rebaselined to lists of expectation
             lines written to flag specific test expectations.
         """
@@ -173,11 +149,11 @@ class WPTExpectationsUpdater(object):
 
         if flag_specific == "disable-site-isolation-trials":
             builder_names = ["linux-rel"]
-            test_suite = "not_site_per_process_blink_web_tests"
+            test_suite = "not_site_per_process_blink_wpt_tests"
         else:
             builder_names = self.host.builders.all_flag_specific_try_builder_names(
                 flag_specific)
-            test_suite = "blink_web_tests"
+            test_suite = "blink_wpt_tests"
 
         build_to_status = self.git_cl.latest_try_jobs(
             builder_names=builder_names,
@@ -200,23 +176,19 @@ class WPTExpectationsUpdater(object):
 
         generic_expectations = TestExpectations(self.port)
 
-        # do not create baseline for flag-specific builders yet
-        # rebaselined_tests, test_expectations = self.download_text_baselines(
-        #    test_expectations, flag_specific)
-
         # Do not create expectations for tests which should have baseline
-        _, test_expectations = self.get_tests_to_rebaseline(
+        tests_to_rebaseline, test_expectations = self.get_tests_to_rebaseline(
             test_expectations)
         exp_lines_dict = self.write_to_test_expectations(test_expectations,
                                                          flag_specific,
                                                          generic_expectations)
-        return [], exp_lines_dict
+        return tests_to_rebaseline, exp_lines_dict
 
     def update_expectations(self):
-        """Downloads new baselines and adds test expectations lines.
+        """Adds test expectations lines.
 
         Returns:
-            A pair: A set of tests that are rebaselined, and a dictionary
+            A pair: A set of tests that should be rebaselined, and a dictionary
             mapping tests that couldn't be rebaselined to lists of expectation
             lines written to TestExpectations.
         """
@@ -273,10 +245,11 @@ class WPTExpectationsUpdater(object):
         #     }
         # }
 
-        rebaselined_tests, test_expectations = self.download_text_baselines(
+        # Do not create expectations for tests which should have baseline
+        tests_to_rebaseline, test_expectations = self.get_tests_to_rebaseline(
             test_expectations)
         exp_lines_dict = self.write_to_test_expectations(test_expectations)
-        return rebaselined_tests, exp_lines_dict
+        return tests_to_rebaseline, exp_lines_dict
 
     def add_results_for_configs_without_results(self, test_expectations,
                                                 configs_with_no_results):
@@ -364,7 +337,8 @@ class WPTExpectationsUpdater(object):
         func = lambda x: (x["variant"]["def"]["test_suite"] == test_suite)
         test_results_list = []
         predicate = {"expectancy": "VARIANTS_WITH_ONLY_UNEXPECTED_RESULTS"}
-        rv = self.host.results_fetcher.fetch_results_from_resultdb(self.host, [build], predicate)
+        rv = self.host.results_fetcher.fetch_results_from_resultdb([build],
+                                                                   predicate)
         rv = list(filter(func, rv))
         if not self.options.include_unexpected_pass:
             # if a test first fail then passed unexpectedly
@@ -387,7 +361,7 @@ class WPTExpectationsUpdater(object):
 
         webdriver_test_results = []
         if has_webdriver_tests:
-            mst = self.host.builders.master_for_builder(build.builder_name)
+            mst = self.host.builders.main_for_builder(build.builder_name)
             webdriver_test_results.append(
                 self.host.results_fetcher.fetch_webdriver_test_results(
                     build, mst))
@@ -657,11 +631,7 @@ class WPTExpectationsUpdater(object):
         # rebaselined and has an actual result but no baseline. We can't
         # add a Missing expectation (this is not allowed), but no other
         # expectation is correct.
-        # We also want to skip any new manual tests that are not automated;
-        # see crbug.com/708241 for context.
         if 'MISSING' in actual_results:
-            return {'Skip'}
-        if '-manual.' in test_name and 'TIMEOUT' in actual_results:
             return {'Skip'}
         expectations = set()
         failure_types = {'TEXT', 'IMAGE+TEXT', 'IMAGE', 'AUDIO', 'FAIL'}
@@ -890,13 +860,13 @@ class WPTExpectationsUpdater(object):
         Args:
             specifiers: A collection of specifiers (case insensitive).
             specifier_macros: A dict mapping "macros" for groups of specifiers
-                to lists of version specifiers. e.g. {"win": ["win7", "win10"]}.
+                to lists of version specifiers. e.g. {"win": ["win10", "win11"]}.
                 If there are versions in this dict for that have no corresponding
                 try bots, they are ignored.
 
         Returns:
-            A shortened list of specifiers (capitalized). For example, ["win7",
-            "win10"] would be converted to ["Win"]. If the given list covers
+            A shortened list of specifiers (capitalized). For example, ["win10",
+            "win11"] would be converted to ["Win"]. If the given list covers
             all supported platforms, then an empty list is returned.
         """
         specifiers = {s.lower() for s in specifiers}
@@ -966,9 +936,7 @@ class WPTExpectationsUpdater(object):
         webdriver_list = []
         for lines in line_dict.values():
             for line in lines:
-                if 'Skip' in line and '-manual.' in line:
-                    wont_fix_list.append(line)
-                elif self.finder.webdriver_prefix() in line:
+                if self.finder.webdriver_prefix() in line:
                     webdriver_list.append(line)
                 else:
                     line_list.append(line)
@@ -1022,47 +990,6 @@ class WPTExpectationsUpdater(object):
                                                  wont_fix_file_content)
         return line_dict
 
-    @contextlib.contextmanager
-    def prepare_smoke_tests(self, chromium_git):
-        """List test cases that should be run by the smoke test builder
-
-        Add new and modified test cases to WPT_SMOKE_TESTS_FILE,
-        builder android-weblayer-pie-x86-wpt-smoketest will run those
-        tests. wpt-importer will generate initial expectations for weblayer
-        based on the result. Save and restore WPT_SMOKE_TESTS_FILE as
-        necessary.
-        """
-        _log.info('Backup file WPTSmokeTestCases.')
-        temp_dir = tempfile.gettempdir()
-        base_path = os.path.basename(WPT_SMOKE_TESTS_FILE)
-        self._saved_test_cases_file = os.path.join(temp_dir, base_path)
-        shutil.copyfile(WPT_SMOKE_TESTS_FILE, self._saved_test_cases_file)
-        tests = (self._list_add_files()
-                 + self._list_modified_files())
-
-        manifest_path = os.path.join(
-            self.finder.web_tests_dir(), "external", BASE_MANIFEST_NAME)
-        manifest = WPTManifest(self.host, manifest_path)
-        with open(WPT_SMOKE_TESTS_FILE, 'w') as out_file:
-            _log.info('Test cases to run on smoke test builder:')
-            prelen = len('external/wpt/')
-            for test in sorted(tests):
-                if test.startswith('external/wpt/') \
-                        and manifest.is_test_file(test[prelen:]):
-                    # path should be the relative path of the test case to
-                    # out/Release dir, as that will be same as that on swarming
-                    # infra. We use path instead of the test case name, because
-                    # that is needed to correctly run cases in js files
-                    path = '../../third_party/blink/web_tests/' + test
-                    _log.info('  ' + path)
-                    out_file.write(path + '\n')
-        try:
-            yield
-        finally:
-            _log.info('Restore file WPTSmokeTestCases.')
-            shutil.copyfile(self._saved_test_cases_file, WPT_SMOKE_TESTS_FILE)
-            chromium_git.commit_locally_with_message('Restore WPTSmokeTestCases')
-
     def skip_slow_timeout_tests(self, port):
         """Skip any Slow and Timeout tests found in TestExpectations.
         """
@@ -1107,16 +1034,8 @@ class WPTExpectationsUpdater(object):
         for path in self._test_expectations.expectations_dict:
             _log.info('Updating %s for any removed or renamed tests.',
                       self.host.filesystem.basename(path))
-            if path in PRODUCTS_TO_EXPECTATION_FILE_PATHS.values():
-                # Also delete any expectations for modified test cases at
-                # android side to avoid any conflict
-                # TODO: consider keep the triaged expectations when results do
-                # not change
-                self._clean_single_test_expectations_file(
-                    path, deleted_files + modified_files, renamed_files)
-            else:
-                self._clean_single_test_expectations_file(
-                    path, deleted_files, renamed_files)
+            self._clean_single_test_expectations_file(path, deleted_files,
+                                                      renamed_files)
         self._test_expectations.commit_changes()
 
     def _list_files(self, diff_filter):
@@ -1251,28 +1170,22 @@ class WPTExpectationsUpdater(object):
             abs_path, self.finder.web_tests_dir())
 
     # TODO(robertma): Unit test this method.
-    def download_text_baselines(self, test_results, flag_specific=None):
+    def download_text_baselines(self, tests_to_rebaseline):
         """Fetches new baseline files for tests that should be rebaselined.
 
         Invokes `blink_tool.py rebaseline-cl` in order to download new baselines
         (-expected.txt files) for testharness.js tests that did not crash or
-        time out. Then, the platform-specific test is removed from the overall
-        failure test dictionary and the resulting dictionary is returned.
+        time out.
 
         Args:
-            test_results: A dictionary of failing test results, mapping test
-                names to lists of platforms to SimpleTestResult.
+            tests_to_rebaseline: A list of tests that should be rebaselined.
 
-        Returns:
-            A pair: A set of tests that are rebaselined, and a modified copy of
-            the test_results dictionary containing only tests that couldn't be
-            rebaselined.
+        Returns: None
         """
-        tests_to_rebaseline, test_results = self.get_tests_to_rebaseline(
-            test_results)
         if not tests_to_rebaseline:
             _log.info('No tests to rebaseline.')
-            return tests_to_rebaseline, test_results
+            return
+
         _log.info('Tests to rebaseline:')
         for test in tests_to_rebaseline:
             _log.info('  %s', test)
@@ -1285,8 +1198,6 @@ class WPTExpectationsUpdater(object):
             '--no-trigger-jobs',
             '--fill-missing',
         ]
-        if flag_specific:
-            command.append('--flag-specific=' + flag_specific)
         if self.options.verbose:
             command.append('--verbose')
         if self.patchset:
@@ -1296,7 +1207,6 @@ class WPTExpectationsUpdater(object):
         _log.info(
             "Output of rebaseline-cl:\n%s\n--end of rebaseline-cl output --" %
             rebaseline_output)
-        return tests_to_rebaseline, test_results
 
     def get_tests_to_rebaseline(self, test_results):
         """Filters failing tests that can be rebaselined.

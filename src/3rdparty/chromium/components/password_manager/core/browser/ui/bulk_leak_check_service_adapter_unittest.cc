@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,7 @@
 #include "components/password_manager/core/browser/leak_detection/leak_detection_check_factory.h"
 #include "components/password_manager/core/browser/leak_detection/mock_leak_detection_check_factory.h"
 #include "components/password_manager/core/browser/password_form.h"
+#include "components/password_manager/core/browser/site_affiliation/mock_affiliation_service.h"
 #include "components/password_manager/core/browser/test_password_store.h"
 #include "components/password_manager/core/browser/ui/saved_passwords_presenter.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
@@ -123,7 +124,8 @@ class BulkLeakCheckServiceAdapterTest : public ::testing::Test {
   signin::IdentityTestEnvironment identity_test_env_;
   scoped_refptr<TestPasswordStore> store_ =
       base::MakeRefCounted<TestPasswordStore>();
-  SavedPasswordsPresenter presenter_{store_};
+  MockAffiliationService affiliation_service_;
+  SavedPasswordsPresenter presenter_{&affiliation_service_, store_};
   BulkLeakCheckService service_{
       identity_test_env_.identity_manager(),
       base::MakeRefCounted<network::TestSharedURLLoaderFactory>()};
@@ -264,7 +266,10 @@ TEST_F(BulkLeakCheckServiceAdapterTest, OnEditedNoPrefs) {
   RunUntilIdle();
 
   EXPECT_CALL(factory(), TryCreateBulkLeakCheck).Times(0);
-  presenter().EditPassword(password, kPassword2);
+  CredentialUIEntry original_credential(password),
+      updated_credential = original_credential;
+  updated_credential.password = kPassword2;
+  presenter().EditSavedCredentials(original_credential, updated_credential);
 }
 
 // Tests that editing a password through the presenter will result in another
@@ -288,7 +293,10 @@ TEST_F(BulkLeakCheckServiceAdapterTest, OnEditedWithPrefs) {
               CheckCredentials(CredentialsAre(std::cref(expected))));
   EXPECT_CALL(factory(), TryCreateBulkLeakCheck)
       .WillOnce(Return(ByMove(std::move(leak_check))));
-  presenter().EditPassword(password, kPassword2);
+  CredentialUIEntry original_credential(password),
+      updated_credential = original_credential;
+  updated_credential.password = kPassword2;
+  presenter().EditSavedCredentials(original_credential, updated_credential);
 }
 
 }  // namespace password_manager

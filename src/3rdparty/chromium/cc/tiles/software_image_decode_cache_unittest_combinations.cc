@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,27 +81,24 @@ class BaseTest : public testing::Test {
 class N32Cache : public virtual BaseTest {
  protected:
   std::unique_ptr<SoftwareImageDecodeCache> CreateCache() override {
-    return std::make_unique<SoftwareImageDecodeCache>(
-        kN32_SkColorType, kLockedMemoryLimitBytes,
-        PaintImage::kDefaultGeneratorClientId);
+    return std::make_unique<SoftwareImageDecodeCache>(kN32_SkColorType,
+                                                      kLockedMemoryLimitBytes);
   }
 };
 
 class RGBA4444Cache : public virtual BaseTest {
  protected:
   std::unique_ptr<SoftwareImageDecodeCache> CreateCache() override {
-    return std::make_unique<SoftwareImageDecodeCache>(
-        kARGB_4444_SkColorType, kLockedMemoryLimitBytes,
-        PaintImage::kDefaultGeneratorClientId);
+    return std::make_unique<SoftwareImageDecodeCache>(kARGB_4444_SkColorType,
+                                                      kLockedMemoryLimitBytes);
   }
 };
 
 class RGBA_F16Cache : public virtual BaseTest {
  protected:
   std::unique_ptr<SoftwareImageDecodeCache> CreateCache() override {
-    return std::make_unique<SoftwareImageDecodeCache>(
-        kRGBA_F16_SkColorType, kLockedMemoryLimitBytes,
-        PaintImage::kDefaultGeneratorClientId);
+    return std::make_unique<SoftwareImageDecodeCache>(kRGBA_F16_SkColorType,
+                                                      kLockedMemoryLimitBytes);
   }
 };
 

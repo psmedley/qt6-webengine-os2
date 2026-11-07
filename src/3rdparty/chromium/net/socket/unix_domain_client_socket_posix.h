@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,6 @@
 namespace net {
 
 class SocketPosix;
-struct SockaddrStorage;
 
 // A client socket that uses unix domain socket as the transport layer.
 class NET_EXPORT UnixDomainClientSocket : public StreamSocket {
@@ -38,12 +37,6 @@ class NET_EXPORT UnixDomainClientSocket : public StreamSocket {
 
   ~UnixDomainClientSocket() override;
 
-  // Fills |address| with |socket_path| and its length. For Android or Linux
-  // platform, this supports abstract namespaces.
-  static bool FillAddress(const std::string& socket_path,
-                          bool use_abstract_namespace,
-                          SockaddrStorage* address);
-
   // StreamSocket implementation.
   int Connect(CompletionOnceCallback callback) override;
   void Disconnect() override;
@@ -56,9 +49,6 @@ class NET_EXPORT UnixDomainClientSocket : public StreamSocket {
   bool WasAlpnNegotiated() const override;
   NextProto GetNegotiatedProtocol() const override;
   bool GetSSLInfo(SSLInfo* ssl_info) override;
-  void GetConnectionAttempts(ConnectionAttempts* out) const override;
-  void ClearConnectionAttempts() override {}
-  void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
   int64_t GetTotalReceivedBytes() const override;
   void ApplySocketTag(const SocketTag& tag) override;
 

@@ -31,7 +31,7 @@ static SkPath create_underline(const SkTDArray<SkScalar>& intersections,
         SkScalar uPos, SkScalar uWidth, SkScalar textSize) {
     SkPath underline;
     SkScalar end = last;
-    for (int index = 0; index < intersections.count(); index += 2) {
+    for (int index = 0; index < intersections.size(); index += 2) {
         SkScalar start = intersections[index] - uWidth;
         end = intersections[index + 1] + uWidth;
         if (start > last && last + textSize / 12 < start) {
@@ -113,7 +113,7 @@ DEF_SIMPLE_GM(fancyblobunderline, canvas, 1480, 1380) {
     const char test[] = "aAjJgGyY_|{-(~[,]qQ}pP}zZ";
     const SkPoint blobOffset = { 10, 80 };
 
-    for (size_t font = 0; font < SK_ARRAY_COUNT(fam); ++font) {
+    for (size_t font = 0; font < std::size(fam); ++font) {
         for (SkScalar textSize = 100; textSize > 10; textSize -= 20) {
             SkFont skFont(ToolUtils::create_portable_typeface(fam[font], SkFontStyle()), textSize);
             const SkScalar uWidth = textSize / 15;
@@ -129,7 +129,7 @@ DEF_SIMPLE_GM(fancyblobunderline, canvas, 1480, 1380) {
             SkASSERT(!(interceptCount % 2));
 
             SkTDArray<SkScalar> intercepts;
-            intercepts.setCount(interceptCount);
+            intercepts.resize(interceptCount);
             blob->getIntercepts(bounds, intercepts.begin(), &paint);
 
             const SkScalar start = blob->bounds().left();

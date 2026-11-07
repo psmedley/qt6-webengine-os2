@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,11 +44,11 @@ bool CopyPreventionSettingsPolicyHandler::CheckPolicySettings(
     return false;
   }
 
-  const base::Value* value =
-      policies.GetValue(policy_name(), base::Value::Type::DICT);
-  const base::Value* enable = value->FindListKey(
+  const base::Value::Dict& dict =
+      policies.GetValue(policy_name(), base::Value::Type::DICT)->GetDict();
+  const base::Value::List* enable = dict.FindList(
       enterprise::content::kCopyPreventionSettingsEnableFieldName);
-  const base::Value* disable = value->FindListKey(
+  const base::Value::List* disable = dict.FindList(
       enterprise::content::kCopyPreventionSettingsDisableFieldName);
   if (!enable || !disable) {
     errors->AddError(policy_name(),
@@ -56,7 +56,7 @@ bool CopyPreventionSettingsPolicyHandler::CheckPolicySettings(
     return false;
   }
 
-  for (auto& pattern : disable->GetListDeprecated()) {
+  for (auto& pattern : *disable) {
     if (pattern.GetString() == "*") {
       errors->AddError(
           policy_name(),

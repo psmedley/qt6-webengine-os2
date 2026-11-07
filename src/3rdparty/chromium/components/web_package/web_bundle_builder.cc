@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -155,8 +155,7 @@ cbor::Value WebBundleBuilder::CreateEncodedSigned(
 
 std::vector<uint8_t> WebBundleBuilder::CreateTopLevel() {
   cbor::Value::ArrayValue toplevel_array;
-  toplevel_array.emplace_back(
-      CreateByteString(u8"\U0001F310\U0001F4E6"));  // "🌐📦"
+  toplevel_array.emplace_back(CreateByteString("🌐📦"));
   toplevel_array.emplace_back(CreateByteString(base::StringPiece("b2\0\0", 4)));
   toplevel_array.emplace_back(Encode(cbor::Value(section_lengths_)));
   toplevel_array.emplace_back(sections_);

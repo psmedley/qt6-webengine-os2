@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -76,11 +76,11 @@ class NET_EXPORT_PRIVATE WebSocketBasicHandshakeStream final
   bool GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const override;
   void GetSSLInfo(SSLInfo* ssl_info) override;
   void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) override;
-  bool GetRemoteEndpoint(IPEndPoint* endpoint) override;
+  int GetRemoteEndpoint(IPEndPoint* endpoint) override;
   void Drain(HttpNetworkSession* session) override;
   void SetPriority(RequestPriority priority) override;
   void PopulateNetErrorDetails(NetErrorDetails* details) override;
-  HttpStream* RenewStreamForAuth() override;
+  std::unique_ptr<HttpStream> RenewStreamForAuth() override;
   const std::set<std::string>& GetDnsAliases() const override;
   base::StringPiece GetAcceptChViaAlps() const override;
 
@@ -115,7 +115,7 @@ class NET_EXPORT_PRIVATE WebSocketBasicHandshakeStream final
 
   HttpStreamParser* parser() const { return state_.parser(); }
 
-  HandshakeResult result_;
+  HandshakeResult result_ = HandshakeResult::INCOMPLETE;
 
   // The request URL.
   GURL url_;
@@ -125,10 +125,11 @@ class NET_EXPORT_PRIVATE WebSocketBasicHandshakeStream final
 
   // Owned by another object.
   // |connect_delegate| will live during the lifetime of this object.
-  const raw_ptr<WebSocketStream::ConnectDelegate> connect_delegate_;
+  const raw_ptr<WebSocketStream::ConnectDelegate, DanglingUntriaged>
+      connect_delegate_;
 
   // This is stored in SendRequest() for use by ReadResponseHeaders().
-  raw_ptr<HttpResponseInfo> http_response_info_;
+  raw_ptr<HttpResponseInfo> http_response_info_ = nullptr;
 
   // The key to be sent in the next Sec-WebSocket-Key header. Usually NULL (the
   // key is generated on the fly).
@@ -153,7 +154,7 @@ class NET_EXPORT_PRIVATE WebSocketBasicHandshakeStream final
   // to avoid including extension-related header files here.
   std::unique_ptr<WebSocketExtensionParams> extension_params_;
 
-  const raw_ptr<WebSocketStreamRequestAPI> stream_request_;
+  const raw_ptr<WebSocketStreamRequestAPI, DanglingUntriaged> stream_request_;
 
   const raw_ptr<WebSocketEndpointLockManager> websocket_endpoint_lock_manager_;
 

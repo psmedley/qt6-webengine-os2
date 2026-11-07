@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -164,6 +164,8 @@ class GPU_EXPORT GLHelper {
                             GLenum texture_target,
                             const gfx::Size& dst_size,
                             unsigned char* out,
+                            size_t row_stride_bytes,
+                            bool flip_y,
                             GLenum format,
                             base::OnceCallback<void(bool)> callback);
 
@@ -420,8 +422,8 @@ class GPU_EXPORT I420Converter {
 // and read back a texture from the GPU into CPU-accessible RAM. A single
 // readback pipeline can handle multiple outstanding readbacks at the same time.
 //
-// TODO(crbug.com/870036): DEPRECATED. This will be removed soon, in favor of
-// I420Converter and readback implementation in GLRendererCopier.
+// TODO(crbug.com/870036): DEPRECATED. This will be removed soon in favor of
+// I420Converter.
 class GPU_EXPORT ReadbackYUVInterface {
  public:
   ReadbackYUVInterface() {}

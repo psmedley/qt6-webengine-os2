@@ -7,6 +7,7 @@
 #ifndef FPDFSDK_CPDFSDK_INTERACTIVEFORM_H_
 #define FPDFSDK_CPDFSDK_INTERACTIVEFORM_H_
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <vector>
@@ -33,15 +34,12 @@ class CPDFSDK_InteractiveForm final
   CPDF_InteractiveForm* GetInteractiveForm() const {
     return m_pInteractiveForm.get();
   }
-  CPDFSDK_FormFillEnvironment* GetFormFillEnv() const {
-    return m_pFormFillEnv.Get();
-  }
 
   CPDFSDK_Widget* GetWidget(CPDF_FormControl* pControl) const;
   void GetWidgets(const WideString& sFieldName,
-                  std::vector<ObservedPtr<CPDFSDK_Annot>>* widgets) const;
+                  std::vector<ObservedPtr<CPDFSDK_Widget>>* widgets) const;
   void GetWidgets(CPDF_FormField* pField,
-                  std::vector<ObservedPtr<CPDFSDK_Annot>>* widgets) const;
+                  std::vector<ObservedPtr<CPDFSDK_Widget>>* widgets) const;
 
   void AddMap(CPDF_FormControl* pControl, CPDFSDK_Widget* pWidget);
   void RemoveMap(CPDF_FormControl* pControl);
@@ -71,7 +69,7 @@ class CPDFSDK_InteractiveForm final
   void DoAction_ResetForm(const CPDF_Action& action);
 
   std::vector<CPDF_FormField*> GetFieldFromObjects(
-      const std::vector<const CPDF_Object*>& objects) const;
+      const std::vector<RetainPtr<const CPDF_Object>>& objects) const;
   bool SubmitFields(const WideString& csDestination,
                     const std::vector<CPDF_FormField*>& fields,
                     bool bIncludeOrExclude,
@@ -102,11 +100,14 @@ class CPDFSDK_InteractiveForm final
   void AfterFormReset(CPDF_InteractiveForm* pForm) override;
 
   int GetPageIndexByAnnotDict(CPDF_Document* pDocument,
-                              CPDF_Dictionary* pAnnotDict) const;
+                              const CPDF_Dictionary* pAnnotDict) const;
 
   UnownedPtr<CPDFSDK_FormFillEnvironment> const m_pFormFillEnv;
   std::unique_ptr<CPDF_InteractiveForm> const m_pInteractiveForm;
-  std::map<CPDF_FormControl*, UnownedPtr<CPDFSDK_Widget>> m_Map;
+  std::map<UnownedPtr<const CPDF_FormControl>,
+           UnownedPtr<CPDFSDK_Widget>,
+           std::less<>>
+      m_Map;
 #ifdef PDF_ENABLE_XFA
   bool m_bXfaCalculate = true;
   bool m_bXfaValidationsEnabled = true;

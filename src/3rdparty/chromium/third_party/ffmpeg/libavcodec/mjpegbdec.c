@@ -40,9 +40,8 @@ static uint32_t read_offs(AVCodecContext *avctx, GetBitContext *gb, uint32_t siz
     return offs;
 }
 
-static int mjpegb_decode_frame(AVCodecContext *avctx,
-                              void *data, int *got_frame,
-                              AVPacket *avpkt)
+static int mjpegb_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
+                               int *got_frame, AVPacket *avpkt)
 {
     const uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
@@ -65,10 +64,8 @@ read_header:
     s->restart_count = 0;
     s->mjpb_skiptosod = 0;
 
-    if (buf_end - buf_ptr >= 1 << 28)
-        return AVERROR_INVALIDDATA;
-
-    init_get_bits(&hgb, buf_ptr, /*buf_size*/(buf_end - buf_ptr)*8);
+    if ((ret = init_get_bits8(&hgb, buf_ptr, /*buf_size*/(buf_end - buf_ptr))) < 0)
+        return ret;
 
     skip_bits(&hgb, 32); /* reserved zeros */
 
@@ -145,7 +142,7 @@ read_header:
         return buf_size;
     }
 
-    if ((ret = av_frame_ref(data, s->picture_ptr)) < 0)
+    if ((ret = av_frame_ref(rframe, s->picture_ptr)) < 0)
         return ret;
     *got_frame = 1;
 
@@ -159,14 +156,14 @@ read_header:
 
 const FFCodec ff_mjpegb_decoder = {
     .p.name         = "mjpegb",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Apple MJPEG-B"),
+    CODEC_LONG_NAME("Apple MJPEG-B"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_MJPEGB,
     .priv_data_size = sizeof(MJpegDecodeContext),
     .init           = ff_mjpeg_decode_init,
     .close          = ff_mjpeg_decode_end,
-    .decode         = mjpegb_decode_frame,
+    FF_CODEC_DECODE_CB(mjpegb_decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1,
     .p.max_lowres   = 3,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -158,6 +158,9 @@ struct ShortcutInfo {
   std::vector<std::string> icon_urls;
   std::vector<GURL> screenshot_urls;
   absl::optional<ShareTarget> share_target;
+
+  // Id specified in the manifest.
+  GURL manifest_id;
 
   // Both shortcut item related vectors have the same size.
   std::vector<blink::Manifest::ShortcutItem> shortcut_items;

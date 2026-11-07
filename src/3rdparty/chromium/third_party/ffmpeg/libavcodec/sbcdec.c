@@ -32,7 +32,7 @@
 
 #include "avcodec.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include "libavutil/channel_layout.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mem_internal.h"
@@ -337,12 +337,10 @@ static int sbc_decode_init(AVCodecContext *avctx)
     return 0;
 }
 
-static int sbc_decode_frame(AVCodecContext *avctx,
-                            void *data, int *got_frame_ptr,
-                            AVPacket *avpkt)
+static int sbc_decode_frame(AVCodecContext *avctx, AVFrame *frame,
+                            int *got_frame_ptr, AVPacket *avpkt)
 {
     SBCDecContext *sbc = avctx->priv_data;
-    AVFrame *frame = data;
     int ret, frame_length;
 
     if (!sbc)
@@ -369,14 +367,13 @@ static int sbc_decode_frame(AVCodecContext *avctx,
 
 const FFCodec ff_sbc_decoder = {
     .p.name                = "sbc",
-    .p.long_name           = NULL_IF_CONFIG_SMALL("SBC (low-complexity subband codec)"),
+    CODEC_LONG_NAME("SBC (low-complexity subband codec)"),
     .p.type                = AVMEDIA_TYPE_AUDIO,
     .p.id                  = AV_CODEC_ID_SBC,
     .priv_data_size        = sizeof(SBCDecContext),
     .init                  = sbc_decode_init,
-    .decode                = sbc_decode_frame,
+    FF_CODEC_DECODE_CB(sbc_decode_frame),
     .p.capabilities        = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
-    .caps_internal         = FF_CODEC_CAP_INIT_THREADSAFE,
 #if FF_API_OLD_CHANNEL_LAYOUT
     .p.channel_layouts     = (const uint64_t[]) { AV_CH_LAYOUT_MONO,
                                                   AV_CH_LAYOUT_STEREO, 0},

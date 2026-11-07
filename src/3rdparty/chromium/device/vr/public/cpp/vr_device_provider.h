@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,10 +18,8 @@ class COMPONENT_EXPORT(VR_PUBLIC_CPP) VRDeviceProviderClient {
   VRDeviceProviderClient();
   virtual ~VRDeviceProviderClient();
 
-  // TODO(crbug.com/1090029): Wrap XRDeviceId + VRDisplayInfo into XRDeviceData
   virtual void AddRuntime(
       device::mojom::XRDeviceId id,
-      device::mojom::VRDisplayInfoPtr info,
       device::mojom::XRDeviceDataPtr device_data,
       mojo::PendingRemote<device::mojom::XRRuntime> runtime) = 0;
   virtual void RemoveRuntime(device::mojom::XRDeviceId id) = 0;

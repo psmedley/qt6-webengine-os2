@@ -24,6 +24,7 @@
 
 #include <memory>
 
+#include "base/check_op.h"
 #include "base/dcheck_is_on.h"
 #include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -39,6 +40,7 @@
 
 namespace blink {
 
+class DeferredShapingController;
 class LayoutQuote;
 class LocalFrameView;
 class NamedPagesMapper;
@@ -140,24 +142,14 @@ class CORE_EXPORT LayoutView : public LayoutBlockFlow {
   void UpdateAfterLayout() override;
 
   // See comments for the equivalent method on LayoutObject.
-  bool MapToVisualRectInAncestorSpace(const LayoutBoxModelObject* ancestor,
-                                      PhysicalRect&,
-                                      MapCoordinatesFlags mode,
-                                      VisualRectFlags) const;
-
   // |ancestor| can be nullptr, which will map the rect to the main frame's
   // space, even if the main frame is remote (or has intermediate remote
   // frames in the chain).
   bool MapToVisualRectInAncestorSpaceInternal(
       const LayoutBoxModelObject* ancestor,
       TransformState&,
-      MapCoordinatesFlags,
-      VisualRectFlags) const;
-
-  bool MapToVisualRectInAncestorSpaceInternal(
-      const LayoutBoxModelObject* ancestor,
-      TransformState&,
       VisualRectFlags = kDefaultVisualRectFlags) const override;
+
   PhysicalOffset OffsetForFixedPosition() const;
   PhysicalOffset PixelSnappedOffsetForFixedPosition() const;
 
@@ -212,15 +204,21 @@ class CORE_EXPORT LayoutView : public LayoutBlockFlow {
 
   LayoutUnit PageLogicalHeight() const {
     NOT_DESTROYED();
-    return page_logical_height_;
+    return IsHorizontalWritingMode() ? page_size_.height : page_size_.width;
   }
-  void SetPageLogicalHeight(LayoutUnit height) {
+  void SetPageSize(PhysicalSize size) {
     NOT_DESTROYED();
-    page_logical_height_ = height;
+    page_size_ = size;
   }
+
+  virtual AtomicString NamedPageAtIndex(wtf_size_t page_index) const;
 
   NamedPagesMapper* GetNamedPagesMapper() const {
     NOT_DESTROYED();
+
+    // NamedPagesMapper is deprecated.
+    DCHECK(!RuntimeEnabledFeatures::LayoutNGPrintingEnabled());
+
     return named_pages_mapper_.get();
   }
 
@@ -362,6 +360,11 @@ class CORE_EXPORT LayoutView : public LayoutBlockFlow {
 
   TrackedDescendantsMap& SvgTextDescendantsMap();
 
+  DeferredShapingController& GetDeferredShapingController() const {
+    NOT_DESTROYED();
+    return *deferred_shaping_controller_;
+  }
+
  protected:
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
 
@@ -388,11 +391,12 @@ class CORE_EXPORT LayoutView : public LayoutBlockFlow {
   bool UpdateLogicalWidthAndColumnWidth() override;
 
   Member<LocalFrameView> frame_view_;
+  Member<DeferredShapingController> deferred_shaping_controller_;
 
-  // The page logical height.
+  // The page size.
   // This is only used during printing to split the content into pages.
-  // Outside of printing, this is 0.
-  LayoutUnit page_logical_height_;
+  // Outside of printing, this is 0x0.
+  PhysicalSize page_size_;
 
   // LayoutState is an optimization used during layout.
   // |m_layoutState| will be nullptr outside of layout.

@@ -1,10 +1,11 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_GRID_NG_GRID_TRACK_COLLECTION_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_GRID_NG_GRID_TRACK_COLLECTION_H_
 
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -44,7 +45,7 @@ class CORE_EXPORT NGGridTrackCollectionBase {
 class CORE_EXPORT TrackSpanProperties {
  public:
   enum PropertyId : unsigned {
-    kNone = 0,
+    kNoPropertyId = 0,
     kHasAutoMinimumTrack = 1 << 1,
     kHasFixedMaximumTrack = 1 << 2,
     kHasFixedMinimumTrack = 1 << 3,
@@ -58,10 +59,10 @@ class CORE_EXPORT TrackSpanProperties {
 
   inline bool HasProperty(PropertyId id) const { return bitmask_ & id; }
   inline void SetProperty(PropertyId id) { bitmask_ |= id; }
-  inline void Reset() { bitmask_ = kNone; }
+  inline void Reset() { bitmask_ = kNoPropertyId; }
 
  private:
-  wtf_size_t bitmask_{kNone};
+  wtf_size_t bitmask_{kNoPropertyId};
 };
 
 class CORE_EXPORT NGGridBlockTrackCollection
@@ -174,6 +175,11 @@ class CORE_EXPORT NGGridLayoutTrackCollection
   explicit NGGridLayoutTrackCollection(GridTrackSizingDirection track_direction)
       : NGGridTrackCollectionBase(track_direction) {}
 
+  NGGridLayoutTrackCollection(
+      const NGGridLayoutTrackCollection& other,
+      const NGBoxStrut& subgrid_border_scrollbar_padding,
+      const NGBoxStrut& subgrid_margins);
+
   bool operator==(const NGGridLayoutTrackCollection& other) const;
 
   // NGGridTrackCollectionBase overrides.
@@ -185,6 +191,8 @@ class CORE_EXPORT NGGridLayoutTrackCollection
   wtf_size_t RangeSetCount(wtf_size_t range_index) const;
   // Return the index of the first set spanned by a given track range.
   wtf_size_t RangeBeginSetIndex(wtf_size_t range_index) const;
+  // Returns the track span properties of the range at position |range_index|.
+  TrackSpanProperties RangeProperties(wtf_size_t range_index) const;
 
   // Returns true if the specified property has been set in the track span
   // properties bitmask of the range at position |range_index|.
@@ -200,6 +208,10 @@ class CORE_EXPORT NGGridLayoutTrackCollection
   LayoutUnit GetSetOffset(wtf_size_t set_index) const;
   wtf_size_t GetSetTrackCount(wtf_size_t set_index) const;
 
+  bool HasBaselines() const {
+    DCHECK_EQ(major_baselines_.empty(), minor_baselines_.empty());
+    return !major_baselines_.empty();
+  }
   LayoutUnit MajorBaseline(wtf_size_t set_index) const;
   LayoutUnit MinorBaseline(wtf_size_t set_index) const;
 
@@ -232,6 +244,12 @@ class CORE_EXPORT NGGridLayoutTrackCollection
 
  protected:
   LayoutUnit gutter_size_;
+
+  // These values are used to adjust the sets geometry to the relative border
+  // box of a subgrid and account for its gutter size difference.
+  LayoutUnit sets_geometry_start_offset_;
+  LayoutUnit start_extra_margin_;
+  LayoutUnit end_extra_margin_;
 
   Vector<Range> ranges_;
   Vector<LayoutUnit> major_baselines_;

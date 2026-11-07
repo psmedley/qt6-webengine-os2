@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,12 @@ namespace ui {
 
 WaylandBufferBacking::WaylandBufferBacking(const WaylandConnection* connection,
                                            uint32_t buffer_id,
-                                           const gfx::Size& size)
-    : connection_(connection), buffer_id_(buffer_id), size_(size) {
+                                           const gfx::Size& size,
+                                           uint32_t format)
+    : connection_(connection),
+      format_(format),
+      buffer_id_(buffer_id),
+      size_(size) {
   DCHECK(connection_);
   DCHECK_NE(buffer_id_, kInvalidBufferId);
 }
@@ -26,6 +30,9 @@ bool WaylandBufferBacking::UseExplicitSyncRelease() const {
 
 WaylandBufferHandle* WaylandBufferBacking::EnsureBufferHandle(
     WaylandSurface* requestor) {
+  if (UseExplicitSyncRelease())
+    requestor = nullptr;
+
   auto& buffer_handle = buffer_handles_[requestor];
 
   if (buffer_handle)
@@ -51,6 +58,10 @@ WaylandBufferHandle* WaylandBufferBacking::EnsureBufferHandle(
 WaylandBufferHandle* WaylandBufferBacking::GetBufferHandle(
     WaylandSurface* requestor) {
   DCHECK(requestor);
+  if (UseExplicitSyncRelease()) {
+    requestor = nullptr;
+    DCHECK_LE(buffer_handles_.size(), 1u);
+  }
   return buffer_handles_[requestor].get();
 }
 

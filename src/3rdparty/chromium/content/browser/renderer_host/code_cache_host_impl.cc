@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
+#include "components/services/storage/public/cpp/buckets/bucket_locator.h"
 #include "components/services/storage/public/mojom/cache_storage_control.mojom.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/code_cache/generated_code_cache.h"
@@ -196,7 +197,8 @@ void DidGenerateCacheableMetadataInCacheStorageOnUI(
   // real StorageKey somehow.
   cache_storage_control->AddReceiver(
       cross_origin_embedder_policy, mojo::NullRemote(),
-      blink::StorageKey(cache_storage_origin),
+      storage::BucketLocator::ForDefaultBucket(
+          blink::StorageKey(cache_storage_origin)),
       storage::mojom::CacheStorageOwner::kCacheAPI,
       remote.BindNewPipeAndPassReceiver());
 
@@ -346,9 +348,9 @@ void CodeCacheHostImpl::FetchCachedCode(blink::mojom::CodeCacheType cache_type,
     return;
   }
 
-  auto read_callback =
-      base::BindOnce(&CodeCacheHostImpl::OnReceiveCachedCode,
-                     weak_ptr_factory_.GetWeakPtr(), std::move(callback));
+  auto read_callback = base::BindOnce(
+      &CodeCacheHostImpl::OnReceiveCachedCode, weak_ptr_factory_.GetWeakPtr(),
+      cache_type, base::TimeTicks::Now(), std::move(callback));
   code_cache->FetchEntry(url, *origin_lock, network_isolation_key_,
                          std::move(read_callback));
 }
@@ -424,9 +426,17 @@ GeneratedCodeCache* CodeCacheHostImpl::GetCodeCache(
   return generated_code_cache_context_->generated_wasm_code_cache();
 }
 
-void CodeCacheHostImpl::OnReceiveCachedCode(FetchCachedCodeCallback callback,
-                                            const base::Time& response_time,
-                                            mojo_base::BigBuffer data) {
+void CodeCacheHostImpl::OnReceiveCachedCode(
+    blink::mojom::CodeCacheType cache_type,
+    base::TimeTicks start_time,
+    FetchCachedCodeCallback callback,
+    const base::Time& response_time,
+    mojo_base::BigBuffer data) {
+  if (cache_type == blink::mojom::CodeCacheType::kJavascript &&
+      data.size() > 0) {
+    base::UmaHistogramTimes("SiteIsolatedCodeCache.JS.FetchCodeCache",
+                            base::TimeTicks::Now() - start_time);
+  }
   std::move(callback).Run(response_time, std::move(data));
 }
 

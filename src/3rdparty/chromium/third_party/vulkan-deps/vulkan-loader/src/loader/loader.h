@@ -31,6 +31,9 @@
 
 #include "loader_common.h"
 
+// Declare the once_init variable
+LOADER_PLATFORM_THREAD_ONCE_EXTERN_DEFINITION(once_init)
+
 static inline VkPhysicalDevice loader_unwrap_physical_device(VkPhysicalDevice physicalDevice) {
     struct loader_physical_device_tramp *phys_dev = (struct loader_physical_device_tramp *)physicalDevice;
     if (PHYS_TRAMP_MAGIC_NUMBER != phys_dev->magic) {
@@ -42,8 +45,11 @@ static inline VkPhysicalDevice loader_unwrap_physical_device(VkPhysicalDevice ph
 static inline void loader_set_dispatch(void *obj, const void *data) { *((const void **)obj) = data; }
 
 static inline VkLayerDispatchTable *loader_get_dispatch(const void *obj) {
+    if (VK_NULL_HANDLE == obj) {
+        return NULL;
+    }
     VkLayerDispatchTable *disp = *((VkLayerDispatchTable **)obj);
-    if (VK_NULL_HANDLE == obj || DEVICE_DISP_TABLE_MAGIC_NUMBER != disp->magic) {
+    if (VK_NULL_HANDLE == disp || DEVICE_DISP_TABLE_MAGIC_NUMBER != disp->magic) {
         return NULL;
     }
     return disp;
@@ -76,6 +82,7 @@ extern struct loader_struct loader;
 extern loader_platform_thread_mutex loader_lock;
 extern loader_platform_thread_mutex loader_json_lock;
 extern loader_platform_thread_mutex loader_preload_icd_lock;
+extern loader_platform_thread_mutex loader_global_instance_list_lock;
 
 bool compare_vk_extension_properties(const VkExtensionProperties *op1, const VkExtensionProperties *op2);
 
@@ -111,8 +118,11 @@ void loader_delete_layer_list_and_properties(const struct loader_instance *inst,
 VkResult loader_add_layer_name_to_list(const struct loader_instance *inst, const char *name, const enum layer_type_flags type_flags,
                                        const struct loader_layer_list *source_list, struct loader_layer_list *target_list,
                                        struct loader_layer_list *expanded_target_list);
+void loader_icd_destroy(struct loader_instance *ptr_inst, struct loader_icd_term *icd_term,
+                        const VkAllocationCallbacks *pAllocator);
 void loader_scanned_icd_clear(const struct loader_instance *inst, struct loader_icd_tramp_list *icd_tramp_list);
-VkResult loader_icd_scan(const struct loader_instance *inst, struct loader_icd_tramp_list *icd_tramp_list);
+VkResult loader_icd_scan(const struct loader_instance *inst, struct loader_icd_tramp_list *icd_tramp_list,
+                         bool *skipped_portability_drivers);
 void loader_scan_for_layers(struct loader_instance *inst, struct loader_layer_list *instance_layers);
 void loader_scan_for_implicit_layers(struct loader_instance *inst, struct loader_layer_list *instance_layers);
 bool loader_implicit_layer_is_enabled(const struct loader_instance *inst, const struct loader_layer_properties *prop);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@
 #include "net/base/features.h"
 #include "net/base/load_flags.h"
 #include "net/base/mock_network_change_notifier.h"
-#include "net/base/network_isolation_key.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/base/schemeful_site.h"
 #include "net/cert/ct_policy_enforcer.h"
 #include "net/cert/mock_cert_verifier.h"
@@ -79,7 +79,7 @@
 #include "net/third_party/quiche/src/quiche/quic/test_tools/quic_session_peer.h"
 #include "net/third_party/quiche/src/quiche/quic/test_tools/quic_spdy_session_peer.h"
 #include "net/third_party/quiche/src/quiche/quic/test_tools/quic_test_utils.h"
-#include "net/third_party/quiche/src/quiche/spdy/core/spdy_test_utils.h"
+#include "net/third_party/quiche/src/quiche/spdy/test_tools/spdy_test_utils.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -89,9 +89,7 @@
 
 using std::string;
 
-namespace net {
-
-namespace test {
+namespace net::test {
 
 class QuicHttpStreamPeer {
  public:
@@ -114,7 +112,7 @@ const char kServer4Url[] = "https://images.example.org/";
 const int kDefaultRTTMilliSecs = 300;
 const size_t kMinRetryTimeForDefaultNetworkSecs = 1;
 const size_t kWaitTimeForNewNetworkSecs = 10;
-const IPAddress kCachedIPAddress = IPAddress(192, 168, 0, 2);
+const char kCachedIPAddress[] = "192.168.0.2";
 const char kNonCachedIPAddress[] = "192.168.0.1";
 const quic::QuicConnectionId kNewCID = quic::test::TestConnectionId(12345678);
 
@@ -150,7 +148,7 @@ std::vector<TestParams> GetTestParams() {
 // IPV4 address.
 class TestConnectionMigrationSocketFactory : public MockClientSocketFactory {
  public:
-  TestConnectionMigrationSocketFactory() : next_source_host_num_(1u) {}
+  TestConnectionMigrationSocketFactory() = default;
 
   TestConnectionMigrationSocketFactory(
       const TestConnectionMigrationSocketFactory&) = delete;
@@ -164,21 +162,20 @@ class TestConnectionMigrationSocketFactory : public MockClientSocketFactory {
       NetLog* net_log,
       const NetLogSource& source) override {
     SocketDataProvider* data_provider = mock_data().GetNext();
-    std::unique_ptr<MockUDPClientSocket> socket(
-        new MockUDPClientSocket(data_provider, net_log));
+    auto socket = std::make_unique<MockUDPClientSocket>(data_provider, net_log);
     socket->set_source_host(IPAddress(192, 0, 2, next_source_host_num_++));
     return std::move(socket);
   }
 
  private:
-  uint8_t next_source_host_num_;
+  uint8_t next_source_host_num_ = 1u;
 };
 
 // TestPortMigrationSocketFactory will vend sockets with incremental port
 // number.
 class TestPortMigrationSocketFactory : public MockClientSocketFactory {
  public:
-  TestPortMigrationSocketFactory() : next_source_port_num_(1u) {}
+  TestPortMigrationSocketFactory() = default;
 
   TestPortMigrationSocketFactory(const TestPortMigrationSocketFactory&) =
       delete;
@@ -192,26 +189,25 @@ class TestPortMigrationSocketFactory : public MockClientSocketFactory {
       NetLog* net_log,
       const NetLogSource& source) override {
     SocketDataProvider* data_provider = mock_data().GetNext();
-    std::unique_ptr<MockUDPClientSocket> socket(
-        new MockUDPClientSocket(data_provider, net_log));
+    auto socket = std::make_unique<MockUDPClientSocket>(data_provider, net_log);
     socket->set_source_port(next_source_port_num_++);
     return std::move(socket);
   }
 
  private:
-  uint16_t next_source_port_num_;
+  uint16_t next_source_port_num_ = 1u;
 };
 
 class QuicStreamFactoryTestBase : public WithTaskEnvironment {
  protected:
   QuicStreamFactoryTestBase(quic::ParsedQuicVersion version,
                             bool client_headers_include_h2_stream_dependency)
-      : host_resolver_(
-            new MockHostResolver(/*default_result=*/MockHostResolverBase::
-                                     RuleResolver::GetLocalhostResult())),
-        ssl_config_service_(new SSLConfigServiceDefaults),
-        socket_factory_(new MockClientSocketFactory),
-        runner_(new TestTaskRunner(context_.mock_clock())),
+      : host_resolver_(std::make_unique<MockHostResolver>(
+            /*default_result=*/MockHostResolverBase::RuleResolver::
+                GetLocalhostResult())),
+        ssl_config_service_(std::make_unique<SSLConfigServiceDefaults>()),
+        socket_factory_(std::make_unique<MockClientSocketFactory>()),
+        runner_(base::MakeRefCounted<TestTaskRunner>(context_.mock_clock())),
         version_(version),
         client_maker_(version_,
                       quic::QuicUtils::CreateRandomConnectionId(
@@ -229,8 +225,6 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
                       false),
         http_server_properties_(std::make_unique<HttpServerProperties>()),
         cert_verifier_(std::make_unique<MockCertVerifier>()),
-        scoped_mock_network_change_notifier_(nullptr),
-        factory_(nullptr),
         scheme_host_port_(url::kHttpsScheme,
                           kDefaultServerHostName,
                           kDefaultServerPort),
@@ -238,14 +232,11 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
         url2_(kServer2Url),
         url3_(kServer3Url),
         url4_(kServer4Url),
-        privacy_mode_(PRIVACY_MODE_DISABLED),
         failed_on_default_network_callback_(base::BindRepeating(
             &QuicStreamFactoryTestBase::OnFailedOnDefaultNetwork,
             base::Unretained(this))),
-        failed_on_default_network_(false),
         quic_params_(context_.params()) {
     FLAGS_quic_enable_http3_grease_randomness = false;
-    FLAGS_quic_enable_chaos_protection = false;
     quic_params_->headers_include_h2_stream_dependency =
         client_headers_include_h2_stream_dependency;
     context_.AdvanceTime(quic::QuicTime::Delta::FromSeconds(1));
@@ -263,9 +254,7 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
   }
 
   void SetIetfConnectionMigrationFlagsAndConnectionOptions() {
-    FLAGS_quic_reloadable_flag_quic_server_reverse_validate_new_path3 = true;
     FLAGS_quic_reloadable_flag_quic_connection_migration_use_new_cid_v2 = true;
-    quic_params_->connection_options.push_back(quic::kRVCM);
   }
 
   void InitializeConnectionMigrationV2Test(
@@ -278,7 +267,6 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
     mock_ncn->SetConnectedNetworksList(connected_networks);
     quic_params_->migrate_sessions_on_network_change_v2 = true;
     quic_params_->migrate_sessions_early_v2 = true;
-    quic_params_->allow_port_migration = false;
     socket_factory_ = std::make_unique<TestConnectionMigrationSocketFactory>();
     SetIetfConnectionMigrationFlagsAndConnectionOptions();
     Initialize();
@@ -318,13 +306,14 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
                                             std::move(dns_aliases));
   }
 
-  bool HasActiveSession(const url::SchemeHostPort& scheme_host_port,
-                        const NetworkIsolationKey& network_isolation_key =
-                            NetworkIsolationKey()) {
+  bool HasActiveSession(
+      const url::SchemeHostPort& scheme_host_port,
+      const NetworkAnonymizationKey& network_anonymization_key =
+          NetworkAnonymizationKey()) {
     quic::QuicServerId server_id(scheme_host_port.host(),
                                  scheme_host_port.port(), false);
     return QuicStreamFactoryPeer::HasActiveSession(factory_.get(), server_id,
-                                                   network_isolation_key);
+                                                   network_anonymization_key);
   }
 
   bool HasLiveSession(const url::SchemeHostPort& scheme_host_port) {
@@ -353,12 +342,12 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
 
   QuicChromiumClientSession* GetActiveSession(
       const url::SchemeHostPort& scheme_host_port,
-      const NetworkIsolationKey& network_isolation_key =
-          NetworkIsolationKey()) {
+      const NetworkAnonymizationKey& network_anonymization_key =
+          NetworkAnonymizationKey()) {
     quic::QuicServerId server_id(scheme_host_port.host(),
                                  scheme_host_port.port(), false);
     return QuicStreamFactoryPeer::GetActiveSession(factory_.get(), server_id,
-                                                   network_isolation_key);
+                                                   network_anonymization_key);
   }
 
   int GetSourcePortForNewSession(const url::SchemeHostPort& destination) {
@@ -384,13 +373,14 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
 
     QuicStreamRequest request(factory_.get());
     GURL url("https://" + destination.host() + "/");
-    EXPECT_EQ(ERR_IO_PENDING,
-              request.Request(
-                  destination, version_, privacy_mode_, DEFAULT_PRIORITY,
-                  SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                  true /* use_dns_aliases */,
-                  /*cert_verify_flags=*/0, url, net_log_, &net_error_details_,
-                  failed_on_default_network_callback_, callback_.callback()));
+    EXPECT_EQ(
+        ERR_IO_PENDING,
+        request.Request(
+            destination, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
+            NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+            /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+            /*cert_verify_flags=*/0, url, net_log_, &net_error_details_,
+            failed_on_default_network_callback_, callback_.callback()));
 
     EXPECT_THAT(callback_.WaitForResult(), IsOk());
     std::unique_ptr<HttpStream> stream = CreateStream(&request);
@@ -550,13 +540,14 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
 
     // Create request and QuicHttpStream.
     QuicStreamRequest request(factory_.get());
-    EXPECT_EQ(ERR_IO_PENDING,
-              request.Request(
-                  scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                  SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                  true /* use_dns_aliases */,
-                  /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
-                  failed_on_default_network_callback_, callback_.callback()));
+    EXPECT_EQ(
+        ERR_IO_PENDING,
+        request.Request(
+            scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
+            SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+            /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+            /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+            failed_on_default_network_callback_, callback_.callback()));
 
     EXPECT_EQ(OK, callback_.WaitForResult());
 
@@ -596,25 +587,25 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
   }
 
   // Verifies that the QUIC stream factory is initialized correctly.
-  // If |vary_network_isolation_key| is true, stores data for two different
-  // NetworkIsolationKeys, but the same server. If false, stores data for two
-  // different servers, using the same NetworkIsolationKey.
-  void VerifyInitialization(bool vary_network_isolation_key) {
+  // If |vary_network_anonymization_key| is true, stores data for two different
+  // NetworkAnonymizationKeys, but the same server. If false, stores data for
+  // two different servers, using the same NetworkAnonymizationKey.
+  void VerifyInitialization(bool vary_network_anonymization_key) {
     const SchemefulSite kSite1(GURL("https://foo.test/"));
     const SchemefulSite kSite2(GURL("https://bar.test/"));
 
-    NetworkIsolationKey network_isolation_key1(kSite1, kSite1);
+    NetworkAnonymizationKey network_anonymization_key1(kSite1, kSite1);
     quic::QuicServerId quic_server_id1(
         kDefaultServerHostName, kDefaultServerPort, PRIVACY_MODE_DISABLED);
 
-    NetworkIsolationKey network_isolation_key2;
+    NetworkAnonymizationKey network_anonymization_key2;
     quic::QuicServerId quic_server_id2;
 
-    if (vary_network_isolation_key) {
-      network_isolation_key2 = NetworkIsolationKey(kSite2, kSite2);
+    if (vary_network_anonymization_key) {
+      network_anonymization_key2 = NetworkAnonymizationKey(kSite2, kSite2);
       quic_server_id2 = quic_server_id1;
     } else {
-      network_isolation_key2 = network_isolation_key1;
+      network_anonymization_key2 = network_anonymization_key1;
       quic_server_id2 = quic::QuicServerId(kServer2HostName, kDefaultServerPort,
                                            PRIVACY_MODE_DISABLED);
     }
@@ -644,7 +635,7 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
     http_server_properties_->SetAlternativeServices(
         url::SchemeHostPort("https", quic_server_id1.host(),
                             quic_server_id1.port()),
-        network_isolation_key1, alternative_service_info_vector);
+        network_anonymization_key1, alternative_service_info_vector);
 
     const AlternativeService alternative_service2(
         kProtoQUIC, quic_server_id2.host(), quic_server_id2.port());
@@ -656,7 +647,7 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
     http_server_properties_->SetAlternativeServices(
         url::SchemeHostPort("https", quic_server_id2.host(),
                             quic_server_id2.port()),
-        network_isolation_key2, alternative_service_info_vector2);
+        network_anonymization_key2, alternative_service_info_vector2);
     // Verify that the properties of both QUIC servers are stored in the
     // HTTP properties map.
     EXPECT_EQ(2U,
@@ -667,7 +658,7 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
 
     std::unique_ptr<QuicServerInfo> quic_server_info =
         std::make_unique<PropertiesBasedQuicServerInfo>(
-            quic_server_id1, network_isolation_key1,
+            quic_server_id1, network_anonymization_key1,
             http_server_properties_.get());
 
     // Update quic_server_info's server_config and persist it.
@@ -706,7 +697,7 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
 
     std::unique_ptr<QuicServerInfo> quic_server_info2 =
         std::make_unique<PropertiesBasedQuicServerInfo>(
-            quic_server_id2, network_isolation_key2,
+            quic_server_id2, network_anonymization_key2,
             http_server_properties_.get());
     // Update quic_server_info2's server_config and persist it.
     QuicServerInfo::State* state2 = quic_server_info2->mutable_state();
@@ -770,18 +761,18 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
                   url::SchemeHostPort(url::kHttpsScheme, quic_server_id1.host(),
                                       quic_server_id1.port()),
                   version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
-                  network_isolation_key1, SecureDnsPolicy::kAllow,
-                  true /* use_dns_aliases */, /*cert_verify_flags=*/0, url_,
-                  net_log_, &net_error_details_,
+                  network_anonymization_key1, SecureDnsPolicy::kAllow,
+                  /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                  /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                   failed_on_default_network_callback_, callback_.callback()));
     EXPECT_THAT(callback_.WaitForResult(), IsOk());
 
     EXPECT_FALSE(QuicStreamFactoryPeer::CryptoConfigCacheIsEmpty(
-        factory_.get(), quic_server_id1, network_isolation_key1));
+        factory_.get(), quic_server_id1, network_anonymization_key1));
 
     std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle1 =
         QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                               network_isolation_key1);
+                                               network_anonymization_key1);
     quic::QuicCryptoClientConfig::CachedState* cached =
         crypto_config_handle1->GetConfig()->LookupOrCreate(quic_server_id1);
     EXPECT_FALSE(cached->server_config().empty());
@@ -815,19 +806,20 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
             url::SchemeHostPort(url::kHttpsScheme, quic_server_id2.host(),
                                 quic_server_id2.port()),
             version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
-            network_isolation_key2, SecureDnsPolicy::kAllow,
-            true /* use_dns_aliases */, /*cert_verify_flags=*/0,
-            vary_network_isolation_key ? url_
-                                       : GURL("https://mail.example.org/"),
+            network_anonymization_key2, SecureDnsPolicy::kAllow,
+            /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+            /*cert_verify_flags=*/0,
+            vary_network_anonymization_key ? url_
+                                           : GURL("https://mail.example.org/"),
             net_log_, &net_error_details_, failed_on_default_network_callback_,
             callback_.callback()));
     EXPECT_THAT(callback_.WaitForResult(), IsOk());
 
     EXPECT_FALSE(QuicStreamFactoryPeer::CryptoConfigCacheIsEmpty(
-        factory_.get(), quic_server_id2, network_isolation_key2));
+        factory_.get(), quic_server_id2, network_anonymization_key2));
     std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle2 =
         QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                               network_isolation_key2);
+                                               network_anonymization_key2);
     quic::QuicCryptoClientConfig::CachedState* cached2 =
         crypto_config_handle2->GetConfig()->LookupOrCreate(quic_server_id2);
     EXPECT_FALSE(cached2->server_config().empty());
@@ -939,7 +931,12 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
   // Port migrations.
   void TestSimplePortMigrationOnPathDegrading();
 
-  QuicFlagSaver flags_;  // Save/restore all QUIC flag values.
+  // Tests for DNS HTTPS record with alpn.
+  void TestRequireDnsHttpsAlpn(
+      std::vector<HostResolverEndpointResult> endpoints,
+      bool expect_success);
+
+  quic::test::QuicFlagSaver flags_;  // Save/restore all QUIC flag values.
   std::unique_ptr<MockHostResolverBase> host_resolver_;
   std::unique_ptr<SSLConfigService> ssl_config_service_;
   std::unique_ptr<MockClientSocketFactory> socket_factory_;
@@ -962,11 +959,11 @@ class QuicStreamFactoryTestBase : public WithTaskEnvironment {
   GURL url3_;
   GURL url4_;
 
-  PrivacyMode privacy_mode_;
+  PrivacyMode privacy_mode_ = PRIVACY_MODE_DISABLED;
   NetLogWithSource net_log_;
   TestCompletionCallback callback_;
   const CompletionRepeatingCallback failed_on_default_network_callback_;
-  bool failed_on_default_network_;
+  bool failed_on_default_network_ = false;
   NetErrorDetails net_error_details_;
 
   raw_ptr<QuicParams> quic_params_;
@@ -1001,8 +998,8 @@ TEST_P(QuicStreamFactoryTest, Create) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -1016,8 +1013,8 @@ TEST_P(QuicStreamFactoryTest, Create) {
   EXPECT_EQ(OK,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   // Will reset stream 3.
@@ -1031,8 +1028,8 @@ TEST_P(QuicStreamFactoryTest, Create) {
   EXPECT_EQ(OK,
             request3.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   stream = CreateStream(&request3);  // Will reset stream 5.
@@ -1065,8 +1062,8 @@ TEST_P(QuicStreamFactoryTest, CreateZeroRtt) {
   EXPECT_EQ(OK,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -1104,8 +1101,8 @@ TEST_P(QuicStreamFactoryTest, AsyncZeroRtt) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_FALSE(HasActiveSession(scheme_host_port_));
@@ -1137,8 +1134,8 @@ TEST_P(QuicStreamFactoryTest, DefaultInitialRtt) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -1167,8 +1164,8 @@ TEST_P(QuicStreamFactoryTest, FactoryDestroyedWhenJobPending) {
   EXPECT_EQ(ERR_IO_PENDING,
             request->Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   request.reset();
@@ -1200,8 +1197,8 @@ TEST_P(QuicStreamFactoryTest, RequireConfirmation) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -1242,13 +1239,14 @@ TEST_P(QuicStreamFactoryTest, DontRequireConfirmationFromSameIP) {
   socket_data.AddSocketDataToFactory(socket_factory_.get());
 
   QuicStreamRequest request(factory_.get());
-  EXPECT_THAT(request.Request(
-                  scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                  SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                  true /* use_dns_aliases */,
-                  /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
-                  failed_on_default_network_callback_, callback_.callback()),
-              IsOk());
+  EXPECT_THAT(
+      request.Request(
+          scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
+          SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+          /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+          /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+          failed_on_default_network_callback_, callback_.callback()),
+      IsOk());
 
   EXPECT_FALSE(http_server_properties_->HasLastLocalAddressWhenQuicWorked());
 
@@ -1267,8 +1265,8 @@ TEST_P(QuicStreamFactoryTest, DontRequireConfirmationFromSameIP) {
 TEST_P(QuicStreamFactoryTest, CachedInitialRtt) {
   ServerNetworkStats stats;
   stats.srtt = base::Milliseconds(10);
-  http_server_properties_->SetServerNetworkStats(url::SchemeHostPort(url_),
-                                                 NetworkIsolationKey(), stats);
+  http_server_properties_->SetServerNetworkStats(
+      url::SchemeHostPort(url_), NetworkAnonymizationKey(), stats);
   quic_params_->estimate_initial_rtt = true;
 
   Initialize();
@@ -1285,8 +1283,8 @@ TEST_P(QuicStreamFactoryTest, CachedInitialRtt) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -1301,19 +1299,19 @@ TEST_P(QuicStreamFactoryTest, CachedInitialRtt) {
 }
 
 // Test that QUIC sessions use the cached RTT from HttpServerProperties for the
-// correct NetworkIsolationKey.
-TEST_P(QuicStreamFactoryTest, CachedInitialRttWithNetworkIsolationKey) {
+// correct NetworkAnonymizationKey.
+TEST_P(QuicStreamFactoryTest, CachedInitialRttWithNetworkAnonymizationKey) {
   const SchemefulSite kSite1(GURL("https://foo.test/"));
   const SchemefulSite kSite2(GURL("https://bar.test/"));
-  const NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
-  const NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
+  const NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
+  const NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
 
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
       // enabled_features
       {features::kPartitionHttpServerPropertiesByNetworkIsolationKey,
-       // Need to partition connections by NetworkIsolationKey for
-       // QuicSessionAliasKey to include NetworkIsolationKeys.
+       // Need to partition connections by NetworkAnonymizationKey for
+       // QuicSessionAliasKey to include NetworkAnonymizationKeys.
        features::kPartitionConnectionsByNetworkIsolationKey},
       // disabled_features
       {});
@@ -1323,14 +1321,15 @@ TEST_P(QuicStreamFactoryTest, CachedInitialRttWithNetworkIsolationKey) {
 
   ServerNetworkStats stats;
   stats.srtt = base::Milliseconds(10);
-  http_server_properties_->SetServerNetworkStats(url::SchemeHostPort(url_),
-                                                 kNetworkIsolationKey1, stats);
+  http_server_properties_->SetServerNetworkStats(
+      url::SchemeHostPort(url_), kNetworkAnonymizationKey1, stats);
   quic_params_->estimate_initial_rtt = true;
   Initialize();
 
-  for (const auto& network_isolation_key :
-       {kNetworkIsolationKey1, kNetworkIsolationKey2, NetworkIsolationKey()}) {
-    SCOPED_TRACE(network_isolation_key.ToString());
+  for (const auto& network_anonymization_key :
+       {kNetworkAnonymizationKey1, kNetworkAnonymizationKey2,
+        NetworkAnonymizationKey()}) {
+    SCOPED_TRACE(network_anonymization_key.ToDebugString());
 
     ProofVerifyDetailsChromium verify_details = DefaultProofVerifyDetails();
     crypto_client_stream_factory_.AddProofVerifyDetails(&verify_details);
@@ -1350,21 +1349,22 @@ TEST_P(QuicStreamFactoryTest, CachedInitialRttWithNetworkIsolationKey) {
     socket_data.AddSocketDataToFactory(socket_factory_.get());
 
     QuicStreamRequest request(factory_.get());
-    EXPECT_EQ(ERR_IO_PENDING,
-              request.Request(
-                  scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                  SocketTag(), network_isolation_key, SecureDnsPolicy::kAllow,
-                  true /* use_dns_aliases */,
-                  /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
-                  failed_on_default_network_callback_, callback_.callback()));
+    EXPECT_EQ(
+        ERR_IO_PENDING,
+        request.Request(
+            scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
+            SocketTag(), network_anonymization_key, SecureDnsPolicy::kAllow,
+            /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+            /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+            failed_on_default_network_callback_, callback_.callback()));
 
     EXPECT_THAT(callback_.WaitForResult(), IsOk());
     std::unique_ptr<HttpStream> stream = CreateStream(&request);
     EXPECT_TRUE(stream.get());
 
     QuicChromiumClientSession* session =
-        GetActiveSession(scheme_host_port_, network_isolation_key);
-    if (network_isolation_key == kNetworkIsolationKey1) {
+        GetActiveSession(scheme_host_port_, network_anonymization_key);
+    if (network_anonymization_key == kNetworkAnonymizationKey1) {
       EXPECT_EQ(10000, session->connection()->GetStats().srtt_us);
       ASSERT_TRUE(session->config()->HasInitialRoundTripTimeUsToSend());
       EXPECT_EQ(10000u, session->config()->GetInitialRoundTripTimeUsToSend());
@@ -1396,8 +1396,8 @@ TEST_P(QuicStreamFactoryTest, 2gInitialRtt) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -1431,8 +1431,8 @@ TEST_P(QuicStreamFactoryTest, 3gInitialRtt) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -1461,8 +1461,8 @@ TEST_P(QuicStreamFactoryTest, GoAway) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -1504,8 +1504,8 @@ TEST_P(QuicStreamFactoryTest, GoAwayForConnectionMigrationWithPortOnly) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -1533,22 +1533,23 @@ TEST_P(QuicStreamFactoryTest, GoAwayForConnectionMigrationWithPortOnly) {
 }
 
 // Makes sure that setting and clearing ServerNetworkStats respects the
-// NetworkIsolationKey.
-TEST_P(QuicStreamFactoryTest, ServerNetworkStatsWithNetworkIsolationKey) {
+// NetworkAnonymizationKey.
+TEST_P(QuicStreamFactoryTest, ServerNetworkStatsWithNetworkAnonymizationKey) {
   const SchemefulSite kSite1(GURL("https://foo.test/"));
   const SchemefulSite kSite2(GURL("https://bar.test/"));
-  const NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
-  const NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
+  const NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
+  const NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
 
-  const NetworkIsolationKey kNetworkIsolationKeys[] = {
-      kNetworkIsolationKey1, kNetworkIsolationKey2, NetworkIsolationKey()};
+  const NetworkAnonymizationKey kNetworkAnonymizationKeys[] = {
+      kNetworkAnonymizationKey1, kNetworkAnonymizationKey2,
+      NetworkAnonymizationKey()};
 
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
       // enabled_features
       {features::kPartitionHttpServerPropertiesByNetworkIsolationKey,
-       // Need to partition connections by NetworkIsolationKey for
-       // QuicSessionAliasKey to include NetworkIsolationKeys.
+       // Need to partition connections by NetworkAnonymizationKey for
+       // QuicSessionAliasKey to include NetworkAnonymizationKeys.
        features::kPartitionConnectionsByNetworkIsolationKey},
       // disabled_features
       {});
@@ -1559,8 +1560,8 @@ TEST_P(QuicStreamFactoryTest, ServerNetworkStatsWithNetworkIsolationKey) {
 
   // For each server, set up and tear down a QUIC session cleanly, and check
   // that stats have been added to HttpServerProperties using the correct
-  // NetworkIsolationKey.
-  for (size_t i = 0; i < std::size(kNetworkIsolationKeys); ++i) {
+  // NetworkAnonymizationKey.
+  for (size_t i = 0; i < std::size(kNetworkAnonymizationKeys); ++i) {
     SCOPED_TRACE(i);
 
     ProofVerifyDetailsChromium verify_details = DefaultProofVerifyDetails();
@@ -1581,20 +1582,21 @@ TEST_P(QuicStreamFactoryTest, ServerNetworkStatsWithNetworkIsolationKey) {
     socket_data.AddSocketDataToFactory(socket_factory_.get());
 
     QuicStreamRequest request(factory_.get());
-    EXPECT_EQ(ERR_IO_PENDING,
-              request.Request(
-                  scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                  SocketTag(), kNetworkIsolationKeys[i],
-                  SecureDnsPolicy::kAllow, true /* use_dns_aliases */,
-                  /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
-                  failed_on_default_network_callback_, callback_.callback()));
+    EXPECT_EQ(
+        ERR_IO_PENDING,
+        request.Request(
+            scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
+            SocketTag(), kNetworkAnonymizationKeys[i], SecureDnsPolicy::kAllow,
+            /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+            /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+            failed_on_default_network_callback_, callback_.callback()));
 
     EXPECT_THAT(callback_.WaitForResult(), IsOk());
     std::unique_ptr<HttpStream> stream = CreateStream(&request);
     EXPECT_TRUE(stream.get());
 
     QuicChromiumClientSession* session =
-        GetActiveSession(scheme_host_port_, kNetworkIsolationKeys[i]);
+        GetActiveSession(scheme_host_port_, kNetworkAnonymizationKeys[i]);
 
     if (version_.UsesHttp3()) {
       session->OnHttp3GoAway(0);
@@ -1602,20 +1604,21 @@ TEST_P(QuicStreamFactoryTest, ServerNetworkStatsWithNetworkIsolationKey) {
       session->OnGoAway(quic::QuicGoAwayFrame());
     }
 
-    EXPECT_FALSE(HasActiveSession(scheme_host_port_, kNetworkIsolationKeys[i]));
+    EXPECT_FALSE(
+        HasActiveSession(scheme_host_port_, kNetworkAnonymizationKeys[i]));
 
     EXPECT_TRUE(socket_data.AllReadDataConsumed());
     EXPECT_TRUE(socket_data.AllWriteDataConsumed());
 
-    for (size_t j = 0; j < std::size(kNetworkIsolationKeys); ++j) {
-      // Stats up to kNetworkIsolationKeys[j] should have been populated, all
-      // others should remain empty.
+    for (size_t j = 0; j < std::size(kNetworkAnonymizationKeys); ++j) {
+      // Stats up to kNetworkAnonymizationKeys[j] should have been populated,
+      // all others should remain empty.
       if (j <= i) {
         EXPECT_TRUE(http_server_properties_->GetServerNetworkStats(
-            url::SchemeHostPort(url_), kNetworkIsolationKeys[j]));
+            url::SchemeHostPort(url_), kNetworkAnonymizationKeys[j]));
       } else {
         EXPECT_FALSE(http_server_properties_->GetServerNetworkStats(
-            url::SchemeHostPort(url_), kNetworkIsolationKeys[j]));
+            url::SchemeHostPort(url_), kNetworkAnonymizationKeys[j]));
       }
     }
   }
@@ -1627,8 +1630,8 @@ TEST_P(QuicStreamFactoryTest, ServerNetworkStatsWithNetworkIsolationKey) {
 
   // For each server, simulate an error during session creation, and check that
   // stats have been deleted from HttpServerProperties using the correct
-  // NetworkIsolationKey.
-  for (size_t i = 0; i < std::size(kNetworkIsolationKeys); ++i) {
+  // NetworkAnonymizationKey.
+  for (size_t i = 0; i < std::size(kNetworkAnonymizationKeys); ++i) {
     SCOPED_TRACE(i);
 
     MockQuicData socket_data(version_);
@@ -1638,27 +1641,29 @@ TEST_P(QuicStreamFactoryTest, ServerNetworkStatsWithNetworkIsolationKey) {
     socket_data.AddSocketDataToFactory(socket_factory_.get());
 
     QuicStreamRequest request(factory_.get());
-    EXPECT_EQ(ERR_IO_PENDING,
-              request.Request(
-                  scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                  SocketTag(), kNetworkIsolationKeys[i],
-                  SecureDnsPolicy::kAllow, true /* use_dns_aliases */,
-                  /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
-                  failed_on_default_network_callback_, callback_.callback()));
+    EXPECT_EQ(
+        ERR_IO_PENDING,
+        request.Request(
+            scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
+            SocketTag(), kNetworkAnonymizationKeys[i], SecureDnsPolicy::kAllow,
+            /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+            /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+            failed_on_default_network_callback_, callback_.callback()));
 
     EXPECT_THAT(callback_.WaitForResult(), IsError(ERR_QUIC_HANDSHAKE_FAILED));
 
-    EXPECT_FALSE(HasActiveSession(scheme_host_port_, kNetworkIsolationKeys[i]));
+    EXPECT_FALSE(
+        HasActiveSession(scheme_host_port_, kNetworkAnonymizationKeys[i]));
 
-    for (size_t j = 0; j < std::size(kNetworkIsolationKeys); ++j) {
-      // Stats up to kNetworkIsolationKeys[j] should have been deleted, all
+    for (size_t j = 0; j < std::size(kNetworkAnonymizationKeys); ++j) {
+      // Stats up to kNetworkAnonymizationKeys[j] should have been deleted, all
       // others should still be populated.
       if (j <= i) {
         EXPECT_FALSE(http_server_properties_->GetServerNetworkStats(
-            url::SchemeHostPort(url_), kNetworkIsolationKeys[j]));
+            url::SchemeHostPort(url_), kNetworkAnonymizationKeys[j]));
       } else {
         EXPECT_TRUE(http_server_properties_->GetServerNetworkStats(
-            url::SchemeHostPort(url_), kNetworkIsolationKeys[j]));
+            url::SchemeHostPort(url_), kNetworkAnonymizationKeys[j]));
       }
     }
   }
@@ -1686,8 +1691,8 @@ TEST_P(QuicStreamFactoryTest, Pooling) {
   EXPECT_EQ(OK,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   std::unique_ptr<HttpStream> stream = CreateStream(&request);
@@ -1695,12 +1700,13 @@ TEST_P(QuicStreamFactoryTest, Pooling) {
 
   TestCompletionCallback callback;
   QuicStreamRequest request2(factory_.get());
-  EXPECT_EQ(OK, request2.Request(
-                    server2, version_, privacy_mode_, DEFAULT_PRIORITY,
-                    SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                    true /* use_dns_aliases */, /*cert_verify_flags=*/0, url2_,
-                    net_log_, &net_error_details_,
-                    failed_on_default_network_callback_, callback.callback()));
+  EXPECT_EQ(OK,
+            request2.Request(
+                server2, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                /*cert_verify_flags=*/0, url2_, net_log_, &net_error_details_,
+                failed_on_default_network_callback_, callback.callback()));
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
   EXPECT_TRUE(stream2.get());
 
@@ -1761,9 +1767,9 @@ TEST_P(QuicStreamFactoryTest, PoolingWithServerMigration) {
   EXPECT_EQ(ERR_IO_PENDING,
             request2.Request(
                 server2, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
-                NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */, /*cert_verify_flags=*/0, url2_,
-                net_log_, &net_error_details_,
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                /*cert_verify_flags=*/0, url2_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback.callback()));
   EXPECT_EQ(OK, callback.WaitForResult());
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
@@ -1807,8 +1813,8 @@ TEST_P(QuicStreamFactoryTest, NoPoolingAfterGoAway) {
   EXPECT_EQ(OK,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   std::unique_ptr<HttpStream> stream = CreateStream(&request);
@@ -1816,12 +1822,13 @@ TEST_P(QuicStreamFactoryTest, NoPoolingAfterGoAway) {
 
   TestCompletionCallback callback;
   QuicStreamRequest request2(factory_.get());
-  EXPECT_EQ(OK, request2.Request(
-                    server2, version_, privacy_mode_, DEFAULT_PRIORITY,
-                    SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                    true /* use_dns_aliases */, /*cert_verify_flags=*/0, url2_,
-                    net_log_, &net_error_details_,
-                    failed_on_default_network_callback_, callback.callback()));
+  EXPECT_EQ(OK,
+            request2.Request(
+                server2, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                /*cert_verify_flags=*/0, url2_, net_log_, &net_error_details_,
+                failed_on_default_network_callback_, callback.callback()));
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
   EXPECT_TRUE(stream2.get());
 
@@ -1831,12 +1838,13 @@ TEST_P(QuicStreamFactoryTest, NoPoolingAfterGoAway) {
 
   TestCompletionCallback callback3;
   QuicStreamRequest request3(factory_.get());
-  EXPECT_EQ(OK, request3.Request(
-                    server2, version_, privacy_mode_, DEFAULT_PRIORITY,
-                    SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                    true /* use_dns_aliases */, /*cert_verify_flags=*/0, url2_,
-                    net_log_, &net_error_details_,
-                    failed_on_default_network_callback_, callback3.callback()));
+  EXPECT_EQ(OK,
+            request3.Request(
+                server2, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                /*cert_verify_flags=*/0, url2_, net_log_, &net_error_details_,
+                failed_on_default_network_callback_, callback3.callback()));
   std::unique_ptr<HttpStream> stream3 = CreateStream(&request3);
   EXPECT_TRUE(stream3.get());
 
@@ -1868,23 +1876,25 @@ TEST_P(QuicStreamFactoryTest, HttpsPooling) {
   host_resolver_->rules()->AddIPLiteralRule(server2.host(), "192.168.0.1", "");
 
   QuicStreamRequest request(factory_.get());
-  EXPECT_EQ(OK, request.Request(
-                    server1, version_, privacy_mode_, DEFAULT_PRIORITY,
-                    SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                    true /* use_dns_aliases */, /*cert_verify_flags=*/0, url_,
-                    net_log_, &net_error_details_,
-                    failed_on_default_network_callback_, callback_.callback()));
+  EXPECT_EQ(OK,
+            request.Request(
+                server1, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+                failed_on_default_network_callback_, callback_.callback()));
   std::unique_ptr<HttpStream> stream = CreateStream(&request);
   EXPECT_TRUE(stream.get());
 
   TestCompletionCallback callback;
   QuicStreamRequest request2(factory_.get());
-  EXPECT_EQ(OK, request2.Request(
-                    server2, version_, privacy_mode_, DEFAULT_PRIORITY,
-                    SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                    true /* use_dns_aliases */, /*cert_verify_flags=*/0, url2_,
-                    net_log_, &net_error_details_,
-                    failed_on_default_network_callback_, callback_.callback()));
+  EXPECT_EQ(OK,
+            request2.Request(
+                server2, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                /*cert_verify_flags=*/0, url2_, net_log_, &net_error_details_,
+                failed_on_default_network_callback_, callback_.callback()));
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
   EXPECT_TRUE(stream2.get());
 
@@ -1919,23 +1929,25 @@ TEST_P(QuicStreamFactoryTest, HttpsPoolingWithMatchingPins) {
   host_resolver_->rules()->AddIPLiteralRule(server2.host(), "192.168.0.1", "");
 
   QuicStreamRequest request(factory_.get());
-  EXPECT_EQ(OK, request.Request(
-                    server1, version_, privacy_mode_, DEFAULT_PRIORITY,
-                    SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                    true /* use_dns_aliases */, /*cert_verify_flags=*/0, url_,
-                    net_log_, &net_error_details_,
-                    failed_on_default_network_callback_, callback_.callback()));
+  EXPECT_EQ(OK,
+            request.Request(
+                server1, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+                failed_on_default_network_callback_, callback_.callback()));
   std::unique_ptr<HttpStream> stream = CreateStream(&request);
   EXPECT_TRUE(stream.get());
 
   TestCompletionCallback callback;
   QuicStreamRequest request2(factory_.get());
-  EXPECT_EQ(OK, request2.Request(
-                    server2, version_, privacy_mode_, DEFAULT_PRIORITY,
-                    SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                    true /* use_dns_aliases */, /*cert_verify_flags=*/0, url2_,
-                    net_log_, &net_error_details_,
-                    failed_on_default_network_callback_, callback_.callback()));
+  EXPECT_EQ(OK,
+            request2.Request(
+                server2, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                /*cert_verify_flags=*/0, url2_, net_log_, &net_error_details_,
+                failed_on_default_network_callback_, callback_.callback()));
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
   EXPECT_TRUE(stream2.get());
 
@@ -1946,6 +1958,9 @@ TEST_P(QuicStreamFactoryTest, HttpsPoolingWithMatchingPins) {
 }
 
 TEST_P(QuicStreamFactoryTest, NoHttpsPoolingWithDifferentPins) {
+  base::test::ScopedFeatureList scoped_feature_list_;
+  scoped_feature_list_.InitAndEnableFeature(
+      net::features::kStaticKeyPinningEnforcement);
   Initialize();
 
   MockQuicData socket_data1(version_);
@@ -1963,6 +1978,7 @@ TEST_P(QuicStreamFactoryTest, NoHttpsPoolingWithDifferentPins) {
   url::SchemeHostPort server1(url::kHttpsScheme, kDefaultServerHostName, 443);
   url::SchemeHostPort server2(url::kHttpsScheme, kServer2HostName, 443);
   transport_security_state_.EnableStaticPinsForTesting();
+  transport_security_state_.SetPinningListAlwaysTimelyForTesting(true);
   ScopedTransportSecurityStateSource scoped_security_state_source;
 
   ProofVerifyDetailsChromium verify_details1 = DefaultProofVerifyDetails();
@@ -1983,23 +1999,25 @@ TEST_P(QuicStreamFactoryTest, NoHttpsPoolingWithDifferentPins) {
   host_resolver_->rules()->AddIPLiteralRule(server2.host(), "192.168.0.1", "");
 
   QuicStreamRequest request(factory_.get());
-  EXPECT_EQ(OK, request.Request(
-                    server1, version_, privacy_mode_, DEFAULT_PRIORITY,
-                    SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                    true /* use_dns_aliases */, /*cert_verify_flags=*/0, url_,
-                    net_log_, &net_error_details_,
-                    failed_on_default_network_callback_, callback_.callback()));
+  EXPECT_EQ(OK,
+            request.Request(
+                server1, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+                failed_on_default_network_callback_, callback_.callback()));
   std::unique_ptr<HttpStream> stream = CreateStream(&request);
   EXPECT_TRUE(stream.get());
 
   TestCompletionCallback callback;
   QuicStreamRequest request2(factory_.get());
-  EXPECT_EQ(OK, request2.Request(
-                    server2, version_, privacy_mode_, DEFAULT_PRIORITY,
-                    SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                    true /* use_dns_aliases */, /*cert_verify_flags=*/0, url2_,
-                    net_log_, &net_error_details_,
-                    failed_on_default_network_callback_, callback_.callback()));
+  EXPECT_EQ(OK,
+            request2.Request(
+                server2, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                /*cert_verify_flags=*/0, url2_, net_log_, &net_error_details_,
+                failed_on_default_network_callback_, callback_.callback()));
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
   EXPECT_TRUE(stream2.get());
 
@@ -2033,8 +2051,8 @@ TEST_P(QuicStreamFactoryTest, Goaway) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -2056,8 +2074,8 @@ TEST_P(QuicStreamFactoryTest, Goaway) {
   EXPECT_EQ(ERR_IO_PENDING,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -2130,8 +2148,8 @@ TEST_P(QuicStreamFactoryTest, MaxOpenStream) {
     QuicStreamRequest request(factory_.get());
     int rv = request.Request(
         scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-        SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-        true /* use_dns_aliases */,
+        SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+        /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
         /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
         failed_on_default_network_callback_, callback_.callback());
     if (i == 0) {
@@ -2152,8 +2170,8 @@ TEST_P(QuicStreamFactoryTest, MaxOpenStream) {
   EXPECT_EQ(OK,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, CompletionOnceCallback()));
   std::unique_ptr<HttpStream> stream = CreateStream(&request);
@@ -2193,8 +2211,8 @@ TEST_P(QuicStreamFactoryTest, ResolutionErrorInCreate) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -2215,8 +2233,8 @@ TEST_P(QuicStreamFactoryTest, ConnectErrorInCreate) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -2235,13 +2253,14 @@ TEST_P(QuicStreamFactoryTest, CancelCreate) {
   socket_data.AddSocketDataToFactory(socket_factory_.get());
   {
     QuicStreamRequest request(factory_.get());
-    EXPECT_EQ(ERR_IO_PENDING,
-              request.Request(
-                  scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                  SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                  true /* use_dns_aliases */,
-                  /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
-                  failed_on_default_network_callback_, callback_.callback()));
+    EXPECT_EQ(
+        ERR_IO_PENDING,
+        request.Request(
+            scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
+            SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+            /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+            /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+            failed_on_default_network_callback_, callback_.callback()));
   }
 
   base::RunLoop().RunUntilIdle();
@@ -2250,8 +2269,8 @@ TEST_P(QuicStreamFactoryTest, CancelCreate) {
   EXPECT_EQ(OK,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   std::unique_ptr<HttpStream> stream = CreateStream(&request2);
@@ -2293,8 +2312,8 @@ TEST_P(QuicStreamFactoryTest, CloseAllSessions) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -2320,8 +2339,8 @@ TEST_P(QuicStreamFactoryTest, CloseAllSessions) {
   EXPECT_EQ(ERR_IO_PENDING,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -2357,8 +2376,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(ERR_QUIC_HANDSHAKE_FAILED, callback_.WaitForResult());
@@ -2381,8 +2400,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_FALSE(HasActiveSession(scheme_host_port_));
@@ -2427,8 +2446,8 @@ TEST_P(QuicStreamFactoryTest, WriteErrorInCryptoConnectWithSyncHostResolution) {
   EXPECT_EQ(ERR_QUIC_HANDSHAKE_FAILED,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   // Check no active session, or active jobs left for this server.
@@ -2451,8 +2470,8 @@ TEST_P(QuicStreamFactoryTest, WriteErrorInCryptoConnectWithSyncHostResolution) {
   EXPECT_EQ(ERR_IO_PENDING,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_FALSE(HasActiveSession(scheme_host_port_));
@@ -2506,8 +2525,8 @@ TEST_P(QuicStreamFactoryTest, CloseSessionsOnIPAddressChanged) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -2542,8 +2561,8 @@ TEST_P(QuicStreamFactoryTest, CloseSessionsOnIPAddressChanged) {
   EXPECT_EQ(ERR_IO_PENDING,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -2604,8 +2623,8 @@ TEST_P(QuicStreamFactoryTest, GoAwaySessionsOnIPAddressChanged) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -2652,8 +2671,8 @@ TEST_P(QuicStreamFactoryTest, GoAwaySessionsOnIPAddressChanged) {
   EXPECT_EQ(ERR_IO_PENDING,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -2701,8 +2720,8 @@ TEST_P(QuicStreamFactoryTest, OnIPAddressChangedWithConnectionMigration) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -2727,8 +2746,8 @@ TEST_P(QuicStreamFactoryTest, OnIPAddressChangedWithConnectionMigration) {
   EXPECT_EQ(OK,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   stream = CreateStream(&request2);
@@ -2819,8 +2838,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnNetworkMadeDefault(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -2983,8 +3002,8 @@ TEST_P(QuicStreamFactoryTest, MigratedToBlockedSocketAfterProbing) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -3094,8 +3113,8 @@ TEST_P(QuicStreamFactoryTest, MigrationTimeoutWithNoNewNetwork) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -3226,8 +3245,8 @@ void QuicStreamFactoryTestBase::TestOnNetworkMadeDefaultNonMigratableStream(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -3305,8 +3324,8 @@ TEST_P(QuicStreamFactoryTest, OnNetworkMadeDefaultConnectionMigrationDisabled) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -3426,8 +3445,8 @@ void QuicStreamFactoryTestBase::TestOnNetworkDisconnectedNonMigratableStream(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -3495,8 +3514,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -3597,8 +3616,8 @@ void QuicStreamFactoryTestBase::TestOnNetworkMadeDefaultNoOpenStreams(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -3681,8 +3700,8 @@ void QuicStreamFactoryTestBase::TestOnNetworkDisconnectedNoOpenStreams(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -3757,8 +3776,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnNetworkDisconnected(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -3897,8 +3916,8 @@ TEST_P(QuicStreamFactoryTest, NewNetworkConnectedAfterNoNetwork) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -4091,8 +4110,8 @@ TEST_P(QuicStreamFactoryTest, MigrateToProbingSocket) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -4260,8 +4279,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnPathDegrading(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -4416,8 +4435,8 @@ TEST_P(QuicStreamFactoryTest, MigrateSessionEarlyProbingWriterError) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -4557,8 +4576,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -4640,7 +4659,6 @@ TEST_P(QuicStreamFactoryTest,
     // Path validator is only supported in IETF QUIC.
     return;
   }
-  quic_params_->allow_port_migration = true;
   SetIetfConnectionMigrationFlagsAndConnectionOptions();
   socket_factory_ = std::make_unique<TestPortMigrationSocketFactory>();
   Initialize();
@@ -4653,7 +4671,6 @@ TEST_P(QuicStreamFactoryTest, PortMigrationDisabledOnPathDegrading) {
     // Path validator is only supported in IETF QUIC.
     return;
   }
-  quic_params_->allow_port_migration = true;
   SetIetfConnectionMigrationFlagsAndConnectionOptions();
   socket_factory_ = std::make_unique<TestPortMigrationSocketFactory>();
   Initialize();
@@ -4688,8 +4705,8 @@ TEST_P(QuicStreamFactoryTest, PortMigrationDisabledOnPathDegrading) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -4760,7 +4777,6 @@ TEST_P(QuicStreamFactoryTest,
     // Path validator is only supported in IETF QUIC.
     return;
   }
-  quic_params_->allow_port_migration = true;
   SetIetfConnectionMigrationFlagsAndConnectionOptions();
   socket_factory_ = std::make_unique<TestPortMigrationSocketFactory>();
   Initialize();
@@ -4813,8 +4829,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -4893,7 +4909,6 @@ TEST_P(QuicStreamFactoryTest,
       scoped_mock_network_change_notifier_->mock_network_change_notifier();
   mock_ncn->ForceNetworkHandlesSupported();
   mock_ncn->SetConnectedNetworksList({kDefaultNetworkForTests});
-  quic_params_->allow_port_migration = true;
   SetIetfConnectionMigrationFlagsAndConnectionOptions();
   socket_factory_ = std::make_unique<TestPortMigrationSocketFactory>();
   Initialize();
@@ -4918,7 +4933,6 @@ TEST_P(QuicStreamFactoryTest,
   mock_ncn->SetConnectedNetworksList({kDefaultNetworkForTests});
   // Enable migration on network change.
   quic_params_->migrate_sessions_on_network_change_v2 = true;
-  quic_params_->allow_port_migration = true;
   SetIetfConnectionMigrationFlagsAndConnectionOptions();
   socket_factory_ = std::make_unique<TestPortMigrationSocketFactory>();
   Initialize();
@@ -5007,8 +5021,8 @@ void QuicStreamFactoryTestBase::TestSimplePortMigrationOnPathDegrading() {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -5119,7 +5133,6 @@ TEST_P(QuicStreamFactoryTest,
     return;
   }
   SetIetfConnectionMigrationFlagsAndConnectionOptions();
-  quic_params_->allow_port_migration = true;
   socket_factory_ = std::make_unique<TestPortMigrationSocketFactory>();
   Initialize();
 
@@ -5148,8 +5161,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -5310,7 +5323,6 @@ TEST_P(QuicStreamFactoryTest,
   mock_ncn->SetConnectedNetworksList({kDefaultNetworkForTests});
   // Enable migration on network change.
   quic_params_->migrate_sessions_on_network_change_v2 = true;
-  quic_params_->allow_port_migration = true;
   quic_params_->migrate_idle_sessions = true;
   SetIetfConnectionMigrationFlagsAndConnectionOptions();
   socket_factory_ = std::make_unique<TestPortMigrationSocketFactory>();
@@ -5376,8 +5388,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -5530,8 +5542,8 @@ TEST_P(QuicStreamFactoryTest, DoNotMigrateToBadSocketOnPathDegrading) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -5679,8 +5691,8 @@ void QuicStreamFactoryTestBase::TestMigrateSessionWithDrainingStream(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -5832,8 +5844,8 @@ TEST_P(QuicStreamFactoryTest, MigrateOnNewNetworkConnectAfterPathDegrading) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -5961,23 +5973,25 @@ TEST_P(QuicStreamFactoryTest,
 
   // Create request and QuicHttpStream to create session1.
   QuicStreamRequest request1(factory_.get());
-  EXPECT_EQ(OK, request1.Request(
-                    server1, version_, privacy_mode_, DEFAULT_PRIORITY,
-                    SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                    true /* use_dns_aliases */, /*cert_verify_flags=*/0, url_,
-                    net_log_, &net_error_details_,
-                    failed_on_default_network_callback_, callback_.callback()));
+  EXPECT_EQ(OK,
+            request1.Request(
+                server1, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+                failed_on_default_network_callback_, callback_.callback()));
   std::unique_ptr<HttpStream> stream1 = CreateStream(&request1);
   EXPECT_TRUE(stream1.get());
 
   // Create request and QuicHttpStream to create session2.
   QuicStreamRequest request2(factory_.get());
-  EXPECT_EQ(OK, request2.Request(
-                    server2, version_, privacy_mode_, DEFAULT_PRIORITY,
-                    SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                    true /* use_dns_aliases */, /*cert_verify_flags=*/0, url2_,
-                    net_log_, &net_error_details_,
-                    failed_on_default_network_callback_, callback_.callback()));
+  EXPECT_EQ(OK,
+            request2.Request(
+                server2, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                /*cert_verify_flags=*/0, url2_, net_log_, &net_error_details_,
+                failed_on_default_network_callback_, callback_.callback()));
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
   EXPECT_TRUE(stream2.get());
 
@@ -6096,8 +6110,8 @@ TEST_P(QuicStreamFactoryTest, MigrateOnPathDegradingWithNoNewNetwork) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -6237,8 +6251,8 @@ void QuicStreamFactoryTestBase::TestMigrateSessionEarlyNonMigratableStream(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -6317,8 +6331,8 @@ TEST_P(QuicStreamFactoryTest, MigrateSessionEarlyConnectionMigrationDisabled) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -6454,8 +6468,8 @@ TEST_P(QuicStreamFactoryTest, MigrateSessionOnAsyncWriteError) {
   EXPECT_EQ(ERR_IO_PENDING,
             request1.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -6477,8 +6491,8 @@ TEST_P(QuicStreamFactoryTest, MigrateSessionOnAsyncWriteError) {
   EXPECT_EQ(OK,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback2.callback()));
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
@@ -6621,8 +6635,8 @@ TEST_P(QuicStreamFactoryTest, MigrateBackToDefaultPostMigrationOnWriteError) {
   EXPECT_EQ(ERR_IO_PENDING,
             request1.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -6739,8 +6753,9 @@ TEST_P(QuicStreamFactoryTest, MigrateBackToDefaultPostMigrationOnWriteError) {
 // This test verifies that the connection will not attempt connection migration
 // (send connectivity probes on alternate path) when path degrading is detected
 // and handshake is not confirmed.
+// TODO(crbug.com/1347664): This test is failing on various platforms.
 TEST_P(QuicStreamFactoryTest,
-       NoMigrationOnPathDegradingBeforeHandshakeConfirmed) {
+       DISABLED_NoMigrationOnPathDegradingBeforeHandshakeConfirmed) {
   InitializeConnectionMigrationV2Test(
       {kDefaultNetworkForTests, kNewNetworkForTests});
 
@@ -6762,8 +6777,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -6792,13 +6807,16 @@ TEST_P(QuicStreamFactoryTest,
 // This test verifies that if a connection is closed with
 // QUIC_NETWORK_IDLE_TIMEOUT before handshake is completed and there is no
 // alternate network, no new connection will be created.
-TEST_P(QuicStreamFactoryTest, NoAlternateNetworkBeforeHandshakeOnIdleTimeout) {
+// TODO(crbug.com/1347664): This test is failing on various platforms.
+TEST_P(QuicStreamFactoryTest,
+       DISABLED_NoAlternateNetworkBeforeHandshakeOnIdleTimeout) {
   TestNoAlternateNetworkBeforeHandshake(quic::QUIC_NETWORK_IDLE_TIMEOUT);
 }
 
 // This test verifies that if a connection is closed with QUIC_HANDSHAKE_TIMEOUT
 // and there is no alternate network, no new connection will be created.
-TEST_P(QuicStreamFactoryTest, NoAlternateNetworkOnHandshakeTimeout) {
+// TODO(crbug.com/1347664): This test is failing on various platforms.
+TEST_P(QuicStreamFactoryTest, DISABLED_NoAlternateNetworkOnHandshakeTimeout) {
   TestNoAlternateNetworkBeforeHandshake(quic::QUIC_HANDSHAKE_TIMEOUT);
 }
 
@@ -6826,8 +6844,8 @@ void QuicStreamFactoryTestBase::TestNoAlternateNetworkBeforeHandshake(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -6870,12 +6888,15 @@ void QuicStreamFactoryTestBase::TestNoAlternateNetworkBeforeHandshake(
   EXPECT_TRUE(socket_data.AllWriteDataConsumed());
 }
 
-TEST_P(QuicStreamFactoryTest, NewConnectionBeforeHandshakeAfterIdleTimeout) {
+// TODO(crbug.com/1347664): This test is failing on various platforms.
+TEST_P(QuicStreamFactoryTest,
+       DISABLED_NewConnectionBeforeHandshakeAfterIdleTimeout) {
   TestNewConnectionOnAlternateNetworkBeforeHandshake(
       quic::QUIC_NETWORK_IDLE_TIMEOUT);
 }
 
-TEST_P(QuicStreamFactoryTest, NewConnectionAfterHandshakeTimeout) {
+// TODO(crbug.com/1347664): This test is failing on various platforms.
+TEST_P(QuicStreamFactoryTest, DISABLED_NewConnectionAfterHandshakeTimeout) {
   TestNewConnectionOnAlternateNetworkBeforeHandshake(
       quic::QUIC_HANDSHAKE_TIMEOUT);
 }
@@ -6967,8 +6988,8 @@ void QuicStreamFactoryTestBase::
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -7079,8 +7100,8 @@ TEST_P(QuicStreamFactoryTest, MigrationOnWriteErrorBeforeHandshakeConfirmed) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(ERR_QUIC_HANDSHAKE_FAILED, callback_.WaitForResult());
@@ -7103,8 +7124,8 @@ TEST_P(QuicStreamFactoryTest, MigrationOnWriteErrorBeforeHandshakeConfirmed) {
   EXPECT_EQ(ERR_IO_PENDING,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_FALSE(HasActiveSession(scheme_host_port_));
@@ -7132,8 +7153,9 @@ TEST_P(QuicStreamFactoryTest, MigrationOnWriteErrorBeforeHandshakeConfirmed) {
 // Test that if the original connection is closed with QUIC_PACKET_WRITE_ERROR
 // before handshake is confirmed and new connection before handshake is turned
 // on, a new connection will be retried on the alternate network.
+// TODO(crbug.com/1347664): This test is failing on various platforms.
 TEST_P(QuicStreamFactoryTest,
-       RetryConnectionOnWriteErrorBeforeHandshakeConfirmed) {
+       DISABLED_RetryConnectionOnWriteErrorBeforeHandshakeConfirmed) {
   quic_params_->retry_on_alternate_network_before_handshake = true;
   InitializeConnectionMigrationV2Test(
       {kDefaultNetworkForTests, kNewNetworkForTests});
@@ -7192,8 +7214,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   // Ensure that the session is alive but not active.
@@ -7267,8 +7289,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnWriteError(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -7393,8 +7415,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnWriteErrorNoNewNetwork(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -7565,8 +7587,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnWriteErrorWithMultipleRequests(
   EXPECT_EQ(ERR_IO_PENDING,
             request1.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -7588,8 +7610,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnWriteErrorWithMultipleRequests(
   EXPECT_EQ(OK,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback2.callback()));
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
@@ -7725,8 +7747,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnWriteErrorMixedStreams(
   EXPECT_EQ(ERR_IO_PENDING,
             request1.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -7748,8 +7770,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnWriteErrorMixedStreams(
   EXPECT_EQ(OK,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback2.callback()));
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
@@ -7893,8 +7915,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnWriteErrorMixedStreams2(
   EXPECT_EQ(ERR_IO_PENDING,
             request1.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -7916,8 +7938,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnWriteErrorMixedStreams2(
   EXPECT_EQ(OK,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback2.callback()));
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
@@ -8042,8 +8064,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnWriteErrorNonMigratableStream(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -8133,8 +8155,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnWriteErrorMigrationDisabled(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -8243,8 +8265,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnMultipleWriteErrors(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -8315,7 +8337,9 @@ TEST_P(QuicStreamFactoryTest, MigrateSessionOnMultipleWriteErrorsAsyncAsync) {
 
 // Verifies that a connection is closed when connection migration is triggered
 // on network being disconnected and the handshake is not confirmed.
-TEST_P(QuicStreamFactoryTest, NoMigrationBeforeHandshakeOnNetworkDisconnected) {
+// TODO(crbug.com/1347664): This test is failing on various platforms.
+TEST_P(QuicStreamFactoryTest,
+       DISABLED_NoMigrationBeforeHandshakeOnNetworkDisconnected) {
   if (!version_.UsesHttp3())
     return;
   InitializeConnectionMigrationV2Test(
@@ -8335,8 +8359,8 @@ TEST_P(QuicStreamFactoryTest, NoMigrationBeforeHandshakeOnNetworkDisconnected) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   // Deliver the network notification, which should cause the connection to be
@@ -8378,8 +8402,8 @@ void QuicStreamFactoryTestBase::
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -8543,8 +8567,8 @@ void QuicStreamFactoryTestBase::
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -8714,8 +8738,8 @@ void QuicStreamFactoryTestBase::TestMigrationOnWriteErrorPauseBeforeConnected(
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -8875,8 +8899,8 @@ TEST_P(QuicStreamFactoryTest, IgnoreWriteErrorFromOldWriterAfterMigration) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -8999,8 +9023,8 @@ TEST_P(QuicStreamFactoryTest, IgnoreReadErrorFromOldReaderAfterMigration) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -9136,8 +9160,8 @@ TEST_P(QuicStreamFactoryTest, IgnoreReadErrorOnOldReaderDuringMigration) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -9344,8 +9368,8 @@ TEST_P(QuicStreamFactoryTest, DefaultRetransmittableOnWireTimeoutForMigration) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -9513,8 +9537,8 @@ TEST_P(QuicStreamFactoryTest, CustomRetransmittableOnWireTimeoutForMigration) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -9651,8 +9675,8 @@ TEST_P(QuicStreamFactoryTest, CustomRetransmittableOnWireTimeout) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -9720,8 +9744,8 @@ TEST_P(QuicStreamFactoryTest, NoRetransmittableOnWireTimeout) {
   // default value of retransmittable-on-wire-ping timeout.
   ServerNetworkStats stats;
   stats.srtt = base::Milliseconds(200);
-  http_server_properties_->SetServerNetworkStats(url::SchemeHostPort(url_),
-                                                 NetworkIsolationKey(), stats);
+  http_server_properties_->SetServerNetworkStats(
+      url::SchemeHostPort(url_), NetworkAnonymizationKey(), stats);
   quic_params_->estimate_initial_rtt = true;
 
   Initialize();
@@ -9784,8 +9808,8 @@ TEST_P(QuicStreamFactoryTest, NoRetransmittableOnWireTimeout) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -9917,8 +9941,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -9989,8 +10013,8 @@ TEST_P(QuicStreamFactoryTest,
   // default value of retransmittable-on-wire-ping timeout.
   ServerNetworkStats stats;
   stats.srtt = base::Milliseconds(200);
-  http_server_properties_->SetServerNetworkStats(url::SchemeHostPort(url_),
-                                                 NetworkIsolationKey(), stats);
+  http_server_properties_->SetServerNetworkStats(
+      url::SchemeHostPort(url_), NetworkAnonymizationKey(), stats);
   quic_params_->estimate_initial_rtt = true;
   quic_params_->migrate_sessions_on_network_change_v2 = true;
   Initialize();
@@ -10050,8 +10074,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -10144,8 +10168,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -10301,8 +10325,8 @@ void QuicStreamFactoryTestBase::
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -10419,8 +10443,8 @@ void QuicStreamFactoryTestBase::
   EXPECT_EQ(OK,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
@@ -10606,8 +10630,8 @@ TEST_P(QuicStreamFactoryTest, DefaultIdleMigrationPeriod) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -10802,8 +10826,8 @@ TEST_P(QuicStreamFactoryTest, CustomIdleMigrationPeriod) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -10892,8 +10916,8 @@ TEST_P(QuicStreamFactoryTest, ServerMigration) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -10917,6 +10941,13 @@ TEST_P(QuicStreamFactoryTest, ServerMigration) {
   quic::QuicConnectionId cid_on_new_path =
       quic::test::TestConnectionId(12345678);
   MaybeMakeNewConnectionIdAvailableToSession(cid_on_new_path, session);
+
+  NetErrorDetails details;
+  EXPECT_FALSE(details.quic_connection_migration_attempted);
+  EXPECT_FALSE(details.quic_connection_migration_successful);
+  session->PopulateNetErrorDetails(&details);
+  EXPECT_FALSE(details.quic_connection_migration_attempted);
+  EXPECT_FALSE(details.quic_connection_migration_successful);
 
   // Send GET request on stream.
   HttpResponseInfo response;
@@ -10976,7 +11007,7 @@ TEST_P(QuicStreamFactoryTest, ServerMigration) {
 
   const uint8_t kTestIpAddress[] = {1, 2, 3, 4};
   const uint16_t kTestPort = 123;
-  session->Migrate(NetworkChangeNotifier::kInvalidNetworkHandle,
+  session->Migrate(handles::kInvalidNetworkHandle,
                    IPEndPoint(IPAddress(kTestIpAddress), kTestPort), true);
 
   session->GetDefaultSocket()->GetPeerAddress(&ip);
@@ -10987,6 +11018,10 @@ TEST_P(QuicStreamFactoryTest, ServerMigration) {
   EXPECT_TRUE(QuicStreamFactoryPeer::IsLiveSession(factory_.get(), session));
   EXPECT_TRUE(HasActiveSession(scheme_host_port_));
   EXPECT_EQ(1u, session->GetNumActiveStreams());
+
+  session->PopulateNetErrorDetails(&details);
+  EXPECT_TRUE(details.quic_connection_migration_attempted);
+  EXPECT_TRUE(details.quic_connection_migration_successful);
 
   // Run the message loop so that data queued in the new socket is read by the
   // packet reader.
@@ -11003,6 +11038,124 @@ TEST_P(QuicStreamFactoryTest, ServerMigration) {
   EXPECT_TRUE(socket_data1.AllWriteDataConsumed());
   EXPECT_TRUE(socket_data2.AllReadDataConsumed());
   EXPECT_TRUE(socket_data2.AllWriteDataConsumed());
+}
+
+TEST_P(QuicStreamFactoryTest, ServerMigrationNonMigratableStream) {
+  quic_params_->allow_server_migration = true;
+  SetIetfConnectionMigrationFlagsAndConnectionOptions();
+  Initialize();
+
+  ProofVerifyDetailsChromium verify_details = DefaultProofVerifyDetails();
+  crypto_client_stream_factory_.AddProofVerifyDetails(&verify_details);
+  crypto_client_stream_factory_.AddProofVerifyDetails(&verify_details);
+  client_maker_.set_save_packet_frames(true);
+
+  int packet_num = 1;
+  MockQuicData socket_data(version_);
+  socket_data.AddRead(SYNCHRONOUS, ERR_IO_PENDING);  // Hanging Read.
+  if (VersionUsesHttp3(version_.transport_version)) {
+    socket_data.AddWrite(SYNCHRONOUS,
+                         ConstructInitialSettingsPacket(packet_num++));
+  }
+  socket_data.AddWrite(
+      SYNCHRONOUS,
+      ConstructGetRequestPacket(packet_num++,
+                                GetNthClientInitiatedBidirectionalStreamId(0),
+                                true, true));
+  if (VersionUsesHttp3(version_.transport_version)) {
+    socket_data.AddWrite(
+        SYNCHRONOUS, client_maker_.MakeDataPacket(
+                         packet_num++, GetQpackDecoderStreamId(), true, false,
+                         StreamCancellationQpackDecoderInstruction(0)));
+  }
+  socket_data.AddWrite(
+      SYNCHRONOUS,
+      ConstructClientRstPacket(packet_num++, quic::QUIC_STREAM_CANCELLED));
+  socket_data.AddSocketDataToFactory(socket_factory_.get());
+
+  // Create request and QuicHttpStream.
+  QuicStreamRequest request(factory_.get());
+  EXPECT_EQ(ERR_IO_PENDING,
+            request.Request(
+                scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+                failed_on_default_network_callback_, callback_.callback()));
+  EXPECT_EQ(OK, callback_.WaitForResult());
+  std::unique_ptr<HttpStream> stream = CreateStream(&request);
+  EXPECT_TRUE(stream.get());
+
+  // Cause QUIC stream to be created.
+  HttpRequestInfo request_info;
+  request_info.method = "GET";
+  request_info.url = GURL("https://www.example.org/");
+  request_info.traffic_annotation =
+      MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
+  stream->RegisterRequest(&request_info);
+  EXPECT_EQ(OK, stream->InitializeStream(true, DEFAULT_PRIORITY, net_log_,
+                                         CompletionOnceCallback()));
+
+  // Ensure that session is alive and active.
+  QuicChromiumClientSession* session = GetActiveSession(scheme_host_port_);
+  EXPECT_TRUE(QuicStreamFactoryPeer::IsLiveSession(factory_.get(), session));
+  EXPECT_TRUE(HasActiveSession(scheme_host_port_));
+  quic::QuicConnectionId cid_on_new_path =
+      quic::test::TestConnectionId(12345678);
+  MaybeMakeNewConnectionIdAvailableToSession(cid_on_new_path, session);
+
+  // Disable connection migration on the request streams.
+  QuicChromiumClientStream* chrome_stream =
+      static_cast<QuicChromiumClientStream*>(
+          quic::test::QuicSessionPeer::GetStream(
+              session, GetNthClientInitiatedBidirectionalStreamId(0)));
+  EXPECT_TRUE(chrome_stream);
+  chrome_stream->DisableConnectionMigrationToCellularNetwork();
+
+  NetErrorDetails details;
+  EXPECT_FALSE(details.quic_connection_migration_attempted);
+  EXPECT_FALSE(details.quic_connection_migration_successful);
+  session->PopulateNetErrorDetails(&details);
+  EXPECT_FALSE(details.quic_connection_migration_attempted);
+  EXPECT_FALSE(details.quic_connection_migration_successful);
+
+  // Send GET request on stream.
+  HttpResponseInfo response;
+  HttpRequestHeaders request_headers;
+  EXPECT_EQ(OK, stream->SendRequest(request_headers, &response,
+                                    callback_.callback()));
+
+  // The specific network isn't important, we just want something !=
+  // handles::kInvalidNetworkHandle to specify a non-default network.
+  constexpr handles::NetworkHandle kNonDefaultNetwork = 1;
+  constexpr uint8_t kTestIpAddress[] = {1, 2, 3, 4};
+  constexpr uint16_t kTestPort = 123;
+  session->Migrate(kNonDefaultNetwork,
+                   IPEndPoint(IPAddress(kTestIpAddress), kTestPort), true);
+
+  // The session should exist but no longer be active since its only stream has
+  // been reset.
+  EXPECT_TRUE(QuicStreamFactoryPeer::IsLiveSession(factory_.get(), session));
+  EXPECT_FALSE(HasActiveSession(scheme_host_port_));
+
+  session->PopulateNetErrorDetails(&details);
+  EXPECT_TRUE(details.quic_connection_migration_attempted);
+  EXPECT_FALSE(details.quic_connection_migration_successful);
+
+  // Run the message loop so that data queued due to the reset is read by the
+  // packet reader.
+  base::RunLoop().RunUntilIdle();
+
+  // Verify that the request failed since connection the stream couldn't be
+  // migrated.
+  EXPECT_EQ(ERR_QUIC_PROTOCOL_ERROR,
+            stream->ReadResponseHeaders(callback_.callback()));
+  EXPECT_EQ(nullptr, response.headers);
+
+  stream.reset();
+
+  EXPECT_TRUE(socket_data.AllReadDataConsumed());
+  EXPECT_TRUE(socket_data.AllWriteDataConsumed());
 }
 
 TEST_P(QuicStreamFactoryTest, ServerMigrationIPv4ToIPv4) {
@@ -11083,8 +11236,8 @@ TEST_P(QuicStreamFactoryTest, ServerMigrationIPv6ToIPv4Fails) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -11167,8 +11320,8 @@ TEST_P(QuicStreamFactoryTest, ServerMigrationIPv4ToIPv6Fails) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -11229,8 +11382,8 @@ TEST_P(QuicStreamFactoryTest, OnCertDBChanged) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -11253,8 +11406,8 @@ TEST_P(QuicStreamFactoryTest, OnCertDBChanged) {
   EXPECT_EQ(ERR_IO_PENDING,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -11280,21 +11433,21 @@ TEST_P(QuicStreamFactoryTest, SharedCryptoConfig) {
   Initialize();
 
   std::vector<string> cannoncial_suffixes;
-  cannoncial_suffixes.push_back(string(".c.youtube.com"));
-  cannoncial_suffixes.push_back(string(".googlevideo.com"));
+  cannoncial_suffixes.emplace_back(".c.youtube.com");
+  cannoncial_suffixes.emplace_back(".googlevideo.com");
 
-  for (unsigned i = 0; i < cannoncial_suffixes.size(); ++i) {
+  for (const auto& cannoncial_suffix : cannoncial_suffixes) {
     string r1_host_name("r1");
     string r2_host_name("r2");
-    r1_host_name.append(cannoncial_suffixes[i]);
-    r2_host_name.append(cannoncial_suffixes[i]);
+    r1_host_name.append(cannoncial_suffix);
+    r2_host_name.append(cannoncial_suffix);
 
     url::SchemeHostPort scheme_host_port1(url::kHttpsScheme, r1_host_name, 80);
     // Need to hold onto this through the test, to keep the
     // QuicCryptoClientConfig alive.
     std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle =
         QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                               NetworkIsolationKey());
+                                               NetworkAnonymizationKey());
     quic::QuicServerId server_id1(scheme_host_port1.host(),
                                   scheme_host_port1.port(), privacy_mode_);
     quic::QuicCryptoClientConfig::CachedState* cached1 =
@@ -11320,21 +11473,21 @@ TEST_P(QuicStreamFactoryTest, SharedCryptoConfig) {
 TEST_P(QuicStreamFactoryTest, CryptoConfigWhenProofIsInvalid) {
   Initialize();
   std::vector<string> cannoncial_suffixes;
-  cannoncial_suffixes.push_back(string(".c.youtube.com"));
-  cannoncial_suffixes.push_back(string(".googlevideo.com"));
+  cannoncial_suffixes.emplace_back(".c.youtube.com");
+  cannoncial_suffixes.emplace_back(".googlevideo.com");
 
-  for (unsigned i = 0; i < cannoncial_suffixes.size(); ++i) {
+  for (const auto& cannoncial_suffix : cannoncial_suffixes) {
     string r3_host_name("r3");
     string r4_host_name("r4");
-    r3_host_name.append(cannoncial_suffixes[i]);
-    r4_host_name.append(cannoncial_suffixes[i]);
+    r3_host_name.append(cannoncial_suffix);
+    r4_host_name.append(cannoncial_suffix);
 
     url::SchemeHostPort scheme_host_port1(url::kHttpsScheme, r3_host_name, 80);
     // Need to hold onto this through the test, to keep the
     // QuicCryptoClientConfig alive.
     std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle =
         QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                               NetworkIsolationKey());
+                                               NetworkAnonymizationKey());
     quic::QuicServerId server_id1(scheme_host_port1.host(),
                                   scheme_host_port1.port(), privacy_mode_);
     quic::QuicCryptoClientConfig::CachedState* cached1 =
@@ -11383,8 +11536,8 @@ TEST_P(QuicStreamFactoryTest, EnableNotLoadFromDiskCache) {
   EXPECT_EQ(OK,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -11438,14 +11591,12 @@ TEST_P(QuicStreamFactoryTest, ReducePingTimeoutOnConnectionTimeOutOpenStreams) {
   EXPECT_EQ(OK,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
   QuicChromiumClientSession* session = GetActiveSession(scheme_host_port_);
-  EXPECT_EQ(quic::QuicTime::Delta::FromSeconds(quic::kPingTimeoutSecs),
-            session->connection()->ping_timeout());
 
   std::unique_ptr<HttpStream> stream = CreateStream(&request);
   EXPECT_TRUE(stream.get());
@@ -11475,15 +11626,14 @@ TEST_P(QuicStreamFactoryTest, ReducePingTimeoutOnConnectionTimeOutOpenStreams) {
   DVLOG(1) << "Create 2nd session and timeout with open stream";
   TestCompletionCallback callback2;
   QuicStreamRequest request2(factory_.get());
-  EXPECT_EQ(OK, request2.Request(
-                    server2, version_, privacy_mode_, DEFAULT_PRIORITY,
-                    SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                    true /* use_dns_aliases */, /*cert_verify_flags=*/0, url2_,
-                    net_log_, &net_error_details_,
-                    failed_on_default_network_callback_, callback2.callback()));
+  EXPECT_EQ(OK,
+            request2.Request(
+                server2, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+                /*cert_verify_flags=*/0, url2_, net_log_, &net_error_details_,
+                failed_on_default_network_callback_, callback2.callback()));
   QuicChromiumClientSession* session2 = GetActiveSession(server2);
-  EXPECT_EQ(quic::QuicTime::Delta::FromSeconds(10),
-            session2->connection()->ping_timeout());
 
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
   EXPECT_TRUE(stream2.get());
@@ -11506,16 +11656,16 @@ TEST_P(QuicStreamFactoryTest, ReducePingTimeoutOnConnectionTimeOutOpenStreams) {
 
 // Verifies that the QUIC stream factory is initialized correctly.
 TEST_P(QuicStreamFactoryTest, MaybeInitialize) {
-  VerifyInitialization(false /* vary_network_isolation_key */);
+  VerifyInitialization(false /* vary_network_anonymization_key */);
 }
 
-TEST_P(QuicStreamFactoryTest, MaybeInitializeWithNetworkIsolationKey) {
+TEST_P(QuicStreamFactoryTest, MaybeInitializeWithNetworkAnonymizationKey) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
       // enabled_features
       {features::kPartitionHttpServerPropertiesByNetworkIsolationKey,
-       // Need to partition connections by NetworkIsolationKey for
-       // QuicSessionAliasKey to include NetworkIsolationKeys.
+       // Need to partition connections by NetworkAnonymizationKey for
+       // QuicSessionAliasKey to include NetworkAnonymizationKeys.
        features::kPartitionConnectionsByNetworkIsolationKey},
       // disabled_features
       {});
@@ -11523,11 +11673,11 @@ TEST_P(QuicStreamFactoryTest, MaybeInitializeWithNetworkIsolationKey) {
   // one.
   http_server_properties_ = std::make_unique<HttpServerProperties>();
 
-  VerifyInitialization(true /* vary_network_isolation_key */);
+  VerifyInitialization(true /* vary_network_anonymization_key */);
 }
 
-// Without NetworkIsolationKeys enabled for HttpServerProperties, there should
-// only be one global CryptoCache.
+// Without NetworkAnonymizationKeys enabled for HttpServerProperties, there
+// should only be one global CryptoCache.
 TEST_P(QuicStreamFactoryTest, CryptoConfigCache) {
   const char kUserAgentId[] = "spoon";
 
@@ -11539,46 +11689,48 @@ TEST_P(QuicStreamFactoryTest, CryptoConfigCache) {
       {features::kPartitionHttpServerPropertiesByNetworkIsolationKey});
 
   const SchemefulSite kSite1(GURL("https://foo.test/"));
-  const NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
+  const NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
 
   const SchemefulSite kSite2(GURL("https://bar.test/"));
-  const NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
+  const NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
 
   const SchemefulSite kSite3(GURL("https://baz.test/"));
-  const NetworkIsolationKey kNetworkIsolationKey3(kSite3, kSite3);
+  const NetworkAnonymizationKey kNetworkAnonymizationKey3(kSite3, kSite3);
 
   Initialize();
 
-  // Create a QuicCryptoClientConfigHandle for kNetworkIsolationKey1, and set
-  // the user agent.
+  // Create a QuicCryptoClientConfigHandle for kNetworkAnonymizationKey1, and
+  // set the user agent.
   std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle1 =
       QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                             kNetworkIsolationKey1);
+                                             kNetworkAnonymizationKey1);
   crypto_config_handle1->GetConfig()->set_user_agent_id(kUserAgentId);
   EXPECT_EQ(kUserAgentId, crypto_config_handle1->GetConfig()->user_agent_id());
 
-  // Create another crypto config handle using a different NetworkIsolationKey
-  // while the first one is still alive should return the same config, with the
-  // user agent that was just set.
+  // Create another crypto config handle using a different
+  // NetworkAnonymizationKey while the first one is still alive should return
+  // the same config, with the user agent that was just set.
   std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle2 =
       QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                             kNetworkIsolationKey2);
+                                             kNetworkAnonymizationKey2);
   EXPECT_EQ(kUserAgentId, crypto_config_handle2->GetConfig()->user_agent_id());
 
   // Destroying both handles and creating a new one with yet another
-  // NetworkIsolationKey should again return the same config.
+  // NetworkAnonymizationKey should again return the same config.
   crypto_config_handle1.reset();
   crypto_config_handle2.reset();
 
   std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle3 =
       QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                             kNetworkIsolationKey3);
+                                             kNetworkAnonymizationKey3);
   EXPECT_EQ(kUserAgentId, crypto_config_handle3->GetConfig()->user_agent_id());
 }
 
-// With different NetworkIsolationKeys enabled for HttpServerProperties, there
-// should only be one global CryptoCache per NetworkIsolationKey.
-TEST_P(QuicStreamFactoryTest, CryptoConfigCacheWithNetworkIsolationKey) {
+// With different NetworkAnonymizationKeys enabled for HttpServerProperties,
+// there should only be one global CryptoCache per NetworkAnonymizationKey.
+// TODO(https://crbug.com/1335453): The test is flaky.
+TEST_P(QuicStreamFactoryTest,
+       DISABLED_CryptoConfigCacheWithNetworkAnonymizationKey) {
   const char kUserAgentId1[] = "spoon";
   const char kUserAgentId2[] = "fork";
   const char kUserAgentId3[] = "another spoon";
@@ -11587,36 +11739,37 @@ TEST_P(QuicStreamFactoryTest, CryptoConfigCacheWithNetworkIsolationKey) {
   feature_list.InitWithFeatures(
       // enabled_features
       {features::kPartitionHttpServerPropertiesByNetworkIsolationKey,
-       // Need to partition connections by NetworkIsolationKey for
-       // QuicSessionAliasKey to include NetworkIsolationKeys.
+       // Need to partition connections by NetworkAnonymizationKey for
+       // QuicSessionAliasKey to include NetworkAnonymizationKeys.
        features::kPartitionConnectionsByNetworkIsolationKey},
       // disabled_features
       {});
 
   const SchemefulSite kSite1(GURL("https://foo.test/"));
-  const NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
+  const NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
 
   const SchemefulSite kSite2(GURL("https://bar.test/"));
-  const NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
+  const NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
 
   const SchemefulSite kSite3(GURL("https://baz.test/"));
-  const NetworkIsolationKey kNetworkIsolationKey3(kSite3, kSite3);
+  const NetworkAnonymizationKey kNetworkAnonymizationKey3(kSite3, kSite3);
 
   Initialize();
 
-  // Create a QuicCryptoClientConfigHandle for kNetworkIsolationKey1, and set
-  // the user agent.
+  // Create a QuicCryptoClientConfigHandle for kNetworkAnonymizationKey1, and
+  // set the user agent.
   std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle1 =
       QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                             kNetworkIsolationKey1);
+                                             kNetworkAnonymizationKey1);
   crypto_config_handle1->GetConfig()->set_user_agent_id(kUserAgentId1);
   EXPECT_EQ(kUserAgentId1, crypto_config_handle1->GetConfig()->user_agent_id());
 
-  // Create another crypto config handle using a different NetworkIsolationKey
-  // while the first one is still alive should return a different config.
+  // Create another crypto config handle using a different
+  // NetworkAnonymizationKey while the first one is still alive should return a
+  // different config.
   std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle2 =
       QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                             kNetworkIsolationKey2);
+                                             kNetworkAnonymizationKey2);
   EXPECT_EQ("", crypto_config_handle2->GetConfig()->user_agent_id());
   crypto_config_handle2->GetConfig()->set_user_agent_id(kUserAgentId2);
   EXPECT_EQ(kUserAgentId1, crypto_config_handle1->GetConfig()->user_agent_id());
@@ -11626,17 +11779,17 @@ TEST_P(QuicStreamFactoryTest, CryptoConfigCacheWithNetworkIsolationKey) {
   // should result in getting the same CryptoConfigs.
   std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle1_2 =
       QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                             kNetworkIsolationKey1);
+                                             kNetworkAnonymizationKey1);
   std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle2_2 =
       QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                             kNetworkIsolationKey2);
+                                             kNetworkAnonymizationKey2);
   EXPECT_EQ(kUserAgentId1,
             crypto_config_handle1_2->GetConfig()->user_agent_id());
   EXPECT_EQ(kUserAgentId2,
             crypto_config_handle2_2->GetConfig()->user_agent_id());
 
   // Destroying all handles and creating a new one with yet another
-  // NetworkIsolationKey return yet another config.
+  // NetworkAnonymizationKey return yet another config.
   crypto_config_handle1.reset();
   crypto_config_handle2.reset();
   crypto_config_handle1_2.reset();
@@ -11644,7 +11797,7 @@ TEST_P(QuicStreamFactoryTest, CryptoConfigCacheWithNetworkIsolationKey) {
 
   std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle3 =
       QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                             kNetworkIsolationKey3);
+                                             kNetworkAnonymizationKey3);
   EXPECT_EQ("", crypto_config_handle3->GetConfig()->user_agent_id());
   crypto_config_handle3->GetConfig()->set_user_agent_id(kUserAgentId3);
   EXPECT_EQ(kUserAgentId3, crypto_config_handle3->GetConfig()->user_agent_id());
@@ -11653,26 +11806,26 @@ TEST_P(QuicStreamFactoryTest, CryptoConfigCacheWithNetworkIsolationKey) {
   // The old CryptoConfigs should be recovered when creating handles with the
   // same NIKs as before.
   crypto_config_handle2 = QuicStreamFactoryPeer::GetCryptoConfig(
-      factory_.get(), kNetworkIsolationKey2);
+      factory_.get(), kNetworkAnonymizationKey2);
   crypto_config_handle1 = QuicStreamFactoryPeer::GetCryptoConfig(
-      factory_.get(), kNetworkIsolationKey1);
+      factory_.get(), kNetworkAnonymizationKey1);
   crypto_config_handle3 = QuicStreamFactoryPeer::GetCryptoConfig(
-      factory_.get(), kNetworkIsolationKey3);
+      factory_.get(), kNetworkAnonymizationKey3);
   EXPECT_EQ(kUserAgentId1, crypto_config_handle1->GetConfig()->user_agent_id());
   EXPECT_EQ(kUserAgentId2, crypto_config_handle2->GetConfig()->user_agent_id());
   EXPECT_EQ(kUserAgentId3, crypto_config_handle3->GetConfig()->user_agent_id());
 }
 
 // Makes Verifies MRU behavior of the crypto config caches. Without
-// NetworkIsolationKeys enabled, behavior is uninteresting, since there's only
-// one cache, so nothing is ever evicted.
-TEST_P(QuicStreamFactoryTest, CryptoConfigCacheMRUWithNetworkIsolationKey) {
+// NetworkAnonymizationKeys enabled, behavior is uninteresting, since there's
+// only one cache, so nothing is ever evicted.
+TEST_P(QuicStreamFactoryTest, CryptoConfigCacheMRUWithNetworkAnonymizationKey) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
       // enabled_features
       {features::kPartitionHttpServerPropertiesByNetworkIsolationKey,
-       // Need to partition connections by NetworkIsolationKey for
-       // QuicSessionAliasKey to include NetworkIsolationKeys.
+       // Need to partition connections by NetworkAnonymizationKey for
+       // QuicSessionAliasKey to include NetworkAnonymizationKeys.
        features::kPartitionConnectionsByNetworkIsolationKey},
       // disabled_features
       {});
@@ -11685,14 +11838,14 @@ TEST_P(QuicStreamFactoryTest, CryptoConfigCacheMRUWithNetworkIsolationKey) {
   // and keeping the handles alives.
   std::vector<std::unique_ptr<QuicCryptoClientConfigHandle>>
       crypto_config_handles;
-  std::vector<NetworkIsolationKey> network_isolation_keys;
+  std::vector<NetworkAnonymizationKey> network_anonymization_keys;
   for (int i = 0; i < kNumSessionsToMake; ++i) {
     SchemefulSite site(GURL(base::StringPrintf("https://foo%i.test/", i)));
-    network_isolation_keys.push_back(NetworkIsolationKey(site, site));
+    network_anonymization_keys.emplace_back(site, site);
 
     std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle =
         QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                               network_isolation_keys[i]);
+                                               network_anonymization_keys[i]);
     crypto_config_handle->GetConfig()->set_user_agent_id(
         base::NumberToString(i));
     crypto_config_handles.emplace_back(std::move(crypto_config_handle));
@@ -11707,7 +11860,7 @@ TEST_P(QuicStreamFactoryTest, CryptoConfigCacheMRUWithNetworkIsolationKey) {
     // A new handle for the same NIK returns the same crypto config.
     std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle =
         QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                               network_isolation_keys[i]);
+                                               network_anonymization_keys[i]);
     EXPECT_EQ(base::NumberToString(i),
               crypto_config_handle->GetConfig()->user_agent_id());
   }
@@ -11725,7 +11878,7 @@ TEST_P(QuicStreamFactoryTest, CryptoConfigCacheMRUWithNetworkIsolationKey) {
     // evicted. Otherwise, it will return the same one.
     std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle =
         QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                               network_isolation_keys[i]);
+                                               network_anonymization_keys[i]);
     if (kNumSessionsToMake - i > kNumSessionsToMake) {
       EXPECT_EQ("", crypto_config_handle->GetConfig()->user_agent_id());
     } else {
@@ -11738,15 +11891,15 @@ TEST_P(QuicStreamFactoryTest, CryptoConfigCacheMRUWithNetworkIsolationKey) {
 // Similar to above test, but uses real requests, and doesn't keep Handles
 // around, so evictions happen immediately.
 TEST_P(QuicStreamFactoryTest,
-       CryptoConfigCacheMRUWithRealRequestsAndWithNetworkIsolationKey) {
+       CryptoConfigCacheMRUWithRealRequestsAndWithNetworkAnonymizationKey) {
   const int kNumSessionsToMake = kMaxRecentCryptoConfigs + 5;
 
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
       // enabled_features
       {features::kPartitionHttpServerPropertiesByNetworkIsolationKey,
-       // Need to partition connections by NetworkIsolationKey for
-       // QuicSessionAliasKey to include NetworkIsolationKeys.
+       // Need to partition connections by NetworkAnonymizationKey for
+       // QuicSessionAliasKey to include NetworkAnonymizationKeys.
        features::kPartitionConnectionsByNetworkIsolationKey},
       // disabled_features
       {});
@@ -11754,10 +11907,10 @@ TEST_P(QuicStreamFactoryTest,
   // one.
   http_server_properties_ = std::make_unique<HttpServerProperties>();
 
-  std::vector<NetworkIsolationKey> network_isolation_keys;
+  std::vector<NetworkAnonymizationKey> network_anonymization_keys;
   for (int i = 0; i < kNumSessionsToMake; ++i) {
     SchemefulSite site(GURL(base::StringPrintf("https://foo%i.test/", i)));
-    network_isolation_keys.push_back(NetworkIsolationKey(site, site));
+    network_anonymization_keys.emplace_back(site, site);
   }
 
   const quic::QuicServerId kQuicServerId(
@@ -11788,7 +11941,7 @@ TEST_P(QuicStreamFactoryTest,
         AlternativeServiceInfo::CreateQuicAlternativeServiceInfo(
             alternative_service1, expiration, {version_}));
     http_server_properties_->SetAlternativeServices(
-        url::SchemeHostPort(url_), network_isolation_keys[i],
+        url::SchemeHostPort(url_), network_anonymization_keys[i],
         alternative_service_info_vector);
 
     http_server_properties_->SetMaxServerConfigsStoredInProperties(
@@ -11796,7 +11949,7 @@ TEST_P(QuicStreamFactoryTest,
 
     std::unique_ptr<QuicServerInfo> quic_server_info =
         std::make_unique<PropertiesBasedQuicServerInfo>(
-            kQuicServerId, network_isolation_keys[i],
+            kQuicServerId, network_anonymization_keys[i],
             http_server_properties_.get());
 
     // Update quic_server_info's server_config and persist it.
@@ -11849,8 +12002,8 @@ TEST_P(QuicStreamFactoryTest,
         url::SchemeHostPort(url::kHttpsScheme, kDefaultServerHostName,
                             kDefaultServerPort),
         version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
-        network_isolation_keys[i], SecureDnsPolicy::kAllow,
-        true /* use_dns_aliases */,
+        network_anonymization_keys[i], SecureDnsPolicy::kAllow,
+        /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
         /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
         failed_on_default_network_callback_, callback_.callback());
     EXPECT_THAT(callback_.GetResult(rv), IsOk());
@@ -11860,9 +12013,10 @@ TEST_P(QuicStreamFactoryTest,
     // don't count towards the limit.
     for (int j = 0; j < kNumSessionsToMake; ++j) {
       SCOPED_TRACE(j);
-      EXPECT_EQ(i - (kMaxRecentCryptoConfigs + 1) < j && j <= i,
-                !QuicStreamFactoryPeer::CryptoConfigCacheIsEmpty(
-                    factory_.get(), kQuicServerId, network_isolation_keys[j]));
+      EXPECT_EQ(
+          i - (kMaxRecentCryptoConfigs + 1) < j && j <= i,
+          !QuicStreamFactoryPeer::CryptoConfigCacheIsEmpty(
+              factory_.get(), kQuicServerId, network_anonymization_keys[j]));
     }
 
     // Close the sessions, which should cause its CryptoConfigCache to be moved
@@ -11873,9 +12027,10 @@ TEST_P(QuicStreamFactoryTest,
     // CryptoConfigCaches
     for (int j = 0; j < kNumSessionsToMake; ++j) {
       SCOPED_TRACE(j);
-      EXPECT_EQ(i - kMaxRecentCryptoConfigs < j && j <= i,
-                !QuicStreamFactoryPeer::CryptoConfigCacheIsEmpty(
-                    factory_.get(), kQuicServerId, network_isolation_keys[j]));
+      EXPECT_EQ(
+          i - kMaxRecentCryptoConfigs < j && j <= i,
+          !QuicStreamFactoryPeer::CryptoConfigCacheIsEmpty(
+              factory_.get(), kQuicServerId, network_anonymization_keys[j]));
     }
   }
 }
@@ -11911,8 +12066,8 @@ TEST_P(QuicStreamFactoryTest, YieldAfterPackets) {
   EXPECT_EQ(OK,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -11964,8 +12119,8 @@ TEST_P(QuicStreamFactoryTest, YieldAfterDuration) {
   EXPECT_EQ(OK,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -12000,8 +12155,8 @@ TEST_P(QuicStreamFactoryTest, ServerPushSessionAffinity) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -12023,8 +12178,8 @@ TEST_P(QuicStreamFactoryTest, ServerPushSessionAffinity) {
   EXPECT_EQ(OK,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -12055,8 +12210,8 @@ TEST_P(QuicStreamFactoryTest, ServerPushPrivacyModeMismatch) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -12080,13 +12235,14 @@ TEST_P(QuicStreamFactoryTest, ServerPushPrivacyModeMismatch) {
   // Sending the request should not use the push stream, since the privacy mode
   // is different.
   QuicStreamRequest request2(factory_.get());
-  EXPECT_EQ(ERR_IO_PENDING,
-            request2.Request(
-                scheme_host_port_, version_, PRIVACY_MODE_ENABLED,
-                DEFAULT_PRIORITY, SocketTag(), NetworkIsolationKey(),
-                SecureDnsPolicy::kAllow, true /* use_dns_aliases */,
-                /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
-                failed_on_default_network_callback_, callback_.callback()));
+  EXPECT_EQ(
+      ERR_IO_PENDING,
+      request2.Request(
+          scheme_host_port_, version_, PRIVACY_MODE_ENABLED, DEFAULT_PRIORITY,
+          SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+          /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+          /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+          failed_on_default_network_callback_, callback_.callback()));
 
   EXPECT_EQ(0, QuicStreamFactoryPeer::GetNumPushStreamsCreated(factory_.get()));
   // The pushed stream should still be pending.
@@ -12102,13 +12258,13 @@ TEST_P(QuicStreamFactoryTest, ServerPushPrivacyModeMismatch) {
   EXPECT_TRUE(socket_data2.AllWriteDataConsumed());
 }
 
-TEST_P(QuicStreamFactoryTest, ServerPushNetworkIsolationKeyMismatch) {
+TEST_P(QuicStreamFactoryTest, ServerPushNetworkAnonymizationKeyMismatch) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
       // enabled_features
       {features::kPartitionHttpServerPropertiesByNetworkIsolationKey,
-       // Need to partition connections by NetworkIsolationKey for
-       // QuicSessionAliasKey to include NetworkIsolationKeys.
+       // Need to partition connections by NetworkAnonymizationKey for
+       // QuicSessionAliasKey to include NetworkAnonymizationKeys.
        features::kPartitionConnectionsByNetworkIsolationKey},
       // disabled_features
       {});
@@ -12136,8 +12292,8 @@ TEST_P(QuicStreamFactoryTest, ServerPushNetworkIsolationKeyMismatch) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -12159,14 +12315,15 @@ TEST_P(QuicStreamFactoryTest, ServerPushNetworkIsolationKeyMismatch) {
   EXPECT_EQ(index->GetPromised(kDefaultUrl), &promised);
 
   // Sending the request should not use the push stream, since the
-  // NetworkIsolationKey is different.
+  // NetworkAnonymizationKey is different.
   QuicStreamRequest request2(factory_.get());
   EXPECT_EQ(
       ERR_IO_PENDING,
       request2.Request(
           scheme_host_port_, version_, PRIVACY_MODE_DISABLED, DEFAULT_PRIORITY,
-          SocketTag(), NetworkIsolationKey::CreateTransient(),
-          SecureDnsPolicy::kAllow, true /* use_dns_aliases */,
+          SocketTag(), NetworkAnonymizationKey::CreateTransient(),
+          SecureDnsPolicy::kAllow,
+          /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
           /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
           failed_on_default_network_callback_, callback_.callback()));
 
@@ -12205,8 +12362,8 @@ TEST_P(QuicStreamFactoryTest, PoolByOrigin) {
   EXPECT_EQ(ERR_IO_PENDING,
             request1.Request(
                 destination1, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -12220,8 +12377,8 @@ TEST_P(QuicStreamFactoryTest, PoolByOrigin) {
   EXPECT_EQ(OK,
             request2.Request(
                 destination2, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback2.callback()));
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
@@ -12322,9 +12479,8 @@ class QuicStreamFactoryWithDestinationTest
   }
 
   void AddHangingSocketData() {
-    std::unique_ptr<SequencedSocketData> sequenced_socket_data(
-        new SequencedSocketData(base::make_span(&hanging_read_, 1),
-                                base::span<MockWrite>()));
+    auto sequenced_socket_data = std::make_unique<SequencedSocketData>(
+        base::make_span(&hanging_read_, 1), base::span<MockWrite>());
     socket_factory_->AddSocketDataProvider(sequenced_socket_data.get());
     sequenced_socket_data_vector_.push_back(std::move(sequenced_socket_data));
   }
@@ -12385,8 +12541,8 @@ TEST_P(QuicStreamFactoryWithDestinationTest, InvalidCertificate) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 destination, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -12427,8 +12583,8 @@ TEST_P(QuicStreamFactoryWithDestinationTest, SharedCertificate) {
   EXPECT_EQ(ERR_IO_PENDING,
             request1.Request(
                 destination, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url1, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -12443,8 +12599,8 @@ TEST_P(QuicStreamFactoryWithDestinationTest, SharedCertificate) {
   EXPECT_EQ(OK,
             request2.Request(
                 destination, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url2, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback2.callback()));
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
@@ -12507,8 +12663,8 @@ TEST_P(QuicStreamFactoryWithDestinationTest, DifferentPrivacyMode) {
   EXPECT_EQ(ERR_IO_PENDING,
             request1.Request(
                 destination, version_, PRIVACY_MODE_DISABLED, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url1, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -12521,8 +12677,8 @@ TEST_P(QuicStreamFactoryWithDestinationTest, DifferentPrivacyMode) {
   EXPECT_EQ(ERR_IO_PENDING,
             request2.Request(
                 destination, version_, PRIVACY_MODE_ENABLED, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url2, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback2.callback()));
   EXPECT_EQ(OK, callback2.WaitForResult());
@@ -12592,8 +12748,8 @@ TEST_P(QuicStreamFactoryWithDestinationTest, DifferentSecureDnsPolicy) {
   EXPECT_EQ(ERR_IO_PENDING,
             request1.Request(
                 destination, version_, PRIVACY_MODE_DISABLED, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url1, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(OK, callback_.WaitForResult());
@@ -12603,13 +12759,14 @@ TEST_P(QuicStreamFactoryWithDestinationTest, DifferentSecureDnsPolicy) {
 
   TestCompletionCallback callback2;
   QuicStreamRequest request2(factory_.get());
-  EXPECT_EQ(ERR_IO_PENDING,
-            request2.Request(
-                destination, version_, PRIVACY_MODE_DISABLED, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kDisable,
-                true /* use_dns_aliases */,
-                /*cert_verify_flags=*/0, url2, net_log_, &net_error_details_,
-                failed_on_default_network_callback_, callback2.callback()));
+  EXPECT_EQ(
+      ERR_IO_PENDING,
+      request2.Request(
+          destination, version_, PRIVACY_MODE_DISABLED, DEFAULT_PRIORITY,
+          SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kDisable,
+          /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+          /*cert_verify_flags=*/0, url2, net_log_, &net_error_details_,
+          failed_on_default_network_callback_, callback2.callback()));
   EXPECT_EQ(OK, callback2.WaitForResult());
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
   EXPECT_TRUE(stream2.get());
@@ -12676,8 +12833,8 @@ TEST_P(QuicStreamFactoryWithDestinationTest, DisjointCertificate) {
   EXPECT_EQ(ERR_IO_PENDING,
             request1.Request(
                 destination, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url1, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -12690,8 +12847,8 @@ TEST_P(QuicStreamFactoryWithDestinationTest, DisjointCertificate) {
   EXPECT_EQ(ERR_IO_PENDING,
             request2.Request(
                 destination, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url2, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback2.callback()));
   EXPECT_THAT(callback2.WaitForResult(), IsOk());
@@ -12729,7 +12886,7 @@ TEST_P(QuicStreamFactoryTest, ClearCachedStatesInCryptoConfig) {
   // alive.
   std::unique_ptr<QuicCryptoClientConfigHandle> crypto_config_handle =
       QuicStreamFactoryPeer::GetCryptoConfig(factory_.get(),
-                                             NetworkIsolationKey());
+                                             NetworkAnonymizationKey());
 
   struct TestCase {
     TestCase(const std::string& host,
@@ -12784,6 +12941,8 @@ TEST_P(QuicStreamFactoryTest, ConfigConnectionOptions) {
 
   Initialize();
 
+  // RVCM will be default enabled as a connection option.
+  quic_params_->connection_options.push_back(quic::kRVCM);
   const quic::QuicConfig* config =
       QuicStreamFactoryPeer::GetConfig(factory_.get());
   EXPECT_EQ(quic_params_->connection_options, config->SendConnectionOptions());
@@ -12810,8 +12969,8 @@ TEST_P(QuicStreamFactoryTest, HostResolverUsesRequestPriority) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, MAXIMUM_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -12840,8 +12999,8 @@ TEST_P(QuicStreamFactoryTest, HostResolverRequestReprioritizedOnSetPriority) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, MAXIMUM_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -12852,8 +13011,8 @@ TEST_P(QuicStreamFactoryTest, HostResolverRequestReprioritizedOnSetPriority) {
   EXPECT_EQ(ERR_IO_PENDING,
             request2.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url2_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_EQ(DEFAULT_PRIORITY, host_resolver_->last_request_priority());
@@ -12865,11 +13024,11 @@ TEST_P(QuicStreamFactoryTest, HostResolverRequestReprioritizedOnSetPriority) {
 }
 
 // Verifies that the host resolver uses the disable secure DNS setting and
-// NetworkIsolationKey passed to QuicStreamRequest::Request().
+// NetworkAnonymizationKey passed to QuicStreamRequest::Request().
 TEST_P(QuicStreamFactoryTest, HostResolverUsesParams) {
   const SchemefulSite kSite1(GURL("https://foo.test/"));
   const SchemefulSite kSite2(GURL("https://bar.test/"));
-  const NetworkIsolationKey kNetworkIsolationKey(kSite1, kSite1);
+  const NetworkAnonymizationKey kNetworkAnonymizationKey(kSite1, kSite1);
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
       // enabled_features
@@ -12889,13 +13048,14 @@ TEST_P(QuicStreamFactoryTest, HostResolverUsesParams) {
   socket_data.AddSocketDataToFactory(socket_factory_.get());
 
   QuicStreamRequest request(factory_.get());
-  EXPECT_EQ(ERR_IO_PENDING,
-            request.Request(
-                scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), kNetworkIsolationKey, SecureDnsPolicy::kDisable,
-                true /* use_dns_aliases */,
-                /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
-                failed_on_default_network_callback_, callback_.callback()));
+  EXPECT_EQ(
+      ERR_IO_PENDING,
+      request.Request(
+          scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
+          SocketTag(), kNetworkAnonymizationKey, SecureDnsPolicy::kDisable,
+          /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+          /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+          failed_on_default_network_callback_, callback_.callback()));
 
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
   std::unique_ptr<HttpStream> stream = CreateStream(&request);
@@ -12903,9 +13063,10 @@ TEST_P(QuicStreamFactoryTest, HostResolverUsesParams) {
 
   EXPECT_EQ(net::SecureDnsPolicy::kDisable,
             host_resolver_->last_secure_dns_policy());
-  ASSERT_TRUE(host_resolver_->last_request_network_isolation_key().has_value());
-  EXPECT_EQ(kNetworkIsolationKey,
-            host_resolver_->last_request_network_isolation_key().value());
+  ASSERT_TRUE(
+      host_resolver_->last_request_network_anonymization_key().has_value());
+  EXPECT_EQ(kNetworkAnonymizationKey,
+            host_resolver_->last_request_network_anonymization_key().value());
 
   EXPECT_TRUE(socket_data.AllReadDataConsumed());
   EXPECT_TRUE(socket_data.AllWriteDataConsumed());
@@ -12945,8 +13106,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterHostResolutionCallbackAsyncSync) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13000,8 +13161,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterHostResolutionCallbackAsyncAsync) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13052,8 +13213,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterHostResolutionCallbackSyncSync) {
   EXPECT_EQ(ERR_QUIC_PROTOCOL_ERROR,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13091,8 +13252,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterHostResolutionCallbackSyncAsync) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13126,8 +13287,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterHostResolutionCallbackFailSync) {
   EXPECT_EQ(ERR_NAME_NOT_RESOLVED,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13153,8 +13314,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterHostResolutionCallbackFailAsync) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13185,10 +13346,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceAndHostResolutionSync) {
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_synchronous_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -13206,13 +13365,14 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceAndHostResolutionSync) {
   quic_data.AddSocketDataToFactory(socket_factory_.get());
 
   QuicStreamRequest request(factory_.get());
-  EXPECT_THAT(request.Request(
-                  scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                  SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                  true /* use_dns_aliases */,
-                  /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
-                  failed_on_default_network_callback_, callback_.callback()),
-              IsOk());
+  EXPECT_THAT(
+      request.Request(
+          scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
+          SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+          /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
+          /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+          failed_on_default_network_callback_, callback_.callback()),
+      IsOk());
   std::unique_ptr<HttpStream> stream = CreateStream(&request);
   EXPECT_TRUE(stream.get());
   QuicChromiumClientSession* session = GetActiveSession(scheme_host_port_);
@@ -13246,8 +13406,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceAndHostResolutionAsync) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   TestCompletionCallback host_resolution_callback;
@@ -13282,10 +13442,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceHostResolveAsyncStaleMatch) {
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_ondemand_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -13301,8 +13459,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceHostResolveAsyncStaleMatch) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13318,8 +13476,7 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceHostResolveAsyncStaleMatch) {
 
   QuicChromiumClientSession* session = GetActiveSession(scheme_host_port_);
 
-  EXPECT_EQ(session->peer_address().host().ToString(),
-            kCachedIPAddress.ToString());
+  EXPECT_EQ(session->peer_address().host().ToString(), kCachedIPAddress);
 
   EXPECT_TRUE(quic_data.AllReadDataConsumed());
   EXPECT_TRUE(quic_data.AllWriteDataConsumed());
@@ -13337,10 +13494,8 @@ TEST_P(QuicStreamFactoryTest,
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_ondemand_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -13361,8 +13516,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13384,8 +13539,7 @@ TEST_P(QuicStreamFactoryTest,
 
   QuicChromiumClientSession* session = GetActiveSession(scheme_host_port_);
 
-  EXPECT_EQ(session->peer_address().host().ToString(),
-            kCachedIPAddress.ToString());
+  EXPECT_EQ(session->peer_address().host().ToString(), kCachedIPAddress);
 
   EXPECT_TRUE(quic_data.AllReadDataConsumed());
   EXPECT_TRUE(quic_data.AllWriteDataConsumed());
@@ -13403,10 +13557,8 @@ TEST_P(QuicStreamFactoryTest,
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_ondemand_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -13427,8 +13579,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13446,8 +13598,7 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_TRUE(stream.get());
 
   QuicChromiumClientSession* session = GetActiveSession(scheme_host_port_);
-  EXPECT_EQ(session->peer_address().host().ToString(),
-            kCachedIPAddress.ToString());
+  EXPECT_EQ(session->peer_address().host().ToString(), kCachedIPAddress);
 
   EXPECT_TRUE(quic_data.AllReadDataConsumed());
   EXPECT_TRUE(quic_data.AllWriteDataConsumed());
@@ -13465,10 +13616,8 @@ TEST_P(QuicStreamFactoryTest,
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_ondemand_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -13505,8 +13654,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13542,10 +13691,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceStaleAsyncResolveAsyncNoMatch) {
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_ondemand_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -13588,8 +13735,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceStaleAsyncResolveAsyncNoMatch) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13627,10 +13774,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceResolveAsyncStaleAsyncNoMatch) {
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_ondemand_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -13669,8 +13814,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceResolveAsyncStaleAsyncNoMatch) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   // Finish dns resolution, but need to wait for stale connection.
@@ -13712,8 +13857,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceHostResolveError) {
   EXPECT_EQ(ERR_NAME_NOT_RESOLVED,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 }
@@ -13738,8 +13883,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceHostResolveAsyncError) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13759,10 +13904,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceStaleSyncHostResolveError) {
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_ondemand_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -13791,8 +13934,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceStaleSyncHostResolveError) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13820,10 +13963,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceStaleErrorDNSMatches) {
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_ondemand_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -13842,8 +13983,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceStaleErrorDNSMatches) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_FALSE(HasLiveSession(scheme_host_port_));
@@ -13864,10 +14005,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceStaleErrorDNSNoMatch) {
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_ondemand_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -13894,8 +14033,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceStaleErrorDNSNoMatch) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13929,10 +14068,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceStaleErrorDNSNoMatchError) {
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_ondemand_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -13957,8 +14094,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceStaleErrorDNSNoMatchError) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -13982,10 +14119,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceResolveAsyncErrorStaleAsync) {
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_ondemand_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -14016,8 +14151,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceResolveAsyncErrorStaleAsync) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -14041,10 +14176,8 @@ TEST_P(QuicStreamFactoryTest,
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_ondemand_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -14074,8 +14207,8 @@ TEST_P(QuicStreamFactoryTest,
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -14111,8 +14244,8 @@ TEST_P(QuicStreamFactoryTest, ResultAfterDNSRaceHostResolveAsync) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -14149,10 +14282,8 @@ TEST_P(QuicStreamFactoryTest, StaleNetworkFailedAfterHandshake) {
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_ondemand_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -14181,8 +14312,8 @@ TEST_P(QuicStreamFactoryTest, StaleNetworkFailedAfterHandshake) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -14224,10 +14355,8 @@ TEST_P(QuicStreamFactoryTest, StaleNetworkFailedBeforeHandshake) {
 
   // Set up an address in stale resolver cache.
   host_resolver_->set_ondemand_mode(true);
-  host_resolver_->rules()->AddRule(
-      scheme_host_port_.host(),
-      AddressList::CreateFromIPAddress(kCachedIPAddress, 0));
-  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkIsolationKey(),
+  host_resolver_->rules()->AddRule(scheme_host_port_.host(), kCachedIPAddress);
+  host_resolver_->LoadIntoCache(scheme_host_port_, NetworkAnonymizationKey(),
                                 /*optional_parameters=*/absl::nullopt);
 
   // Expire the cache
@@ -14260,8 +14389,8 @@ TEST_P(QuicStreamFactoryTest, StaleNetworkFailedBeforeHandshake) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -14329,8 +14458,8 @@ TEST_P(QuicStreamFactoryTest, ConfigInitialRttForHandshake) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   base::RunLoop().RunUntilIdle();
@@ -14339,10 +14468,10 @@ TEST_P(QuicStreamFactoryTest, ConfigInitialRttForHandshake) {
   EXPECT_TRUE(HasActiveJob(scheme_host_port_, privacy_mode_));
 
   // The pending task is scheduled for handshake timeout retransmission,
-  // which is 2 * 400ms with crypto frames and 1.5 * 400ms otherwise.
+  // which is 3 * 400ms with crypto frames and 1.5 * 400ms otherwise.
   base::TimeDelta handshake_timeout =
       QuicVersionUsesCryptoFrames(version_.transport_version)
-          ? (GetQuicRestartFlag(quic_default_on_pto2) ? 3 : 2) * kInitialRtt
+          ? 3 * kInitialRtt
           : 1.5 * kInitialRtt;
   EXPECT_EQ(handshake_timeout, task_runner->NextPendingTaskDelay());
 
@@ -14398,8 +14527,8 @@ TEST_P(QuicStreamFactoryTest, Tag) {
   QuicStreamRequest request1(factory_.get());
   int rv = request1.Request(
       scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY, tag1,
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-      true /* use_dns_aliases */,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+      /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
       /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
       failed_on_default_network_callback_, callback_.callback());
   EXPECT_THAT(callback_.GetResult(rv), IsOk());
@@ -14415,8 +14544,8 @@ TEST_P(QuicStreamFactoryTest, Tag) {
   QuicStreamRequest request2(factory_.get());
   rv = request2.Request(
       scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY, tag1,
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-      true /* use_dns_aliases */,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+      /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
       /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
       failed_on_default_network_callback_, callback_.callback());
   EXPECT_THAT(callback_.GetResult(rv), IsOk());
@@ -14430,8 +14559,8 @@ TEST_P(QuicStreamFactoryTest, Tag) {
   QuicStreamRequest request3(factory_.get());
   rv = request3.Request(
       scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY, tag2,
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-      true /* use_dns_aliases */,
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+      /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
       /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
       failed_on_default_network_callback_, callback_.callback());
   EXPECT_THAT(callback_.GetResult(rv), IsOk());
@@ -14468,8 +14597,8 @@ TEST_P(QuicStreamFactoryTest, ReadErrorClosesConnection) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -14505,8 +14634,8 @@ TEST_P(QuicStreamFactoryTest, MessageTooBigReadErrorDoesNotCloseConnection) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -14542,8 +14671,8 @@ TEST_P(QuicStreamFactoryTest, ZeroLengthReadDoesNotCloseConnection) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -14581,8 +14710,8 @@ TEST_P(QuicStreamFactoryTest, DnsAliasesCanBeAccessedFromStream) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -14619,8 +14748,8 @@ TEST_P(QuicStreamFactoryTest, NoAdditionalDnsAliases) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -14656,8 +14785,8 @@ TEST_P(QuicStreamFactoryTest, DoNotUseDnsAliases) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                false /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/false, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -14690,8 +14819,8 @@ TEST_P(QuicStreamFactoryTest, ConnectErrorInCreateWithDnsAliases) {
   EXPECT_EQ(ERR_IO_PENDING,
             request.Request(
                 scheme_host_port_, version_, privacy_mode_, DEFAULT_PRIORITY,
-                SocketTag(), NetworkIsolationKey(), SecureDnsPolicy::kAllow,
-                true /* use_dns_aliases */,
+                SocketTag(), NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/false,
                 /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
                 failed_on_default_network_callback_, callback_.callback()));
 
@@ -14699,6 +14828,81 @@ TEST_P(QuicStreamFactoryTest, ConnectErrorInCreateWithDnsAliases) {
 
   EXPECT_TRUE(socket_data.AllReadDataConsumed());
   EXPECT_TRUE(socket_data.AllWriteDataConsumed());
+}
+
+TEST_P(QuicStreamFactoryTest, RequireDnsHttpsAlpnNoHttpsRecord) {
+  std::vector<HostResolverEndpointResult> endpoints(1);
+  endpoints[0].ip_endpoints = {IPEndPoint(IPAddress::IPv4Localhost(), 0)};
+  TestRequireDnsHttpsAlpn(std::move(endpoints), /*expect_success=*/false);
+}
+
+TEST_P(QuicStreamFactoryTest, RequireDnsHttpsAlpnMatch) {
+  std::vector<HostResolverEndpointResult> endpoints(2);
+  endpoints[0].ip_endpoints = {IPEndPoint(IPAddress::IPv4Localhost(), 0)};
+  endpoints[0].metadata.supported_protocol_alpns = {
+      quic::QuicVersionLabelToString(quic::CreateQuicVersionLabel(version_))};
+  // Add a final non-protocol endpoint at the end.
+  endpoints[1].ip_endpoints = {IPEndPoint(IPAddress::IPv4Localhost(), 0)};
+  TestRequireDnsHttpsAlpn(std::move(endpoints), /*expect_success=*/true);
+}
+
+TEST_P(QuicStreamFactoryTest, RequireDnsHttpsAlpnUnkownAlpn) {
+  std::vector<HostResolverEndpointResult> endpoints(2);
+  endpoints[0].ip_endpoints = {IPEndPoint(IPAddress::IPv4Localhost(), 0)};
+  endpoints[0].metadata.supported_protocol_alpns = {"unkown"};
+  // Add a final non-protocol endpoint at the end.
+  endpoints[1].ip_endpoints = {IPEndPoint(IPAddress::IPv4Localhost(), 0)};
+  TestRequireDnsHttpsAlpn(std::move(endpoints), /*expect_success=*/false);
+}
+
+TEST_P(QuicStreamFactoryTest, RequireDnsHttpsAlpnUnkownAndSupportedAlpn) {
+  std::vector<HostResolverEndpointResult> endpoints(2);
+  endpoints[0].ip_endpoints = {IPEndPoint(IPAddress::IPv4Localhost(), 0)};
+  endpoints[0].metadata.supported_protocol_alpns = {
+      "unkown",
+      quic::QuicVersionLabelToString(quic::CreateQuicVersionLabel(version_))};
+  // Add a final non-protocol endpoint at the end.
+  endpoints[1].ip_endpoints = {IPEndPoint(IPAddress::IPv4Localhost(), 0)};
+  TestRequireDnsHttpsAlpn(std::move(endpoints), /*expect_success=*/true);
+}
+
+void QuicStreamFactoryTestBase::TestRequireDnsHttpsAlpn(
+    std::vector<HostResolverEndpointResult> endpoints,
+    bool expect_success) {
+  quic_params_->supported_versions = {version_};
+  host_resolver_ = std::make_unique<MockCachingHostResolver>();
+  host_resolver_->rules()->AddRule(
+      scheme_host_port_.host(),
+      MockHostResolverBase::RuleResolver::RuleResult(
+          std::move(endpoints),
+          /*aliases=*/std::set<std::string>{scheme_host_port_.host()}));
+
+  Initialize();
+  ProofVerifyDetailsChromium verify_details = DefaultProofVerifyDetails();
+  crypto_client_stream_factory_.AddProofVerifyDetails(&verify_details);
+
+  MockQuicData socket_data(version_);
+  socket_data.AddRead(SYNCHRONOUS, ERR_IO_PENDING);
+  if (VersionUsesHttp3(version_.transport_version))
+    socket_data.AddWrite(SYNCHRONOUS, ConstructInitialSettingsPacket());
+  socket_data.AddSocketDataToFactory(socket_factory_.get());
+
+  QuicStreamRequest request(factory_.get());
+  EXPECT_EQ(ERR_IO_PENDING,
+            request.Request(
+                scheme_host_port_, quic::ParsedQuicVersion::Unsupported(),
+                privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
+                NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                /*use_dns_aliases=*/true, /*require_dns_https_alpn=*/true,
+                /*cert_verify_flags=*/0, url_, net_log_, &net_error_details_,
+                failed_on_default_network_callback_, callback_.callback()));
+
+  if (expect_success) {
+    EXPECT_THAT(callback_.WaitForResult(), IsOk());
+  } else {
+    EXPECT_THAT(callback_.WaitForResult(),
+                IsError(ERR_DNS_NO_MACHING_SUPPORTED_ALPN));
+  }
 }
 
 namespace {
@@ -14873,9 +15077,10 @@ TEST_P(QuicStreamFactoryDnsAliasPoolingTest, IPPooling) {
       ERR_IO_PENDING,
       request1.Request(
           kOrigin1, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
-          NetworkIsolationKey(), SecureDnsPolicy::kAllow, use_dns_aliases_,
-          /*cert_verify_flags=*/0, kUrl1, net_log_, &net_error_details_,
-          failed_on_default_network_callback_, callback_.callback()));
+          NetworkAnonymizationKey(), SecureDnsPolicy::kAllow, use_dns_aliases_,
+          /*require_dns_https_alpn=*/false, /*cert_verify_flags=*/0, kUrl1,
+          net_log_, &net_error_details_, failed_on_default_network_callback_,
+          callback_.callback()));
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
 
   std::unique_ptr<HttpStream> stream1 = CreateStream(&request1);
@@ -14888,9 +15093,10 @@ TEST_P(QuicStreamFactoryDnsAliasPoolingTest, IPPooling) {
       ERR_IO_PENDING,
       request2.Request(
           kOrigin2, version_, privacy_mode_, DEFAULT_PRIORITY, SocketTag(),
-          NetworkIsolationKey(), SecureDnsPolicy::kAllow, use_dns_aliases_,
-          /*cert_verify_flags=*/0, kUrl2, net_log_, &net_error_details_,
-          failed_on_default_network_callback_, callback2.callback()));
+          NetworkAnonymizationKey(), SecureDnsPolicy::kAllow, use_dns_aliases_,
+          /*require_dns_https_alpn=*/false, /*cert_verify_flags=*/0, kUrl2,
+          net_log_, &net_error_details_, failed_on_default_network_callback_,
+          callback2.callback()));
   EXPECT_THAT(callback2.WaitForResult(), IsOk());
 
   std::unique_ptr<HttpStream> stream2 = CreateStream(&request2);
@@ -14914,5 +15120,4 @@ TEST_P(QuicStreamFactoryDnsAliasPoolingTest, IPPooling) {
   EXPECT_EQ(expected_dns_aliases2_, stream2->GetDnsAliases());
 }
 
-}  // namespace test
-}  // namespace net
+}  // namespace net::test

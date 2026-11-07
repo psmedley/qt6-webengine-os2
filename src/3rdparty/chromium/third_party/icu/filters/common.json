@@ -132,6 +132,10 @@
 // "brkitr_dictionaries": { everything }
     "brkitr_rules": {
       "excludelist": [
+// Exclude *phrase_cj
+        "line_phrase_cj",
+        "line_normal_phrase_cj",
+        "line_loose_phrase_cj",
 // Exclude line_cj till we upgrade to 68.1 due to size impact.
         "line_cj",
         "title",
@@ -611,8 +615,7 @@
         "-/ExemplarCharactersNumbers",
         "-/ExemplarCharactersPunctuation",
         "-/measurementSystemNames",
-        "-/NumberElements/minimalPairs",
-        "-/delimiters"
+        "-/NumberElements/minimalPairs"
       ]
     },
 // Based on filter_display_language_names
@@ -1438,6 +1441,9 @@
         "+/*/*/meter",
         "-/*/*/meter/case",
         "-/*/*/meter/gender",
+        "+/*/*/microsecond",
+        "-/*/*/microsecond/case",
+        "-/*/*/microsecond/gender",
         "+/*/*/mile",
         "-/*/*/mile/case",
         "-/*/*/mile/gender",
@@ -1459,6 +1465,9 @@
         "+/*/*/month",
         "-/*/*/month/case",
         "-/*/*/month/gender",
+        "+/*/*/nanosecond",
+        "-/*/*/nanosecond/case",
+        "-/*/*/nanosecond/gender",
         "+/*/*/ounce",
         "-/*/*/ounce/case",
         "-/*/*/ounce/gender",

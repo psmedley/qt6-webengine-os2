@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -1911,10 +1911,117 @@ TEST_F(MapCoordinatesTest, IgnoreScrollOffsetWithWritingModes) {
       MapLocalToAncestor(box, scroller, PhysicalOffset(), kIgnoreScrollOffset));
 }
 
+TEST_F(MapCoordinatesTest, FixedPositionWithScrollOffset) {
+  SetBodyInnerHTML(R"HTML(
+    <div id="target" style="position: fixed; top: 200px; left: 100px"></div>
+    <div style="height: 10000px"></div>
+  )HTML");
+
+  auto* target = GetLayoutObjectByElementId("target");
+  PhysicalOffset expected(100, 200);
+  EXPECT_EQ(expected, MapLocalToAncestor(target, nullptr, PhysicalOffset()));
+  EXPECT_EQ(expected,
+            MapLocalToAncestor(target, &GetLayoutView(), PhysicalOffset()));
+  EXPECT_EQ(expected, MapLocalToAncestor(target, nullptr, PhysicalOffset(),
+                                         kIgnoreScrollOffset));
+  EXPECT_EQ(expected,
+            MapLocalToAncestor(target, &GetLayoutView(), PhysicalOffset(),
+                               kIgnoreScrollOffset));
+
+  // Scroll offset doesn't affect MapLocalToAncestor(), regardless of
+  // kIgnoreScrollOffset.
+  GetLayoutView().GetScrollableArea()->ScrollToAbsolutePosition(
+      gfx::PointF(0, 400));
+  EXPECT_EQ(expected, MapLocalToAncestor(target, nullptr, PhysicalOffset()));
+  EXPECT_EQ(expected,
+            MapLocalToAncestor(target, &GetLayoutView(), PhysicalOffset()));
+  EXPECT_EQ(expected, MapLocalToAncestor(target, nullptr, PhysicalOffset(),
+                                         kIgnoreScrollOffset));
+  EXPECT_EQ(expected,
+            MapLocalToAncestor(target, &GetLayoutView(), PhysicalOffset(),
+                               kIgnoreScrollOffset));
+}
+
+TEST_F(MapCoordinatesTest, FixedPositionWithScrollOffsetVerticalRL) {
+  SetBodyInnerHTML(R"HTML(
+    <style>body { writing-mode: vertical-rl; margin: 0; }</style>
+    <div id="target" style="position: fixed; top: 200px; left: 100px"></div>
+    <div style="width: 10000px"></div>
+  )HTML");
+
+  auto* target = GetLayoutObjectByElementId("target");
+  PhysicalOffset expected(100, 200);
+  EXPECT_EQ(expected, MapLocalToAncestor(target, nullptr, PhysicalOffset()));
+  EXPECT_EQ(expected,
+            MapLocalToAncestor(target, &GetLayoutView(), PhysicalOffset()));
+  EXPECT_EQ(expected, MapLocalToAncestor(target, nullptr, PhysicalOffset(),
+                                         kIgnoreScrollOffset));
+  EXPECT_EQ(expected,
+            MapLocalToAncestor(target, &GetLayoutView(), PhysicalOffset(),
+                               kIgnoreScrollOffset));
+
+  // Scroll offset doesn't affect MapLocalToAncestor(), regardless of
+  // kIgnoreScrollOffset.
+  GetLayoutView().GetScrollableArea()->ScrollToAbsolutePosition(
+      gfx::PointF(400, 0));
+  EXPECT_EQ(expected, MapLocalToAncestor(target, nullptr, PhysicalOffset()));
+  EXPECT_EQ(expected,
+            MapLocalToAncestor(target, &GetLayoutView(), PhysicalOffset()));
+  EXPECT_EQ(expected, MapLocalToAncestor(target, nullptr, PhysicalOffset(),
+                                         kIgnoreScrollOffset));
+  EXPECT_EQ(expected,
+            MapLocalToAncestor(target, &GetLayoutView(), PhysicalOffset(),
+                               kIgnoreScrollOffset));
+}
+
+TEST_F(MapCoordinatesTest, FixedPositionUnderTransformWithScrollOffset) {
+  SetBodyInnerHTML(R"HTML(
+    <style>body { margin: 0 }</style>
+    <div style="will-change: transform">
+      <div id="target" style="position: fixed; top: 200px; left: 100px"></div>
+    </div>
+    <div style="height: 10000px"></div>
+  )HTML");
+
+  auto* target = GetLayoutObjectByElementId("target");
+  PhysicalOffset expected(100, 200);
+  EXPECT_EQ(expected, MapLocalToAncestor(target, nullptr, PhysicalOffset()));
+  EXPECT_EQ(expected,
+            MapLocalToAncestor(target, &GetLayoutView(), PhysicalOffset()));
+  EXPECT_EQ(expected, MapLocalToAncestor(target, nullptr, PhysicalOffset(),
+                                         kIgnoreScrollOffset));
+  EXPECT_EQ(expected,
+            MapLocalToAncestor(target, &GetLayoutView(), PhysicalOffset(),
+                               kIgnoreScrollOffset));
+
+  // Fixed position under transform is treated like absolute position, so is
+  // affected by scroll offset.
+  GetLayoutView().GetScrollableArea()->ScrollToAbsolutePosition(
+      gfx::PointF(0, 400));
+  PhysicalOffset expected_scrolled(100, -200);
+  EXPECT_EQ(expected_scrolled,
+            MapLocalToAncestor(target, nullptr, PhysicalOffset()));
+  EXPECT_EQ(expected_scrolled,
+            MapLocalToAncestor(target, &GetLayoutView(), PhysicalOffset()));
+  EXPECT_EQ(expected, MapLocalToAncestor(target, nullptr, PhysicalOffset(),
+                                         kIgnoreScrollOffset));
+  EXPECT_EQ(expected,
+            MapLocalToAncestor(target, &GetLayoutView(), PhysicalOffset(),
+                               kIgnoreScrollOffset));
+}
+
+#if BUILDFLAG(IS_FUCHSIA)
+// TODO(crbug.com/1313287): Fix this test on Fuchsia and re-enable.
+#define MAYBE_IgnoreScrollOffsetWithWritingModesAndNonOverlayScrollbar \
+  DISABLED_IgnoreScrollOffsetWithWritingModesAndNonOverlayScrollbar
+#else
+#define MAYBE_IgnoreScrollOffsetWithWritingModesAndNonOverlayScrollbar \
+  IgnoreScrollOffsetWithWritingModesAndNonOverlayScrollbar
+#endif
 // This test verifies that ignoring scroll offset works with writing modes and
 // non-overlay scrollbar.
 TEST_F(MapCoordinatesTest,
-       IgnoreScrollOffsetWithWritingModesAndNonOverlayScrollbar) {
+       MAYBE_IgnoreScrollOffsetWithWritingModesAndNonOverlayScrollbar) {
   USE_NON_OVERLAY_SCROLLBARS();
 
   SetBodyInnerHTML(R"HTML(

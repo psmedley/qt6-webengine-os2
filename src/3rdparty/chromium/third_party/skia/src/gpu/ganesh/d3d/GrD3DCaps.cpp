@@ -51,11 +51,12 @@ GrD3DCaps::GrD3DCaps(const GrContextOptions& contextOptions, IDXGIAdapter1* adap
 
     fTransferFromBufferToTextureSupport = true;
     fTransferFromSurfaceToBufferSupport = true;
+    fTransferFromBufferToBufferSupport  = true;
 
     fMaxRenderTargetSize = 16384;  // minimum required by feature level 11_0
     fMaxTextureSize = 16384;       // minimum required by feature level 11_0
 
-    fTransferBufferAlignment = D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
+    fTransferBufferRowBytesAlignment = D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
 
     // TODO: implement
     fDynamicStateArrayGeometryProcessorTextureSupport = false;
@@ -98,8 +99,12 @@ bool GrD3DCaps::canCopyAsResolve(DXGI_FORMAT dstFormat, int dstSampleCnt,
     return true;
 }
 
-bool GrD3DCaps::onCanCopySurface(const GrSurfaceProxy* dst, const GrSurfaceProxy* src,
-                                 const SkIRect& srcRect, const SkIPoint& dstPoint) const {
+bool GrD3DCaps::onCanCopySurface(const GrSurfaceProxy* dst, const SkIRect& dstRect,
+                                 const GrSurfaceProxy* src, const SkIRect& srcRect) const {
+    // D3D12 does not support scaling copies
+    if (srcRect.size() != dstRect.size()) {
+        return false;
+    }
     if (src->isProtected() == GrProtected::kYes && dst->isProtected() != GrProtected::kYes) {
         return false;
     }
@@ -202,9 +207,6 @@ void GrD3DCaps::initGrCaps(const D3D12_FEATURE_DATA_D3D12_OPTIONS& optionsDesc,
     fMaxTextureSize = 16384;
     // There's no specific cap for RT size, so use texture size
     fMaxRenderTargetSize = fMaxTextureSize;
-    if (fDriverBugWorkarounds.max_texture_size_limit_4096) {
-        fMaxTextureSize = std::min(fMaxTextureSize, 4096);
-    }
     // Our render targets are always created with textures as the color
     // attachment, hence this min:
     fMaxRenderTargetSize = fMaxTextureSize;
@@ -238,6 +240,7 @@ void GrD3DCaps::initShaderCaps(int vendorID, const D3D12_FEATURE_DATA_D3D12_OPTI
     shaderCaps->fSampleMaskSupport = true;
 
     shaderCaps->fShaderDerivativeSupport = true;
+    shaderCaps->fExplicitTextureLodSupport = true;
 
     shaderCaps->fDualSourceBlendingSupport = true;
 
@@ -341,9 +344,9 @@ const GrD3DCaps::FormatInfo& GrD3DCaps::getFormatInfo(DXGI_FORMAT format) const 
 }
 
 GrD3DCaps::FormatInfo& GrD3DCaps::getFormatInfo(DXGI_FORMAT format) {
-    static_assert(SK_ARRAY_COUNT(kDxgiFormats) == GrD3DCaps::kNumDxgiFormats,
+    static_assert(std::size(kDxgiFormats) == GrD3DCaps::kNumDxgiFormats,
                   "Size of DXGI_FORMATs array must match static value in header");
-    for (size_t i = 0; i < SK_ARRAY_COUNT(kDxgiFormats); ++i) {
+    for (size_t i = 0; i < std::size(kDxgiFormats); ++i) {
         if (kDxgiFormats[i] == format) {
             return fFormatTable[i];
         }
@@ -353,7 +356,7 @@ GrD3DCaps::FormatInfo& GrD3DCaps::getFormatInfo(DXGI_FORMAT format) {
 }
 
 void GrD3DCaps::initFormatTable(const DXGI_ADAPTER_DESC& adapterDesc, ID3D12Device* device) {
-    static_assert(SK_ARRAY_COUNT(kDxgiFormats) == GrD3DCaps::kNumDxgiFormats,
+    static_assert(std::size(kDxgiFormats) == GrD3DCaps::kNumDxgiFormats,
                   "Size of DXGI_FORMATs array must match static value in header");
 
     std::fill_n(fColorTypeToFormatTable, kGrColorTypeCnt, DXGI_FORMAT_UNKNOWN);
@@ -853,14 +856,14 @@ int GrD3DCaps::getRenderTargetSampleCount(int requestedCount, DXGI_FORMAT format
 
     const FormatInfo& info = this->getFormatInfo(format);
 
-    int count = info.fColorSampleCounts.count();
+    int count = info.fColorSampleCounts.size();
 
     if (!count) {
         return 0;
     }
 
     if (1 == requestedCount) {
-        SkASSERT(info.fColorSampleCounts.count() && info.fColorSampleCounts[0] == 1);
+        SkASSERT(info.fColorSampleCounts.size() && info.fColorSampleCounts[0] == 1);
         return 1;
     }
 
@@ -884,10 +887,10 @@ int GrD3DCaps::maxRenderTargetSampleCount(DXGI_FORMAT format) const {
     const FormatInfo& info = this->getFormatInfo(format);
 
     const auto& table = info.fColorSampleCounts;
-    if (!table.count()) {
+    if (!table.size()) {
         return 0;
     }
-    return table[table.count() - 1];
+    return table[table.size() - 1];
 }
 
 GrColorType GrD3DCaps::getFormatColorType(DXGI_FORMAT format) const {

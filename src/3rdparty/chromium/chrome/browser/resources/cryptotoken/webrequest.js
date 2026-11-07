@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -213,7 +213,7 @@ function mapDeviceStatusCodeToU2fError(code) {
     default:
       var reportedError = {
         errorCode: ErrorCodes.OTHER_ERROR,
-        errorMessage: 'device status code: ' + code.toString(16)
+        errorMessage: 'device status code: ' + code.toString(16),
       };
       return reportedError;
   }
@@ -270,7 +270,7 @@ function makeBrowserData(type, serverChallenge, origin) {
   var browserData = {
     'typ': type,
     'challenge': serverChallenge,
-    'origin': origin
+    'origin': origin,
   };
   return JSON.stringify(browserData);
 }
@@ -355,7 +355,7 @@ function encodeSignChallenges(
         'challengeHash': challengeHash,
         'appIdHash': B64_encode(sha256HashOfString(appId)),
         'keyHandle': keyHandle,
-        'version': (challenge['version'] || 'U2F_V1')
+        'version': (challenge['version'] || 'U2F_V1'),
       };
       encodedSignChallenges.push(encodedChallenge);
     }
@@ -375,7 +375,7 @@ function makeSignHelperRequest(challenges, opt_timeoutSeconds, opt_logMsgUrl) {
     'type': 'sign_helper_request',
     'signData': challenges,
     'timeout': opt_timeoutSeconds || 0,
-    'timeoutSeconds': opt_timeoutSeconds || 0
+    'timeoutSeconds': opt_timeoutSeconds || 0,
   };
   if (opt_logMsgUrl !== undefined) {
     request.logMsgUrl = opt_logMsgUrl;

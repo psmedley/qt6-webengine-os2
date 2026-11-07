@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -136,8 +136,8 @@ class NET_EXPORT NetLog {
     friend class NetLog;
 
     // Both of these values are only modified by the NetLog.
-    NetLogCaptureMode capture_mode_;
-    raw_ptr<NetLog> net_log_;
+    NetLogCaptureMode capture_mode_ = NetLogCaptureMode::kDefault;
+    raw_ptr<NetLog> net_log_ = nullptr;
   };
 
   // An observer that is notified of changes in the capture mode set, and has

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,23 +61,31 @@ SelectorObserver::RequestedElement::~RequestedElement() = default;
 SelectorObserver::RequestedElement::RequestedElement(const RequestedElement&) =
     default;
 
+SelectorObserver::Settings::Settings(const base::TimeDelta& max_wait_time,
+                                     const base::TimeDelta& min_check_interval,
+                                     const base::TimeDelta& extra_timeout,
+                                     const base::TimeDelta& debounce_interval)
+    : max_wait_time(max_wait_time),
+      min_check_interval(min_check_interval),
+      extra_timeout(extra_timeout),
+      debounce_interval(debounce_interval) {}
+SelectorObserver::Settings::~Settings() = default;
+SelectorObserver::Settings::Settings(const Settings&) = default;
+
 SelectorObserver::SelectorObserver(
     const std::vector<ObservableSelector>& selectors,
-    base::TimeDelta max_wait_time,
-    base::TimeDelta periodic_check_interval,
-    base::TimeDelta extra_timeout,
+    const Settings& settings,
     content::WebContents* web_contents,
     DevtoolsClient* devtools_client,
     const UserData* user_data,
     Callback update_callback)
-    : periodic_check_interval_(periodic_check_interval),
-      extra_timeout_(extra_timeout),
+    : settings_(settings),
       devtools_client_(devtools_client),
       web_contents_(web_contents),
       user_data_(user_data),
       update_callback_(update_callback) {
   const DomRoot root(/* frame_id = */ "", DomRoot::kUseMainDoc);
-  wait_time_remaining_ms_[root] = max_wait_time.InMilliseconds();
+  wait_time_remaining_ms_[root] = settings.max_wait_time.InMilliseconds();
   for (auto& selector : selectors) {
     selectors_.emplace(std::make_pair(selector.selector_id, selector));
     // Every selector starts in the root frame
@@ -103,10 +111,16 @@ ClientStatus SelectorObserver::Start(base::OnceClosure finished_callback) {
 
   EnterState(State::RUNNING);
   const DomRoot root(/* frame_id = */ "", DomRoot::kUseMainDoc);
+  // Since it's the root frame, it doesn't belong to an iframe and doesn't have
+  // a devtools_id.
+  frame_ids_.emplace(
+      root, FrameIds{/* devtools_id= */ "",
+                     /* global_frame_id= */ web_contents_->GetPrimaryMainFrame()
+                         ->GetGlobalId()});
   ResolveObjectIdAndInjectFrame(root, 0);
 
   timeout_timer_ = std::make_unique<base::OneShotTimer>();
-  timeout_timer_->Start(FROM_HERE, MaxTimeRemaining() + extra_timeout_,
+  timeout_timer_->Start(FROM_HERE, MaxTimeRemaining() + settings_.extra_timeout,
                         base::BindOnce(&SelectorObserver::OnHardTimeout,
                                        weak_ptr_factory_.GetWeakPtr()));
 
@@ -169,15 +183,18 @@ void SelectorObserver::OnGetElementsResponse(
     DomObjectFrameStack element_dom_object;
     element_dom_object.object_data.object_id = element_object_id_entry->second;
     element_dom_object.object_data.node_frame_id = dom_root.frame_id();
-
+    if (const auto entry = frame_ids_.find(dom_root);
+        entry != frame_ids_.end()) {
+      element_dom_object.render_frame_id = entry->second.global_frame_id;
+    }
     size_t depth = 1;
     std::string prev_frame_id = "";
     auto it = dom_roots_.find(std::make_pair(element.selector_id, depth++));
     while (it != dom_roots_.end() && it->second != dom_root) {
-      auto entry = iframe_object_ids_.find(it->second);
-      if (entry != iframe_object_ids_.end()) {
+      if (const auto entry = frame_ids_.find(it->second);
+          entry != frame_ids_.end()) {
         JsObjectIdentifier frame;
-        frame.object_id = entry->second;
+        frame.object_id = entry->second.devtools_id;
         frame.node_frame_id = prev_frame_id;
         element_dom_object.frame_stack.push_back(frame);
       }
@@ -355,6 +372,15 @@ void SelectorObserver::OnDescribeNodeDone(
       return;
     }
 
+    auto* const frame =
+        FindCorrespondingRenderFrameHost(node->GetFrameId(), web_contents_);
+    if (!frame) {
+      VLOG(1) << __func__ << " Failed to find corresponding owner frame.";
+      FailWithError(ClientStatus(FRAME_HOST_NOT_FOUND));
+      return;
+    }
+    const auto global_frame_id = frame->GetGlobalId();
+
     DomRoot dom_root;
     if (node->HasContentDocument()) {
       // If the frame has a ContentDocument it's considered a local frame.
@@ -365,7 +391,9 @@ void SelectorObserver::OnDescribeNodeDone(
       // OOP frame.
       dom_root = DomRoot(node->GetFrameId(), DomRoot::kUseMainDoc);
     }
-    iframe_object_ids_.emplace(dom_root, parent_object_id);
+    frame_ids_.emplace(dom_root,
+                       FrameIds{/* devtools_id= */ parent_object_id,
+                                /* global_frame_id= */ global_frame_id});
     InjectOrAddSelectorsToDomRoot(dom_root, frame_depth, selector_ids);
   } else if (node->HasShadowRoots()) {
     // We aren't entering a frame but a shadow dom.
@@ -572,7 +600,7 @@ void SelectorObserver::OnHasChanges(
   wait_time_remaining_ms_[dom_root] = wait_time_remaining;
   const base::Value* updates_val = value->FindKey("updates");
   DCHECK(updates_val->is_list());
-  auto update_list = updates_val->GetListDeprecated();
+  const base::Value::List& update_list = updates_val->GetList();
   if (update_list.size() == 0) {
     AwaitChanges(dom_root);
     return;
@@ -647,16 +675,16 @@ void SelectorObserver::GetElementsByElementId(
     const std::vector<int>& element_ids,
     base::OnceCallback<void(const base::flat_map<int, std::string>&)>
         callback) {
-  auto element_ids_list =
-      std::make_unique<base::Value>(base::Value::Type::LIST);
+  base::Value::List element_ids_list;
   for (int id : element_ids) {
     DCHECK(id >= 0);
-    element_ids_list->Append(id);
+    element_ids_list.Append(id);
   }
   std::vector<std::unique_ptr<runtime::CallArgument>> arguments;
-  arguments.emplace_back(runtime::CallArgument::Builder()
-                             .SetValue(std::move(element_ids_list))
-                             .Build());
+  arguments.emplace_back(
+      runtime::CallArgument::Builder()
+          .SetValue(std::make_unique<base::Value>(std::move(element_ids_list)))
+          .Build());
   auto status = CallSelectorObserverScriptApi(
       dom_root, "getElements",
       std::move(runtime::CallFunctionOnParams::Builder()
@@ -805,7 +833,7 @@ void SelectorObserver::CheckTimeout() {
   if (pending_frame_injects_ == 0 && MaxTimeRemaining().is_zero()) {
     // We didn't didn't match the required condition in the allotted time. It
     // could be expected from the script perspective.
-    FailWithError(ClientStatus(ELEMENT_RESOLUTION_FAILED));
+    update_callback_.Run(ClientStatus(ELEMENT_RESOLUTION_FAILED), {}, this);
   }
 }
 
@@ -814,15 +842,21 @@ std::string SelectorObserver::BuildExpression(const DomRoot& dom_root) const {
   snippet.AddLine("(function selectorObserver() {");
   snippet.AddLine(
       {"const pollInterval = ",
-       base::NumberToString(periodic_check_interval_.InMilliseconds()), ";"});
+       base::NumberToString(settings_.min_check_interval.InMilliseconds()),
+       ";"});
   int max_wait_time = wait_time_remaining_ms_.at(dom_root);
-  snippet.AddLine({"const maxRuntime = ",
-                   base::NumberToString(base::saturated_cast<int>(
-                       (base::Milliseconds(max_wait_time) + extra_timeout_)
-                           .InMilliseconds())),
-                   ";"});
+  snippet.AddLine(
+      {"const maxRuntime = ",
+       base::NumberToString(base::saturated_cast<int>(
+           (base::Milliseconds(max_wait_time) + settings_.extra_timeout)
+               .InMilliseconds())),
+       ";"});
   snippet.AddLine(
       {"const maxWaitTime = ", base::NumberToString(max_wait_time), ";"});
+  snippet.AddLine(
+      {"const debounceInterval = ",
+       base::NumberToString(settings_.debounce_interval.InMilliseconds()),
+       ";"});
   snippet.AddLine("const selectors = [");
 
   size_t depth = frame_depth_.at(dom_root);

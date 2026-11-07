@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,10 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "media/capture/capture_switches.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/constants/ash_features.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace media {
 
@@ -26,7 +30,16 @@ int DeviceVideoCaptureMaxBufferPoolSize() {
   // here to take into account the delay caused by the consumer (e.g. display or
   // video encoder).
   if (switches::IsVideoCaptureUseGpuMemoryBufferEnabled()) {
-    max_buffer_count = 36;
+    if (base::FeatureList::IsEnabled(
+            chromeos::features::kMoreVideoCaptureBuffers)) {
+      // Some devices might need more buffers to enable advanced features and
+      // might report pipeline depth as 8 for preview, 8 for video snapshot and
+      // 36 for recording. And some extra buffers are needed for the possible
+      // delay of display and video encoder, and also a few for spare usage.
+      max_buffer_count = 76;
+    } else {
+      max_buffer_count = 36;
+    }
   }
 #elif BUILDFLAG(IS_WIN)
   // On Windows, for GMB backed zero-copy more buffers are needed because it's

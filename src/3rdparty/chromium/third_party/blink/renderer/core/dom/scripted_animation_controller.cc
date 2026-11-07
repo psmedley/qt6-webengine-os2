@@ -25,6 +25,7 @@
 
 #include "third_party/blink/renderer/core/dom/scripted_animation_controller.h"
 
+#include "third_party/blink/public/mojom/frame/lifecycle.mojom-blink.h"
 #include "third_party/blink/renderer/core/css/media_query_list_listener.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
@@ -54,7 +55,7 @@ void ScriptedAnimationController::EraseFromPerFrameEventsMap(
   if (it != per_frame_events_.end()) {
     HashSet<const StringImpl*>& set = it->value;
     set.erase(event->type().Impl());
-    if (set.IsEmpty())
+    if (set.empty())
       per_frame_events_.erase(target);
   }
 }
@@ -90,7 +91,6 @@ void ScriptedAnimationController::DispatchEventsAndCallbacksForPrinting() {
 
 void ScriptedAnimationController::ScheduleVideoFrameCallbacksExecution(
     ExecuteVfcCallback execute_vfc_callback) {
-  DCHECK(RuntimeEnabledFeatures::RequestVideoFrameCallbackEnabled());
   vfc_execution_queue_.push_back(std::move(execute_vfc_callback));
   ScheduleAnimationIfNeeded();
 }
@@ -108,7 +108,7 @@ void ScriptedAnimationController::CancelFrameCallback(CallbackId id) {
 
 bool ScriptedAnimationController::HasFrameCallback() const {
   return callback_collection_.HasFrameCallback() ||
-         !vfc_execution_queue_.IsEmpty();
+         !vfc_execution_queue_.empty();
 }
 
 void ScriptedAnimationController::RunTasks() {
@@ -182,10 +182,10 @@ void ScriptedAnimationController::CallMediaQueryListListeners() {
 }
 
 bool ScriptedAnimationController::HasScheduledFrameTasks() const {
-  return callback_collection_.HasFrameCallback() || !task_queue_.IsEmpty() ||
-         !event_queue_.IsEmpty() || !media_query_list_listeners_.IsEmpty() ||
+  return callback_collection_.HasFrameCallback() || !task_queue_.empty() ||
+         !event_queue_.empty() || !media_query_list_listeners_.empty() ||
          GetWindow()->document()->HasAutofocusCandidates() ||
-         !vfc_execution_queue_.IsEmpty();
+         !vfc_execution_queue_.empty();
 }
 
 PageAnimator* ScriptedAnimationController::GetPageAnimator() {
@@ -225,6 +225,9 @@ void ScriptedAnimationController::ServiceScriptedAnimations(
   if (!HasScheduledFrameTasks())
     return;
 
+  // https://gpuweb.github.io/gpuweb/#abstract-opdef-expire-stale-external-textures
+  WebGPUCheckStateToExpireVideoFrame();
+
   // https://html.spec.whatwg.org/C/#update-the-rendering
 
   // 10.5. For each fully active Document in docs, flush autofocus
@@ -251,11 +254,9 @@ void ScriptedAnimationController::ServiceScriptedAnimations(
   // steps for that Document, passing in now as the timestamp.
   RunTasks();
 
-  if (RuntimeEnabledFeatures::RequestVideoFrameCallbackEnabled()) {
-    // Run the fulfilled HTMLVideoELement.requestVideoFrameCallback() callbacks.
-    // See https://wicg.github.io/video-rvfc/.
-    ExecuteVideoFrameCallbacks();
-  }
+  // Run the fulfilled HTMLVideoELement.requestVideoFrameCallback() callbacks.
+  // See https://wicg.github.io/video-rvfc/.
+  ExecuteVideoFrameCallbacks();
 
   // 10.11. For each fully active Document in docs, run the animation
   // frame callbacks for that Document, passing in now as the timestamp.
@@ -315,6 +316,25 @@ void ScriptedAnimationController::ScheduleAnimationIfNeeded() {
 
 LocalDOMWindow* ScriptedAnimationController::GetWindow() const {
   return To<LocalDOMWindow>(GetExecutionContext());
+}
+
+void ScriptedAnimationController::WebGPURegisterVideoFrameStateCallback(
+    WebGPUVideoFrameStateCallback webgpu_video_frame_state_callback) {
+  webgpu_video_frame_state_callbacks_.push_back(
+      std::move(webgpu_video_frame_state_callback));
+}
+
+// If a callback |IsCancelled| or returns false, remove that callback
+// from the list. Otherwise, keep it to be checked again later.
+void ScriptedAnimationController::WebGPUCheckStateToExpireVideoFrame() {
+  for (auto* it = webgpu_video_frame_state_callbacks_.begin();
+       it != webgpu_video_frame_state_callbacks_.end();) {
+    if (it->IsCancelled() || !it->Run()) {
+      it = webgpu_video_frame_state_callbacks_.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 }  // namespace blink

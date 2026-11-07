@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -70,10 +70,8 @@ bool IsGmockObject(const CXXRecordDecl* decl) {
 }
 
 bool IsPodOrTemplateType(const CXXRecordDecl& record) {
-  return record.isPOD() ||
-         record.getDescribedClassTemplate() ||
-         record.getTemplateSpecializationKind() ||
-         record.isDependentType();
+  return record.isPOD() || record.getDescribedClassTemplate() ||
+         record.getTemplateSpecializationKind() || record.isDependentType();
 }
 
 // Use a local RAV implementation to simply collect all FunctionDecls marked for
@@ -120,6 +118,10 @@ std::string GetAutoReplacementTypeAsString(QualType type,
 FindBadConstructsConsumer::FindBadConstructsConsumer(CompilerInstance& instance,
                                                      const Options& options)
     : ChromeClassTester(instance, options) {
+  if (options.check_blink_data_member_type) {
+    blink_data_member_type_checker_.reset(
+        new BlinkDataMemberTypeChecker(instance));
+  }
   if (options.check_ipc) {
     ipc_visitor_.reset(new CheckIPCVisitor(instance));
   }
@@ -226,13 +228,16 @@ void FindBadConstructsConsumer::Traverse(ASTContext& context) {
     layout_visitor_->VisitLayoutObjectMethods(context);
   }
   RecursiveASTVisitor::TraverseDecl(context.getTranslationUnitDecl());
-  if (ipc_visitor_) ipc_visitor_->set_context(nullptr);
+  if (ipc_visitor_)
+    ipc_visitor_->set_context(nullptr);
 }
 
 bool FindBadConstructsConsumer::TraverseDecl(Decl* decl) {
-  if (ipc_visitor_) ipc_visitor_->BeginDecl(decl);
+  if (ipc_visitor_)
+    ipc_visitor_->BeginDecl(decl);
   bool result = RecursiveASTVisitor::TraverseDecl(decl);
-  if (ipc_visitor_) ipc_visitor_->EndDecl();
+  if (ipc_visitor_)
+    ipc_visitor_->EndDecl();
   return result;
 }
 
@@ -249,12 +254,14 @@ bool FindBadConstructsConsumer::VisitTagDecl(clang::TagDecl* tag_decl) {
 
 bool FindBadConstructsConsumer::VisitTemplateSpecializationType(
     TemplateSpecializationType* spec) {
-  if (ipc_visitor_) ipc_visitor_->VisitTemplateSpecializationType(spec);
+  if (ipc_visitor_)
+    ipc_visitor_->VisitTemplateSpecializationType(spec);
   return true;
 }
 
 bool FindBadConstructsConsumer::VisitCallExpr(CallExpr* call_expr) {
-  if (ipc_visitor_) ipc_visitor_->VisitCallExpr(call_expr);
+  if (ipc_visitor_)
+    ipc_visitor_->VisitCallExpr(call_expr);
   return true;
 }
 
@@ -294,6 +301,11 @@ void FindBadConstructsConsumer::CheckChromeClass(LocationType location_type,
   // modularized.
   if (location_type != LocationType::kBlink)
     CheckRefCountedDtors(record_location, record);
+
+  if (blink_data_member_type_checker_ &&
+      location_type == LocationType::kBlink) {
+    blink_data_member_type_checker_->CheckClass(record_location, record);
+  }
 
   CheckWeakPtrFactoryMembers(record_location, record);
 }
@@ -369,8 +381,7 @@ void FindBadConstructsConsumer::CheckCtorDtorWeight(
   // destructor can be inlined.
   int templated_base_classes = 0;
   for (CXXRecordDecl::base_class_const_iterator it = record->bases_begin();
-       it != record->bases_end();
-       ++it) {
+       it != record->bases_end(); ++it) {
     if (it->getTypeSourceInfo()->getTypeLoc().getTypeLocClass() ==
         TypeLoc::TemplateSpecialization) {
       ++templated_base_classes;
@@ -382,8 +393,7 @@ void FindBadConstructsConsumer::CheckCtorDtorWeight(
   int non_trivial_member = 0;
   int templated_non_trivial_member = 0;
   for (RecordDecl::field_iterator it = record->field_begin();
-       it != record->field_end();
-       ++it) {
+       it != record->field_end(); ++it) {
     switch (ClassifyType(it->getType().getTypePtr())) {
       case TypeClassification::kTrivial:
         trivial_member += 1;
@@ -429,8 +439,7 @@ void FindBadConstructsConsumer::CheckCtorDtorWeight(
       // Iterate across all the constructors in this file and yell if we
       // find one that tries to be inline.
       for (CXXRecordDecl::ctor_iterator it = record->ctor_begin();
-           it != record->ctor_end();
-           ++it) {
+           it != record->ctor_end(); ++it) {
         // The current check is buggy. An implicit copy constructor does not
         // have an inline body, so this check never fires for classes with a
         // user-declared out-of-line constructor.
@@ -462,8 +471,9 @@ void FindBadConstructsConsumer::CheckCtorDtorWeight(
                                             diag_inline_complex_ctor_);
           }
         } else if (it->isInlined() && !it->isInlineSpecified() &&
-                   !it->isDeleted() && (!it->isCopyOrMoveConstructor() ||
-                                        it->isExplicitlyDefaulted())) {
+                   !it->isDeleted() &&
+                   (!it->isCopyOrMoveConstructor() ||
+                    it->isExplicitlyDefaulted())) {
           // isInlined() is a more reliable check than hasInlineBody(), but
           // unfortunately, it results in warnings for implicit copy/move
           // constructors in the previously mentioned situation. To preserve
@@ -522,14 +532,11 @@ void FindBadConstructsConsumer::CheckVirtualMethods(
     CXXRecordDecl* record,
     bool warn_on_inline_bodies) {
   if (IsGmockObject(record)) {
-    if (!options_.check_gmock_objects)
-      return;
     warn_on_inline_bodies = false;
   }
 
   for (CXXRecordDecl::method_iterator it = record->method_begin();
-       it != record->method_end();
-       ++it) {
+       it != record->method_end(); ++it) {
     if (it->isCopyAssignmentOperator() || isa<CXXConstructorDecl>(*it)) {
       // Ignore constructors and assignment operators.
     } else if (isa<CXXDestructorDecl>(*it) &&
@@ -708,13 +715,16 @@ FindBadConstructsConsumer::ClassifyType(const Type* type) {
       if (name == "std::basic_string")
         return TypeClassification::kNonTrivialExternTemplate;
 
-      // `base::raw_ptr` is non-trivial if the `use_backup_ref_ptr` flag is
-      // enabled, and trivial otherwise. Since there are many existing types
-      // using this that we don't wish to burden with defining custom
-      // ctors/dtors, and we'd rather not vary on triviality by build config,
-      // treat this as always trivial.
-      if (name == "base::raw_ptr")
+      // `base::raw_ptr` and `base::raw_ref` are non-trivial if the
+      // `use_backup_ref_ptr` flag is enabled, and trivial otherwise. Since
+      // there are many existing types using this that we don't wish to burden
+      // with defining custom ctors/dtors, and we'd rather not vary on
+      // triviality by build config, treat this as always trivial.
+      if (name == "base::raw_ptr" ||
+          (options_.raw_ref_template_as_trivial_member &&
+           name == "base::raw_ref")) {
         return TypeClassification::kTrivialTemplate;
+      }
 
       return TypeClassification::kNonTrivial;
     }
@@ -837,9 +847,8 @@ FindBadConstructsConsumer::CheckRecordForRefcountIssue(
 
 // Returns true if |base| specifies one of the Chromium reference counted
 // classes (base::RefCounted / base::RefCountedThreadSafe).
-bool FindBadConstructsConsumer::IsRefCounted(
-    const CXXBaseSpecifier* base,
-    CXXBasePath& path) {
+bool FindBadConstructsConsumer::IsRefCounted(const CXXBaseSpecifier* base,
+                                             CXXBasePath& path) {
   const TemplateSpecializationType* base_type =
       dyn_cast<TemplateSpecializationType>(
           UnwrapType(base->getType().getTypePtr()));
@@ -990,8 +999,7 @@ void FindBadConstructsConsumer::CheckRefCountedDtors(
   }
 
   for (CXXBasePaths::const_paths_iterator it = dtor_paths.begin();
-       it != dtor_paths.end();
-       ++it) {
+       it != dtor_paths.end(); ++it) {
     // The record with the problem will always be the last record
     // in the path, since it is the record that stopped the search.
     const CXXRecordDecl* problem_record = dyn_cast<CXXRecordDecl>(

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,8 +17,8 @@ class ContainerQueryParserTest : public PageTestBase {
  public:
   String ParseQuery(String string) {
     const auto* context = MakeGarbageCollected<CSSParserContext>(GetDocument());
-    std::unique_ptr<MediaQueryExpNode> node =
-        ContainerQueryParser(*context).ParseQuery(string);
+    const MediaQueryExpNode* node =
+        ContainerQueryParser(*context).ParseCondition(string);
     if (!node)
       return g_null_atom;
     if (node->HasUnknown())
@@ -32,9 +32,15 @@ class ContainerQueryParserTest : public PageTestBase {
     STACK_ALLOCATED();
 
    public:
-    bool IsAllowed(const String& name) const override {
-      return name == "width";
+    bool IsAllowed(const String& feature) const override {
+      return feature == "width";
     }
+    bool IsAllowedWithoutValue(const String& feature,
+                               const ExecutionContext*) const override {
+      return true;
+    }
+    bool IsCaseSensitive(const String& feature) const override { return false; }
+    bool SupportsRange() const override { return true; }
   };
 
   // E.g. https://drafts.csswg.org/css-contain-3/#typedef-style-query
@@ -43,7 +49,7 @@ class ContainerQueryParserTest : public PageTestBase {
     Vector<CSSParserToken, 32> tokens =
         CSSTokenizer(feature_query).TokenizeToEOF();
     CSSParserTokenRange range(tokens);
-    std::unique_ptr<MediaQueryExpNode> node =
+    const MediaQueryExpNode* node =
         ContainerQueryParser(*context).ConsumeFeatureQuery(range,
                                                            TestFeatureSet());
     if (!node || !range.AtEnd())
@@ -66,6 +72,9 @@ TEST_F(ContainerQueryParserTest, ParseQuery) {
       "((width > 100px) and (width > 200px))",
       "((width) and (width) and (width))",
       "((width) or (width) or (width))",
+      "not (width)",
+      "(width) and (height)",
+      "(width) or (height)",
   };
 
   for (const char* test : tests)
@@ -73,8 +82,6 @@ TEST_F(ContainerQueryParserTest, ParseQuery) {
 
   // Invalid:
   EXPECT_EQ("<unknown>", ParseQuery("(min-width)"));
-  EXPECT_EQ(g_null_atom, ParseQuery("(width) and (height)"));
-  EXPECT_EQ(g_null_atom, ParseQuery("(width) or (height)"));
   EXPECT_EQ("<unknown>", ParseQuery("((width) or (width) and (width))"));
   EXPECT_EQ("<unknown>", ParseQuery("((width) and (width) or (width))"));
   EXPECT_EQ("<unknown>", ParseQuery("((width) or (height) and (width))"));

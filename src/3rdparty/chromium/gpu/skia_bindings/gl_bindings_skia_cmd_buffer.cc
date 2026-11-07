@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -112,6 +112,8 @@ sk_sp<GrGLInterface> CreateGLES2InterfaceBindings(
       gles_bind(&GLES2Interface::CompressedTexImage2D, impl, context_support);
   functions->fCompressedTexSubImage2D = gles_bind(
       &GLES2Interface::CompressedTexSubImage2D, impl, context_support);
+  functions->fCopyBufferSubData =
+        gles_bind(&GLES2Interface::CopyBufferSubData, impl, context_support);
   functions->fCopyTexSubImage2D =
       gles_bind(&GLES2Interface::CopyTexSubImage2D, impl, context_support);
   functions->fCreateProgram =

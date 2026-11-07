@@ -1,14 +1,18 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Web test-specific impl of the unexpected passes' queries module."""
 
 import os
 import posixpath
+import typing
+from typing import List, Optional
 
 from blinkpy.web_tests.stale_expectation_removal import constants
+from blinkpy.web_tests.stale_expectation_removal import data_types
 
 from unexpected_passes_common import constants as common_constants
+from unexpected_passes_common import data_types as common_data_types
 from unexpected_passes_common import queries as queries_module
 
 RESULTS_SUBQUERY = """\
@@ -53,7 +57,8 @@ FROM results
 WHERE
   "Failure" IN UNNEST(typ_expectations)
   OR "Crash" IN UNNEST(typ_expectations)
-  OR "Timeout" IN UNNEST(typ_expectations)"""
+  OR "Timeout" IN UNNEST(typ_expectations)
+  OR "Slow" IN UNNEST(typ_expectations)"""
 
 # This query gets us all results for tests from CI that have had results with a
 # Failure, Timeout, or Crash expectation in the past |@num_builds| builds on
@@ -147,6 +152,7 @@ WHERE
   "Failure" IN UNNEST(typ_expectations)
   OR "Crash" IN UNNEST(typ_expectations)
   OR "Timeout" IN UNNEST(typ_expectations)
+  OR "Slow" IN UNNEST(typ_expectations)
 """
 
 ALL_BUILDERS_FROM_TABLE_SUBQUERY = """\
@@ -184,14 +190,21 @@ DEFAULT_TIMEOUT = 6
 
 
 class WebTestBigQueryQuerier(queries_module.BigQueryQuerier):
-    def _ConvertJsonResultToResultObject(self, json_result):
+    def _ConvertJsonResultToResultObject(
+            self, json_result: queries_module.QueryResult
+    ) -> data_types.WebTestResult:
         result = super(WebTestBigQueryQuerier,
                        self)._ConvertJsonResultToResultObject(json_result)
+        # The actual returned data type is set at runtime, so we need to force
+        # pytype to treat this as the correct type during its static analysis,
+        # which doesn't set the the data type.
+        result = typing.cast(data_types.WebTestResult, result)
         result.SetDuration(json_result['duration'], json_result['timeout']
                            or DEFAULT_TIMEOUT)
         return result
 
-    def _GetRelevantExpectationFilesForQueryResult(self, query_result):
+    def _GetRelevantExpectationFilesForQueryResult(
+            self, query_result: queries_module.QueryResult) -> List[str]:
         # Files in the query are either relative to the web tests directory or
         # are an absolute path. The paths are always POSIX-style. We don't
         # handle absolute paths since those typically point to temporary files
@@ -205,15 +218,18 @@ class WebTestBigQueryQuerier(queries_module.BigQueryQuerier):
             filepaths.append(f)
         return filepaths
 
-    def _ShouldSkipOverResult(self, result):
+    def _ShouldSkipOverResult(self,
+                              result: queries_module.QueryResult) -> bool:
         # WebGPU web tests are currently unsupported for various reasons.
         return 'webgpu/' in result['test_id']
 
-    def _GetQueryGeneratorForBuilder(self, builder):
+    def _GetQueryGeneratorForBuilder(
+            self, builder: common_data_types.BuilderEntry
+    ) -> Optional[queries_module.BaseQueryGenerator]:
         builder_type = builder.builder_type
         # Look for all tests.
         if not self._large_query_mode:
-            return WebTestFixedQueryGenerator(builder_type, '')
+            return WebTestFixedQueryGenerator(builder, '')
 
         query = TEST_FILTER_QUERY_TEMPLATE.format(
             builder_project=builder.project, builder_type=builder.builder_type)
@@ -229,12 +245,11 @@ class WebTestBigQueryQuerier(queries_module.BigQueryQuerier):
         # Only consider specific test cases that were found to have active
         # expectations in the above query. Also perform any initial query
         # splitting.
-        target_num_ids = (queries_module.TARGET_RESULTS_PER_QUERY /
+        target_num_ids = (queries_module.TARGET_RESULTS_PER_QUERY //
                           self._num_samples)
-        return WebTestSplitQueryGenerator(builder_type, test_ids,
-                                          target_num_ids)
+        return WebTestSplitQueryGenerator(builder, test_ids, target_num_ids)
 
-    def _StripPrefixFromTestId(self, test_id):
+    def _StripPrefixFromTestId(self, test_id: str) -> str:
         # Web test IDs provided by ResultDB are the test name known by the test
         # runner prefixed by one of the following:
         #   "ninja://:blink_web_tests/"
@@ -244,7 +259,8 @@ class WebTestBigQueryQuerier(queries_module.BigQueryQuerier):
                 return test_id.replace(prefix, '')
         raise RuntimeError('Unable to strip prefix from test ID %s' % test_id)
 
-    def _GetActiveBuilderQuery(self, builder_type, include_internal_builders):
+    def _GetActiveBuilderQuery(self, builder_type: str,
+                               include_internal_builders: bool) -> str:
         if include_internal_builders:
             subquery = ACTIVE_INTERNAL_BUILDER_SUBQUERY.format(
                 builder_project='chrome', builder_type=builder_type)
@@ -257,16 +273,17 @@ class WebTestBigQueryQuerier(queries_module.BigQueryQuerier):
 
 
 class WebTestFixedQueryGenerator(queries_module.FixedQueryGenerator):
-    def GetQueries(self):
+    def GetQueries(self) -> List[str]:
         return QueryGeneratorImpl(self.GetClauses(), self._builder)
 
 
 class WebTestSplitQueryGenerator(queries_module.SplitQueryGenerator):
-    def GetQueries(self):
+    def GetQueries(self) -> List[str]:
         return QueryGeneratorImpl(self.GetClauses(), self._builder)
 
 
-def QueryGeneratorImpl(test_filter_clauses, builder):
+def QueryGeneratorImpl(test_filter_clauses: List[str],
+                       builder: common_data_types.BuilderEntry) -> List[str]:
     queries = []
     query_template = None
     if builder.builder_type == common_constants.BuilderTypes.CI:

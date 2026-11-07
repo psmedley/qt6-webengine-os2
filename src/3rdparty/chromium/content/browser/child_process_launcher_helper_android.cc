@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -78,7 +78,7 @@ ChildProcessLauncherHelper::GetFilesToMap() {
   std::unique_ptr<PosixFileDescriptorInfo> files_to_register =
       CreateDefaultPosixFilesToMap(
           child_process_id(), mojo_channel_->remote_endpoint(),
-          files_to_preload_, GetProcessType(), command_line());
+          file_data_->files_to_preload, GetProcessType(), command_line());
 
 #if ICU_UTIL_DATA_IMPL == ICU_UTIL_DATA_FILE
   base::MemoryMappedFile::Region icu_region;
@@ -92,6 +92,11 @@ ChildProcessLauncherHelper::GetFilesToMap() {
 bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
     PosixFileDescriptorInfo& files_to_register,
     base::LaunchOptions* options) {
+  for (const auto& remapped_fd : file_data_->additional_remapped_fds) {
+    options->fds_to_remap.emplace_back(remapped_fd.second.get(),
+                                       remapped_fd.first);
+  }
+
   return true;
 }
 
@@ -153,8 +158,7 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
 
 void ChildProcessLauncherHelper::AfterLaunchOnLauncherThread(
     const ChildProcessLauncherHelper::Process& process,
-    const base::LaunchOptions& options) {
-}
+    const base::LaunchOptions& options) {}
 
 ChildProcessTerminationInfo ChildProcessLauncherHelper::GetTerminationInfo(
     const ChildProcessLauncherHelper::Process& process,
@@ -173,7 +177,7 @@ ChildProcessTerminationInfo ChildProcessLauncherHelper::GetTerminationInfo(
       app_state == base::android::APPLICATION_STATE_HAS_PAUSED_ACTIVITIES;
 
   if (app_foreground &&
-      (info.binding_state == base::android::ChildBindingState::MODERATE ||
+      (info.binding_state == base::android::ChildBindingState::VISIBLE ||
        info.binding_state == base::android::ChildBindingState::STRONG)) {
     info.status = base::TERMINATION_STATUS_OOM_PROTECTED;
   } else {
@@ -211,15 +215,6 @@ JNI_ChildProcessLauncherHelperImpl_ServiceGroupImportanceEnabled(JNIEnv* env) {
          SiteIsolationPolicy::ArePreloadedIsolatedOriginsEnabled();
 }
 
-static jboolean JNI_ChildProcessLauncherHelperImpl_IsNetworkSandboxEnabled(
-    JNIEnv* env) {
-  // We may want to call ContentBrowserClient::ShouldSandboxNetworkService,
-  // but that needs to be called on the UI thread. This function is called on
-  // the launcher thread, not UI thread. Hence we use
-  // sandbox::policy::features::IsNetworkSandboxEnabled.
-  return sandbox::policy::features::IsNetworkSandboxEnabled();
-}
-
 // static
 bool ChildProcessLauncherHelper::TerminateProcess(const base::Process& process,
                                                   int exit_code) {
@@ -255,6 +250,15 @@ base::File OpenFileToShare(const base::FilePath& path,
   return base::File(base::android::OpenApkAsset(path.value(), region));
 }
 
+base::android::ChildBindingState
+ChildProcessLauncherHelper::GetEffectiveChildBindingState() {
+  JNIEnv* env = AttachCurrentThread();
+  DCHECK(env);
+  return static_cast<base::android::ChildBindingState>(
+      Java_ChildProcessLauncherHelperImpl_getEffectiveChildBindingState(
+          env, java_peer_));
+}
+
 void ChildProcessLauncherHelper::DumpProcessStack(
     const base::Process& process) {
   JNIEnv* env = AttachCurrentThread();
@@ -266,9 +270,7 @@ void ChildProcessLauncherHelper::DumpProcessStack(
 // Called from ChildProcessLauncher.java when the ChildProcess was started.
 // |handle| is the processID of the child process as originated in Java, 0 if
 // the ChildProcess could not be created.
-void ChildProcessLauncherHelper::OnChildProcessStarted(
-    JNIEnv*,
-    jint handle) {
+void ChildProcessLauncherHelper::OnChildProcessStarted(JNIEnv*, jint handle) {
   DCHECK(CurrentlyOnProcessLauncherTaskRunner());
   scoped_refptr<ChildProcessLauncherHelper> ref(this);
   Release();  // Balances with LaunchProcessOnLauncherThread.

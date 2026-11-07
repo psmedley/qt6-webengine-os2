@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/containers/contains.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_util.h"
 #include "components/js_injection/renderer/js_communication.h"
 #include "content/public/renderer/render_frame.h"
@@ -116,8 +117,7 @@ void JsBinding::OnPostMessage(const std::u16string& message) {
   v8::Local<v8::Object> self = GetWrapper(isolate).ToLocalChecked();
   v8::Local<v8::Function> on_message = GetOnMessage(isolate);
   if (!on_message.IsEmpty()) {
-    web_frame->RequestExecuteV8Function(context, on_message, self, 1, argv,
-                                        nullptr);
+    web_frame->RequestExecuteV8Function(context, on_message, self, 1, argv, {});
   }
 
   // Copy the listeners so that if the listener modifies the list in some way
@@ -130,8 +130,7 @@ void JsBinding::OnPostMessage(const std::u16string& message) {
   for (const auto& listener : listeners_copy) {
     // Ensure the listener is still registered.
     if (base::Contains(listeners_, listener)) {
-      web_frame->RequestExecuteV8Function(context, listener, self, 1, argv,
-                                          nullptr);
+      web_frame->RequestExecuteV8Function(context, listener, self, 1, argv, {});
     }
   }
 }
@@ -244,7 +243,7 @@ void JsBinding::RemoveEventListener(gin::Arguments* args) {
     return;
   }
 
-  auto iter = std::find(listeners_.begin(), listeners_.end(), listener);
+  auto iter = base::ranges::find(listeners_, listener);
   if (iter == listeners_.end())
     return;
 

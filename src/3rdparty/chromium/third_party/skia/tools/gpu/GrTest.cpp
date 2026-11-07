@@ -24,10 +24,10 @@
 #include "src/gpu/ganesh/GrSemaphore.h"
 #include "src/gpu/ganesh/GrTexture.h"
 #include "src/gpu/ganesh/SkGr.h"
-#include "src/gpu/ganesh/text/GrStrikeCache.h"
-#include "src/gpu/ganesh/text/GrTextBlobRedrawCoordinator.h"
-#include "src/gpu/ganesh/v1/SurfaceDrawContext_v1.h"
+#include "src/gpu/ganesh/SurfaceDrawContext.h"
 #include "src/image/SkImage_Gpu.h"
+#include "src/text/gpu/StrikeCache.h"
+#include "src/text/gpu/TextBlobRedrawCoordinator.h"
 
 #include <algorithm>
 
@@ -76,25 +76,31 @@ void GrDrawRandomOp(SkRandom* random, skgpu::v1::SurfaceDrawContext* sdc, GrPain
             DRAW_OP_TEST_ENTRY(AAHairlineOp),
             DRAW_OP_TEST_ENTRY(AAStrokeRectOp),
             DRAW_OP_TEST_ENTRY(AtlasTextOp),
+#ifndef SK_ENABLE_OPTIMIZE_SIZE
             DRAW_OP_TEST_ENTRY(ButtCapDashedCircleOp),
             DRAW_OP_TEST_ENTRY(CircleOp),
+#endif
             DRAW_OP_TEST_ENTRY(DashOpImpl),
             DRAW_OP_TEST_ENTRY(DefaultPathOp),
             DRAW_OP_TEST_ENTRY(DrawAtlasOp),
+#ifndef SK_ENABLE_OPTIMIZE_SIZE
             DRAW_OP_TEST_ENTRY(DIEllipseOp),
             DRAW_OP_TEST_ENTRY(EllipseOp),
+#endif
             DRAW_OP_TEST_ENTRY(FillRectOp),
             DRAW_OP_TEST_ENTRY(NonAALatticeOp),
             DRAW_OP_TEST_ENTRY(NonAAStrokeRectOp),
             DRAW_OP_TEST_ENTRY(RegionOp),
+#ifndef SK_ENABLE_OPTIMIZE_SIZE
             DRAW_OP_TEST_ENTRY(RRectOp),
+#endif
             DRAW_OP_TEST_ENTRY(ShadowRRectOp),
             DRAW_OP_TEST_ENTRY(SmallPathOp),
             DRAW_OP_TEST_ENTRY(TextureOpImpl),
             DRAW_OP_TEST_ENTRY(TriangulatingPathOp),
     };
 
-    static constexpr size_t kTotal = SK_ARRAY_COUNT(gFactories);
+    static constexpr size_t kTotal = std::size(gFactories);
     uint32_t index = random->nextULessThan(static_cast<uint32_t>(kTotal));
     auto op = gFactories[index](std::move(paint),
                                 random,

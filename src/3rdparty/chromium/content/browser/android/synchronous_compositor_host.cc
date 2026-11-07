@@ -1,9 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/android/synchronous_compositor_host.h"
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <utility>
@@ -207,6 +208,7 @@ SynchronousCompositorHost::DemandDrawHwAsync(
     const gfx::Rect& viewport_rect_for_tile_priority,
     const gfx::Transform& transform_for_tile_priority) {
   invalidate_needs_draw_ = false;
+  num_invalidates_since_last_draw_ = 0u;
   scoped_refptr<FrameFuture> frame_future = new FrameFuture();
   if (!allow_async_draw_) {
     allow_async_draw_ = allow_async_draw_ || IsReadyForSynchronousCall();
@@ -304,7 +306,6 @@ void SynchronousCompositorHost::UpdateFrameMetaData(
   frame_metadata_version_ = version;
   if (new_local_surface_id)
     local_surface_id_ = new_local_surface_id.value();
-  UpdatePresentedFrameToken(frame_metadata.frame_token);
 }
 
 namespace {
@@ -336,6 +337,7 @@ bool SynchronousCompositorHost::DemandDrawSwInProc(SkCanvas* canvas) {
       blink::mojom::SyncCompositorDemandDrawSwParams::New();  // Unused.
   uint32_t metadata_version = 0u;
   invalidate_needs_draw_ = false;
+  num_invalidates_since_last_draw_ = 0u;
   if (!IsReadyForSynchronousCall() ||
       !GetSynchronousCompositor()->DemandDrawSw(std::move(params),
                                                 &common_renderer_params,
@@ -384,7 +386,7 @@ bool SynchronousCompositorHost::DemandDrawSw(SkCanvas* canvas,
                            canvas->getBaseLayerSize().height());
   SkIRect canvas_clip = canvas->getDeviceClipBounds();
   params->clip = gfx::SkIRectToRect(canvas_clip);
-  params->transform = gfx::Transform(canvas->getTotalMatrix());
+  params->transform = gfx::SkMatrixToTransform(canvas->getTotalMatrix());
   if (params->size.IsEmpty())
     return true;
 
@@ -506,20 +508,22 @@ void SynchronousCompositorHost::ReturnResources(
                                  std::move(resources));
 }
 
+void SynchronousCompositorHost::OnCompositorFrameTransitionDirectiveProcessed(
+    uint32_t layer_tree_frame_sink_id,
+    uint32_t sequence_id) {
+  if (blink::mojom::SynchronousCompositor* compositor =
+          GetSynchronousCompositor()) {
+    compositor->OnCompositorFrameTransitionDirectiveProcessed(
+        layer_tree_frame_sink_id, sequence_id);
+  }
+}
+
 void SynchronousCompositorHost::DidPresentCompositorFrames(
     viz::FrameTimingDetailsMap timing_details,
     uint32_t frame_token) {
   timing_details_ = timing_details;
   if (!timing_details_.empty())
     AddBeginFrameRequest(BEGIN_FRAME);
-
-  UpdatePresentedFrameToken(frame_token);
-}
-
-void SynchronousCompositorHost::UpdatePresentedFrameToken(
-    uint32_t frame_token) {
-  rwhva_->FrameTokenChangedForSynchronousCompositor(frame_token,
-                                                    root_scroll_offset_);
 }
 
 void SynchronousCompositorHost::SetMemoryPolicy(size_t bytes_limit) {
@@ -619,6 +623,7 @@ void SynchronousCompositorHost::UpdateState(
   if (need_invalidate_count_ != params->need_invalidate_count) {
     need_invalidate_count_ = params->need_invalidate_count;
     if (invalidate_needs_draw_) {
+      num_invalidates_since_last_draw_++;
       client_->PostInvalidate(this);
     } else {
       GetSynchronousCompositor()->WillSkipDraw();
@@ -714,12 +719,35 @@ void SynchronousCompositorHost::SendBeginFramePaused() {
 }
 
 void SynchronousCompositorHost::SendBeginFrame(viz::BeginFrameArgs args) {
+  static bool enable_thorttling = base::FeatureList::IsEnabled(
+      ::features::kWebViewThrottleBackgroundBeginFrame);
+  if (enable_thorttling && num_invalidates_since_last_draw_ > 5u) {
+    // Throttle begin frames if there has been no draws in response to
+    // invalidates. This can happen if webview is detached or offscreen. There
+    // are cases where renderer is still expected to make progress. In this
+    // case renderer receives no back pressure so reduce the frequency of begin
+    // frames to avoid unnecessary work.
+    if (num_begin_frames_to_skip_) {
+      TRACE_EVENT_INSTANT0("cc",
+                           "SynchronousCompositorHost::SendBeginFrame_skipped",
+                           TRACE_EVENT_SCOPE_THREAD);
+      num_begin_frames_to_skip_--;
+      return;
+    } else {
+      num_begin_frames_to_skip_ =
+          std::min(num_invalidates_since_last_draw_ / 5, 250u);
+    }
+  } else {
+    num_begin_frames_to_skip_ = 0u;
+  }
+
   TRACE_EVENT2("cc", "SynchronousCompositorHost::SendBeginFrame",
                "frame_number", args.frame_id.sequence_number, "frame_time_us",
                args.frame_time);
 
   if (!bridge_->WaitAfterVSyncOnUIThread())
     return;
+
   blink::mojom::SynchronousCompositor* compositor = GetSynchronousCompositor();
   DCHECK(compositor);
   compositor->BeginFrame(args, timing_details_);

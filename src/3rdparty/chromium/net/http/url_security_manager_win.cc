@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,8 +46,8 @@ class URLSecurityManagerWin : public URLSecurityManagerAllowlist {
   Microsoft::WRL::ComPtr<IInternetSecurityManager> security_manager_;
 };
 
-URLSecurityManagerWin::URLSecurityManagerWin() {}
-URLSecurityManagerWin::~URLSecurityManagerWin() {}
+URLSecurityManagerWin::URLSecurityManagerWin() = default;
+URLSecurityManagerWin::~URLSecurityManagerWin() = default;
 
 bool URLSecurityManagerWin::CanUseDefaultCredentials(
     const url::SchemeHostPort& auth_scheme_host_port) const {

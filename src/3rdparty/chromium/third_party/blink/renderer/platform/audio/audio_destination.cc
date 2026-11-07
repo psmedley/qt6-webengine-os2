@@ -38,6 +38,7 @@
 #include "third_party/blink/public/platform/modules/webrtc/webrtc_logging.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_audio_latency_hint.h"
+#include "third_party/blink/public/platform/web_audio_sink_descriptor.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
 #include "third_party/blink/renderer/platform/audio/push_pull_fifo.h"
 #include "third_party/blink/renderer/platform/audio/vector_math.h"
@@ -104,12 +105,10 @@ AudioDestination::AudioDestination(AudioIOCallback& callback,
                                 number_of_output_channels));
   SendLogMessage(
       String::Format("%s => (FIFO size=%u bytes)", __func__, fifo_->length()));
-  // Create WebAudioDevice. blink::WebAudioDevice is designed to support the
-  // local input (e.g. loopback from OS audio system), but Chromium's media
-  // renderer does not support it currently. Thus, we use zero for the number
-  // of input channels.
+
+  WebAudioSinkDescriptor sink_descriptor(WebString::FromASCII(std::string()));
   web_audio_device_ = Platform::Current()->CreateAudioDevice(
-      0, number_of_output_channels, latency_hint, this, String());
+      sink_descriptor, number_of_output_channels, latency_hint, this);
   DCHECK(web_audio_device_);
 
   callback_buffer_size_ = web_audio_device_->FramesPerBuffer();

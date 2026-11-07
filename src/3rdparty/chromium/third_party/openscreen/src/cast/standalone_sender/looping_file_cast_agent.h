@@ -16,6 +16,7 @@
 #include "cast/common/channel/connection_namespace_handler.h"
 #include "cast/common/channel/virtual_connection_router.h"
 #include "cast/common/public/cast_socket.h"
+#include "cast/common/public/trust_store.h"
 #include "cast/sender/public/sender_socket_factory.h"
 #include "cast/standalone_sender/connection_settings.h"
 #include "cast/standalone_sender/looping_file_sender.h"
@@ -76,6 +77,7 @@ class LoopingFileCastAgent final
   // |shutdown_callback| is invoked after normal shutdown, whether initiated
   // sender- or receiver-side; or, for any fatal error.
   LoopingFileCastAgent(TaskRunner* task_runner,
+                       std::unique_ptr<TrustStore> cast_trust_store,
                        ShutdownCallback shutdown_callback);
   ~LoopingFileCastAgent();
 
@@ -133,15 +135,12 @@ class LoopingFileCastAgent final
                     SenderSession::ConfiguredSenders senders,
                     capture_recommendations::Recommendations
                         capture_recommendations) override;
-  void OnRemotingNegotiated(
-      const SenderSession* session,
-      SenderSession::RemotingNegotiation negotiation) override;
   void OnError(const SenderSession* session, Error error) override;
 
-  // Starts the remoting sender. This may occur when remoting is "ready" if the
-  // session is already negotiated, or upon session negotiation if the receiver
-  // is already ready.
-  void StartRemotingSenders();
+  // Starts the file sender. This may occur when mirroring or remoting is
+  // "ready" if the session is already negotiated, or upon session negotiation
+  // if the receiver is already ready.
+  void StartFileSender();
 
   // Helper for stopping the current session, and/or unwinding a remote
   // connection request (pre-session). This ensures LoopingFileCastAgent is in a
@@ -172,6 +171,8 @@ class LoopingFileCastAgent final
   // the mirroring app on a Cast Receiver.
   absl::optional<VirtualConnection> remote_connection_;
 
+  CastMode cast_mode_ = CastMode::kMirroring;
+
   // Member variables set while a streaming to the mirroring app on a Cast
   // Receiver.
   std::unique_ptr<Environment> environment_;
@@ -183,7 +184,7 @@ class LoopingFileCastAgent final
 
   // Set when remoting is successfully negotiated. However, remoting streams
   // won't start until |is_ready_for_remoting_| is true.
-  std::unique_ptr<SenderSession::RemotingNegotiation> current_negotiation_;
+  std::unique_ptr<SenderSession::ConfiguredSenders> current_negotiation_;
 
   // Set to true when the remoting receiver is ready.  However, remoting streams
   // won't start until remoting is successfully negotiated.

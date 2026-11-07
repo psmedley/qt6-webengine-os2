@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -227,7 +227,13 @@ bool SearchingForNodeTool::HandleMouseMove(const WebMouseEvent& event) {
   if (node && node->IsShadowRoot())
     node = node->ParentOrShadowHostNode();
 
-  if (!node)
+  // Keep last behavior if Ctrl + Alt(Gr) key is being pressed.
+  bool hold_selected_node =
+      (event.GetModifiers() &
+       (WebInputEvent::kAltKey | WebInputEvent::kAltGrKey)) &&
+      (event.GetModifiers() &
+       (WebInputEvent::kControlKey | WebInputEvent::kMetaKey));
+  if (!node || hold_selected_node)
     return true;
 
   std::tie(node, content_visibility_state_) =
@@ -395,7 +401,7 @@ void NodeHighlightTool::DrawNode() {
 }
 
 void NodeHighlightTool::DrawMatchingSelector() {
-  if (selector_list_.IsEmpty() || !node_)
+  if (selector_list_.empty() || !node_)
     return;
   DummyExceptionStateForTesting exception_state;
   ContainerNode* query_base = node_->ContainingShadowRoot();

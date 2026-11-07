@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "media/capture/mojom/video_capture_types.mojom-blink.h"
 #include "media/capture/video_capture_types.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -22,22 +23,12 @@
 
 namespace blink {
 
-namespace {
-// TODO(crbug.com/1223353): Remove usage of Thread::Current()->GetTaskRunner()
-// when canvas capture no longer requires a task runner when trying to capture
-// a detached canvas.
-scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunnerFromFrame(
-    LocalFrame* frame) {
-  return frame ? frame->GetTaskRunner(TaskType::kInternalMediaRealTime)
-               : Thread::Current()->GetTaskRunner();
-}
-}  // namespace
-
 MediaStreamVideoCapturerSource::MediaStreamVideoCapturerSource(
+    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
     LocalFrame* frame,
     SourceStoppedCallback stop_callback,
     std::unique_ptr<VideoCapturerSource> source)
-    : MediaStreamVideoSource(GetTaskRunnerFromFrame(frame)),
+    : MediaStreamVideoSource(std::move(main_task_runner)),
       frame_(frame),
       source_(std::move(source)) {
   media::VideoCaptureFormats preferred_formats = source_->GetPreferredFormats();
@@ -47,12 +38,13 @@ MediaStreamVideoCapturerSource::MediaStreamVideoCapturerSource(
 }
 
 MediaStreamVideoCapturerSource::MediaStreamVideoCapturerSource(
+    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
     LocalFrame* frame,
     SourceStoppedCallback stop_callback,
     const MediaStreamDevice& device,
     const media::VideoCaptureParams& capture_params,
     DeviceCapturerFactoryCallback device_capturer_factory_callback)
-    : MediaStreamVideoSource(GetTaskRunnerFromFrame(frame)),
+    : MediaStreamVideoSource(std::move(main_task_runner)),
       frame_(frame),
       source_(device_capturer_factory_callback.Run(device.session_id())),
       capture_params_(capture_params),
@@ -114,12 +106,16 @@ void MediaStreamVideoCapturerSource::OnCapturingLinkSecured(bool is_secure) {
 
 void MediaStreamVideoCapturerSource::StartSourceImpl(
     VideoCaptureDeliverFrameCB frame_callback,
-    EncodedVideoFrameCB encoded_frame_callback) {
+    EncodedVideoFrameCB encoded_frame_callback,
+    VideoCaptureCropVersionCB crop_version_callback) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
   state_ = kStarting;
   frame_callback_ = std::move(frame_callback);
+  crop_version_callback_ = std::move(crop_version_callback);
+
   source_->StartCapture(
-      capture_params_, frame_callback_,
+      capture_params_, frame_callback_, crop_version_callback_,
       WTF::BindRepeating(&MediaStreamVideoCapturerSource::OnRunStateChanged,
                          WTF::Unretained(this), capture_params_));
 }
@@ -156,7 +152,7 @@ void MediaStreamVideoCapturerSource::RestartSourceImpl(
   new_capture_params.requested_format = new_format;
   state_ = kRestarting;
   source_->StartCapture(
-      new_capture_params, frame_callback_,
+      new_capture_params, frame_callback_, crop_version_callback_,
       WTF::BindRepeating(&MediaStreamVideoCapturerSource::OnRunStateChanged,
                          WTF::Unretained(this), new_capture_params));
 }
@@ -167,27 +163,32 @@ MediaStreamVideoCapturerSource::GetCurrentFormat() const {
   return capture_params_.requested_format;
 }
 
-absl::optional<media::VideoCaptureParams>
-MediaStreamVideoCapturerSource::GetCurrentCaptureParams() const {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  return capture_params_;
-}
-
 void MediaStreamVideoCapturerSource::ChangeSourceImpl(
     const MediaStreamDevice& new_device) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(device_capturer_factory_callback_);
 
-  if (state_ != kStarted) {
+  if (!base::FeatureList::IsEnabled(
+          features::kAllowSourceSwitchOnPausedVideoMediaStream) &&
+      state_ != kStarted) {
     return;
   }
 
-  state_ = kStoppingForChangeSource;
-  source_->StopCapture();
+  if (state_ != kStarted && state_ != kStoppedForRestart) {
+    return;
+  }
+
+  if (state_ == kStarted) {
+    state_ = kStoppingForChangeSource;
+    source_->StopCapture();
+  } else {
+    DCHECK_EQ(state_, kStoppedForRestart);
+    state_ = kRestartingAfterSourceChange;
+  }
   SetDevice(new_device);
   source_ = device_capturer_factory_callback_.Run(new_device.session_id());
   source_->StartCapture(
-      capture_params_, frame_callback_,
+      capture_params_, frame_callback_, crop_version_callback_,
       WTF::BindRepeating(&MediaStreamVideoCapturerSource::OnRunStateChanged,
                          WTF::Unretained(this), capture_params_));
 }
@@ -207,10 +208,21 @@ void MediaStreamVideoCapturerSource::Crop(
   GetMediaStreamDispatcherHost()->Crop(session_id.value(), crop_id,
                                        crop_version, std::move(callback));
 }
+
+absl::optional<uint32_t> MediaStreamVideoCapturerSource::GetNextCropVersion() {
+  if (NumTracks() != 1) {
+    return absl::nullopt;
+  }
+  return ++current_crop_version_;
+}
 #endif
 
+uint32_t MediaStreamVideoCapturerSource::GetCropVersion() const {
+  return current_crop_version_;
+}
+
 base::WeakPtr<MediaStreamVideoSource>
-MediaStreamVideoCapturerSource::GetWeakPtr() const {
+MediaStreamVideoCapturerSource::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
 
@@ -245,7 +257,7 @@ void MediaStreamVideoCapturerSource::OnRunStateChanged(
     case kStoppingForRestart:
       source_->OnLog(
           "MediaStreamVideoCapturerSource sending OnStopForRestartDone");
-      state_ = is_running ? kStarted : kStopped;
+      state_ = is_running ? kStarted : kStoppedForRestart;
       OnStopForRestartDone(!is_running);
       break;
     case kStoppingForChangeSource:
@@ -256,12 +268,23 @@ void MediaStreamVideoCapturerSource::OnRunStateChanged(
         state_ = kStarted;
         capture_params_ = new_capture_params;
       } else {
-        state_ = kStopped;
+        state_ = kStoppedForRestart;
       }
       source_->OnLog("MediaStreamVideoCapturerSource sending OnRestartDone");
       OnRestartDone(is_running);
       break;
+    case kRestartingAfterSourceChange:
+      if (is_running) {
+        state_ = kStarted;
+        capture_params_ = new_capture_params;
+      } else {
+        state_ = kStoppedForRestart;
+      }
+      source_->OnLog("MediaStreamVideoCapturerSource sending OnRestartDone");
+      OnRestartBySourceSwitchDone(is_running);
+      break;
     case kStopped:
+    case kStoppedForRestart:
       break;
   }
 }

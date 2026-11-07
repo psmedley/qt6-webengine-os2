@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -92,14 +92,12 @@ bool MediaRouterDialogController::ShowMediaRouterDialogForPresentation(
   }
 
   start_presentation_context_ = std::move(context);
-  MediaRouterMetrics::RecordMediaRouterDialogOrigin(
-      MediaRouterDialogOpenOrigin::PAGE);
-  FocusOnMediaRouterDialog(true, MediaRouterDialogOpenOrigin::PAGE);
+  FocusOnMediaRouterDialog(true, MediaRouterDialogActivationLocation::PAGE);
   return true;
 }
 
 bool MediaRouterDialogController::ShowMediaRouterDialog(
-    MediaRouterDialogOpenOrigin activation_location) {
+    MediaRouterDialogActivationLocation activation_location) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   bool dialog_needs_creation = !IsShowingMediaRouterDialog();
@@ -115,7 +113,7 @@ void MediaRouterDialogController::HideMediaRouterDialog() {
 
 void MediaRouterDialogController::FocusOnMediaRouterDialog(
     bool dialog_needs_creation,
-    MediaRouterDialogOpenOrigin activation_location) {
+    MediaRouterDialogActivationLocation activation_location) {
   // Show the WebContents requesting a dialog.
   // TODO(takumif): In the case of Views dialog, if the dialog is already shown,
   // activating the WebContents makes the dialog lose focus and disappear. The

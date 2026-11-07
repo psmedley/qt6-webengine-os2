@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,15 +16,11 @@ class EXTENSIONS_CHROMEOS_EXPORT ChromeOS : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  explicit ChromeOS(ExecutionContext* execution_context);
-  CrosWindowManagement* windowManagement();
-  CrosHID* hid();
+  ChromeOS();
+  CrosWindowManagement* windowManagement(ExecutionContext*);
+  CrosHID* hid(ExecutionContext*);
 
   void Trace(Visitor*) const override;
-
- private:
-  Member<CrosWindowManagement> window_management_;
-  Member<CrosHID> hid_;
 };
 
 }  // namespace blink

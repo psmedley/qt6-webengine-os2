@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,11 +81,14 @@ void AnimationDelegateViews::UpdateAnimationRunner(
 }
 
 void AnimationDelegateViews::ClearAnimationRunner() {
+  // `compositor_animation_runner_` holds a pointer owned by `container_`, so
+  // we need to release it before `container_` actually releases the memory it
+  // points to.
+  compositor_animation_runner_ = nullptr;
   // TODO(https://crbug.com/960621): make sure the container has a correct
   // compositor-assisted runner.
   if (container_)
     container_->SetAnimationRunner(nullptr);
-  compositor_animation_runner_ = nullptr;
 }
 
 }  // namespace views

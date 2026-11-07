@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -120,7 +120,7 @@ NGTableTypes::Column NGTableTypes::CreateColumn(
 // Note: this method calls NGBlockNode::ComputeMinMaxSizes.
 NGTableTypes::CellInlineConstraint NGTableTypes::CreateCellInlineConstraint(
     const NGBlockNode& node,
-    WritingMode table_writing_mode,
+    WritingDirectionMode table_writing_direction,
     bool is_fixed_layout,
     const NGBoxStrut& cell_border,
     const NGBoxStrut& cell_padding) {
@@ -129,6 +129,7 @@ NGTableTypes::CellInlineConstraint NGTableTypes::CreateCellInlineConstraint(
   absl::optional<LayoutUnit> css_max_inline_size;
   absl::optional<float> css_percentage_inline_size;
   const auto& style = node.Style();
+  const auto table_writing_mode = table_writing_direction.GetWritingMode();
   const bool is_parallel =
       IsParallelWritingMode(table_writing_mode, style.GetWritingMode());
 
@@ -137,10 +138,12 @@ NGTableTypes::CellInlineConstraint NGTableTypes::CreateCellInlineConstraint(
   absl::optional<MinMaxSizes> cached_min_max_sizes;
   auto MinMaxSizesFunc = [&]() -> MinMaxSizes {
     if (!cached_min_max_sizes) {
+      const auto cell_writing_direction = style.GetWritingDirection();
       NGConstraintSpaceBuilder builder(table_writing_mode,
-                                       style.GetWritingDirection(),
+                                       cell_writing_direction,
                                        /* is_new_fc */ true);
-      builder.SetTableCellBorders(cell_border);
+      builder.SetTableCellBorders(cell_border, cell_writing_direction,
+                                  table_writing_direction);
       builder.SetIsTableCell(true);
       builder.SetCacheSlot(NGCacheSlot::kMeasure);
       if (!is_parallel) {
@@ -353,21 +356,43 @@ NGTableGroupedChildrenIterator::NGTableGroupedChildrenIterator(
     return;
   }
   current_section_ = kNone;
-  AdvanceToNonEmptySection();
+  AdvanceForwardToNonEmptySection();
 }
 
 NGTableGroupedChildrenIterator& NGTableGroupedChildrenIterator::operator++() {
   switch (current_section_) {
     case kHead:
     case kFoot:
-      AdvanceToNonEmptySection();
+      AdvanceForwardToNonEmptySection();
       break;
     case kBody:
       ++position_;
       if (body_vector_->begin() + position_ == grouped_children_.bodies.end())
-        AdvanceToNonEmptySection();
+        AdvanceForwardToNonEmptySection();
       break;
     case kEnd:
+      break;
+    case kNone:
+      NOTREACHED();
+      break;
+  }
+  return *this;
+}
+
+NGTableGroupedChildrenIterator& NGTableGroupedChildrenIterator::operator--() {
+  switch (current_section_) {
+    case kHead:
+    case kFoot:
+      AdvanceBackwardToNonEmptySection();
+      break;
+    case kBody:
+      if (position_ == 0)
+        AdvanceBackwardToNonEmptySection();
+      else
+        --position_;
+      break;
+    case kEnd:
+      AdvanceBackwardToNonEmptySection();
       break;
     case kNone:
       NOTREACHED();
@@ -405,30 +430,59 @@ bool NGTableGroupedChildrenIterator::operator!=(
   return !(*this == rhs);
 }
 
-void NGTableGroupedChildrenIterator::AdvanceToNonEmptySection() {
+void NGTableGroupedChildrenIterator::AdvanceForwardToNonEmptySection() {
   switch (current_section_) {
     case kNone:
       current_section_ = kHead;
       if (!grouped_children_.header)
-        AdvanceToNonEmptySection();
+        AdvanceForwardToNonEmptySection();
       break;
     case kHead:
       current_section_ = kBody;
       body_vector_ = &grouped_children_.bodies;
       position_ = 0;
       if (body_vector_->size() == 0)
-        AdvanceToNonEmptySection();
+        AdvanceForwardToNonEmptySection();
       break;
     case kBody:
       current_section_ = kFoot;
       if (!grouped_children_.footer)
-        AdvanceToNonEmptySection();
+        AdvanceForwardToNonEmptySection();
       break;
     case kFoot:
       current_section_ = kEnd;
       break;
     case kEnd:
       NOTREACHED();
+      break;
+  }
+}
+
+void NGTableGroupedChildrenIterator::AdvanceBackwardToNonEmptySection() {
+  switch (current_section_) {
+    case kNone:
+      NOTREACHED();
+      break;
+    case kHead:
+      current_section_ = kNone;
+      break;
+    case kBody:
+      current_section_ = kHead;
+      if (!grouped_children_.header)
+        AdvanceBackwardToNonEmptySection();
+      break;
+    case kFoot:
+      current_section_ = kBody;
+      body_vector_ = &grouped_children_.bodies;
+      if (body_vector_->size() == 0)
+        AdvanceBackwardToNonEmptySection();
+      else
+        position_ = body_vector_->size() - 1;
+      break;
+    case kEnd:
+      current_section_ = kFoot;
+      if (!grouped_children_.footer)
+        AdvanceBackwardToNonEmptySection();
       break;
   }
 }

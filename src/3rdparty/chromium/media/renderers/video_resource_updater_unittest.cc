@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -183,6 +183,26 @@ class VideoResourceUpdaterTest : public testing::Test {
     return video_frame;
   }
 
+  scoped_refptr<VideoFrame> CreateNV12TestFrame() {
+    const int kDimension = 10;
+    gfx::Size size(kDimension, kDimension);
+
+    scoped_refptr<VideoFrame> video_frame(VideoFrame::CreateFrame(
+        PIXEL_FORMAT_NV12, size, gfx::Rect(size), size, base::TimeDelta()));
+    EXPECT_TRUE(video_frame);
+    return video_frame;
+  }
+
+  scoped_refptr<VideoFrame> CreateP016TestFrame() {
+    const int kDimension = 10;
+    gfx::Size size(kDimension, kDimension);
+
+    scoped_refptr<VideoFrame> video_frame(VideoFrame::CreateFrame(
+        PIXEL_FORMAT_P016LE, size, gfx::Rect(size), size, base::TimeDelta()));
+    EXPECT_TRUE(video_frame);
+    return video_frame;
+  }
+
   void SetReleaseSyncToken(const gpu::SyncToken& sync_token) {
     release_sync_token_ = sync_token;
   }
@@ -214,10 +234,10 @@ class VideoResourceUpdaterTest : public testing::Test {
   }
 
   scoped_refptr<VideoFrame> CreateTestStreamTextureHardwareVideoFrame(
-      absl::optional<VideoFrameMetadata::CopyMode> copy_mode) {
+      bool needs_copy) {
     scoped_refptr<VideoFrame> video_frame = CreateTestHardwareVideoFrame(
         PIXEL_FORMAT_ARGB, GL_TEXTURE_EXTERNAL_OES);
-    video_frame->metadata().copy_mode = std::move(copy_mode);
+    video_frame->metadata().copy_required = needs_copy;
     return video_frame;
   }
 
@@ -278,6 +298,29 @@ TEST_F(VideoResourceUpdaterTest, SoftwareFrame) {
   EXPECT_EQ(VideoFrameResourceType::YUV, resources.type);
 }
 
+TEST_F(VideoResourceUpdaterTest, SoftwareFrameNV12) {
+  std::unique_ptr<VideoResourceUpdater> updater = CreateUpdaterForHardware();
+
+  VideoFrameExternalResources resources =
+      updater->CreateExternalResourcesFromVideoFrame(CreateNV12TestFrame());
+  EXPECT_EQ(VideoFrameResourceType::RGBA, resources.type);
+
+  // Use a different frame for this test since frames with the same unique_id()
+  // expect to use the same resources.
+  gl_->set_supports_texture_rg(true);
+  resources =
+      updater->CreateExternalResourcesFromVideoFrame(CreateNV12TestFrame());
+  EXPECT_EQ(VideoFrameResourceType::YUV, resources.type);
+}
+
+TEST_F(VideoResourceUpdaterTest, SoftwareFrameP016_NoR16Support) {
+  std::unique_ptr<VideoResourceUpdater> updater = CreateUpdaterForHardware();
+
+  VideoFrameExternalResources resources =
+      updater->CreateExternalResourcesFromVideoFrame(CreateP016TestFrame());
+  EXPECT_EQ(VideoFrameResourceType::RGBA, resources.type);
+}
+
 TEST_F(VideoResourceUpdaterTest, SoftwareFrameRGB) {
   std::unique_ptr<VideoResourceUpdater> updater = CreateUpdaterForHardware();
   for (const auto& fmt : {PIXEL_FORMAT_XBGR, PIXEL_FORMAT_XRGB,
@@ -332,6 +375,14 @@ class VideoResourceUpdaterTestWithR16 : public VideoResourceUpdaterTest {
   }
 };
 
+TEST_F(VideoResourceUpdaterTestWithR16, SoftwareFrameP016) {
+  std::unique_ptr<VideoResourceUpdater> updater = CreateUpdaterForHardware();
+
+  VideoFrameExternalResources resources =
+      updater->CreateExternalResourcesFromVideoFrame(CreateP016TestFrame());
+  EXPECT_EQ(VideoFrameResourceType::YUV, resources.type);
+}
+
 TEST_F(VideoResourceUpdaterTestWithR16, HighBitFrame) {
   std::unique_ptr<VideoResourceUpdater> updater = CreateUpdaterForHardware();
   scoped_refptr<VideoFrame> video_frame = CreateTestHighBitFrame();
@@ -352,6 +403,24 @@ TEST_F(VideoResourceUpdaterTestWithR16, HighBitFrame) {
   EXPECT_EQ(VideoFrameResourceType::YUV, resources2.type);
   EXPECT_NEAR(resources2.multiplier * max_10bit_value, 1.0, 0.0001);
   EXPECT_NEAR(resources2.offset, 0.0, 0.1);
+}
+
+TEST_F(VideoResourceUpdaterTest, NV12FrameSoftwareCompositor) {
+  std::unique_ptr<VideoResourceUpdater> updater = CreateUpdaterForSoftware();
+  scoped_refptr<VideoFrame> video_frame = CreateNV12TestFrame();
+
+  VideoFrameExternalResources resources =
+      updater->CreateExternalResourcesFromVideoFrame(video_frame);
+  EXPECT_EQ(VideoFrameResourceType::RGBA_PREMULTIPLIED, resources.type);
+}
+
+TEST_F(VideoResourceUpdaterTest, P016FrameSoftwareCompositor) {
+  std::unique_ptr<VideoResourceUpdater> updater = CreateUpdaterForSoftware();
+  scoped_refptr<VideoFrame> video_frame = CreateP016TestFrame();
+
+  VideoFrameExternalResources resources =
+      updater->CreateExternalResourcesFromVideoFrame(video_frame);
+  EXPECT_EQ(VideoFrameResourceType::RGBA_PREMULTIPLIED, resources.type);
 }
 
 TEST_F(VideoResourceUpdaterTest, HighBitFrameSoftwareCompositor) {
@@ -407,6 +476,37 @@ TEST_F(VideoResourceUpdaterTest, ReuseResource) {
   EXPECT_EQ(VideoFrameResourceType::YUV, resources.type);
   EXPECT_EQ(3u, resources.resources.size());
   EXPECT_EQ(3u, resources.release_callbacks.size());
+  // The data should be reused so expect no texture uploads.
+  EXPECT_EQ(0, gl_->UploadCount());
+}
+
+TEST_F(VideoResourceUpdaterTest, ReuseResourceNV12) {
+  std::unique_ptr<VideoResourceUpdater> updater = CreateUpdaterForHardware();
+  scoped_refptr<VideoFrame> video_frame = CreateNV12TestFrame();
+  video_frame->set_timestamp(base::Seconds(1234));
+  gl_->set_supports_texture_rg(true);
+
+  // Allocate the resources for a YUV video frame.
+  gl_->ResetUploadCount();
+  VideoFrameExternalResources resources =
+      updater->CreateExternalResourcesFromVideoFrame(video_frame);
+  EXPECT_EQ(VideoFrameResourceType::YUV, resources.type);
+  EXPECT_EQ(2u, resources.resources.size());
+  EXPECT_EQ(2u, resources.release_callbacks.size());
+  // Expect exactly three texture uploads, one for each plane.
+  EXPECT_EQ(2, gl_->UploadCount());
+
+  // Simulate the ResourceProvider releasing the resources back to the video
+  // updater.
+  for (auto& release_callback : resources.release_callbacks)
+    std::move(release_callback).Run(gpu::SyncToken(), false);
+
+  // Allocate resources for the same frame.
+  gl_->ResetUploadCount();
+  resources = updater->CreateExternalResourcesFromVideoFrame(video_frame);
+  EXPECT_EQ(VideoFrameResourceType::YUV, resources.type);
+  EXPECT_EQ(2u, resources.resources.size());
+  EXPECT_EQ(2u, resources.release_callbacks.size());
   // The data should be reused so expect no texture uploads.
   EXPECT_EQ(0, gl_->UploadCount());
 }
@@ -557,18 +657,27 @@ TEST_F(VideoResourceUpdaterTest, CreateForHardwarePlanes) {
   EXPECT_EQ(VideoFrameResourceType::YUV, resources.type);
   EXPECT_EQ(3u, resources.resources.size());
   EXPECT_EQ(3u, resources.release_callbacks.size());
-  EXPECT_FALSE(resources.resources[0].read_lock_fences_enabled);
-  EXPECT_FALSE(resources.resources[1].read_lock_fences_enabled);
-  EXPECT_FALSE(resources.resources[2].read_lock_fences_enabled);
+  EXPECT_EQ(resources.resources[0].synchronization_type,
+            viz::TransferableResource::SynchronizationType::kSyncToken);
+  EXPECT_EQ(resources.resources[1].synchronization_type,
+            viz::TransferableResource::SynchronizationType::kSyncToken);
+  EXPECT_EQ(resources.resources[2].synchronization_type,
+            viz::TransferableResource::SynchronizationType::kSyncToken);
 
   video_frame = CreateTestYuvHardwareVideoFrame(PIXEL_FORMAT_I420, 3,
                                                 GL_TEXTURE_RECTANGLE_ARB);
   video_frame->metadata().read_lock_fences_enabled = true;
 
   resources = updater->CreateExternalResourcesFromVideoFrame(video_frame);
-  EXPECT_TRUE(resources.resources[0].read_lock_fences_enabled);
-  EXPECT_TRUE(resources.resources[1].read_lock_fences_enabled);
-  EXPECT_TRUE(resources.resources[2].read_lock_fences_enabled);
+  EXPECT_EQ(
+      resources.resources[0].synchronization_type,
+      viz::TransferableResource::SynchronizationType::kGpuCommandsCompleted);
+  EXPECT_EQ(
+      resources.resources[1].synchronization_type,
+      viz::TransferableResource::SynchronizationType::kGpuCommandsCompleted);
+  EXPECT_EQ(
+      resources.resources[2].synchronization_type,
+      viz::TransferableResource::SynchronizationType::kGpuCommandsCompleted);
 }
 
 TEST_F(VideoResourceUpdaterTest,
@@ -578,7 +687,7 @@ TEST_F(VideoResourceUpdaterTest,
       CreateUpdaterForHardware(true);
   EXPECT_EQ(0u, GetSharedImageCount());
   scoped_refptr<VideoFrame> video_frame =
-      CreateTestStreamTextureHardwareVideoFrame(absl::nullopt);
+      CreateTestStreamTextureHardwareVideoFrame(/*needs_copy=*/false);
 
   VideoFrameExternalResources resources =
       updater->CreateExternalResourcesFromVideoFrame(video_frame);
@@ -591,8 +700,7 @@ TEST_F(VideoResourceUpdaterTest,
 
   // A copied stream texture should return an RGBA resource in a new
   // GL_TEXTURE_2D texture.
-  video_frame = CreateTestStreamTextureHardwareVideoFrame(
-      VideoFrameMetadata::CopyMode::kCopyToNewTexture);
+  video_frame = CreateTestStreamTextureHardwareVideoFrame(/*needs_copy=*/true);
   resources = updater->CreateExternalResourcesFromVideoFrame(video_frame);
   EXPECT_EQ(VideoFrameResourceType::RGBA_PREMULTIPLIED, resources.type);
   EXPECT_EQ(1u, resources.resources.size());
@@ -602,43 +710,11 @@ TEST_F(VideoResourceUpdaterTest,
   EXPECT_EQ(1u, GetSharedImageCount());
 }
 
-TEST_F(VideoResourceUpdaterTest,
-       CreateForHardwarePlanes_StreamTexture_CopyMailboxesOnly) {
-  // Note that |use_stream_video_draw_quad| is true for this test.
-  std::unique_ptr<VideoResourceUpdater> updater =
-      CreateUpdaterForHardware(true);
-  EXPECT_EQ(0u, GetSharedImageCount());
-  scoped_refptr<VideoFrame> video_frame =
-      CreateTestStreamTextureHardwareVideoFrame(absl::nullopt);
-  VideoFrameExternalResources resources =
-      updater->CreateExternalResourcesFromVideoFrame(video_frame);
-  EXPECT_EQ(VideoFrameResourceType::STREAM_TEXTURE, resources.type);
-  EXPECT_EQ(1u, resources.resources.size());
-  EXPECT_EQ((GLenum)GL_TEXTURE_EXTERNAL_OES,
-            resources.resources[0].mailbox_holder.texture_target);
-  EXPECT_EQ(1u, resources.release_callbacks.size());
-  EXPECT_EQ(0u, GetSharedImageCount());
-
-  // If mailbox is copied, the texture target should still be
-  // GL_TEXTURE_EXTERNAL_OES and resource type should be STREAM_TEXTURE.
-  video_frame = CreateTestStreamTextureHardwareVideoFrame(
-      VideoFrameMetadata::CopyMode::kCopyMailboxesOnly);
-  resources = updater->CreateExternalResourcesFromVideoFrame(video_frame);
-  EXPECT_EQ(VideoFrameResourceType::STREAM_TEXTURE, resources.type);
-  EXPECT_EQ(1u, resources.resources.size());
-  EXPECT_EQ((GLenum)GL_TEXTURE_EXTERNAL_OES,
-            resources.resources[0].mailbox_holder.texture_target);
-  EXPECT_EQ(1u, resources.release_callbacks.size());
-  // This count will be 1 since a new mailbox will be created when mailbox is
-  // being copied.
-  EXPECT_EQ(1u, GetSharedImageCount());
-}
-
 TEST_F(VideoResourceUpdaterTest, CreateForHardwarePlanes_TextureQuad) {
   std::unique_ptr<VideoResourceUpdater> updater = CreateUpdaterForHardware();
   EXPECT_EQ(0u, GetSharedImageCount());
   scoped_refptr<VideoFrame> video_frame =
-      CreateTestStreamTextureHardwareVideoFrame(absl::nullopt);
+      CreateTestStreamTextureHardwareVideoFrame(/*needs_copy=*/false);
 
   VideoFrameExternalResources resources =
       updater->CreateExternalResourcesFromVideoFrame(video_frame);
@@ -724,8 +800,7 @@ TEST_F(VideoResourceUpdaterTest, GenerateSyncTokenOnTextureCopy) {
   std::unique_ptr<VideoResourceUpdater> updater = CreateUpdaterForHardware();
 
   scoped_refptr<VideoFrame> video_frame =
-      CreateTestStreamTextureHardwareVideoFrame(
-          VideoFrameMetadata::CopyMode::kCopyToNewTexture);
+      CreateTestStreamTextureHardwareVideoFrame(/*needs_copy=*/true);
 
   VideoFrameExternalResources resources =
       updater->CreateExternalResourcesFromVideoFrame(video_frame);
@@ -751,17 +826,8 @@ TEST_F(VideoResourceUpdaterTest, CreateForHardwarePlanes_SingleNV12) {
   EXPECT_EQ(1u, resources.resources.size());
   EXPECT_EQ((GLenum)GL_TEXTURE_EXTERNAL_OES,
             resources.resources[0].mailbox_holder.texture_target);
-  EXPECT_EQ(viz::YUV_420_BIPLANAR, resources.resources[0].format);
-
-  video_frame = CreateTestYuvHardwareVideoFrame(PIXEL_FORMAT_NV12, 1,
-                                                GL_TEXTURE_RECTANGLE_ARB);
-  resources = updater->CreateExternalResourcesFromVideoFrame(video_frame);
-  EXPECT_EQ(VideoFrameResourceType::RGB, resources.type);
-  EXPECT_EQ(1u, resources.resources.size());
-  EXPECT_EQ((GLenum)GL_TEXTURE_RECTANGLE_ARB,
-            resources.resources[0].mailbox_holder.texture_target);
-  EXPECT_EQ(viz::YUV_420_BIPLANAR, resources.resources[0].format);
-
+  EXPECT_EQ(viz::YUV_420_BIPLANAR,
+            resources.resources[0].format.resource_format());
   EXPECT_EQ(0u, GetSharedImageCount());
 }
 
@@ -778,9 +844,11 @@ TEST_F(VideoResourceUpdaterTest, CreateForHardwarePlanes_DualNV12) {
   EXPECT_EQ(2u, resources.release_callbacks.size());
   EXPECT_EQ((GLenum)GL_TEXTURE_EXTERNAL_OES,
             resources.resources[0].mailbox_holder.texture_target);
+  EXPECT_EQ((GLenum)GL_TEXTURE_EXTERNAL_OES,
+            resources.resources[1].mailbox_holder.texture_target);
   // |updater| doesn't set |buffer_format| in this case.
-  EXPECT_EQ(viz::RED_8, resources.resources[0].format);
-  EXPECT_EQ(viz::RG_88, resources.resources[1].format);
+  EXPECT_EQ(viz::RED_8, resources.resources[0].format.resource_format());
+  EXPECT_EQ(viz::RG_88, resources.resources[1].format.resource_format());
 
   video_frame = CreateTestYuvHardwareVideoFrame(PIXEL_FORMAT_NV12, 2,
                                                 GL_TEXTURE_RECTANGLE_ARB);
@@ -789,8 +857,10 @@ TEST_F(VideoResourceUpdaterTest, CreateForHardwarePlanes_DualNV12) {
   EXPECT_EQ(2u, resources.resources.size());
   EXPECT_EQ((GLenum)GL_TEXTURE_RECTANGLE_ARB,
             resources.resources[0].mailbox_holder.texture_target);
-  EXPECT_EQ(viz::RED_8, resources.resources[0].format);
-  EXPECT_EQ(viz::RG_88, resources.resources[1].format);
+  EXPECT_EQ((GLenum)GL_TEXTURE_RECTANGLE_ARB,
+            resources.resources[1].mailbox_holder.texture_target);
+  EXPECT_EQ(viz::RED_8, resources.resources[0].format.resource_format());
+  EXPECT_EQ(viz::RG_88, resources.resources[1].format.resource_format());
   EXPECT_EQ(0u, GetSharedImageCount());
 }
 
@@ -811,23 +881,9 @@ TEST_F(VideoResourceUpdaterTest, CreateForHardwarePlanes_SingleP016HDR) {
   EXPECT_EQ(1u, resources.resources.size());
   EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_EXTERNAL_OES),
             resources.resources[0].mailbox_holder.texture_target);
-  EXPECT_EQ(viz::P010, resources.resources[0].format);
+  EXPECT_EQ(viz::P010, resources.resources[0].format.resource_format());
   EXPECT_EQ(kHDR10ColorSpace, resources.resources[0].color_space);
   EXPECT_EQ(hdr_metadata, resources.resources[0].hdr_metadata);
-
-  video_frame = CreateTestYuvHardwareVideoFrame(PIXEL_FORMAT_P016LE, 1,
-                                                GL_TEXTURE_RECTANGLE_ARB);
-  video_frame->set_color_space(kHDR10ColorSpace);
-  video_frame->set_hdr_metadata(hdr_metadata);
-  resources = updater->CreateExternalResourcesFromVideoFrame(video_frame);
-  EXPECT_EQ(VideoFrameResourceType::RGB, resources.type);
-  EXPECT_EQ(1u, resources.resources.size());
-  EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_RECTANGLE_ARB),
-            resources.resources[0].mailbox_holder.texture_target);
-  EXPECT_EQ(viz::P010, resources.resources[0].format);
-  EXPECT_EQ(kHDR10ColorSpace, resources.resources[0].color_space);
-  EXPECT_EQ(hdr_metadata, resources.resources[0].hdr_metadata);
-
   EXPECT_EQ(0u, GetSharedImageCount());
 }
 

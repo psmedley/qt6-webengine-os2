@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_tester.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_document_transition_callback.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_document_transition_set_element_options.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/document_transition/document_transition_supplement.h"
@@ -26,8 +25,12 @@
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
+#include "third_party/blink/renderer/core/inspector/inspector_style_resolver.h"
+#include "third_party/blink/renderer/core/layout/layout_shift_tracker.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/testing/mock_function_scope.h"
+#include "third_party/blink/renderer/core/timing/layout_shift.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.h"
@@ -70,7 +73,7 @@ class DocumentTransitionTest : public testing::Test,
   }
 
   bool ElementIsComposited(const char* id) {
-    return !CcLayersByDOMElementId(RootCcLayer(), id).IsEmpty();
+    return !CcLayersByDOMElementId(RootCcLayer(), id).empty();
   }
 
   // Testing the compositor interaction is not in scope for these unittests. So,
@@ -96,6 +99,10 @@ class DocumentTransitionTest : public testing::Test,
 
   LocalFrameView* GetLocalFrameView() {
     return web_view_helper_->LocalMainFrame()->GetFrameView();
+  }
+
+  LayoutShiftTracker& GetLayoutShiftTracker() {
+    return GetLocalFrameView()->GetLayoutShiftTracker();
   }
 
   PaintArtifactCompositor* paint_artifact_compositor() {
@@ -129,7 +136,7 @@ class DocumentTransitionTest : public testing::Test,
     auto* transition =
         DocumentTransitionSupplement::EnsureDocumentTransition(GetDocument());
     return layout_object && transition &&
-           transition->IsTransitionParticipant(*layout_object);
+           transition->NeedsSharedElementEffectNode(*layout_object);
   }
 
   void ValidatePseudoElementTree(
@@ -184,6 +191,69 @@ class DocumentTransitionTest : public testing::Test,
 };
 
 INSTANTIATE_PAINT_TEST_SUITE_P(DocumentTransitionTest);
+
+TEST_P(DocumentTransitionTest, LayoutShift) {
+  SetHtmlInnerHTML(R"HTML(
+    <style>
+      .shared {
+        width: 100px;
+        height: 100px;
+        page-transition-tag: shared;
+        contain: layout;
+        background: green;
+      }
+    </style>
+    <div id=target class=shared></div>
+  )HTML");
+
+  auto* transition =
+      DocumentTransitionSupplement::EnsureDocumentTransition(GetDocument());
+  ASSERT_TRUE(transition->StartNewTransition());
+
+  V8TestingScope v8_scope;
+  ScriptState* script_state = v8_scope.GetScriptState();
+  ExceptionState& exception_state = v8_scope.GetExceptionState();
+
+  MockFunctionScope funcs(script_state);
+  auto* document_transition_callback =
+      V8DocumentTransitionCallback::Create(funcs.ExpectCall());
+
+  ScriptPromiseTester start_tester(
+      script_state,
+      transition->start(script_state, document_transition_callback,
+                        exception_state));
+  EXPECT_EQ(GetState(transition), State::kCapturing);
+
+  UpdateAllLifecyclePhasesAndFinishDirectives();
+  EXPECT_EQ(GetState(transition), State::kCaptured);
+
+  // We should have a start request from the async callback passed to start()
+  // resolving.
+  test::RunPendingTasks();
+  auto start_request = transition->TakePendingRequest();
+  EXPECT_TRUE(start_request);
+  EXPECT_EQ(GetState(transition), State::kStarted);
+
+  // We should have a transition pseudo
+  auto* transition_pseudo = GetDocument().documentElement()->GetPseudoElement(
+      kPseudoIdPageTransition);
+  ASSERT_TRUE(transition_pseudo);
+  auto* container_pseudo = transition_pseudo->GetPseudoElement(
+      kPseudoIdPageTransitionContainer, "shared");
+  ASSERT_TRUE(container_pseudo);
+  auto* container_box = To<LayoutBox>(container_pseudo->GetLayoutObject());
+  EXPECT_EQ(LayoutSize(100, 100), container_box->Size());
+
+  // Shared elements should not cause a layout shift.
+  auto* target =
+      To<LayoutBox>(GetDocument().getElementById("target")->GetLayoutObject());
+  EXPECT_FLOAT_EQ(0, GetLayoutShiftTracker().Score());
+  EXPECT_EQ(LayoutSize(100, 100), target->Size());
+
+  start_request->TakeFinishedCallback().Run();
+  FinishTransition();
+  start_tester.WaitUntilSettled();
+}
 
 TEST_P(DocumentTransitionTest, TransitionObjectPersists) {
   auto* first_transition =
@@ -264,7 +334,11 @@ TEST_P(DocumentTransitionTest, AdditionalStartAbortsTransition) {
 TEST_P(DocumentTransitionTest, PrepareSharedElementsWantToBeComposited) {
   SetHtmlInnerHTML(R"HTML(
     <style>
+      /* TODO(crbug.com/1336462): html.css is parsed before runtime flags are enabled */
+      html { page-transition-tag: root; }
       div { width: 100px; height: 100px; contain: paint }
+      #e1 { page-transition-tag: e1; }
+      #e3 { page-transition-tag: e3; }
     </style>
 
     <div id=e1></div>
@@ -292,8 +366,6 @@ TEST_P(DocumentTransitionTest, PrepareSharedElementsWantToBeComposited) {
   EXPECT_FALSE(ShouldCompositeForDocumentTransition(e2));
   EXPECT_FALSE(ShouldCompositeForDocumentTransition(e3));
 
-  transition->setElement(script_state, e1, "e1", nullptr, exception_state);
-  transition->setElement(script_state, e3, "e3", nullptr, exception_state);
   transition->start(script_state, document_transition_callback,
                     exception_state);
 
@@ -325,10 +397,14 @@ TEST_P(DocumentTransitionTest, PrepareSharedElementsWantToBeComposited) {
 
 TEST_P(DocumentTransitionTest, UncontainedElementsAreCleared) {
   SetHtmlInnerHTML(R"HTML(
-    <style>#e1 { width: 100px; height: 100px; contain: paint }</style>
-    <div id=e1></div>
-    <div id=e2></div>
-    <div id=e3></div>
+    <style>
+      /* TODO(crbug.com/1336462): html.css is parsed before runtime flags are enabled */
+      html { page-transition-tag: root; }
+      #e1 { width: 100px; height: 100px; contain: paint }
+    </style>
+    <div id=e1 style="page-transition-tag: e1"></div>
+    <div id=e2 style="page-transition-tag: e2"></div>
+    <div id=e3 style="page-transition-tag: e3"></div>
   )HTML");
 
   auto* e1 = GetDocument().getElementById("e1");
@@ -351,23 +427,15 @@ TEST_P(DocumentTransitionTest, UncontainedElementsAreCleared) {
   EXPECT_FALSE(ShouldCompositeForDocumentTransition(e2));
   EXPECT_FALSE(ShouldCompositeForDocumentTransition(e3));
 
-  transition->setElement(script_state, e1, "e1", nullptr, exception_state);
-  transition->setElement(script_state, e2, "e2", nullptr, exception_state);
-  transition->setElement(script_state, e3, "e3", nullptr, exception_state);
   transition->start(script_state, document_transition_callback,
                     exception_state);
 
   EXPECT_TRUE(ShouldCompositeForDocumentTransition(e1));
-  EXPECT_TRUE(ShouldCompositeForDocumentTransition(e2));
-  EXPECT_TRUE(ShouldCompositeForDocumentTransition(e3));
+  EXPECT_FALSE(ShouldCompositeForDocumentTransition(e2));
+  EXPECT_FALSE(ShouldCompositeForDocumentTransition(e3));
 
   // Update the lifecycle while keeping the transition active.
   UpdateAllLifecyclePhasesForTest();
-
-  // Since only the first element is contained, the rest should be cleared.
-  EXPECT_TRUE(ShouldCompositeForDocumentTransition(e1));
-  EXPECT_FALSE(ShouldCompositeForDocumentTransition(e2));
-  EXPECT_FALSE(ShouldCompositeForDocumentTransition(e3));
 
   EXPECT_TRUE(ElementIsComposited("e1"));
   EXPECT_FALSE(ElementIsComposited("e2"));
@@ -376,6 +444,11 @@ TEST_P(DocumentTransitionTest, UncontainedElementsAreCleared) {
 
 TEST_P(DocumentTransitionTest, StartSharedElementsWantToBeComposited) {
   SetHtmlInnerHTML(R"HTML(
+    <style>
+      /* TODO(crbug.com/1336462): html.css is parsed before runtime flags are enabled */
+      html { page-transition-tag: root; }
+      div { contain: paint; width: 100px; height: 100px; background: blue; }
+    </style>
     <div id=e1></div>
     <div id=e2></div>
     <div id=e3></div>
@@ -394,43 +467,48 @@ TEST_P(DocumentTransitionTest, StartSharedElementsWantToBeComposited) {
   ExceptionState& exception_state = v8_scope.GetExceptionState();
 
   // Set two of the elements to be shared.
-  transition->setElement(script_state, e1, "e1", nullptr, exception_state);
-  transition->setElement(script_state, e3, "e3", nullptr, exception_state);
+  e1->setAttribute(html_names::kStyleAttr, "page-transition-tag: e1");
+  e3->setAttribute(html_names::kStyleAttr, "page-transition-tag: e3");
 
   struct Data {
     STACK_ALLOCATED();
 
    public:
-    Data(DocumentTransition* transition,
+    Data(Document& document,
+         DocumentTransition* transition,
          ScriptState* script_state,
          ExceptionState& exception_state,
          Element* e1,
          Element* e2)
-        : transition(transition),
+        : document(document),
+          transition(transition),
           script_state(script_state),
           exception_state(exception_state),
           e1(e1),
           e2(e2) {}
 
+    Document& document;
     DocumentTransition* transition;
     ScriptState* script_state;
     ExceptionState& exception_state;
     Element* e1;
     Element* e2;
   };
-  Data data(transition, script_state, exception_state, e1, e2);
+  Data data(GetDocument(), transition, script_state, exception_state, e1, e2);
 
   // This callback sets the elements for the start phase of the transition.
   auto start_setup_lambda =
       [](const v8::FunctionCallbackInfo<v8::Value>& info) {
         auto* data =
             static_cast<Data*>(info.Data().As<v8::External>()->Value());
-
-        // Set two different elements as shared.
-        data->transition->setElement(data->script_state, data->e1, "e1",
-                                     nullptr, data->exception_state);
-        data->transition->setElement(data->script_state, data->e2, "e2",
-                                     nullptr, data->exception_state);
+        data->document.getElementById("e1")->setAttribute(
+            html_names::kStyleAttr, "");
+        data->document.getElementById("e3")->setAttribute(
+            html_names::kStyleAttr, "");
+        data->e1->setAttribute(html_names::kStyleAttr,
+                               "page-transition-tag: e1");
+        data->e2->setAttribute(html_names::kStyleAttr,
+                               "page-transition-tag: e2");
       };
   auto start_setup_callback =
       v8::Function::New(v8_scope.GetContext(), start_setup_lambda,
@@ -450,12 +528,6 @@ TEST_P(DocumentTransitionTest, StartSharedElementsWantToBeComposited) {
 
   EXPECT_TRUE(ShouldCompositeForDocumentTransition(e1));
   EXPECT_TRUE(ShouldCompositeForDocumentTransition(e2));
-  EXPECT_FALSE(ShouldCompositeForDocumentTransition(e3));
-
-  UpdateAllLifecyclePhasesAndFinishDirectives();
-
-  EXPECT_FALSE(ShouldCompositeForDocumentTransition(e1));
-  EXPECT_FALSE(ShouldCompositeForDocumentTransition(e2));
   EXPECT_FALSE(ShouldCompositeForDocumentTransition(e3));
 }
 
@@ -587,14 +659,17 @@ TEST_P(DocumentTransitionTest, StartPromiseIsResolved) {
                         exception_state));
   EXPECT_EQ(GetState(transition), State::kCapturing);
 
-  // Visual updates are allows during capture phase.
-  EXPECT_FALSE(LayerTreeHost()->IsDeferringCommits());
+  UpdateAllLifecyclePhasesForTest();
+  GetDocument().GetPage()->GetChromeClient().WillCommitCompositorFrame();
+
+  // Visual updates paused during capture phase.
+  EXPECT_TRUE(LayerTreeHost()->IsRenderingPaused());
 
   UpdateAllLifecyclePhasesAndFinishDirectives();
   EXPECT_EQ(GetState(transition), State::kCaptured);
 
   // Visual updates are stalled between captured and start.
-  EXPECT_TRUE(LayerTreeHost()->IsDeferringCommits());
+  EXPECT_TRUE(LayerTreeHost()->IsRenderingPaused());
 
   test::RunPendingTasks();
   EXPECT_EQ(GetState(transition), State::kStarted);
@@ -602,7 +677,7 @@ TEST_P(DocumentTransitionTest, StartPromiseIsResolved) {
   FinishTransition();
 
   // Visual updates are restored on start.
-  EXPECT_FALSE(LayerTreeHost()->IsDeferringCommits());
+  EXPECT_FALSE(LayerTreeHost()->IsRenderingPaused());
 
   start_tester.WaitUntilSettled();
   EXPECT_TRUE(start_tester.IsFulfilled());
@@ -640,17 +715,15 @@ TEST_P(DocumentTransitionTest, Abandon) {
 TEST_P(DocumentTransitionTest, DocumentTransitionPseudoTree) {
   SetHtmlInnerHTML(R"HTML(
     <style>
-      div { width: 100px; height: 100px; contain: paint }
+      /* TODO(crbug.com/1336462): html.css is parsed before runtime flags are enabled */
+      html { page-transition-tag: root; }
+      div { width: 100px; height: 100px; contain: paint; background: blue }
     </style>
 
-    <div id=e1></div>
-    <div id=e2></div>
-    <div id=e3></div>
+    <div id=e1 style="page-transition-tag: e1"></div>
+    <div id=e2 style="page-transition-tag: e2"></div>
+    <div id=e3 style="page-transition-tag: e3"></div>
   )HTML");
-
-  auto* e1 = GetDocument().getElementById("e1");
-  auto* e2 = GetDocument().getElementById("e2");
-  auto* e3 = GetDocument().getElementById("e3");
 
   auto* transition =
       DocumentTransitionSupplement::EnsureDocumentTransition(GetDocument());
@@ -659,10 +732,6 @@ TEST_P(DocumentTransitionTest, DocumentTransitionPseudoTree) {
   V8TestingScope v8_scope;
   ScriptState* script_state = v8_scope.GetScriptState();
   ExceptionState& exception_state = v8_scope.GetExceptionState();
-
-  transition->setElement(script_state, e1, "e1", nullptr, exception_state);
-  transition->setElement(script_state, e2, "e2", nullptr, exception_state);
-  transition->setElement(script_state, e3, "e3", nullptr, exception_state);
 
   struct Data {
     STACK_ALLOCATED();
@@ -686,21 +755,7 @@ TEST_P(DocumentTransitionTest, DocumentTransitionPseudoTree) {
 
   // This callback sets the elements for the start phase of the transition.
   auto start_setup_lambda =
-      [](const v8::FunctionCallbackInfo<v8::Value>& info) {
-        auto* data =
-            static_cast<Data*>(info.Data().As<v8::External>()->Value());
-
-        auto* e1 = data->document.getElementById("e1");
-        auto* e2 = data->document.getElementById("e2");
-        auto* e3 = data->document.getElementById("e3");
-
-        data->transition->setElement(data->script_state, e1, "e1", nullptr,
-                                     data->exception_state);
-        data->transition->setElement(data->script_state, e2, "e2", nullptr,
-                                     data->exception_state);
-        data->transition->setElement(data->script_state, e3, "e3", nullptr,
-                                     data->exception_state);
-      };
+      [](const v8::FunctionCallbackInfo<v8::Value>& info) {};
   auto start_setup_callback =
       v8::Function::New(v8_scope.GetContext(), start_setup_lambda,
                         v8::External::New(v8_scope.GetIsolate(), &data))
@@ -721,12 +776,14 @@ TEST_P(DocumentTransitionTest, DocumentTransitionPseudoTree) {
   UpdateAllLifecyclePhasesAndFinishDirectives();
   SetHtmlInnerHTML(R"HTML(
     <style>
+      /* TODO(crbug.com/1336462): html.css is parsed before runtime flags are enabled */
+      html { page-transition-tag: root; }
       div { width: 200px; height: 200px; contain: paint }
     </style>
 
-    <div id=e1></div>
-    <div id=e2></div>
-    <div id=e3></div>
+    <div id=e1 style="page-transition-tag: e1"></div>
+    <div id=e2 style="page-transition-tag: e2"></div>
+    <div id=e3 style="page-transition-tag: e3"></div>
   )HTML");
   test::RunPendingTasks();
   EXPECT_EQ(GetState(transition), State::kStarted);
@@ -746,6 +803,8 @@ TEST_P(DocumentTransitionTest, DocumentTransitionPseudoTree) {
 TEST_P(DocumentTransitionTest, DocumentTransitionSharedElementInvalidation) {
   SetHtmlInnerHTML(R"HTML(
     <style>
+      /* TODO(crbug.com/1336462): html.css is parsed before runtime flags are enabled */
+      html { page-transition-tag: root; }
       div {
         width: 100px;
         height: 100px;
@@ -799,4 +858,125 @@ TEST_P(DocumentTransitionTest, DocumentTransitionSharedElementInvalidation) {
 
   UpdateAllLifecyclePhasesAndFinishDirectives();
 }
+
+TEST_P(DocumentTransitionTest, InspectorStyleResolver) {
+  SetHtmlInnerHTML(R"HTML(
+    <style>
+      /* TODO(crbug.com/1336462): html.css is parsed before runtime flags are enabled */
+      html { page-transition-tag: root; }
+      ::page-transition {
+        background-color: red;
+      }
+      ::page-transition-container(foo) {
+        background-color: blue;
+      }
+      ::page-transition-image-wrapper(foo) {
+        background-color: lightblue;
+      }
+      ::page-transition-incoming-image(foo) {
+        background-color: black;
+      }
+      ::page-transition-outgoing-image(foo) {
+        background-color: grey;
+      }
+      div {
+        page-transition-tag: foo;
+        width: 100px;
+        height: 100px;
+        contain: paint;
+      }
+    </style>
+    <div></div>
+  )HTML");
+  auto* transition =
+      DocumentTransitionSupplement::EnsureDocumentTransition(GetDocument());
+  ASSERT_TRUE(transition->StartNewTransition());
+
+  V8TestingScope v8_scope;
+  ScriptState* script_state = v8_scope.GetScriptState();
+  ExceptionState& exception_state = v8_scope.GetExceptionState();
+
+  auto start_setup_lambda =
+      [](const v8::FunctionCallbackInfo<v8::Value>& info) {};
+
+  // This callback sets the elements for the start phase of the transition.
+  auto start_setup_callback =
+      v8::Function::New(v8_scope.GetContext(), start_setup_lambda, {})
+          .ToLocalChecked();
+
+  transition->start(script_state,
+                    V8DocumentTransitionCallback::Create(start_setup_callback),
+                    exception_state);
+  ASSERT_FALSE(exception_state.HadException());
+  UpdateAllLifecyclePhasesForTest();
+
+  // Finish the prepare phase, mutate the DOM and start the animation.
+  UpdateAllLifecyclePhasesAndFinishDirectives();
+  test::RunPendingTasks();
+  EXPECT_EQ(GetState(transition), State::kStarted);
+
+  struct TestCase {
+    PseudoId pseudo_id;
+    bool uses_tags;
+    String user_rule;
+  };
+  TestCase test_cases[] = {
+      {kPseudoIdPageTransition, false,
+       "::page-transition { background-color: red; }"},
+      {kPseudoIdPageTransitionContainer, true,
+       "::page-transition-container(foo) { background-color: blue; }"},
+      {kPseudoIdPageTransitionImageWrapper, true,
+       "::page-transition-image-wrapper(foo) { background-color: lightblue; }"},
+      {kPseudoIdPageTransitionIncomingImage, true,
+       "::page-transition-incoming-image(foo) { background-color: black; }"},
+      {kPseudoIdPageTransitionOutgoingImage, true,
+       "::page-transition-outgoing-image(foo) { background-color: grey; }"}};
+
+  for (const auto& test_case : test_cases) {
+    InspectorStyleResolver resolver(GetDocument().documentElement(),
+                                    test_case.pseudo_id,
+                                    test_case.uses_tags ? "foo" : g_null_atom);
+    auto* pseudo_element_rules = resolver.MatchedRules();
+
+    // The resolver collects developer and UA rules.
+    EXPECT_GT(pseudo_element_rules->size(), 1u);
+    EXPECT_EQ(pseudo_element_rules->back().first->cssText(),
+              test_case.user_rule);
+  }
+
+  InspectorStyleResolver parent_resolver(GetDocument().documentElement(),
+                                         kPseudoIdNone, g_null_atom);
+  for (const auto& test_case : test_cases) {
+    SCOPED_TRACE(PseudoElementTagName(test_case.pseudo_id));
+    Member<InspectorCSSMatchedRules> matched_rules_for_pseudo;
+
+    bool found_rule_for_root = false;
+    for (const auto& matched_rules : parent_resolver.PseudoElementRules()) {
+      if (matched_rules->pseudo_id != test_case.pseudo_id)
+        continue;
+      if (matched_rules->document_transition_tag == "root") {
+        EXPECT_FALSE(found_rule_for_root);
+        found_rule_for_root = true;
+        continue;
+      }
+
+      EXPECT_FALSE(matched_rules_for_pseudo);
+      matched_rules_for_pseudo = matched_rules;
+    }
+
+    ASSERT_TRUE(matched_rules_for_pseudo);
+    // Pseudo elements which are generated for each tag should include the root
+    // by default.
+    EXPECT_EQ(found_rule_for_root, test_case.uses_tags);
+    EXPECT_EQ(matched_rules_for_pseudo->document_transition_tag,
+              test_case.uses_tags ? "foo" : g_null_atom);
+
+    auto pseudo_element_rules = matched_rules_for_pseudo->matched_rules;
+    // The resolver collects developer and UA rules.
+    EXPECT_GT(pseudo_element_rules->size(), 1u);
+    EXPECT_EQ(pseudo_element_rules->back().first->cssText(),
+              test_case.user_rule);
+  }
+}
+
 }  // namespace blink

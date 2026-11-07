@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,7 +51,6 @@ class MockTabStripUIEmbedder : public TabStripUIEmbedder {
                void(gfx::Point, gfx::Rect, tab_groups::TabGroupId));
   MOCK_METHOD0(HideEditDialogForGroup, void());
   MOCK_METHOD0(GetLayout, TabStripUILayout());
-  MOCK_CONST_METHOD1(GetColor, SkColor(int));
   MOCK_CONST_METHOD1(GetColorProviderColor, SkColor(ui::ColorId));
 };
 

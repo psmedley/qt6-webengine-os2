@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 #include "base/metrics/histogram_macros.h"
 #include "components/viz/common/features.h"
 #include "components/viz/common/quads/aggregated_render_pass_draw_quad.h"
+#include "components/viz/common/quads/draw_quad.h"
 #include "components/viz/common/quads/solid_color_draw_quad.h"
-#include "components/viz/common/quads/stream_video_draw_quad.h"
 #include "components/viz/common/quads/texture_draw_quad.h"
 #include "components/viz/common/quads/tile_draw_quad.h"
 #include "components/viz/common/quads/yuv_video_draw_quad.h"
@@ -45,37 +45,8 @@ const int kTooManyRenderPassDrawQuads = 30;
 // or equal to this number.
 const int kMaxNumVideos = 5;
 
-void RecordCALayerHistogram(gfx::CALayerResult result,
-                            bool odd_width,
-                            bool odd_height,
-                            bool odd_x,
-                            bool odd_y) {
+void RecordCALayerHistogram(gfx::CALayerResult result) {
   UMA_HISTOGRAM_ENUMERATION("Compositing.Renderer.CALayerResult", result);
-
-  // Record any odd sized and odd offset videos in the current frame.
-  gfx::OddSize size_enum;
-  if (odd_width && odd_height)
-    size_enum = gfx::OddSize::kOddWidthAndHeight;
-  else if (odd_width)
-    size_enum = gfx::OddSize::kOddWidthOnly;
-  else if (odd_height)
-    size_enum = gfx::OddSize::kOddHeightOnly;
-  else
-    size_enum = gfx::OddSize::kEvenWidthAndHeight;
-  UMA_HISTOGRAM_ENUMERATION("Compositing.Renderer.CALayer.OddSizedVideo",
-                            size_enum);
-
-  gfx::OddOffset offset_enum;
-  if (odd_x && odd_y)
-    offset_enum = gfx::OddOffset::kOddXAndY;
-  else if (odd_x)
-    offset_enum = gfx::OddOffset::kOddXOnly;
-  else if (odd_y)
-    offset_enum = gfx::OddOffset::kOddYOnly;
-  else
-    offset_enum = gfx::OddOffset::kEvenXAndY;
-  UMA_HISTOGRAM_ENUMERATION("Compositing.Renderer.CALayer.OddOffsetVideo",
-                            offset_enum);
 }
 
 bool FilterOperationSupported(const cc::FilterOperation& operation) {
@@ -136,19 +107,10 @@ gfx::CALayerResult FromRenderPassQuad(
   ca_layer_overlay->rpdq = quad;
   ca_layer_overlay->contents_rect = gfx::RectF(0, 0, 1, 1);
 
-  return gfx::kCALayerSuccess;
-}
+  // For RenderPassDrawQuad, the opacity is applied when its ddl is recorded, so
+  // the content already is with opacity applied.
+  ca_layer_overlay->opacity = 1.0;
 
-gfx::CALayerResult FromStreamVideoQuad(
-    DisplayResourceProvider* resource_provider,
-    const StreamVideoDrawQuad* quad,
-    CALayerOverlay* ca_layer_overlay) {
-  ResourceId resource_id = quad->resource_id();
-  if (!resource_provider->IsOverlayCandidate(resource_id))
-    return gfx::kCALayerFailedStreamVideoNotCandidate;
-  ca_layer_overlay->contents_resource_id = resource_id;
-  ca_layer_overlay->contents_rect =
-      BoundingRect(quad->uv_top_left, quad->uv_bottom_right);
   return gfx::kCALayerSuccess;
 }
 
@@ -156,7 +118,7 @@ gfx::CALayerResult FromSolidColorDrawQuad(const SolidColorDrawQuad* quad,
                                           CALayerOverlay* ca_layer_overlay,
                                           bool* skip) {
   // Do not generate quads that are completely transparent.
-  if (SkColorGetA(quad->color) == 0) {
+  if (quad->color.fA == 0.0f) {
     *skip = true;
     return gfx::kCALayerSuccess;
   }
@@ -187,8 +149,9 @@ gfx::CALayerResult FromTextureQuad(DisplayResourceProvider* resource_provider,
     if (quad->vertex_opacity[i] != quad->vertex_opacity[0])
       return gfx::kCALayerFailedDifferentVertexOpacities;
   }
-  ca_layer_overlay->shared_state->opacity *= quad->vertex_opacity[0];
+  ca_layer_overlay->opacity *= quad->vertex_opacity[0];
   ca_layer_overlay->filter = quad->nearest_neighbor ? GL_NEAREST : GL_LINEAR;
+  ca_layer_overlay->hdr_metadata = quad->hdr_metadata;
   if (quad->is_video_frame)
     ca_layer_overlay->protected_video_type = quad->protected_video_type;
   return gfx::kCALayerSuccess;
@@ -221,37 +184,38 @@ gfx::CALayerResult FromYUVVideoQuad(DisplayResourceProvider* resource_provider,
   // gfx::ScaleRect (which would multiply by the reciprocal), to avoid
   // introducing excessive floating-point errors.
   gfx::RectF ya_contents_rect = {
-      (quad->ya_tex_coord_rect.x() / quad->ya_tex_size.width()),
-      (quad->ya_tex_coord_rect.y() / quad->ya_tex_size.height()),
-      (quad->ya_tex_coord_rect.width() / quad->ya_tex_size.width()),
-      (quad->ya_tex_coord_rect.height() / quad->ya_tex_size.height())};
+      (quad->ya_tex_coord_rect().x() / quad->ya_tex_size().width()),
+      (quad->ya_tex_coord_rect().y() / quad->ya_tex_size().height()),
+      (quad->ya_tex_coord_rect().width() / quad->ya_tex_size().width()),
+      (quad->ya_tex_coord_rect().height() / quad->ya_tex_size().height())};
   gfx::RectF uv_contents_rect = {
-      (quad->uv_tex_coord_rect.x() / quad->uv_tex_size.width()),
-      (quad->uv_tex_coord_rect.y() / quad->uv_tex_size.height()),
-      (quad->uv_tex_coord_rect.width() / quad->uv_tex_size.width()),
-      (quad->uv_tex_coord_rect.height() / quad->uv_tex_size.height())};
+      (quad->uv_tex_coord_rect().x() / quad->uv_tex_size().width()),
+      (quad->uv_tex_coord_rect().y() / quad->uv_tex_size().height()),
+      (quad->uv_tex_coord_rect().width() / quad->uv_tex_size().width()),
+      (quad->uv_tex_coord_rect().height() / quad->uv_tex_size().height())};
   // For odd-sized videos, |ya_tex_coord_rect| and |uv_tex_coord_rect| might not
   // be identical.
-  float tolerance_x = 1.5f / quad->uv_tex_size.width();
-  float tolerance_y = 1.5f / quad->uv_tex_size.height();
+  float tolerance_x = 1.5f / quad->uv_tex_size().width();
+  float tolerance_y = 1.5f / quad->uv_tex_size().height();
   if (!ya_contents_rect.ApproximatelyEqual(uv_contents_rect, tolerance_x,
                                            tolerance_y)) {
     return gfx::kCALayerFailedYUVTexcoordMismatch;
   }
 
   // Check any odd sized and odd offset video in the current frame.
-  if (quad->ya_tex_size.width() % 2)
+  if (quad->ya_tex_size().width() % 2)
     video_with_odd_width_out = true;
-  if (quad->ya_tex_size.height() % 2)
+  if (quad->ya_tex_size().height() % 2)
     video_with_odd_height_out = true;
   float integer = 0;
-  if (std::modf(quad->ya_tex_coord_rect.x() / 2.f, &integer) != 0)
+  if (std::modf(quad->ya_tex_coord_rect().x() / 2.f, &integer) != 0)
     video_with_odd_x_out = true;
-  if (std::modf(quad->ya_tex_coord_rect.y() / 2.f, &integer) != 0)
+  if (std::modf(quad->ya_tex_coord_rect().y() / 2.f, &integer) != 0)
     video_with_odd_y_out = true;
 
   ca_layer_overlay->contents_resource_id = y_resource_id;
   ca_layer_overlay->contents_rect = ya_contents_rect;
+  ca_layer_overlay->hdr_metadata = quad->hdr_metadata;
   ca_layer_overlay->protected_video_type = quad->protected_video_type;
   return gfx::kCALayerSuccess;
 }
@@ -264,8 +228,8 @@ gfx::CALayerResult FromTileQuad(DisplayResourceProvider* resource_provider,
     return gfx::kCALayerFailedTileNotCandidate;
   ca_layer_overlay->contents_resource_id = resource_id;
   ca_layer_overlay->contents_rect = quad->tex_coord_rect;
-  ca_layer_overlay->contents_rect.Scale(1.f / quad->texture_size.width(),
-                                        1.f / quad->texture_size.height());
+  ca_layer_overlay->contents_rect.InvScale(quad->texture_size.width(),
+                                           quad->texture_size.height());
   ca_layer_overlay->filter = quad->nearest_neighbor ? GL_NEAREST : GL_LINEAR;
   return gfx::kCALayerSuccess;
 }
@@ -300,7 +264,6 @@ class CALayerOverlayProcessorInternal {
     // another CALayer to the tree). Handling non-single border radii is also,
     // but requires APIs not supported on all macOS versions.
     if (quad->shared_quad_state->mask_filter_info.HasRoundedCorners()) {
-      DCHECK(quad->shared_quad_state->clip_rect);
       if (quad->shared_quad_state->mask_filter_info.rounded_corner_bounds()
               .GetType() > gfx::RRectF::Type::kSingle) {
         return gfx::kCALayerFailedQuadRoundedCornerNotUniform;
@@ -310,13 +273,13 @@ class CALayerOverlayProcessorInternal {
     // Enable edge anti-aliasing only on layer boundaries.
     ca_layer_overlay->edge_aa_mask = 0;
     if (quad->IsLeftEdge())
-      ca_layer_overlay->edge_aa_mask |= GL_CA_LAYER_EDGE_LEFT_CHROMIUM;
+      ca_layer_overlay->edge_aa_mask |= ui::CALayerEdge::kLayerEdgeLeft;
     if (quad->IsRightEdge())
-      ca_layer_overlay->edge_aa_mask |= GL_CA_LAYER_EDGE_RIGHT_CHROMIUM;
+      ca_layer_overlay->edge_aa_mask |= ui::CALayerEdge::kLayerEdgeRight;
     if (quad->IsBottomEdge())
-      ca_layer_overlay->edge_aa_mask |= GL_CA_LAYER_EDGE_BOTTOM_CHROMIUM;
+      ca_layer_overlay->edge_aa_mask |= ui::CALayerEdge::kLayerEdgeBottom;
     if (quad->IsTopEdge())
-      ca_layer_overlay->edge_aa_mask |= GL_CA_LAYER_EDGE_TOP_CHROMIUM;
+      ca_layer_overlay->edge_aa_mask |= ui::CALayerEdge::kLayerEdgeTop;
 
     if (most_recent_shared_quad_state_ != quad->shared_quad_state) {
       most_recent_shared_quad_state_ = quad->shared_quad_state;
@@ -331,33 +294,32 @@ class CALayerOverlayProcessorInternal {
       most_recent_overlay_shared_state_->rounded_corner_bounds =
           quad->shared_quad_state->mask_filter_info.rounded_corner_bounds();
 
-      most_recent_overlay_shared_state_->opacity =
-          quad->shared_quad_state->opacity;
       most_recent_overlay_shared_state_->transform =
           quad->shared_quad_state->quad_to_target_transform;
     }
     ca_layer_overlay->shared_state = most_recent_overlay_shared_state_;
 
     ca_layer_overlay->bounds_rect = gfx::RectF(quad->rect);
+    ca_layer_overlay->opacity = quad->shared_quad_state->opacity;
 
     *render_pass_draw_quad =
         quad->material == DrawQuad::Material::kAggregatedRenderPass;
     switch (quad->material) {
-      case DrawQuad::Material::kTextureContent:
-        return FromTextureQuad(resource_provider,
-                               TextureDrawQuad::MaterialCast(quad),
+      case DrawQuad::Material::kTextureContent: {
+        const TextureDrawQuad* texture_draw_quad =
+            TextureDrawQuad::MaterialCast(quad);
+        // Stream video counts as a yuv draw quad.
+        if (texture_draw_quad->is_stream_video)
+          yuv_draw_quad_count += 1;
+        return FromTextureQuad(resource_provider, texture_draw_quad,
                                ca_layer_overlay);
+      }
       case DrawQuad::Material::kTiledContent:
         return FromTileQuad(resource_provider, TileDrawQuad::MaterialCast(quad),
                             ca_layer_overlay);
       case DrawQuad::Material::kSolidColor:
         return FromSolidColorDrawQuad(SolidColorDrawQuad::MaterialCast(quad),
                                       ca_layer_overlay, skip);
-      case DrawQuad::Material::kStreamVideoContent:
-        yuv_draw_quad_count++;
-        return FromStreamVideoQuad(resource_provider,
-                                   StreamVideoDrawQuad::MaterialCast(quad),
-                                   ca_layer_overlay);
       case DrawQuad::Material::kDebugBorder:
         return gfx::kCALayerFailedDebugBoarder;
       case DrawQuad::Material::kPictureContent:
@@ -398,13 +360,15 @@ class CALayerOverlayProcessorInternal {
 
 // Control using the CoreAnimation renderer, which is the path that replaces
 // all quads with CALayers.
-base::Feature kCARenderer{"CoreAnimationRenderer",
-                          base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kCARenderer,
+             "CoreAnimationRenderer",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Control using the CoreAnimation renderer, which is the path that replaces
 // all quads with CALayers.
-base::Feature kHDRUnderlays{"CoreAnimationHDRUnderlays",
-                            base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kHDRUnderlays,
+             "CoreAnimationHDRUnderlays",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 }  // namespace
 
@@ -494,7 +458,7 @@ void CALayerOverlayProcessor::PutForcedOverlayContentIntoUnderlays(
 
       // Put HDR videos into an underlay.
       if (enable_hdr_underlays_) {
-        if (resource_provider->GetColorSpace(texture_quad->resource_id())
+        if (resource_provider->GetOverlayColorSpace(texture_quad->resource_id())
                 .IsHDR())
           force_quad_to_overlay = true;
       }
@@ -539,7 +503,7 @@ bool CALayerOverlayProcessor::ProcessForCALayerOverlays(
   }
 
   if (result != gfx::kCALayerSuccess) {
-    RecordCALayerHistogram(result, false, false, false, false);
+    RecordCALayerHistogram(result);
     SaveCALayerResult(result);
     return false;
   }
@@ -592,10 +556,7 @@ bool CALayerOverlayProcessor::ProcessForCALayerOverlays(
     result = gfx::kCALayerFailedTooManyQuads;
   }
 
-  RecordCALayerHistogram(result, processor.video_with_odd_width(),
-                         processor.video_with_odd_height(),
-                         processor.video_with_odd_x(),
-                         processor.video_with_odd_y());
+  RecordCALayerHistogram(result);
   SaveCALayerResult(result);
 
   if (result != gfx::kCALayerSuccess) {
@@ -636,7 +597,7 @@ bool CALayerOverlayProcessor::PutQuadInSeparateOverlay(
     return true;
 
   ca_layer.protected_video_type = protected_video_type;
-  render_pass->ReplaceExistingQuadWithSolidColor(at, SK_ColorTRANSPARENT,
+  render_pass->ReplaceExistingQuadWithSolidColor(at, SkColors::kTransparent,
                                                  SkBlendMode::kSrcOver);
   ca_layer_overlays->push_back(ca_layer);
   return true;

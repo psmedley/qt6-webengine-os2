@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,7 @@ namespace policy {
 class RequestHandlerForAutoEnrollment
     : public EmbeddedPolicyTestServer::RequestHandler {
  public:
-  RequestHandlerForAutoEnrollment(ClientStorage* client_storage,
-                                  PolicyStorage* policy_storage);
+  explicit RequestHandlerForAutoEnrollment(EmbeddedPolicyTestServer* parent);
   RequestHandlerForAutoEnrollment(RequestHandlerForAutoEnrollment&& handler) =
       delete;
   RequestHandlerForAutoEnrollment& operator=(

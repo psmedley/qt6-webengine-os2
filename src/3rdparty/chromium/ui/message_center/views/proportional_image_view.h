@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,14 +28,20 @@ class MESSAGE_CENTER_EXPORT ProportionalImageView : public views::View {
                 const gfx::Size& max_image_size,
                 bool apply_rounded_corners = false);
 
+  // Get the scaled size for the image that will be drawn inside
+  // `ProportionalImageView`.
+  gfx::Size GetImageDrawingSize();
+
+  void set_apply_rounded_corners(bool apply_rounded_corners) {
+    apply_rounded_corners_ = apply_rounded_corners;
+  }
+
   const ui::ImageModel& image() const { return image_; }
 
   // Overridden from views::View:
   void OnPaint(gfx::Canvas* canvas) override;
 
  private:
-  gfx::Size GetImageDrawingSize();
-
   ui::ImageModel image_;
   gfx::Size max_image_size_;
   // Whether to apply rounded corners OnPaint.

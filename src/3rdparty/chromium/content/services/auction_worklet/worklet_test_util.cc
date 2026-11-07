@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include <memory>
 #include <string>
 
-#include "base/logging.h"
 #include "base/strings/strcat.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
@@ -86,6 +85,24 @@ void AddVersionedJsonResponse(network::TestURLLoaderFactory* url_loader_factory,
                               uint32_t data_version) {
   std::string headers = base::StringPrintf("%s\nData-Version: %u",
                                            kAllowFledgeHeader, data_version);
+  AddResponse(url_loader_factory, url, kJsonMimeType, absl::nullopt, content,
+              headers);
+}
+
+void AddBidderJsonResponse(
+    network::TestURLLoaderFactory* url_loader_factory,
+    const GURL& url,
+    const std::string content,
+    absl::optional<uint32_t> data_version,
+    const absl::optional<std::string>& format_version_string) {
+  std::string headers = kAllowFledgeHeader;
+  if (data_version)
+    headers.append(base::StringPrintf("\nData-Version: %u", *data_version));
+  if (format_version_string) {
+    headers.append(
+        base::StringPrintf("\nX-Fledge-Bidding-Signals-Format-Version:  %s",
+                           format_version_string->c_str()));
+  }
   AddResponse(url_loader_factory, url, kJsonMimeType, absl::nullopt, content,
               headers);
 }

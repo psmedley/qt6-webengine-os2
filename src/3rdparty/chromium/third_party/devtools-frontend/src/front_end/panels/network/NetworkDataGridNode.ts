@@ -51,7 +51,7 @@ import * as PerfUI from '../../ui/legacy/components/perf_ui/perf_ui.js';
 import * as Components from '../../ui/legacy/components/utils/utils.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
-import type {NetworkTimeCalculator} from './NetworkTimeCalculator.js';
+import {type NetworkTimeCalculator} from './NetworkTimeCalculator.js';
 
 import {imageNameForResourceType} from '../utils/utils.js';
 
@@ -1043,8 +1043,7 @@ export class NetworkRequestNode extends NetworkNode {
         const secondIconElement = document.createElement('img');
         secondIconElement.classList.add('icon');
         secondIconElement.alt = i18nString(UIStrings.webBundleInnerRequest);
-        secondIconElement.src = 'Images/ic_file_webbundle_inner_request.svg';
-        new URL('../../Images/ic_file_webbundle_inner_request.svg', import.meta.url).toString();
+        secondIconElement.src = new URL('../../Images/ic_file_webbundle_inner_request.svg', import.meta.url).toString();
 
         const networkManager = SDK.NetworkManager.NetworkManager.forRequest(this.requestInternal);
         if (webBundleInnerRequestInfo.bundleRequestId && networkManager) {
@@ -1209,17 +1208,13 @@ export class NetworkRequestNode extends NetworkNode {
       }
 
       case SDK.NetworkRequest.InitiatorType.Script: {
-        const networkManager = SDK.NetworkManager.NetworkManager.forRequest(request);
-        if (!networkManager) {
-          return;
-        }
-
+        const target = SDK.NetworkManager.NetworkManager.forRequest(request)?.target() || null;
         const linkifier = this.parentView().linkifier();
         if (initiator.stack) {
-          this.linkifiedInitiatorAnchor = linkifier.linkifyStackTraceTopFrame(networkManager.target(), initiator.stack);
+          this.linkifiedInitiatorAnchor = linkifier.linkifyStackTraceTopFrame(target, initiator.stack);
         } else {
           this.linkifiedInitiatorAnchor = linkifier.linkifyScriptLocation(
-              networkManager.target(), initiator.scriptId, initiator.url, initiator.lineNumber,
+              target, initiator.scriptId, initiator.url, initiator.lineNumber,
               {columnNumber: initiator.columnNumber, inlineFrameIndex: 0});
         }
         UI.Tooltip.Tooltip.install((this.linkifiedInitiatorAnchor), '');

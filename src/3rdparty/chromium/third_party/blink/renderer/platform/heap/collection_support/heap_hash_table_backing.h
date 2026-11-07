@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_COLLECTION_SUPPORT_HEAP_HASH_TABLE_BACKING_H_
 
 #include <type_traits>
+
+#include "base/check_op.h"
 #include "third_party/blink/renderer/platform/heap/custom_spaces.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/thread_state_storage.h"
@@ -26,7 +28,7 @@ class HeapHashTableBacking final
     : public GarbageCollected<HeapHashTableBacking<Table>>,
       public WTF::ConditionalDestructor<
           HeapHashTableBacking<Table>,
-          std::is_trivially_destructible<typename Table::ValueType>::value> {
+          !std::is_trivially_destructible<typename Table::ValueType>::value> {
   using ClassType = HeapHashTableBacking<Table>;
   using ValueType = typename Table::ValueType;
 

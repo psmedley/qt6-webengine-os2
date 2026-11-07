@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -83,6 +83,18 @@ class TestSendMessageFunction : public ExtensionFunction {
   bool waiting_ = false;
 
   ResponseValue response_;
+};
+
+class TestSendScriptResultFunction : public TestExtensionFunction {
+ public:
+  TestSendScriptResultFunction();
+  DECLARE_EXTENSION_FUNCTION("test.sendScriptResult", UNKNOWN)
+
+ private:
+  ~TestSendScriptResultFunction() override;
+
+  // ExtensionFunction:
+  ResponseAction Run() override;
 };
 
 class TestGetConfigFunction : public TestExtensionFunction {

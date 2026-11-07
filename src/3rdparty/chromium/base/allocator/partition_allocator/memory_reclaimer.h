@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,25 +8,23 @@
 #include <memory>
 #include <set>
 
+#include "base/allocator/partition_allocator/partition_alloc_base/component_export.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/no_destructor.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/thread_annotations.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/time/time.h"
 #include "base/allocator/partition_allocator/partition_alloc_forward.h"
 #include "base/allocator/partition_allocator/partition_lock.h"
-#include "base/base_export.h"
-#include "base/no_destructor.h"
-#include "base/thread_annotations.h"
-#include "base/time/time.h"
 
 namespace partition_alloc {
 
 // Posts and handles memory reclaim tasks for PartitionAlloc.
 //
-// Thread safety: |RegisterPartition()| and |UnregisterPartition()| can be
-// called from any thread, concurrently with reclaim. Reclaim itself runs in the
-// context of the provided |SequencedTaskRunner|, meaning that the caller must
-// take care of this runner being compatible with the various partitions.
+// PartitionAlloc users are responsible for scheduling and calling the
+// reclamation methods with their own timers / event loops.
 //
 // Singleton as this runs as long as the process is alive, and
 // having multiple instances would be wasteful.
-class BASE_EXPORT MemoryReclaimer {
+class PA_COMPONENT_EXPORT(PARTITION_ALLOC) MemoryReclaimer {
  public:
   static MemoryReclaimer* Instance();
 
@@ -48,7 +46,7 @@ class BASE_EXPORT MemoryReclaimer {
 
   // Returns a recommended interval to invoke ReclaimNormal.
   int64_t GetRecommendedReclaimIntervalInMicroseconds() {
-    return base::Seconds(4).InMicroseconds();
+    return internal::base::Seconds(4).InMicroseconds();
   }
 
   // Triggers an explicit reclaim now reclaiming all free memory
@@ -63,20 +61,12 @@ class BASE_EXPORT MemoryReclaimer {
   void ResetForTesting();
 
   internal::Lock lock_;
-  std::set<PartitionRoot<>*> partitions_ GUARDED_BY(lock_);
+  std::set<PartitionRoot<>*> partitions_ PA_GUARDED_BY(lock_);
 
-  friend class base::NoDestructor<MemoryReclaimer>;
+  friend class internal::base::NoDestructor<MemoryReclaimer>;
   friend class MemoryReclaimerTest;
 };
 
 }  // namespace partition_alloc
-
-namespace base {
-
-// TODO(https://crbug.com/1288247): Remove these 'using' declarations once
-// the migration to the new namespaces gets done.
-using ::partition_alloc::MemoryReclaimer;
-
-}  // namespace base
 
 #endif  // BASE_ALLOCATOR_PARTITION_ALLOCATOR_MEMORY_RECLAIMER_H_

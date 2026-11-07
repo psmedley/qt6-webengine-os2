@@ -351,7 +351,7 @@ static SkBitmap make_bitmap(SkColorType colorType, const SkPath& path,
     canvas->drawPath(path, paint);
 
     paint.setBlendMode(SkBlendMode::kSrc);
-    for (int i = 0; i < circles.count(); ++i) {
+    for (int i = 0; i < circles.size(); ++i) {
         SkColor color;
         switch (i % 3) {
             case 0:  color = kYellow;  break;
@@ -687,7 +687,7 @@ static void draw_col_label(SkCanvas* canvas, int x, int yuvColorSpace, bool opaq
     static const char* kYUVColorSpaceNames[] = {"JPEG",     "601",      "709F",     "709L",
                                                 "2020_8F",  "2020_8L",  "2020_10F", "2020_10L",
                                                 "2020_12F", "2020_12L", "Identity"};
-    static_assert(SK_ARRAY_COUNT(kYUVColorSpaceNames) == kLastEnum_SkYUVColorSpace + 1);
+    static_assert(std::size(kYUVColorSpaceNames) == kLastEnum_SkYUVColorSpace + 1);
 
     SkPaint paint;
     SkFont  font(ToolUtils::create_portable_typeface(nullptr, SkFontStyle::Bold()), 16);
@@ -714,7 +714,7 @@ static void draw_row_label(SkCanvas* canvas, int y, int yuvFormat) {
     static const char* kYUVFormatNames[] = {
         "P016", "P010", "P016F", "Y416", "AYUV", "Y410", "NV12", "NV21", "I420", "YV12"
     };
-    static_assert(SK_ARRAY_COUNT(kYUVFormatNames) == kLast_YUVFormat + 1);
+    static_assert(std::size(kYUVFormatNames) == kLast_YUVFormat + 1);
 
     SkPaint paint;
     SkFont  font(ToolUtils::create_portable_typeface(nullptr, SkFontStyle::Bold()), 16);
@@ -1044,7 +1044,7 @@ protected:
             auto yuvaPixmaps = planarConfig.makeYUVAPixmaps(fOriginalBMs[opaque].dimensions(),
                                                             kJPEG_Full_SkYUVColorSpace,
                                                             resultBMs,
-                                                            SK_ARRAY_COUNT(resultBMs));
+                                                            std::size(resultBMs));
 
             int i = 0;
             for (sk_sp<SkColorSpace> cs : {sk_sp<SkColorSpace>(nullptr),
@@ -1214,7 +1214,7 @@ protected:
             auto yuvaPixmaps = SkYUVAPixmaps::FromExternalPixmaps(info, pixmaps);
             auto img = SkImage::MakeFromYUVAPixmaps(canvas->recordingContext(),
                                                     yuvaPixmaps,
-                                                    GrMipMapped::kNo,
+                                                    GrMipmapped::kNo,
                                                     /* limit to max tex size */ false,
                                                     /* color space */ nullptr);
             if (img) {

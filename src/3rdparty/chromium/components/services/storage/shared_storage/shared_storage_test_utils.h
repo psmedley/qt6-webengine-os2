@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,11 +30,14 @@ class Database;
 
 namespace storage {
 
-using OriginMatcherFunction = SharedStorageDatabase::OriginMatcherFunction;
+using StorageKeyPolicyMatcherFunction =
+    SharedStorageDatabase::StorageKeyPolicyMatcherFunction;
 using InitStatus = SharedStorageDatabase::InitStatus;
 using SetBehavior = SharedStorageDatabase::SetBehavior;
 using OperationResult = SharedStorageDatabase::OperationResult;
 using GetResult = SharedStorageDatabase::GetResult;
+using BudgetResult = SharedStorageDatabase::BudgetResult;
+using TimeResult = SharedStorageDatabase::TimeResult;
 using MemoryPressureLevel = base::MemoryPressureListener::MemoryPressureLevel;
 
 // For categorizing test databases.
@@ -64,9 +67,14 @@ class TestDatabaseOperationReceiver {
       DB_PURGE_MATCHING = 11,
       DB_PURGE_STALE = 12,
       DB_FETCH_ORIGINS = 13,
-      DB_IS_OPEN = 14,
-      DB_STATUS = 15,
-      DB_OVERRIDE_TIME = 16,
+      DB_MAKE_BUDGET_WITHDRAWAL = 14,
+      DB_GET_REMAINING_BUDGET = 15,
+      DB_IS_OPEN = 16,
+      DB_STATUS = 17,
+      DB_OVERRIDE_TIME = 18,
+      DB_GET_NUM_BUDGET = 19,
+      DB_GET_TOTAL_NUM_BUDGET = 20,
+      DB_GET_CREATION_TIME = 21,
     } type;
     url::Origin origin;
     std::vector<std::u16string> params;
@@ -109,6 +117,20 @@ class TestDatabaseOperationReceiver {
   base::OnceCallback<void(GetResult)> MakeGetResultCallback(
       const DBOperation& current_operation,
       GetResult* out_result);
+
+  void BudgetResultCallbackBase(const DBOperation& current_operation,
+                                BudgetResult* out_result,
+                                BudgetResult result);
+  base::OnceCallback<void(BudgetResult)> MakeBudgetResultCallback(
+      const DBOperation& current_operation,
+      BudgetResult* out_result);
+
+  void TimeResultCallbackBase(const DBOperation& current_operation,
+                              TimeResult* out_result,
+                              TimeResult result);
+  base::OnceCallback<void(TimeResult)> MakeTimeResultCallback(
+      const DBOperation& current_operation,
+      TimeResult* out_result);
 
   void OperationResultCallbackBase(const DBOperation& current_operation,
                                    OperationResult* out_result,
@@ -163,28 +185,29 @@ class TestDatabaseOperationReceiver {
   std::queue<DBOperation> expected_operations_;
 };
 
-class OriginMatcherFunctionUtility {
+class StorageKeyPolicyMatcherFunctionUtility {
  public:
-  OriginMatcherFunctionUtility();
-  ~OriginMatcherFunctionUtility();
+  StorageKeyPolicyMatcherFunctionUtility();
+  ~StorageKeyPolicyMatcherFunctionUtility();
 
-  [[nodiscard]] static OriginMatcherFunction MakeMatcherFunction(
+  [[nodiscard]] static StorageKeyPolicyMatcherFunction MakeMatcherFunction(
       std::vector<url::Origin> origins_to_match);
 
-  [[nodiscard]] static OriginMatcherFunction MakeMatcherFunction(
+  [[nodiscard]] static StorageKeyPolicyMatcherFunction MakeMatcherFunction(
       std::vector<std::string> origin_strs_to_match);
 
   [[nodiscard]] size_t RegisterMatcherFunction(
       std::vector<url::Origin> origins_to_match);
 
-  [[nodiscard]] OriginMatcherFunction TakeMatcherFunctionForId(size_t id);
+  [[nodiscard]] StorageKeyPolicyMatcherFunction TakeMatcherFunctionForId(
+      size_t id);
 
   [[nodiscard]] bool is_empty() const { return matcher_table_.empty(); }
 
   [[nodiscard]] size_t size() const { return matcher_table_.size(); }
 
  private:
-  std::vector<OriginMatcherFunction> matcher_table_;
+  std::vector<StorageKeyPolicyMatcherFunction> matcher_table_;
 };
 
 class TestSharedStorageEntriesListener
@@ -199,7 +222,8 @@ class TestSharedStorageEntriesListener
       const std::string& error_message,
       std::vector<shared_storage_worklet::mojom::SharedStorageKeyAndOrValuePtr>
           entries,
-      bool has_more_entries) override;
+      bool has_more_entries,
+      int total_queued_to_send) override;
 
   [[nodiscard]] mojo::PendingRemote<
       shared_storage_worklet::mojom::SharedStorageEntriesListener>
@@ -304,6 +328,10 @@ void VerifySharedStorageTablesAndColumns(sql::Database& db);
 
 [[nodiscard]] bool CreateDatabaseFromSQL(const base::FilePath& db_path,
                                          const char* ascii_path);
+
+[[nodiscard]] std::string TimeDeltaToString(base::TimeDelta delta);
+
+[[nodiscard]] BudgetResult MakeBudgetResultForSqlError();
 
 }  // namespace storage
 

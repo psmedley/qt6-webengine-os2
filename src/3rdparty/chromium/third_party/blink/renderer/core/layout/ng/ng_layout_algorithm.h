@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,7 +81,7 @@ class CORE_EXPORT NGLayoutAlgorithm : public NGLayoutAlgorithmOperations {
         break_token_(break_token),
         container_builder_(node,
                            style,
-                           &space,
+                           space,
                            {space.GetWritingMode(), direction}) {}
 
   // Constructor for algorithms that use NGBoxFragmentBuilder and
@@ -93,7 +93,7 @@ class CORE_EXPORT NGLayoutAlgorithm : public NGLayoutAlgorithmOperations {
         container_builder_(
             params.node,
             &params.node.Style(),
-            &params.space,
+            params.space,
             {params.space.GetWritingMode(), params.space.Direction()}),
         additional_early_breaks_(params.additional_early_breaks) {
     container_builder_.SetIsNewFormattingContext(
@@ -110,8 +110,7 @@ class CORE_EXPORT NGLayoutAlgorithm : public NGLayoutAlgorithmOperations {
 
  protected:
   const NGConstraintSpace& ConstraintSpace() const {
-    DCHECK(container_builder_.ConstraintSpace());
-    return *container_builder_.ConstraintSpace();
+    return container_builder_.ConstraintSpace();
   }
 
   const ComputedStyle& Style() const { return node_.Style(); }
@@ -126,6 +125,8 @@ class CORE_EXPORT NGLayoutAlgorithm : public NGLayoutAlgorithmOperations {
 
   const NGBreakTokenType* BreakToken() const { return break_token_; }
 
+  const NGBoxStrut& Borders() const { return container_builder_.Borders(); }
+  const NGBoxStrut& Padding() const { return container_builder_.Padding(); }
   const NGBoxStrut& BorderPadding() const {
     return container_builder_.BorderPadding();
   }
@@ -154,20 +155,26 @@ class CORE_EXPORT NGLayoutAlgorithm : public NGLayoutAlgorithmOperations {
           nullptr) {
     // Not allowed to recurse!
     DCHECK(!early_break_);
-    DCHECK(!additional_early_breaks_ || additional_early_breaks_->IsEmpty());
+    DCHECK(!additional_early_breaks_ || additional_early_breaks_->empty());
 
     NGLayoutAlgorithmParams params(
         Node(), container_builder_.InitialFragmentGeometry(), ConstraintSpace(),
         BreakToken(), &breakpoint, additional_early_breaks);
     Algorithm algorithm_with_break(params);
-    auto& new_builder = algorithm_with_break.container_builder_;
+    return RelayoutAndBreakEarlier(&algorithm_with_break);
+  }
+
+  template <typename Algorithm>
+  const NGLayoutResult* RelayoutAndBreakEarlier(Algorithm* new_algorithm) {
+    DCHECK(new_algorithm);
+    auto& new_builder = new_algorithm->container_builder_;
     new_builder.SetBoxType(container_builder_.BoxType());
     // We're not going to run out of space in the next layout pass, since we're
     // breaking earlier, so no space shortage will be detected. Repeat what we
     // found in this pass.
     new_builder.PropagateSpaceShortage(
         container_builder_.MinimalSpaceShortage());
-    return algorithm_with_break.Layout();
+    return new_algorithm->Layout();
   }
 
   // Lay out again, this time without block fragmentation. This happens when a

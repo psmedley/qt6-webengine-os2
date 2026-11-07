@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,8 +23,6 @@ class PrivacySandboxHandler : public SettingsPageUIHandler {
 
  private:
   friend class PrivacySandboxHandlerTest;
-  FRIEND_TEST_ALL_PREFIXES(PrivacySandboxHandlerTest, GetFlocId);
-  FRIEND_TEST_ALL_PREFIXES(PrivacySandboxHandlerTest, ResetFlocId);
   FRIEND_TEST_ALL_PREFIXES(PrivacySandboxHandlerTestMockService,
                            SetFledgeJoiningAllowed);
   FRIEND_TEST_ALL_PREFIXES(PrivacySandboxHandlerTestMockService,
@@ -34,8 +32,6 @@ class PrivacySandboxHandler : public SettingsPageUIHandler {
   FRIEND_TEST_ALL_PREFIXES(PrivacySandboxHandlerTestMockService,
                            GetTopicsState);
 
-  void HandleGetFlocId(const base::Value::List& args);
-  void HandleResetFlocId(const base::Value::List& args);
   void HandleSetFledgeJoiningAllowed(const base::Value::List& args);
   void HandleGetFledgeState(const base::Value::List& args);
   void HandleSetTopicAllowed(const base::Value::List& args);

@@ -18,8 +18,10 @@
 #include "src/gpu/graphite/Caps.h"
 #include "src/gpu/graphite/CommandBuffer.h"
 #include "src/gpu/graphite/CopyTask.h"
+#include "src/gpu/graphite/Image_Graphite.h"
 #include "src/gpu/graphite/RecorderPriv.h"
 #include "src/gpu/graphite/ResourceProvider.h"
+#include "src/gpu/graphite/SynchronizeToCpuTask.h"
 #include "src/gpu/graphite/Texture.h"
 #include "src/gpu/graphite/UploadTask.h"
 
@@ -27,6 +29,7 @@ namespace skgpu::graphite {
 
 std::tuple<TextureProxyView, SkColorType> MakeBitmapProxyView(Recorder* recorder,
                                                               const SkBitmap& bitmap,
+                                                              sk_sp<SkMipmap> mipmapsIn,
                                                               Mipmapped mipmapped,
                                                               SkBudgeted budgeted) {
     // Adjust params based on input and Caps
@@ -65,13 +68,15 @@ std::tuple<TextureProxyView, SkColorType> MakeBitmapProxyView(Recorder* recorder
     }
 
     // setup MipLevels
+    sk_sp<SkMipmap> mipmaps;
     std::vector<MipLevel> texels;
     if (mipLevelCount == 1) {
         texels.resize(mipLevelCount);
         texels[0].fPixels = bmpToUpload.getPixels();
         texels[0].fRowBytes = bmpToUpload.rowBytes();
     } else {
-        sk_sp<SkMipmap> mipmaps(SkMipmap::Build(bmpToUpload.pixmap(), nullptr));
+        mipmaps = SkToBool(mipmapsIn) ? mipmapsIn
+                                      : sk_ref_sp(SkMipmap::Build(bmpToUpload.pixmap(), nullptr));
         if (!mipmaps) {
             return {};
         }
@@ -93,7 +98,7 @@ std::tuple<TextureProxyView, SkColorType> MakeBitmapProxyView(Recorder* recorder
     }
 
     // Create proxy
-    sk_sp<TextureProxy> proxy(new TextureProxy(bmpToUpload.dimensions(), textureInfo));
+    sk_sp<TextureProxy> proxy(new TextureProxy(bmpToUpload.dimensions(), textureInfo, budgeted));
     if (!proxy) {
         return {};
     }
@@ -107,6 +112,24 @@ std::tuple<TextureProxyView, SkColorType> MakeBitmapProxyView(Recorder* recorder
 
     Swizzle swizzle = caps->getReadSwizzle(ct, textureInfo);
     return {{std::move(proxy), swizzle}, ct};
+}
+
+sk_sp<SkImage> MakeFromBitmap(Recorder* recorder,
+                              const SkColorInfo& colorInfo,
+                              const SkBitmap& bitmap,
+                              sk_sp<SkMipmap> mipmaps,
+                              SkBudgeted budgeted,
+                              SkImage::RequiredImageProperties requiredProps) {
+    auto [ view, ct ] = MakeBitmapProxyView(recorder, bitmap, std::move(mipmaps),
+                                            requiredProps.fMipmapped, budgeted);
+    if (!view) {
+        return nullptr;
+    }
+
+    SkASSERT(requiredProps.fMipmapped == skgpu::graphite::Mipmapped::kNo ||
+             view.proxy()->mipmapped() == skgpu::graphite::Mipmapped::kYes);
+    return sk_make_sp<skgpu::graphite::Image>(std::move(view),
+                                              colorInfo.makeColorType(ct));
 }
 
 bool ReadPixelsHelper(FlushPendingWorkCallback&& flushPendingWork,
@@ -124,12 +147,6 @@ bool ReadPixelsHelper(FlushPendingWorkCallback&& flushPendingWork,
     }
 
     ResourceProvider* resourceProvider = recorder->priv().resourceProvider();
-    if (!srcProxy->instantiate(resourceProvider)) {
-        return false;
-    }
-    sk_sp<Texture> srcTexture = srcProxy->refTexture();
-    SkASSERT(srcTexture);
-
     size_t size = dstRowBytes * dstInfo.height();
     sk_sp<Buffer> dstBuffer = resourceProvider->findOrCreateBuffer(size,
                                                                    BufferType::kXferGpuToCpu,
@@ -139,18 +156,23 @@ bool ReadPixelsHelper(FlushPendingWorkCallback&& flushPendingWork,
     }
 
     SkIRect srcRect = SkIRect::MakeXYWH(srcX, srcY, dstInfo.width(), dstInfo.height());
-    sk_sp<CopyTextureToBufferTask> task =
-            CopyTextureToBufferTask::Make(std::move(srcTexture),
-                                          srcRect,
-                                          dstBuffer,
-                                          /*bufferOffset=*/0,
-                                          dstRowBytes);
-    if (!task) {
+    sk_sp<CopyTextureToBufferTask> copyTask = CopyTextureToBufferTask::Make(sk_ref_sp(srcProxy),
+                                                                            srcRect,
+                                                                            dstBuffer,
+                                                                            /*bufferOffset=*/0,
+                                                                            dstRowBytes);
+    if (!copyTask) {
+        return false;
+    }
+
+    sk_sp<SynchronizeToCpuTask> syncTask = SynchronizeToCpuTask::Make(dstBuffer);
+    if (!syncTask) {
         return false;
     }
 
     flushPendingWork();
-    recorder->priv().add(std::move(task));
+    recorder->priv().add(std::move(copyTask));
+    recorder->priv().add(std::move(syncTask));
 
     std::unique_ptr<Recording> recording = recorder->snap();
     if (!recording) {

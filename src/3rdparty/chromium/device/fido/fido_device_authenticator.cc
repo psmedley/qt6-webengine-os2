@@ -1,10 +1,9 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "device/fido/fido_device_authenticator.h"
 
-#include <algorithm>
 #include <numeric>
 #include <utility>
 
@@ -12,6 +11,7 @@
 #include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
+#include "base/ranges/algorithm.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -31,6 +31,7 @@
 #include "device/fido/make_credential_task.h"
 #include "device/fido/pin.h"
 #include "device/fido/u2f_command_constructor.h"
+#include "device/fido/virtual_fido_device.h"
 
 namespace device {
 
@@ -621,8 +622,7 @@ void FidoDeviceAuthenticator::OnEnumerateRPsDone(
   DCHECK(response->rp_id_hash);
 
   state.rp_id_hashes.push_back(*response->rp_id_hash);
-  state.responses.push_back(
-      AggregatedEnumerateCredentialsResponse(*response->rp));
+  state.responses.emplace_back(*response->rp);
 
   if (state.rp_id_hashes.size() < state.rp_count) {
     // Get the next RP.
@@ -820,7 +820,7 @@ void FidoDeviceAuthenticator::BioEnrollEnumerate(
 }
 
 void FidoDeviceAuthenticator::WriteLargeBlob(
-    const std::vector<uint8_t>& large_blob,
+    LargeBlob large_blob,
     const LargeBlobKey& large_blob_key,
     const absl::optional<pin::TokenResponse> pin_uv_auth_token,
     base::OnceCallback<void(CtapDeviceResponseCode)> callback) {
@@ -890,7 +890,7 @@ void FidoDeviceAuthenticator::OnReadLargeBlobFragment(
 }
 
 void FidoDeviceAuthenticator::OnHaveLargeBlobArrayForWrite(
-    const std::vector<uint8_t>& large_blob,
+    LargeBlob large_blob,
     const LargeBlobKey& large_blob_key,
     const absl::optional<pin::TokenResponse> pin_uv_auth_token,
     base::OnceCallback<void(CtapDeviceResponseCode)> callback,
@@ -912,13 +912,12 @@ void FidoDeviceAuthenticator::OnHaveLargeBlobArrayForWrite(
     return;
   }
 
-  auto existing_large_blob =
-      std::find_if(large_blob_array->begin(), large_blob_array->end(),
-                   [&large_blob_key](const LargeBlobData& blob) {
-                     return blob.Decrypt(large_blob_key);
-                   });
+  auto existing_large_blob = base::ranges::find_if(
+      *large_blob_array, [&large_blob_key](const LargeBlobData& blob) {
+        return blob.Decrypt(large_blob_key).has_value();
+      });
 
-  LargeBlobData new_large_blob_data(large_blob_key, large_blob);
+  LargeBlobData new_large_blob_data(large_blob_key, std::move(large_blob));
   if (existing_large_blob != large_blob_array->end()) {
     *existing_large_blob = std::move(new_large_blob_data);
   } else {
@@ -997,10 +996,10 @@ void FidoDeviceAuthenticator::OnHaveLargeBlobArrayForRead(
     return;
   }
 
-  std::vector<std::pair<LargeBlobKey, std::vector<uint8_t>>> result;
+  std::vector<std::pair<LargeBlobKey, LargeBlob>> result;
   for (const LargeBlobData& blob : *large_blob_array) {
     for (const LargeBlobKey& key : large_blob_keys) {
-      absl::optional<std::vector<uint8_t>> plaintext = blob.Decrypt(key);
+      absl::optional<LargeBlob> plaintext = blob.Decrypt(key);
       if (plaintext) {
         result.emplace_back(std::make_pair(key, std::move(*plaintext)));
         break;
@@ -1084,6 +1083,14 @@ bool FidoDeviceAuthenticator::SupportsCredBlobOfSize(size_t num_bytes) const {
       device_->device_info();
   return get_info_response && get_info_response->max_cred_blob_length &&
          num_bytes <= get_info_response->max_cred_blob_length.value();
+}
+
+bool FidoDeviceAuthenticator::SupportsDevicePublicKey() const {
+  const absl::optional<AuthenticatorGetInfoResponse>& get_info_response =
+      device_->device_info();
+  return get_info_response && get_info_response->extensions &&
+         base::Contains(*get_info_response->extensions,
+                        kExtensionDevicePublicKey);
 }
 
 const absl::optional<AuthenticatorSupportedOptions>&

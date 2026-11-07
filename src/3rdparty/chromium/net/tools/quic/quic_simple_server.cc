@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,10 +60,9 @@ QuicSimpleServer::QuicSimpleServer(
                      quic::QuicRandom::GetInstance(),
                      std::move(proof_source),
                      quic::KeyExchangeSource::Default()),
-      read_pending_(false),
-      synchronous_read_count_(0),
       read_buffer_(base::MakeRefCounted<IOBufferWithSize>(kReadBufferSize)),
-      quic_simple_server_backend_(quic_simple_server_backend) {
+      quic_simple_server_backend_(quic_simple_server_backend),
+      connection_id_generator_(quic::kQuicDefaultConnectionIdLength) {
   DCHECK(quic_simple_server_backend);
   Initialize();
 }
@@ -113,10 +112,11 @@ bool QuicSimpleServer::Listen(const IPEndPoint& address) {
   dispatcher_ = std::make_unique<quic::QuicSimpleDispatcher>(
       &config_, &crypto_config_, &version_manager_,
       std::unique_ptr<quic::QuicConnectionHelperInterface>(helper_),
-      std::unique_ptr<quic::QuicCryptoServerStreamBase::Helper>(
-          new QuicSimpleServerSessionHelper(quic::QuicRandom::GetInstance())),
+      std::make_unique<QuicSimpleServerSessionHelper>(
+          quic::QuicRandom::GetInstance()),
       std::unique_ptr<quic::QuicAlarmFactory>(alarm_factory_),
-      quic_simple_server_backend_, quic::kQuicDefaultConnectionIdLength);
+      quic_simple_server_backend_, quic::kQuicDefaultConnectionIdLength,
+      connection_id_generator_);
   QuicSimpleServerPacketWriter* writer =
       new QuicSimpleServerPacketWriter(socket_.get(), dispatcher_.get());
   dispatcher_->InitializeWithWriter(writer);

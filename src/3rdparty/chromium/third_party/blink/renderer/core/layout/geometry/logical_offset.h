@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,8 +26,14 @@ struct CORE_EXPORT LogicalOffset {
   constexpr LogicalOffset(LayoutUnit inline_offset, LayoutUnit block_offset)
       : inline_offset(inline_offset), block_offset(block_offset) {}
 
+  // This is deleted to avoid unwanted lossy conversion from float or double to
+  // LayoutUnit or int. Use explicit LayoutUnit constructor for each parameter
+  // instead.
+  LogicalOffset(double, double) = delete;
+
   // For testing only. It's defined in core/testing/core_unit_test_helper.h.
-  inline LogicalOffset(int inline_offset, int block_offset);
+  // 'constexpr' is to let compiler detect incorrect usages in production code.
+  constexpr LogicalOffset(int inline_offset, int block_offset);
 
   LayoutUnit inline_offset;
   LayoutUnit block_offset;

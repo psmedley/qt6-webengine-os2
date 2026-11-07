@@ -136,7 +136,7 @@ int SkWGLExtensions::selectFormat(const int formats[],
         0,
     };
     SkTDArray<PixelFormat> rankedFormats;
-    rankedFormats.setCount(formatCount);
+    rankedFormats.resize(formatCount);
     for (int i = 0; i < formatCount; ++i) {
         static const int kQueryAttr = SK_WGL_SAMPLES;
         int numSamples;
@@ -152,7 +152,7 @@ int SkWGLExtensions::selectFormat(const int formats[],
     }
     SkTQSort(rankedFormats.begin(), rankedFormats.end(), pf_less);
     int idx = SkTSearch<PixelFormat, pf_less>(rankedFormats.begin(),
-                                              rankedFormats.count(),
+                                              rankedFormats.size(),
                                               desiredFormat,
                                               sizeof(PixelFormat));
     if (idx < 0) {
@@ -393,7 +393,7 @@ static HGLRC create_gl_context(HDC dc, const SkWGLExtensions& extensions,
                 SK_WGL_CONTEXT_PROFILE_MASK,  SK_WGL_CONTEXT_CORE_PROFILE_BIT,
                 0,
             };
-            for (size_t v = 0; v < SK_ARRAY_COUNT(kCoreGLVersions) / 2; ++v) {
+            for (size_t v = 0; v < std::size(kCoreGLVersions) / 2; ++v) {
                 coreProfileAttribs[1] = kCoreGLVersions[2 * v];
                 coreProfileAttribs[3] = kCoreGLVersions[2 * v + 1];
                 glrc = extensions.createContextAttribs(dc, shareContext, coreProfileAttribs);
@@ -432,7 +432,7 @@ HGLRC SkCreateWGLContext(HDC dc, int msaaSampleCount, bool deepColor,
     int pixelFormatsToTry[] = { -1, -1 };
     get_pixel_formats_to_try(dc, extensions, true, msaaSampleCount, deepColor, pixelFormatsToTry);
     for (size_t f = 0;
-         !set && -1 != pixelFormatsToTry[f] && f < SK_ARRAY_COUNT(pixelFormatsToTry);
+         !set && -1 != pixelFormatsToTry[f] && f < std::size(pixelFormatsToTry);
          ++f) {
         PIXELFORMATDESCRIPTOR pfd;
         DescribePixelFormat(dc, pixelFormatsToTry[f], sizeof(pfd), &pfd);

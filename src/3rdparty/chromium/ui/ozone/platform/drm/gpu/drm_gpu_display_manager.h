@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,8 +54,14 @@ class DrmGpuDisplayManager {
   bool TakeDisplayControl();
   void RelinquishDisplayControl();
 
+  // Whether or not a udev display change event triggered by a DRM property
+  // should go through or get blocked.
+  bool ShouldDisplayEventTriggerConfiguration(
+      const EventPropertyMap& event_props);
+
   bool ConfigureDisplays(
-      const std::vector<display::DisplayConfigurationParams>& config_requests);
+      const std::vector<display::DisplayConfigurationParams>& config_requests,
+      uint32_t modeset_flag);
   bool GetHDCPState(int64_t display_id,
                     display::HDCPState* state,
                     display::ContentProtectionMethod* protection_method);

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,8 +50,9 @@ class LocalPrinterHandlerDefault : public PrinterHandler {
 
  private:
   static PrinterList EnumeratePrintersAsync(const std::string& locale);
-  static base::Value FetchCapabilitiesAsync(const std::string& device_name,
-                                            const std::string& locale);
+  static base::Value::Dict FetchCapabilitiesAsync(
+      const std::string& device_name,
+      const std::string& locale);
   static std::string GetDefaultPrinterAsync(const std::string& locale);
 
   const raw_ptr<content::WebContents> preview_web_contents_;

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,13 +55,13 @@ class MEDIA_EXPORT KeySystems {
       EmeInitDataType init_data_type) const = 0;
 
   // Returns the configuration rule for supporting |encryption_scheme|.
-  virtual EmeConfigRule GetEncryptionSchemeConfigRule(
+  virtual EmeConfig::Rule GetEncryptionSchemeConfigRule(
       const std::string& key_system,
       EncryptionScheme encryption_scheme) const = 0;
 
   // Returns the configuration rule for supporting a container and a list of
   // codecs.
-  virtual EmeConfigRule GetContentTypeConfigRule(
+  virtual EmeConfig::Rule GetContentTypeConfigRule(
       const std::string& key_system,
       EmeMediaType media_type,
       const std::string& container_mime_type,
@@ -75,14 +75,14 @@ class MEDIA_EXPORT KeySystems {
   // must be applied.
   // TODO(crbug.com/1204284): Refactor this and remove the
   // `hw_secure_requirement` argument.
-  virtual EmeConfigRule GetRobustnessConfigRule(
+  virtual EmeConfig::Rule GetRobustnessConfigRule(
       const std::string& key_system,
       EmeMediaType media_type,
       const std::string& requested_robustness,
       const bool* hw_secure_requirement) const = 0;
 
   // Returns the support |key_system| provides for persistent-license sessions.
-  virtual EmeSessionTypeSupport GetPersistentLicenseSessionSupport(
+  virtual EmeConfig::Rule GetPersistentLicenseSessionSupport(
       const std::string& key_system) const = 0;
 
   // Returns the support |key_system| provides for persistent state.
@@ -127,6 +127,8 @@ MEDIA_EXPORT void AddCodecMaskForTesting(EmeMediaType media_type,
                                          uint32_t mask);
 MEDIA_EXPORT void AddMimeTypeCodecMaskForTesting(const std::string& mime_type,
                                                  uint32_t mask);
+// Resets and reinitializes the KeySystems for testing.
+MEDIA_EXPORT void ResetKeySystemsForTesting();
 #endif  // defined(UNIT_TEST)
 
 }  // namespace media

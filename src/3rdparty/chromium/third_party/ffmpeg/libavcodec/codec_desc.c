@@ -1462,6 +1462,7 @@ static const AVCodecDescriptor codec_descriptors[] = {
         .long_name = NULL_IF_CONFIG_SMALL("Avid Meridien Uncompressed"),
         .props     = AV_CODEC_PROP_INTRA_ONLY | AV_CODEC_PROP_LOSSLESS,
     },
+#if FF_API_AYUV_CODECID
     {
         .id        = AV_CODEC_ID_AYUV,
         .type      = AVMEDIA_TYPE_VIDEO,
@@ -1469,6 +1470,7 @@ static const AVCodecDescriptor codec_descriptors[] = {
         .long_name = NULL_IF_CONFIG_SMALL("Uncompressed packed MS 4:4:4:4"),
         .props     = AV_CODEC_PROP_INTRA_ONLY | AV_CODEC_PROP_LOSSLESS,
     },
+#endif
     {
         .id        = AV_CODEC_ID_TARGA_Y216,
         .type      = AVMEDIA_TYPE_VIDEO,
@@ -1862,6 +1864,50 @@ static const AVCodecDescriptor codec_descriptors[] = {
         .name      = "gem",
         .long_name = NULL_IF_CONFIG_SMALL("GEM Raster image"),
         .props     = AV_CODEC_PROP_LOSSY,
+    },
+    {
+        .id        = AV_CODEC_ID_VBN,
+        .type      = AVMEDIA_TYPE_VIDEO,
+        .name      = "vbn",
+        .long_name = NULL_IF_CONFIG_SMALL("Vizrt Binary Image"),
+        .props     = AV_CODEC_PROP_LOSSY,
+    },
+    {
+        .id        = AV_CODEC_ID_JPEGXL,
+        .type      = AVMEDIA_TYPE_VIDEO,
+        .name      = "jpegxl",
+        .long_name = NULL_IF_CONFIG_SMALL("JPEG XL"),
+        .props     = AV_CODEC_PROP_INTRA_ONLY | AV_CODEC_PROP_LOSSY |
+                     AV_CODEC_PROP_LOSSLESS,
+        .mime_types= MT("image/jxl"),
+    },
+    {
+        .id        = AV_CODEC_ID_QOI,
+        .type      = AVMEDIA_TYPE_VIDEO,
+        .name      = "qoi",
+        .long_name = NULL_IF_CONFIG_SMALL("QOI (Quite OK Image)"),
+        .props     = AV_CODEC_PROP_INTRA_ONLY | AV_CODEC_PROP_LOSSLESS,
+    },
+    {
+        .id        = AV_CODEC_ID_PHM,
+        .type      = AVMEDIA_TYPE_VIDEO,
+        .name      = "phm",
+        .long_name = NULL_IF_CONFIG_SMALL("PHM (Portable HalfFloatMap) image"),
+        .props     = AV_CODEC_PROP_INTRA_ONLY | AV_CODEC_PROP_LOSSLESS,
+    },
+    {
+        .id        = AV_CODEC_ID_RADIANCE_HDR,
+        .type      = AVMEDIA_TYPE_VIDEO,
+        .name      = "hdr",
+        .long_name = NULL_IF_CONFIG_SMALL("HDR (Radiance RGBE format) image"),
+        .props     = AV_CODEC_PROP_INTRA_ONLY | AV_CODEC_PROP_LOSSY,
+    },
+    {
+        .id        = AV_CODEC_ID_WBMP,
+        .type      = AVMEDIA_TYPE_VIDEO,
+        .name      = "wbmp",
+        .long_name = NULL_IF_CONFIG_SMALL("WBMP (Wireless Application Protocol Bitmap) image"),
+        .props     = AV_CODEC_PROP_INTRA_ONLY | AV_CODEC_PROP_LOSSLESS,
     },
 
     /* various PCM "codecs" */
@@ -3243,6 +3289,20 @@ static const AVCodecDescriptor codec_descriptors[] = {
         .name      = "dfpwm",
         .long_name = NULL_IF_CONFIG_SMALL("DFPWM (Dynamic Filter Pulse Width Modulation)"),
         .props     = AV_CODEC_PROP_LOSSY,
+    },
+    {
+        .id        = AV_CODEC_ID_BONK,
+        .type      = AVMEDIA_TYPE_AUDIO,
+        .name      = "bonk",
+        .long_name = NULL_IF_CONFIG_SMALL("Bonk audio"),
+        .props     = AV_CODEC_PROP_LOSSY | AV_CODEC_PROP_INTRA_ONLY | AV_CODEC_PROP_LOSSLESS,
+    },
+    {
+        .id        = AV_CODEC_ID_MISC4,
+        .type      = AVMEDIA_TYPE_AUDIO,
+        .name      = "misc4",
+        .long_name = NULL_IF_CONFIG_SMALL("Micronas SC-4 Audio"),
+        .props     = AV_CODEC_PROP_LOSSY | AV_CODEC_PROP_INTRA_ONLY,
     },
 
     /* subtitle codecs */

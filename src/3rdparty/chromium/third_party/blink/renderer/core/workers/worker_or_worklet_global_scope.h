@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,6 +41,7 @@ class ModuleTreeClient;
 class ResourceFetcher;
 class WorkerResourceTimingNotifier;
 class SubresourceFilter;
+class WebContentSettingsClient;
 class WebWorkerFetchContext;
 class WorkerOrWorkletScriptController;
 class WorkerReportingProxy;
@@ -81,6 +82,7 @@ class CORE_EXPORT WorkerOrWorkletGlobalScope
   bool IsWorkerOrWorkletGlobalScope() const final { return true; }
   bool IsJSExecutionForbidden() const final;
   void DisableEval(const String& error_message) final;
+  void SetWasmEvalErrorMessage(const String& error_message) final;
   bool CanExecuteScripts(ReasonForCallingCanExecuteScripts) final;
   bool HasInsecureContextInAncestors() const override;
 
@@ -285,10 +287,6 @@ class CORE_EXPORT WorkerOrWorkletGlobalScope
 
   // This tracks deprecation features that have been used.
   Deprecation deprecation_;
-
-  // LocalDOMWindow::modulator_ workaround equivalent.
-  // TODO(kouhei): Remove this.
-  Member<Modulator> modulator_;
 };
 
 template <>

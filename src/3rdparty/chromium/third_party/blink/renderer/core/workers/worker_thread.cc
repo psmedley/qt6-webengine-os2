@@ -31,6 +31,7 @@
 #include <utility>
 
 #include "base/metrics/histogram_functions.h"
+#include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread_restrictions.h"
 #include "third_party/blink/public/common/loader/worker_main_script_load_parameters.h"
@@ -39,6 +40,7 @@
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/core/execution_context/agent.h"
+#include "third_party/blink/renderer/core/frame/policy_container.h"
 #include "third_party/blink/renderer/core/inspector/console_message_storage.h"
 #include "third_party/blink/renderer/core/inspector/inspector_issue_storage.h"
 #include "third_party/blink/renderer/core/inspector/inspector_task_runner.h"
@@ -53,13 +55,12 @@
 #include "third_party/blink/renderer/core/workers/worker_clients.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worker_reporting_proxy.h"
-#include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
 #include "third_party/blink/renderer/platform/loader/fetch/worker_resource_timing_notifier.h"
 #include "third_party/blink/renderer/platform/scheduler/public/event_loop.h"
 #include "third_party/blink/renderer/platform/scheduler/public/worker_scheduler.h"
-#include "third_party/blink/renderer/platform/scheduler/worker/worker_thread.h"
+#include "third_party/blink/renderer/platform/scheduler/worker/non_main_thread_impl.h"
 #include "third_party/blink/renderer/platform/scheduler/worker/worker_thread_scheduler.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
@@ -78,9 +79,9 @@ constexpr base::TimeDelta kForcibleTerminationDelay = base::Seconds(2);
 
 }  // namespace
 
-Mutex& WorkerThread::ThreadSetMutex() {
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(Mutex, mutex, ());
-  return mutex;
+base::Lock& WorkerThread::ThreadSetLock() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(base::Lock, lock, ());
+  return lock;
 }
 
 static std::atomic_int g_unique_worker_thread_id(1);
@@ -152,13 +153,13 @@ class WorkerThread::InterruptData {
 
 WorkerThread::~WorkerThread() {
   DCHECK_CALLED_ON_VALID_THREAD(parent_thread_checker_);
-  MutexLocker lock(ThreadSetMutex());
+  base::AutoLock locker(ThreadSetLock());
   DCHECK(InitializingWorkerThreads().Contains(this) ||
          WorkerThreads().Contains(this));
   InitializingWorkerThreads().erase(this);
   WorkerThreads().erase(this);
 
-  DCHECK(child_threads_.IsEmpty());
+  DCHECK(child_threads_.empty());
   DCHECK_NE(ExitCode::kNotTerminated, exit_code_);
   base::UmaHistogramEnumeration("WorkerThread.ExitCode", exit_code_);
 }
@@ -211,6 +212,7 @@ void WorkerThread::FetchAndRunClassicScript(
     const KURL& script_url,
     std::unique_ptr<WorkerMainScriptLoadParameters>
         worker_main_script_load_params,
+    std::unique_ptr<WebPolicyContainer> policy_container,
     std::unique_ptr<CrossThreadFetchClientSettingsObjectData>
         outside_settings_object_data,
     WorkerResourceTimingNotifier* outside_resource_timing_notifier,
@@ -222,7 +224,7 @@ void WorkerThread::FetchAndRunClassicScript(
           &WorkerThread::FetchAndRunClassicScriptOnWorkerThread,
           CrossThreadUnretained(this), script_url,
           std::move(worker_main_script_load_params),
-          std::move(outside_settings_object_data),
+          std::move(policy_container), std::move(outside_settings_object_data),
           WrapCrossThreadPersistent(outside_resource_timing_notifier),
           stack_id));
 }
@@ -231,6 +233,7 @@ void WorkerThread::FetchAndRunModuleScript(
     const KURL& script_url,
     std::unique_ptr<WorkerMainScriptLoadParameters>
         worker_main_script_load_params,
+    std::unique_ptr<WebPolicyContainer> policy_container,
     std::unique_ptr<CrossThreadFetchClientSettingsObjectData>
         outside_settings_object_data,
     WorkerResourceTimingNotifier* outside_resource_timing_notifier,
@@ -243,7 +246,7 @@ void WorkerThread::FetchAndRunModuleScript(
           &WorkerThread::FetchAndRunModuleScriptOnWorkerThread,
           CrossThreadUnretained(this), script_url,
           std::move(worker_main_script_load_params),
-          std::move(outside_settings_object_data),
+          std::move(policy_container), std::move(outside_settings_object_data),
           WrapCrossThreadPersistent(outside_resource_timing_notifier),
           credentials_mode, reject_coep_unsafe_none.value()));
 }
@@ -272,7 +275,7 @@ void WorkerThread::Resume() {
 void WorkerThread::Terminate() {
   DCHECK_CALLED_ON_VALID_THREAD(parent_thread_checker_);
   {
-    MutexLocker lock(mutex_);
+    base::AutoLock locker(lock_);
     if (requested_to_terminate_)
       return;
     requested_to_terminate_ = true;
@@ -319,10 +322,11 @@ void WorkerThread::DidProcessTask(const base::PendingTask& pending_task) {
   // metrics for microtasks are counted as a part of the preceding task.
   GlobalScope()->GetAgent()->event_loop()->PerformMicrotaskCheckpoint();
 
-  // Microtask::PerformCheckpoint() runs microtasks and its completion hooks for
-  // the default microtask queue. The default queue may contain the microtasks
-  // queued by V8 itself, and legacy blink::MicrotaskQueue::EnqueueMicrotask.
-  // The completion hook contains IndexedDB clean-up task, as described at
+  // EventLoop::PerformIsolateGlobalMicrotasksCheckpoint() runs microtasks and
+  // its completion hooks for the default microtask queue. The default queue may
+  // contain the microtasks queued by V8 itself, and legacy
+  // blink::MicrotaskQueue::EnqueueMicrotask. The completion hook contains
+  // IndexedDB clean-up task, as described at
   // https://html.spec.whatwg.org/C#perform-a-microtask-checkpoint
   // TODO(tzik): Move rejected promise handling to EventLoop.
 
@@ -356,13 +360,13 @@ bool WorkerThread::IsCurrentThread() {
 }
 
 void WorkerThread::DebuggerTaskStarted() {
-  MutexLocker lock(mutex_);
+  base::AutoLock locker(lock_);
   DCHECK(IsCurrentThread());
   debugger_task_counter_++;
 }
 
 void WorkerThread::DebuggerTaskFinished() {
-  MutexLocker lock(mutex_);
+  base::AutoLock locker(lock_);
   DCHECK(IsCurrentThread());
   debugger_task_counter_--;
 }
@@ -378,7 +382,7 @@ WorkerInspectorController* WorkerThread::GetWorkerInspectorController() {
 }
 
 unsigned WorkerThread::WorkerThreadCount() {
-  MutexLocker lock(ThreadSetMutex());
+  base::AutoLock locker(ThreadSetLock());
   return InitializingWorkerThreads().size() + WorkerThreads().size();
 }
 
@@ -393,7 +397,7 @@ HashSet<WorkerThread*>& WorkerThread::WorkerThreads() {
 }
 
 bool WorkerThread::IsForciblyTerminated() {
-  MutexLocker lock(mutex_);
+  base::AutoLock locker(lock_);
   switch (exit_code_) {
     case ExitCode::kNotTerminated:
     case ExitCode::kGracefullyTerminated:
@@ -413,7 +417,7 @@ void WorkerThread::WaitForShutdownForTesting() {
 }
 
 ExitCode WorkerThread::GetExitCodeForTesting() {
-  MutexLocker lock(mutex_);
+  base::AutoLock locker(lock_);
   return exit_code_;
 }
 
@@ -434,7 +438,7 @@ void WorkerThread::ChildThreadStartedOnWorkerThread(WorkerThread* child) {
   DCHECK(IsCurrentThread());
 #if DCHECK_IS_ON()
   {
-    MutexLocker lock(mutex_);
+    base::AutoLock locker(lock_);
     DCHECK_EQ(ThreadState::kRunning, thread_state_);
   }
 #endif
@@ -444,13 +448,13 @@ void WorkerThread::ChildThreadStartedOnWorkerThread(WorkerThread* child) {
 void WorkerThread::ChildThreadTerminatedOnWorkerThread(WorkerThread* child) {
   DCHECK(IsCurrentThread());
   child_threads_.erase(child);
-  if (child_threads_.IsEmpty() && CheckRequestedToTerminate())
+  if (child_threads_.empty() && CheckRequestedToTerminate())
     PerformShutdownOnWorkerThread();
 }
 
 WorkerThread::WorkerThread(WorkerReportingProxy& worker_reporting_proxy)
-    : WorkerThread(worker_reporting_proxy, Thread::Current()->GetTaskRunner()) {
-}
+    : WorkerThread(worker_reporting_proxy,
+                   Thread::Current()->GetDeprecatedTaskRunner()) {}
 
 WorkerThread::WorkerThread(WorkerReportingProxy& worker_reporting_proxy,
                            scoped_refptr<base::SingleThreadTaskRunner>
@@ -463,7 +467,7 @@ WorkerThread::WorkerThread(WorkerReportingProxy& worker_reporting_proxy,
           std::move(parent_thread_default_task_runner)),
       shutdown_event_(RefCountedWaitableEvent::Create()) {
   DCHECK_CALLED_ON_VALID_THREAD(parent_thread_checker_);
-  MutexLocker lock(ThreadSetMutex());
+  base::AutoLock locker(ThreadSetLock());
   InitializingWorkerThreads().insert(this);
 }
 
@@ -475,8 +479,8 @@ void WorkerThread::ScheduleToTerminateScriptExecution() {
   // class on the parent thread.
   forcible_termination_task_handle_ = PostDelayedCancellableTask(
       *parent_thread_default_task_runner_, FROM_HERE,
-      WTF::Bind(&WorkerThread::EnsureScriptExecutionTerminates,
-                WTF::Unretained(this), ExitCode::kAsyncForciblyTerminated),
+      WTF::BindOnce(&WorkerThread::EnsureScriptExecutionTerminates,
+                    WTF::Unretained(this), ExitCode::kAsyncForciblyTerminated),
       forcible_termination_delay_);
 }
 
@@ -506,7 +510,7 @@ WorkerThread::TerminationState WorkerThread::ShouldTerminateScriptExecution() {
 
 void WorkerThread::EnsureScriptExecutionTerminates(ExitCode exit_code) {
   DCHECK_CALLED_ON_VALID_THREAD(parent_thread_checker_);
-  MutexLocker lock(mutex_);
+  base::AutoLock locker(lock_);
   switch (ShouldTerminateScriptExecution()) {
     case TerminationState::kTerminationUnnecessary:
       return;
@@ -530,10 +534,10 @@ void WorkerThread::InitializeSchedulerOnWorkerThread(
   DCHECK(IsCurrentThread());
   DCHECK(!worker_scheduler_);
 
-  // TODO(hajimehoshi, nhiroki): scheduler::WorkerThread and scheduler::
+  // TODO(hajimehoshi, nhiroki): scheduler::NonMainThreadImpl and scheduler::
   // WorkerThreadScheduler are not in scheduler/public, then using them is a
   // layer violation. Fix this.
-  auto& worker_thread = static_cast<scheduler::WorkerThread&>(
+  auto& worker_thread = static_cast<scheduler::NonMainThreadImpl&>(
       GetWorkerBackingThread().BackingThread());
   worker_scheduler_ = scheduler::WorkerScheduler::CreateWorkerScheduler(
       static_cast<scheduler::WorkerThreadScheduler*>(
@@ -545,7 +549,7 @@ void WorkerThread::InitializeSchedulerOnWorkerThread(
   // worker thread. See also comments on GetTaskRunner().
   // We only capture task types that are actually used. When you want to use a
   // new task type, add it here.
-  Vector<TaskType> available_task_types = {
+  static constexpr TaskType kAvailableTaskTypes[] = {
       TaskType::kBackgroundFetch,
       TaskType::kCanvasBlobSerialization,
       TaskType::kDatabaseAccess,
@@ -578,7 +582,8 @@ void WorkerThread::InitializeSchedulerOnWorkerThread(
       TaskType::kWebLocks,
       TaskType::kWebSocket,
       TaskType::kWorkerAnimation};
-  for (auto type : available_task_types) {
+  worker_task_runners_.ReserveCapacityForSize(std::size(kAvailableTaskTypes));
+  for (auto type : kAvailableTaskTypes) {
     auto task_runner = worker_scheduler_->GetTaskRunner(type);
     auto result = worker_task_runners_.insert(type, std::move(task_runner));
     DCHECK(result.is_new_entry);
@@ -596,7 +601,7 @@ void WorkerThread::InitializeOnWorkerThread(
   worker_reporting_proxy_.WillInitializeWorkerContext();
   {
     TRACE_EVENT0("blink.worker", "WorkerThread::InitializeWorkerContext");
-    MutexLocker lock(mutex_);
+    base::AutoLock locker(lock_);
     DCHECK_EQ(ThreadState::kNotStarted, thread_state_);
 
     if (IsOwningBackingThread()) {
@@ -647,7 +652,7 @@ void WorkerThread::InitializeOnWorkerThread(
   }
 
   {
-    MutexLocker lock(ThreadSetMutex());
+    base::AutoLock locker(ThreadSetLock());
     DCHECK(InitializingWorkerThreads().Contains(this));
     DCHECK(!WorkerThreads().Contains(this));
     InitializingWorkerThreads().erase(this);
@@ -677,6 +682,7 @@ void WorkerThread::FetchAndRunClassicScriptOnWorkerThread(
     const KURL& script_url,
     std::unique_ptr<WorkerMainScriptLoadParameters>
         worker_main_script_load_params,
+    std::unique_ptr<WebPolicyContainer> policy_container,
     std::unique_ptr<CrossThreadFetchClientSettingsObjectData>
         outside_settings_object,
     WorkerResourceTimingNotifier* outside_resource_timing_notifier,
@@ -689,6 +695,8 @@ void WorkerThread::FetchAndRunClassicScriptOnWorkerThread(
   To<WorkerGlobalScope>(GlobalScope())
       ->FetchAndRunClassicScript(
           script_url, std::move(worker_main_script_load_params),
+          PolicyContainer::CreateFromWebPolicyContainer(
+              std::move(policy_container)),
           *MakeGarbageCollected<FetchClientSettingsObjectSnapshot>(
               std::move(outside_settings_object)),
           *outside_resource_timing_notifier, stack_id);
@@ -698,6 +706,7 @@ void WorkerThread::FetchAndRunModuleScriptOnWorkerThread(
     const KURL& script_url,
     std::unique_ptr<WorkerMainScriptLoadParameters>
         worker_main_script_load_params,
+    std::unique_ptr<WebPolicyContainer> policy_container,
     std::unique_ptr<CrossThreadFetchClientSettingsObjectData>
         outside_settings_object,
     WorkerResourceTimingNotifier* outside_resource_timing_notifier,
@@ -713,6 +722,8 @@ void WorkerThread::FetchAndRunModuleScriptOnWorkerThread(
   To<WorkerGlobalScope>(GlobalScope())
       ->FetchAndRunModuleScript(
           script_url, std::move(worker_main_script_load_params),
+          PolicyContainer::CreateFromWebPolicyContainer(
+              std::move(policy_container)),
           *MakeGarbageCollected<FetchClientSettingsObjectSnapshot>(
               std::move(outside_settings_object)),
           *outside_resource_timing_notifier, credentials_mode,
@@ -722,7 +733,7 @@ void WorkerThread::FetchAndRunModuleScriptOnWorkerThread(
 void WorkerThread::PrepareForShutdownOnWorkerThread() {
   DCHECK(IsCurrentThread());
   {
-    MutexLocker lock(mutex_);
+    base::AutoLock locker(lock_);
     if (thread_state_ == ThreadState::kReadyToShutdown)
       return;
     SetThreadState(ThreadState::kReadyToShutdown);
@@ -758,7 +769,7 @@ void WorkerThread::PrepareForShutdownOnWorkerThread() {
 void WorkerThread::PerformShutdownOnWorkerThread() {
   DCHECK(IsCurrentThread());
   {
-    MutexLocker lock(mutex_);
+    base::AutoLock locker(lock_);
     DCHECK(requested_to_terminate_);
     DCHECK_EQ(ThreadState::kReadyToShutdown, thread_state_);
     if (exit_code_ == ExitCode::kNotTerminated)
@@ -769,7 +780,7 @@ void WorkerThread::PerformShutdownOnWorkerThread() {
   // down this thread. ChildThreadTerminatedOnWorkerThread() is responsible
   // for completing shutdown on the worker thread after the last child shuts
   // down.
-  if (!child_threads_.IsEmpty())
+  if (!child_threads_.empty())
     return;
 
   inspector_task_runner_->Dispose();
@@ -826,7 +837,7 @@ void WorkerThread::SetExitCode(ExitCode exit_code) {
 }
 
 bool WorkerThread::CheckRequestedToTerminate() {
-  MutexLocker lock(mutex_);
+  base::AutoLock locker(lock_);
   return requested_to_terminate_;
 }
 
@@ -842,7 +853,7 @@ void WorkerThread::PauseOrFreeze(mojom::blink::FrameLifecycleState state,
     // workers might not yield. Likewise we might not be in JS and the
     // interrupt might not fire right away, so we post a task as well.
     // Use a token to mitigate both the interrupt and post task firing.
-    MutexLocker lock(mutex_);
+    base::AutoLock locker(lock_);
 
     InterruptData* interrupt_data =
         new InterruptData(this, state, is_in_back_forward_cache);
@@ -868,6 +879,13 @@ void WorkerThread::PauseOrFreezeOnWorkerThread(
          state == mojom::blink::FrameLifecycleState::kPaused);
   DCHECK(!is_in_back_forward_cache ||
          state == mojom::blink::FrameLifecycleState::kFrozen);
+
+  // Ensure we aren't trying to pause a worker that should be terminating.
+  {
+    base::AutoLock locker(lock_);
+    if (thread_state_ != ThreadState::kRunning)
+      return;
+  }
 
   pause_or_freeze_count_++;
   GlobalScope()->SetIsInBackForwardCache(is_in_back_forward_cache);
@@ -919,7 +937,7 @@ void WorkerThread::PauseOrFreezeWithInterruptDataOnWorkerThread(
   bool should_execute = false;
   mojom::blink::FrameLifecycleState state;
   {
-    MutexLocker lock(mutex_);
+    base::AutoLock locker(lock_);
     state = interrupt_data->state();
     // If both the V8 interrupt and PostTask have executed we can remove
     // the matching InterruptData from the |pending_interrupts_| as it is

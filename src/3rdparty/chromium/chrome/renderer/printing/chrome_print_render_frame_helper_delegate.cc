@@ -1,9 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/renderer/printing/chrome_print_render_frame_helper_delegate.h"
 
+#include <utility>
 #include <vector>
 
 #include "base/check.h"
@@ -60,9 +61,9 @@ bool ChromePrintRenderFrameHelperDelegate::OverridePrint(
     // instructs the PDF plugin to print. This is to make window.print() on a
     // PDF plugin document correctly print the PDF. See
     // https://crbug.com/448720.
-    base::DictionaryValue message;
-    message.SetStringKey("type", "print");
-    post_message_support->PostMessageFromValue(message);
+    base::Value::Dict message;
+    message.Set("type", "print");
+    post_message_support->PostMessageFromValue(base::Value(std::move(message)));
     return true;
   }
 #endif  // BUILDFLAG(ENABLE_PDF)

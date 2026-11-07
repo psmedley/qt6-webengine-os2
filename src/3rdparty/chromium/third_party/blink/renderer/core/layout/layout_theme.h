@@ -68,7 +68,7 @@ class CORE_EXPORT LayoutTheme : public RefCounted<LayoutTheme> {
   void AdjustStyle(const Element*, ComputedStyle&);
 
   // The remaining methods should be implemented by the platform-specific
-  // portion of the theme, e.g., LayoutThemeMac.cpp for Mac OS X.
+  // portion of the theme, e.g., layout_theme_mac.mm for macOS.
 
   // These methods return the theme's extra style sheets rules, to let each
   // platform adjust the default CSS rules in html.css or quirks.css
@@ -211,10 +211,7 @@ class CORE_EXPORT LayoutTheme : public RefCounted<LayoutTheme> {
 
   // Methods for each appearance value.
   virtual void AdjustCheckboxStyle(ComputedStyle&) const;
-  virtual void SetCheckboxSize(ComputedStyle&) const {}
-
   virtual void AdjustRadioStyle(ComputedStyle&) const;
-  virtual void SetRadioSize(ComputedStyle&) const {}
 
   virtual void AdjustButtonStyle(ComputedStyle&) const;
   virtual void AdjustInnerSpinButtonStyle(ComputedStyle&) const;
@@ -256,9 +253,11 @@ class CORE_EXPORT LayoutTheme : public RefCounted<LayoutTheme> {
 
   // This color is expected to be drawn on a semi-transparent overlay,
   // making it more transparent than its alpha value indicates.
-  static const RGBA32 kDefaultTapHighlightColor = 0x66000000;
+  static constexpr Color kDefaultTapHighlightColor =
+      Color::FromRGBA32(0x66000000);
 
-  static const RGBA32 kDefaultCompositionBackgroundColor = 0xFFFFDD55;
+  static constexpr Color kDefaultCompositionBackgroundColor =
+      Color::FromRGBA32(0xFFFFDD55);
 };
 
 }  // namespace blink

@@ -20,13 +20,14 @@
  */
 
 #include "libavutil/channel_layout.h"
+#include "libavcodec/bytestream.h"
 #include "libavcodec/flac.h"
 #include "avformat.h"
+#include "demux.h"
 #include "flac_picture.h"
 #include "internal.h"
 #include "rawdec.h"
 #include "oggdec.h"
-#include "vorbiscomment.h"
 #include "replaygain.h"
 
 #define SEEKPOINT_SIZE 18

@@ -189,7 +189,7 @@ static bool ShouldIgnoreListItem(Node* node) {
       IsA<HTMLOListElement>(*parent)) {
     AtomicString role = AccessibleNode::GetPropertyOrARIAAttribute(
         parent, AOMStringProperty::kRole);
-    if (!role.IsEmpty() && role != "list" && role != "directory")
+    if (!role.empty() && role != "list" && role != "directory")
       return true;
   }
   return false;
@@ -264,7 +264,8 @@ ax::mojom::blink::Role AXLayoutObject::RoleFromLayoutObjectOrNode() const {
     }
     if (layout_object_->IsSVGShape())
       return ax::mojom::blink::Role::kGraphicsSymbol;
-    if (layout_object_->IsSVGForeignObject() || IsA<SVGGElement>(node))
+    if (layout_object_->IsSVGForeignObjectIncludingNG() ||
+        IsA<SVGGElement>(node))
       return ax::mojom::blink::Role::kGroup;
     if (IsA<SVGUseElement>(node))
       return ax::mojom::blink::Role::kGraphicsObject;
@@ -447,10 +448,12 @@ bool AXLayoutObject::ComputeAccessibilityIsIgnored(
   DCHECK(initialized_);
 #endif
 
-  // All nodes must have an unignored parent within their tree under
-  // the root node of the web area, so force that node to always be unignored.
+  // All nodes must have an unignored parent within their tree under the root
+  // node of the main web area, so force that node to always be unignored.
+  // The web area for a <select>'s' popup document is ignored, because the
+  // popup object hierarchy is constructed without the document root.
   if (IsWebArea())
-    return false;
+    return CachedParentObject() && CachedParentObject()->IsMenuList();
 
   const Node* node = GetNode();
   if (IsA<HTMLHtmlElement>(node))
@@ -514,7 +517,7 @@ bool AXLayoutObject::ComputeAccessibilityIsIgnored(
   }
 
   // The SVG-AAM says the foreignObject element is normally presentational.
-  if (layout_object_->IsSVGForeignObject()) {
+  if (layout_object_->IsSVGForeignObjectIncludingNG()) {
     if (ignored_reasons)
       ignored_reasons->push_back(IgnoredReason(kAXPresentational));
     return true;
@@ -585,10 +588,8 @@ bool AXLayoutObject::ComputeAccessibilityIsIgnored(
   // FIXME(aboxhall): may need to move?
   absl::optional<String> alt_text = GetCSSAltText(node);
   if (alt_text)
-    return alt_text->IsEmpty();
+    return alt_text->empty();
 
-  if (IsWebArea())
-    return false;
   if (layout_object_->IsListMarkerIncludingAll()) {
     // Ignore TextAlternative of the list marker for SUMMARY because:
     //  - TextAlternatives for disclosure-* are triangle symbol characters used
@@ -1121,7 +1122,7 @@ String AXLayoutObject::TextAlternative(
       String visible_text = layout_text->PlainText();  // Actual rendered text.
       // If no text boxes we assume this is unrendered end-of-line whitespace.
       // TODO find robust way to deterministically detect end-of-line space.
-      if (visible_text.IsEmpty()) {
+      if (visible_text.empty()) {
         // No visible rendered text -- must be whitespace.
         // Either it is useful whitespace for separating words or not.
         if (layout_text->IsAllCollapsibleWhitespace()) {
@@ -1172,8 +1173,8 @@ String AXLayoutObject::TextAlternative(
 //
 
 AXObject* AXLayoutObject::AccessibilityHitTest(const gfx::Point& point) const {
-  // Must be called for the document.
-  if (!IsRoot() || !layout_object_)
+  // Must be called for the document's root or a popup's root.
+  if (RoleValue() != ax::mojom::blink::Role::kRootWebArea || !layout_object_)
     return nullptr;
 
   // Must be called with lifecycle >= pre-paint clean
@@ -1270,7 +1271,7 @@ bool AXLayoutObject::IsDataTable() const {
   // When a section of the document is contentEditable, all tables should be
   // treated as data tables, otherwise users may not be able to work with rich
   // text editors that allow creating and editing tables.
-  if (GetNode() && HasEditableStyle(*GetNode()))
+  if (GetNode() && blink::IsEditable(*GetNode()))
     return true;
 
   // This employs a heuristic to determine if this table should appear.
@@ -1283,12 +1284,12 @@ bool AXLayoutObject::IsDataTable() const {
 
   // If there is a caption element, summary, THEAD, or TFOOT section, it's most
   // certainly a data table
-  if (!table_element->Summary().IsEmpty() || table_element->tHead() ||
+  if (!table_element->Summary().empty() || table_element->tHead() ||
       table_element->tFoot() || table_element->caption())
     return true;
 
   // if someone used "rules" attribute than the table should appear
-  if (!table_element->Rules().IsEmpty())
+  if (!table_element->Rules().empty())
     return true;
 
   // if there's a colgroup or col element, it's probably a data table.
@@ -1349,9 +1350,9 @@ bool AXLayoutObject::IsDataTable() const {
       // Check for an explicitly assigned a "data" table attribute.
       auto* cell_elem = DynamicTo<HTMLTableCellElement>(*cell);
       if (cell_elem) {
-        if (!cell_elem->Headers().IsEmpty() || !cell_elem->Abbr().IsEmpty() ||
-            !cell_elem->Axis().IsEmpty() ||
-            !cell_elem->FastGetAttribute(html_names::kScopeAttr).IsEmpty())
+        if (!cell_elem->Headers().empty() || !cell_elem->Abbr().empty() ||
+            !cell_elem->Axis().empty() ||
+            !cell_elem->FastGetAttribute(html_names::kScopeAttr).empty())
           return true;
       }
 
@@ -1470,7 +1471,7 @@ unsigned AXLayoutObject::ColumnCount() const {
   LayoutNGTableInterface* table =
       ToInterface<LayoutNGTableInterface>(layout_object);
   table->RecalcSectionsIfNeeded();
-  LayoutNGTableSectionInterface* table_section = table->TopSectionInterface();
+  LayoutNGTableSectionInterface* table_section = table->FirstSectionInterface();
   if (!table_section)
     return AXNodeObject::ColumnCount();
 
@@ -1491,14 +1492,14 @@ unsigned AXLayoutObject::RowCount() const {
 
   unsigned row_count = 0;
   const LayoutNGTableSectionInterface* table_section =
-      table->TopSectionInterface();
+      table->FirstSectionInterface();
   if (!table_section)
     return AXNodeObject::RowCount();
 
   while (table_section) {
     row_count += table_section->NumRows();
     table_section =
-        table->SectionBelowInterface(table_section, kSkipEmptySections);
+        table->NextSectionInterface(table_section, kSkipEmptySections);
   }
   return row_count;
 }
@@ -1548,10 +1549,10 @@ unsigned AXLayoutObject::RowIndex() const {
   // Since our table might have multiple sections, we have to offset our row
   // appropriately.
   table->RecalcSectionsIfNeeded();
-  const LayoutNGTableSectionInterface* section = table->TopSectionInterface();
+  const LayoutNGTableSectionInterface* section = table->FirstSectionInterface();
   while (section && section != row_section) {
     row_index += section->NumRows();
-    section = table->SectionBelowInterface(section, kSkipEmptySections);
+    section = table->NextSectionInterface(section, kSkipEmptySections);
   }
 
   return row_index;
@@ -1593,7 +1594,7 @@ ax::mojom::blink::SortDirection AXLayoutObject::GetSortDirection() const {
 
   const AtomicString& aria_sort =
       GetAOMPropertyOrARIAAttribute(AOMStringProperty::kSort);
-  if (aria_sort.IsEmpty())
+  if (aria_sort.empty())
     return ax::mojom::blink::SortDirection::kNone;
   if (EqualIgnoringASCIICase(aria_sort, "none"))
     return ax::mojom::blink::SortDirection::kNone;
@@ -1619,7 +1620,7 @@ AXObject* AXLayoutObject::CellForColumnAndRow(unsigned target_column_index,
       ToInterface<LayoutNGTableInterface>(layout_object);
   table->RecalcSectionsIfNeeded();
 
-  LayoutNGTableSectionInterface* table_section = table->TopSectionInterface();
+  LayoutNGTableSectionInterface* table_section = table->FirstSectionInterface();
   if (!table_section) {
     return AXNodeObject::CellForColumnAndRow(target_column_index,
                                              target_row_index);
@@ -1654,7 +1655,7 @@ AXObject* AXLayoutObject::CellForColumnAndRow(unsigned target_column_index,
 
     row_offset += table_section->NumRows();
     table_section =
-        table->SectionBelowInterface(table_section, kSkipEmptySections);
+        table->NextSectionInterface(table_section, kSkipEmptySections);
   }
 
   return nullptr;
@@ -1670,7 +1671,7 @@ bool AXLayoutObject::FindAllTableCellsWithRole(ax::mojom::blink::Role role,
       ToInterface<LayoutNGTableInterface>(layout_object);
   table->RecalcSectionsIfNeeded();
 
-  LayoutNGTableSectionInterface* table_section = table->TopSectionInterface();
+  LayoutNGTableSectionInterface* table_section = table->FirstSectionInterface();
   if (!table_section)
     return true;
 
@@ -1687,7 +1688,7 @@ bool AXLayoutObject::FindAllTableCellsWithRole(ax::mojom::blink::Role role,
     }
 
     table_section =
-        table->SectionBelowInterface(table_section, kSkipEmptySections);
+        table->NextSectionInterface(table_section, kSkipEmptySections);
   }
 
   return true;
@@ -1741,8 +1742,8 @@ void AXLayoutObject::GetWordBoundaries(Vector<int>& word_starts,
 
   Vector<AbstractInlineTextBox::WordBoundaries> boundaries;
   AbstractInlineTextBox::GetWordBoundariesForText(boundaries, text_alternative);
-  word_starts.ReserveCapacity(boundaries.size());
-  word_ends.ReserveCapacity(boundaries.size());
+  word_starts.reserve(boundaries.size());
+  word_ends.reserve(boundaries.size());
   for (const auto& boundary : boundaries) {
     word_starts.push_back(boundary.start_index);
     word_ends.push_back(boundary.end_index);

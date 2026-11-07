@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -204,6 +204,7 @@ void ReportScheduler::Stop() {
     delegate_->StopWatchingUpdates();
   delegate_->StopWatchingExtensionRequest();
   extension_request_uploader_.reset();
+  report_uploader_.reset();
   if (pref_change_registrar_.IsObserved(kCloudReportingUploadFrequency))
     pref_change_registrar_.Remove(kCloudReportingUploadFrequency);
 }

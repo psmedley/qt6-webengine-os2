@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,11 +64,13 @@ bool AudioTrackOutputStream::Open() {
         format = kEncodingDts;
         break;
       case AudioParameters::AUDIO_BITSTREAM_DTS_HD:
+      case AudioParameters::AUDIO_BITSTREAM_DTS_HD_MA:
         format = kEncodingDtshd;
         break;
       case AudioParameters::AUDIO_BITSTREAM_IEC61937:
         format = kEncodingIec61937;
         break;
+      case AudioParameters::AUDIO_BITSTREAM_DTSX_P2:
       case AudioParameters::AUDIO_FAKE:
       case AudioParameters::AUDIO_PCM_LINEAR:
       case AudioParameters::AUDIO_PCM_LOW_LATENCY:

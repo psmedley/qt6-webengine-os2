@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,10 @@
 #include "chrome/browser/ash/policy/affiliation/affiliation_test_helper.h"
 #include "chrome/browser/extensions/api/force_installed_affiliated_extension_apitest.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chromeos/dbus/shill/shill_device_client.h"
-#include "chromeos/dbus/shill/shill_ipconfig_client.h"
-#include "chromeos/dbus/shill/shill_profile_client.h"
-#include "chromeos/dbus/shill/shill_service_client.h"
+#include "chromeos/ash/components/dbus/shill/shill_device_client.h"
+#include "chromeos/ash/components/dbus/shill/shill_ipconfig_client.h"
+#include "chromeos/ash/components/dbus/shill/shill_profile_client.h"
+#include "chromeos/ash/components/dbus/shill/shill_service_client.h"
 #include "content/public/test/browser_test.h"
 #include "third_party/cros_system_api/dbus/shill/dbus-constants.h"
 #include "url/gurl.h"
@@ -77,22 +77,14 @@ class EnterpriseNetworkingAttributesTest
                                                  std::get<1>(GetParam())) {}
 
   void SetupDisconnectedNetwork() {
-    chromeos::ShillDeviceClient::TestInterface* shill_device_client =
-        chromeos::DBusThreadManager::Get()
-            ->GetShillDeviceClient()
-            ->GetTestInterface();
-    chromeos::ShillIPConfigClient::TestInterface* shill_ipconfig_client =
-        chromeos::DBusThreadManager::Get()
-            ->GetShillIPConfigClient()
-            ->GetTestInterface();
-    chromeos::ShillServiceClient::TestInterface* shill_service_client =
-        chromeos::DBusThreadManager::Get()
-            ->GetShillServiceClient()
-            ->GetTestInterface();
-    chromeos::ShillProfileClient::TestInterface* shill_profile_client =
-        chromeos::DBusThreadManager::Get()
-            ->GetShillProfileClient()
-            ->GetTestInterface();
+    ash::ShillDeviceClient::TestInterface* shill_device_client =
+        ash::ShillDeviceClient::Get()->GetTestInterface();
+    ash::ShillIPConfigClient::TestInterface* shill_ipconfig_client =
+        ash::ShillIPConfigClient::Get()->GetTestInterface();
+    ash::ShillServiceClient::TestInterface* shill_service_client =
+        ash::ShillServiceClient::Get()->GetTestInterface();
+    ash::ShillProfileClient::TestInterface* shill_profile_client =
+        ash::ShillProfileClient::Get()->GetTestInterface();
 
     shill_service_client->ClearServices();
     shill_device_client->ClearDevices();
@@ -133,16 +125,14 @@ class EnterpriseNetworkingAttributesTest
         kWifiServicePath, shill::kConnectableProperty, base::Value(true));
 
     shill_profile_client->AddService(
-        chromeos::ShillProfileClient::GetSharedProfilePath(), kWifiServicePath);
+        ash::ShillProfileClient::GetSharedProfilePath(), kWifiServicePath);
 
     base::RunLoop().RunUntilIdle();
   }
 
   void ConnectNetwork() {
-    chromeos::ShillServiceClient::TestInterface* shill_service_client =
-        chromeos::DBusThreadManager::Get()
-            ->GetShillServiceClient()
-            ->GetTestInterface();
+    ash::ShillServiceClient::TestInterface* shill_service_client =
+        ash::ShillServiceClient::Get()->GetTestInterface();
     shill_service_client->SetServiceProperty(kWifiServicePath,
                                              shill::kStateProperty,
                                              base::Value(shill::kStateOnline));
@@ -200,7 +190,7 @@ IN_PROC_BROWSER_TEST_F(
     ExtensionApiTest,
     EnterpriseNetworkingAttributesIsRestrictedToPolicyExtension) {
   ASSERT_TRUE(RunExtensionTest("enterprise_networking_attributes",
-                               {.page_url = "api_not_available.html"},
+                               {.extension_url = "api_not_available.html"},
                                {.ignore_manifest_warnings = true}));
 
   base::FilePath extension_path =

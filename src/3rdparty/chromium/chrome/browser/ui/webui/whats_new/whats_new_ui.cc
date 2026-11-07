@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,6 @@
 #include "base/version.h"
 #include "chrome/browser/browser_features.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/hats/hats_service.h"
-#include "chrome/browser/ui/hats/hats_service_factory.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/webui/browser_command/browser_command_handler.h"
 #include "chrome/browser/ui/webui/webui_util.h"
@@ -44,13 +42,11 @@ content::WebUIDataSource* CreateWhatsNewUIHtmlSource(Profile* profile) {
       {"title", IDS_WHATS_NEW_TITLE},
   };
   source->AddLocalizedStrings(kStrings);
-  source->AddBoolean("showFeedbackButton",
-                     features::kChromeWhatsNewUIFeedbackButton.Get());
 
   // Allow embedding of iframe from chrome.com
   source->OverrideContentSecurityPolicy(
       network::mojom::CSPDirectiveName::ChildSrc,
-      base::StringPrintf("child-src chrome://test https: %s;",
+      base::StringPrintf("child-src chrome://webui-test https: %s;",
                          whats_new::kChromeWhatsNewURLShort));
   return source;
 }
@@ -69,7 +65,6 @@ WhatsNewUI::WhatsNewUI(content::WebUI* web_ui)
   content::WebUIDataSource* source = CreateWhatsNewUIHtmlSource(profile_);
   content::WebUIDataSource::Add(profile_, source);
   web_ui->AddMessageHandler(std::make_unique<WhatsNewHandler>());
-  TryShowHatsSurveyWithTimeout();
 }
 
 // static
@@ -94,27 +89,11 @@ void WhatsNewUI::CreateBrowserCommandHandler(
     mojo::PendingReceiver<browser_command::mojom::CommandHandler>
         pending_handler) {
   std::vector<browser_command::mojom::Command> supported_commands = {
-      browser_command::mojom::Command::kOpenFeedbackForm};
+      browser_command::mojom::Command::kStartTabGroupTutorial,
+      browser_command::mojom::Command::kOpenPasswordManager,
+  };
   command_handler_ = std::make_unique<BrowserCommandHandler>(
       std::move(pending_handler), profile_, supported_commands);
-  command_handler_->ConfigureFeedbackCommand(
-      {GURL(chrome::kChromeUIWhatsNewURL), chrome::kFeedbackSourceWhatsNew,
-       "whats-new-page"});
-}
-
-void WhatsNewUI::TryShowHatsSurveyWithTimeout() {
-  HatsService* hats_service =
-      HatsServiceFactory::GetForProfile(Profile::FromWebUI(web_ui()),
-                                        /* create_if_necessary = */ true);
-  if (hats_service) {
-    hats_service->LaunchDelayedSurveyForWebContents(
-        kHatsSurveyTriggerWhatsNew, web_ui()->GetWebContents(),
-        features::kHappinessTrackingSurveysForDesktopWhatsNewTime.Get()
-            .InMilliseconds(),
-        /*product_specific_bits_data=*/{},
-        /*product_specific_string_data=*/{},
-        /*require_same_origin=*/true);
-  }
 }
 
 WhatsNewUI::~WhatsNewUI() = default;

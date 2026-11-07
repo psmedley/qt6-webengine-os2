@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -44,11 +44,6 @@ fuzzer_test("origin_trial_token_fuzzer") {
   dict =
       "//content/test/data/fuzzer_dictionaries/origin_trial_token_fuzzer.dict"
   seed_corpus = "//content/test/data/fuzzer_corpus/origin_trial_token_data/"
-}
-
-fuzzer_test("renderer_fuzzer") {
-  sources = [ "renderer_fuzzer.cc" ]
-  deps = [ ":fuzzer_support" ]
 }
 
 fuzzer_test("renderer_tree_fuzzer") {
@@ -223,6 +218,31 @@ fuzzer_test("speech_audio_encoder_fuzzer") {
   ]
 }
 
+fuzzer_test("attribution_simulator_fuzzer") {
+  sources = [ "attribution_simulator_fuzzer.cc" ]
+  deps = [
+    "//content/test:test_support",
+    "//testing/libfuzzer/proto:json_proto",
+    "//testing/libfuzzer/proto:json_proto_converter",
+    "//third_party/libprotobuf-mutator",
+  ]
+  seed_corpus = "//content/test/data/fuzzer_corpus/attribution_simulator/"
+}
+
+fuzzer_test("attribution_source_fuzzer") {
+  sources = [ "attribution_source_fuzzer.cc" ]
+  deps = [
+    "//content/browser",
+    "//content/public/browser:browser_sources",
+    "//content/test:test_support",
+    "//testing/libfuzzer/proto:json_proto",
+    "//testing/libfuzzer/proto:json_proto_converter",
+    "//third_party/libprotobuf-mutator",
+  ]
+  seed_corpus =
+      "//testing/libfuzzer/fuzzers/attribution_source_registration_corpus/"
+}
+
 fuzzer_test("browser_accessibility_fuzzer") {
   sources = [ "browser_accessibility_fuzzer.cc" ]
   deps = [
@@ -311,21 +331,6 @@ fuzzer_test("first_party_set_parser_json_fuzzer") {
   ]
 }
 
-fuzzer_test("first_party_set_parser_map_fuzzer") {
-  sources = [
-    "../../browser/first_party_sets/test/first_party_set_parser_map_fuzzer.cc",
-  ]
-  deps = [
-    ":first_party_set_parser_fuzzer_support",
-    ":firstpartysets_proto",
-    "//third_party/libprotobuf-mutator",
-  ]
-}
-
-proto_library("firstpartysets_proto") {
-  sources = [ "../../browser/first_party_sets/test/first_party_set_parser_map_fuzzer.proto" ]
-}
-
 mojolpm_fuzzer_test("media_stream_dispatcher_host_mojolpm_fuzzer") {
   sources = [ "media_stream_dispatcher_host_mojolpm_fuzzer.cc" ]
 
@@ -364,6 +369,21 @@ if (is_linux || is_chromeos_lacros) {
   }
 }
 
+mojolpm_fuzzer_test("image_capture_mojolpm_fuzzer") {
+  sources = [ "image_capture_mojolpm_fuzzer.cc" ]
+
+  proto_source = "image_capture_mojolpm_fuzzer.proto"
+
+  deps = [
+    ":mojolpm_fuzzer_support",
+    "//content/browser:for_content_tests",
+    "//content/public/browser:browser_sources",
+    "//media/capture:capture_lib",
+  ]
+
+  proto_deps = [ "//media/capture/mojom:image_capture_mojolpm" ]
+}
+
 mojolpm_fuzzer_test("presentation_service_mojolpm_fuzzer") {
   sources = [ "presentation_service_mojolpm_fuzzer.cc" ]
 
@@ -380,6 +400,21 @@ mojolpm_fuzzer_test("presentation_service_mojolpm_fuzzer") {
     ":controller_presentation_service_delegate_for_fuzzing_proto",
     "//third_party/blink/public/mojom:mojom_platform_mojolpm",
   ]
+}
+
+mojolpm_fuzzer_test("clipboard_host_mojolpm_fuzzer") {
+  sources = [ "clipboard_host_mojolpm_fuzzer.cc" ]
+
+  proto_source = "clipboard_host_mojolpm_fuzzer.proto"
+
+  deps = [
+    ":mojolpm_fuzzer_support",
+    "//content/browser:browser",
+    "//content/browser:for_content_tests",
+    "//content/public/browser:browser_sources",
+  ]
+
+  proto_deps = [ "//third_party/blink/public/mojom:mojom_platform_mojolpm" ]
 }
 
 if (enable_mojom_fuzzer) {

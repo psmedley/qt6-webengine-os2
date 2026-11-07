@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,10 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_origin_3d_dict.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_programmable_stage.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_union_doublesequence_gpucolordict.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_union_gpuautolayoutmode_gpupipelinelayout.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_union_gpuextent3ddict_unsignedlongenforcerangesequence.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_union_gpuorigin3ddict_unsignedlongenforcerangesequence.h"
+#include "third_party/blink/renderer/modules/webgpu/gpu_pipeline_layout.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_shader_module.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_texture.h"
 
@@ -149,7 +151,7 @@ WGPUImageCopyTexture AsDawnType(const GPUImageCopyTexture* webgpu_view) {
   dawn_view.texture = webgpu_view->texture()->GetHandle();
   dawn_view.mipLevel = webgpu_view->mipLevel();
   dawn_view.origin = AsDawnType(webgpu_view->origin());
-  dawn_view.aspect = AsDawnEnum<WGPUTextureAspect>(webgpu_view->aspect());
+  dawn_view.aspect = AsDawnEnum(webgpu_view->aspect());
 
   return dawn_view;
 }
@@ -190,26 +192,6 @@ const char* ValidateTextureDataLayout(const GPUImageDataLayout* webgpu_layout,
   return nullptr;
 }
 
-OwnedProgrammableStageDescriptor AsDawnType(
-    const GPUProgrammableStage* webgpu_stage) {
-  DCHECK(webgpu_stage);
-
-  std::string entry_point = webgpu_stage->entryPoint().Ascii();
-  // length() is in bytes (not utf-8 characters or something), so this is ok.
-  size_t byte_size = entry_point.length() + 1;
-
-  std::unique_ptr<char[]> entry_point_keepalive =
-      std::make_unique<char[]>(byte_size);
-  char* entry_point_ptr = entry_point_keepalive.get();
-  memcpy(entry_point_ptr, entry_point.c_str(), byte_size);
-
-  WGPUProgrammableStageDescriptor dawn_stage = {};
-  dawn_stage.module = webgpu_stage->module()->GetHandle();
-  dawn_stage.entryPoint = entry_point_ptr;
-
-  return std::make_tuple(dawn_stage, std::move(entry_point_keepalive));
-}
-
 WGPUTextureFormat AsDawnType(SkColorType color_type) {
   switch (color_type) {
     case SkColorType::kRGBA_8888_SkColorType:
@@ -229,6 +211,23 @@ WGPUTextureFormat AsDawnType(SkColorType color_type) {
     default:
       return WGPUTextureFormat_Undefined;
   }
+}
+
+WGPUPipelineLayout AsDawnType(
+    V8UnionGPUAutoLayoutModeOrGPUPipelineLayout* webgpu_layout) {
+  DCHECK(webgpu_layout);
+
+  switch (webgpu_layout->GetContentType()) {
+    case V8UnionGPUAutoLayoutModeOrGPUPipelineLayout::ContentType::
+        kGPUPipelineLayout:
+      return AsDawnType(webgpu_layout->GetAsGPUPipelineLayout());
+    case V8UnionGPUAutoLayoutModeOrGPUPipelineLayout::ContentType::
+        kGPUAutoLayoutMode:
+      return nullptr;
+  }
+
+  NOTREACHED();
+  return nullptr;
 }
 
 }  // namespace blink

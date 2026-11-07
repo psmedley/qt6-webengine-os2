@@ -1,4 +1,4 @@
-/* Copyright 2022 The Chromium Authors. All rights reserved.
+/* Copyright 2022 The Chromium Authors
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
@@ -14,4 +14,26 @@ html {
 
 .info-table {
   width: 100%;
+}
+
+#script-cache-header {
+  font-weight: bold;
+  text-align: center;
+}
+
+#script-start-parameters {
+  text-align: center;
+}
+
+#script-fetching-table {
+  padding-bottom: 10px;
+}
+
+button:hover {
+  cursor: pointer;
+}
+
+h2 {
+  font-size: 1em;
+  text-align: center;
 }

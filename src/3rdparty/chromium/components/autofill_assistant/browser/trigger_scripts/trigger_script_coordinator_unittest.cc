@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,11 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "build/build_config.h"
+#include "components/autofill_assistant/browser/fake_common_dependencies.h"
 #include "components/autofill_assistant/browser/fake_starter_platform_delegate.h"
 #include "components/autofill_assistant/browser/features.h"
-#include "components/autofill_assistant/browser/mock_website_login_manager.h"
+#include "components/autofill_assistant/browser/mock_assistant_field_trial_util.h"
+#include "components/autofill_assistant/browser/public/password_change/mock_website_login_manager.h"
 #include "components/autofill_assistant/browser/service/mock_service_request_sender.h"
 #include "components/autofill_assistant/browser/test_util.h"
 #include "components/autofill_assistant/browser/trigger_scripts/mock_dynamic_trigger_conditions.h"
@@ -27,6 +29,7 @@
 #include "components/ukm/test_ukm_recorder.h"
 #include "components/version_info/version_info.h"
 #include "content/public/test/navigation_simulator.h"
+#include "content/public/test/prerender_test_util.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/web_contents_tester.h"
@@ -36,6 +39,9 @@
 
 namespace autofill_assistant {
 
+using autofill_assistant::features::kAutofillAssistantDialogOnboarding;
+using autofill_assistant::features::
+    kAutofillAssistantGetTriggerScriptsByHashPrefix;
 using ::base::test::RunOnceCallback;
 using ::testing::_;
 using ::testing::ElementsAre;
@@ -44,22 +50,25 @@ using ::testing::Eq;
 using ::testing::IsEmpty;
 using ::testing::NiceMock;
 using ::testing::Return;
+using ::testing::SizeIs;
 using ::testing::UnorderedElementsAre;
 using ::testing::UnorderedElementsAreArray;
+using ::testing::ValuesIn;
 using ::testing::WithArg;
 
 std::unique_ptr<base::test::ScopedFeatureList> CreateScopedFeatureList(
-    bool dialog_onboarding) {
+    const base::Feature& feature,
+    bool feature_enabled) {
   auto scoped_feature_list = std::make_unique<base::test::ScopedFeatureList>();
-  scoped_feature_list->InitWithFeatureState(
-      autofill_assistant::features::kAutofillAssistantDialogOnboarding,
-      dialog_onboarding);
+  scoped_feature_list->InitWithFeatureState(feature, feature_enabled);
   return scoped_feature_list;
 }
 
 const char kFakeDeepLink[] = "https://example.com/q?data=test";
 const char kFakeServerUrl[] =
     "https://www.fake.backend.com/trigger_script_server";
+const char kFakePrivacySensitiveServerUrl[] =
+    "https://www.fake.backend.com/trigger_script_by_hash_prefix_server";
 
 class TriggerScriptCoordinatorTest : public testing::Test {
  public:
@@ -103,9 +112,10 @@ class TriggerScriptCoordinatorTest : public testing::Test {
     coordinator_ = std::make_unique<TriggerScriptCoordinator>(
         fake_platform_delegate_.GetWeakPtr(), web_contents(),
         std::move(mock_web_controller), std::move(mock_request_sender),
-        GURL(kFakeServerUrl), std::move(mock_static_trigger_conditions),
+        GURL(kFakeServerUrl), GURL(kFakePrivacySensitiveServerUrl),
+        std::move(mock_static_trigger_conditions),
         std::move(mock_dynamic_trigger_conditions), &ukm_recorder_,
-        ukm::GetSourceIdForWebContentsDocument(web_contents()));
+        web_contents()->GetPrimaryMainFrame()->GetPageUkmSourceId());
   }
 
   void TearDown() override { coordinator_.reset(); }
@@ -127,10 +137,10 @@ class TriggerScriptCoordinatorTest : public testing::Test {
   void SimulateNavigateToUrl(const GURL& url) {
     content::WebContentsTester::For(web_contents())->SetLastCommittedURL(url);
     content::NavigationSimulator::NavigateAndCommitFromDocument(
-        url, web_contents()->GetMainFrame());
+        url, web_contents()->GetPrimaryMainFrame());
     content::WebContentsTester::For(web_contents())->TestSetIsLoading(false);
     navigation_ids_.emplace_back(
-        ukm::GetSourceIdForWebContentsDocument(web_contents()));
+        web_contents()->GetPrimaryMainFrame()->GetPageUkmSourceId());
   }
 
  protected:
@@ -147,7 +157,9 @@ class TriggerScriptCoordinatorTest : public testing::Test {
       std::unique_ptr<TriggerContext> trigger_context,
       absl::optional<TriggerScriptProto> trigger_script)>>
       mock_callback_;
-  FakeStarterPlatformDelegate fake_platform_delegate_;
+  FakeStarterPlatformDelegate fake_platform_delegate_ =
+      FakeStarterPlatformDelegate(std::make_unique<FakeCommonDependencies>(
+          /*identity_manager=*/nullptr));
   raw_ptr<NiceMock<MockTriggerScriptUiDelegate>> mock_ui_delegate_;
   std::unique_ptr<TriggerScriptCoordinator> coordinator_;
   raw_ptr<NiceMock<MockStaticTriggerConditions>>
@@ -196,19 +208,28 @@ TEST_F(TriggerScriptCoordinatorTest, StartSendsOnlyApprovedFields) {
         expected_client_context.mutable_chrome()->set_chrome_version(
             version_info::GetProductNameAndVersionForUserAgent());
         expected_client_context.set_is_in_chrome_triggered(true);
+        expected_client_context.set_locale("fr-CH");
+        expected_client_context.set_country("CH");
         EXPECT_THAT(request.client_context(), Eq(expected_client_context));
       });
 
+  fake_platform_delegate_.fake_common_dependencies_->locale_.assign("fr-CH");
+  fake_platform_delegate_.fake_common_dependencies_->latest_country_code_
+      .assign("CH");
   coordinator_->Start(GURL(kFakeDeepLink),
                       std::make_unique<TriggerContext>(
                           /* params = */ std::make_unique<ScriptParameters>(
                               input_script_params),
-                          /* exp = */ "1,2,4",
-                          /* is_cct = */ true,
-                          /* onboarding_shown = */ true,
-                          /* is_direct_action = */ true,
-                          /* initial_url = */ "https://www.example.com",
-                          /* is_in_chrome_triggered = */ true),
+                          TriggerContext::Options(
+                              /* experiment_ids = */ "1,2,4",
+                              /* is_cct = */ true,
+                              /* onboarding_shown = */ true,
+                              /* is_direct_action = */ true,
+                              /* initial_url = */ "https://www.example.com",
+                              /* is_in_chrome_triggered = */ true,
+                              /* is_externally_triggered = */ false,
+                              /* skip_autofill_assistant_onboarding = */ false,
+                              /* suppress_browsing_features = */ true)),
                       mock_callback_.Get());
 }
 
@@ -249,6 +270,32 @@ TEST_F(TriggerScriptCoordinatorTest, StopOnParsingError) {
              TriggerScriptProto::UNSPECIFIED_TRIGGER_UI_TYPE}}})));
 }
 
+TEST_F(TriggerScriptCoordinatorTest,
+       StopOnParsingError_GetScriptsByHashPrefix) {
+  // Disable MSBB and enable the feature that allows fetching by hash prefix
+  auto feature_list = CreateScopedFeatureList(
+      kAutofillAssistantGetTriggerScriptsByHashPrefix, true);
+  fake_platform_delegate_.fake_common_dependencies_->msbb_enabled_ = false;
+
+  EXPECT_CALL(*mock_request_sender_,
+              OnSendRequest(GURL(kFakePrivacySensitiveServerUrl), _, _,
+                            RpcType::GET_TRIGGER_SCRIPTS_BY_HASH_PREFIX))
+      .WillOnce(RunOnceCallback<2>(net::HTTP_OK, "invalid",
+                                   ServiceRequestSender::ResponseInfo{}));
+  EXPECT_CALL(
+      mock_callback_,
+      Run(Metrics::TriggerScriptFinishedState::GET_ACTIONS_PARSE_ERROR, _, _));
+
+  coordinator_->Start(GURL(kFakeDeepLink), std::make_unique<TriggerContext>(),
+                      mock_callback_.Get());
+  EXPECT_THAT(
+      GetUkmTriggerScriptFinished(ukm_recorder_),
+      ElementsAreArray(ToHumanReadableMetrics(
+          {{navigation_ids_[0],
+            {Metrics::TriggerScriptFinishedState::GET_ACTIONS_PARSE_ERROR,
+             TriggerScriptProto::UNSPECIFIED_TRIGGER_UI_TYPE}}})));
+}
+
 TEST_F(TriggerScriptCoordinatorTest, StopOnNoTriggerScriptsAvailable) {
   EXPECT_CALL(
       *mock_request_sender_,
@@ -267,6 +314,26 @@ TEST_F(TriggerScriptCoordinatorTest, StopOnNoTriggerScriptsAvailable) {
           {{navigation_ids_[0],
             {Metrics::TriggerScriptFinishedState::NO_TRIGGER_SCRIPT_AVAILABLE,
              TriggerScriptProto::UNSPECIFIED_TRIGGER_UI_TYPE}}})));
+}
+
+TEST_F(TriggerScriptCoordinatorTest, UseRegularGetTriggerScriptsIfMsbbEnabled) {
+  // Even though the feature that allows fetching by hash prefix is enabled
+  auto feature_list = CreateScopedFeatureList(
+      kAutofillAssistantGetTriggerScriptsByHashPrefix, true);
+  // MSBB is also enabled
+  fake_platform_delegate_.fake_common_dependencies_->msbb_enabled_ = true;
+  // so make sure that we use the GetTriggerScripts endpoint
+  EXPECT_CALL(
+      *mock_request_sender_,
+      OnSendRequest(GURL(kFakeServerUrl), _, _, RpcType::GET_TRIGGER_SCRIPTS))
+      .Times(1);
+  EXPECT_CALL(*mock_request_sender_,
+              OnSendRequest(GURL(kFakeServerUrl), _, _,
+                            RpcType::GET_TRIGGER_SCRIPTS_BY_HASH_PREFIX))
+      .Times(0);
+
+  coordinator_->Start(GURL(kFakeDeepLink), std::make_unique<TriggerContext>(),
+                      mock_callback_.Get());
 }
 
 TEST_F(TriggerScriptCoordinatorTest, StartChecksStaticAndDynamicConditions) {
@@ -1104,7 +1171,8 @@ TEST_F(TriggerScriptCoordinatorTest, OnboardingShownAndAccepted) {
 
 TEST_F(TriggerScriptCoordinatorTest,
        CancellingDialogOnboardingDoesNotStopTriggerScript) {
-  auto feature_list = CreateScopedFeatureList(/* dialog_onboarding= */ true);
+  auto feature_list =
+      CreateScopedFeatureList(kAutofillAssistantDialogOnboarding, true);
 
   GetTriggerScriptsResponseProto response;
   auto* script = response.add_trigger_scripts();
@@ -1173,7 +1241,8 @@ TEST_F(TriggerScriptCoordinatorTest,
 
 TEST_F(TriggerScriptCoordinatorTest,
        RejectingBottomSheetOnboardingStopsTriggerScript) {
-  auto feature_list = CreateScopedFeatureList(/* dialog_onboarding= */ false);
+  auto feature_list =
+      CreateScopedFeatureList(kAutofillAssistantDialogOnboarding, false);
 
   GetTriggerScriptsResponseProto response;
   auto* script = response.add_trigger_scripts();
@@ -1329,6 +1398,59 @@ TEST_F(TriggerScriptCoordinatorTest, BackendCanOverrideScriptParameters) {
                                    std::make_pair("name_3", "value_3")));
 }
 
+TEST_F(TriggerScriptCoordinatorTest, RegisterSyntheticFieldTrial) {
+  auto mock_field_trial_util =
+      std::make_unique<NiceMock<MockAssistantFieldTrialUtil>>();
+  const auto* mock_field_trial_util_ptr = mock_field_trial_util.get();
+  fake_platform_delegate_.field_trial_util_ = std::move(mock_field_trial_util);
+
+  GetTriggerScriptsResponseProto response;
+  response.add_trigger_scripts();
+  auto* param_1 = response.add_script_parameters();
+  param_1->set_name("EXPERIMENT_IDS");
+  param_1->set_value("1337,1002,1001");
+  auto* trial_1 = response.add_script_parameters();
+  trial_1->set_name("FIELD_TRIAL_1");
+  trial_1->set_value("1001");
+  auto* trial_2 = response.add_script_parameters();
+  trial_2->set_name("FIELD_TRIAL_2");
+  trial_2->set_value("1002");
+
+  std::string serialized_response;
+  response.SerializeToString(&serialized_response);
+
+  EXPECT_CALL(
+      *mock_request_sender_,
+      OnSendRequest(GURL(kFakeServerUrl), _, _, RpcType::GET_TRIGGER_SCRIPTS))
+      .WillOnce(RunOnceCallback<2>(net::HTTP_OK, serialized_response,
+                                   ServiceRequestSender::ResponseInfo{}));
+  EXPECT_CALL(*mock_field_trial_util_ptr,
+              RegisterSyntheticFieldTrial(
+                  base::StringPiece("AutofillAssistantTriggered"),
+                  base::StringPiece("Enabled")));
+  EXPECT_CALL(*mock_field_trial_util_ptr,
+              RegisterSyntheticFieldTrial(
+                  base::StringPiece("AutofillAssistantExperimentsTrial-1"),
+                  base::StringPiece("1001")));
+  EXPECT_CALL(*mock_field_trial_util_ptr,
+              RegisterSyntheticFieldTrial(
+                  base::StringPiece("AutofillAssistantExperimentsTrial-2"),
+                  base::StringPiece("1002")));
+
+  // Backwards compatibility.
+  // TODO(b/242171397): Remove
+  EXPECT_CALL(*mock_field_trial_util_ptr,
+              RegisterSyntheticFieldTrial(
+                  base::StringPiece("AutofillAssistantExperimentsTrial"),
+                  base::StringPiece("1001")));
+
+  coordinator_->Start(
+      GURL(kFakeDeepLink),
+      std::make_unique<TriggerContext>(std::make_unique<ScriptParameters>(),
+                                       TriggerContext::Options()),
+      mock_callback_.Get());
+}
+
 TEST_F(TriggerScriptCoordinatorTest, UiTimeoutWhileShown) {
   GetTriggerScriptsResponseProto response;
   TriggerScriptProto* script = response.add_trigger_scripts();
@@ -1360,7 +1482,7 @@ TEST_F(TriggerScriptCoordinatorTest, UiTimeoutWhileShown) {
   EXPECT_CALL(*mock_ui_delegate_, ShowTriggerScript).Times(1);
   content::NavigationSimulator::Reload(web_contents());
   navigation_ids_.emplace_back(
-      ukm::GetSourceIdForWebContentsDocument(web_contents()));
+      web_contents()->GetPrimaryMainFrame()->GetPageUkmSourceId());
 
   EXPECT_CALL(*mock_ui_delegate_, HideTriggerScript).Times(0);
   task_environment()->FastForwardBy(base::Seconds(1));
@@ -1643,6 +1765,9 @@ class TriggerScriptCoordinatorPrerenderTest
 };
 
 TEST_F(TriggerScriptCoordinatorPrerenderTest, DoNotRecordIfPrerenderingFailed) {
+  content::test::ScopedPrerenderWebContentsDelegate web_contents_delegate(
+      *web_contents());
+
   GetTriggerScriptsResponseProto response;
   response.add_trigger_scripts();
   std::string serialized_response;
@@ -1666,5 +1791,125 @@ TEST_F(TriggerScriptCoordinatorPrerenderTest, DoNotRecordIfPrerenderingFailed) {
   // UKM should not be recorded by the prerendering's fail response.
   EXPECT_THAT(GetUkmTriggerScriptFinished(ukm_recorder_), IsEmpty());
 }
+
+class TriggerScriptCoordinatorParameterizedTest
+    : public TriggerScriptCoordinatorTest,
+      public testing::WithParamInterface<std::pair<std::string, bool>> {
+ public:
+  void SetUp() override {
+    TriggerScriptCoordinatorTest::SetUp();
+    current_parameterized_url_ = GetParam().first;
+    is_matching_url = GetParam().second;
+  }
+
+  void TearDown() override { TriggerScriptCoordinatorTest::TearDown(); }
+
+ protected:
+  std::string current_parameterized_url_;
+  bool is_matching_url;
+};
+
+TEST_P(TriggerScriptCoordinatorParameterizedTest,
+       GetScriptsByHashPrefix_NonMsbbMatchCurrentDomainByUrlHost) {
+  // Disable MSBB and enable the feature that allows fetching by hash prefix
+  auto feature_list = CreateScopedFeatureList(
+      kAutofillAssistantGetTriggerScriptsByHashPrefix, true);
+  fake_platform_delegate_.fake_common_dependencies_->msbb_enabled_ = false;
+
+  // Create the GetTriggerScriptsByHashPrefixProtoResponse
+  GetTriggerScriptsByHashPrefixResponseProto response;
+  // nike.com, first time user, will *not* get matched
+  auto* nikeMatchInfo = response.add_match_info();
+  nikeMatchInfo->set_domain("https://nike.com/");
+  auto* nikeTriggerScript =
+      nikeMatchInfo->mutable_trigger_scripts_response()->add_trigger_scripts();
+  nikeTriggerScript->set_trigger_ui_type(
+      TriggerScriptProto::SHOPPING_CART_FIRST_TIME_USER);
+
+  // example.com, returning user, will get matched
+  auto* exampleMatchInfo = response.add_match_info();
+  exampleMatchInfo->set_domain(current_parameterized_url_);
+  auto* exampleTriggerScript =
+      exampleMatchInfo->mutable_trigger_scripts_response()
+          ->add_trigger_scripts();
+  exampleTriggerScript->set_trigger_ui_type(
+      TriggerScriptProto::SHOPPING_CART_RETURNING_USER);
+
+  std::string serialized_response;
+  response.SerializeToString(&serialized_response);
+
+  EXPECT_CALL(*mock_request_sender_,
+              OnSendRequest(GURL(kFakePrivacySensitiveServerUrl), _, _,
+                            RpcType::GET_TRIGGER_SCRIPTS_BY_HASH_PREFIX))
+      .WillOnce(RunOnceCallback<2>(net::HTTP_OK, serialized_response,
+                                   ServiceRequestSender::ResponseInfo{}));
+
+  if (is_matching_url) {
+    EXPECT_CALL(*mock_dynamic_trigger_conditions_,
+                OnUpdate(mock_web_controller_.get(), _))
+        .WillRepeatedly(RunOnceCallback<1>());
+    EXPECT_CALL(*mock_ui_delegate_, ShowTriggerScript).Times(1);
+  }
+
+  fake_platform_delegate_.is_first_time_user_ = false;
+  fake_platform_delegate_.show_onboarding_result_ = OnboardingResult::ACCEPTED;
+  fake_platform_delegate_.show_onboarding_result_shown_ = true;
+
+  base::flat_map<std::string, std::string> input_script_params{
+      {"DEBUG_BUNDLE_ID", "bundle_id"},
+      {"DEBUG_SOCKET_ID", "socket_id"},
+      {"DEBUG_BUNDLE_VERSION", "socket_version"},
+      {"FALLBACK_BUNDLE_ID", "fallback_id"},
+      {"FALLBACK_BUNDLE_VERSION", "fallback_version"}};
+
+  // The initial URL from which we initiate the check
+  std::string deep_link = "https://example.com/q?data=test";
+  coordinator_->Start(GURL(deep_link),
+                      std::make_unique<TriggerContext>(
+                          /* params = */ std::make_unique<ScriptParameters>(
+                              input_script_params),
+                          TriggerContext::Options(
+                              /* experiment_ids = */ "1,2,4",
+                              /* is_cct = */ true,
+                              /* onboarding_shown = */ true,
+                              /* is_direct_action = */ true,
+                              /* initial_url = */ "https://not-example.com/",
+                              /* is_in_chrome_triggered = */ true,
+                              /* is_externally_triggered = */ false,
+                              /* skip_autofill_assistant_onboarding = */ false,
+                              /* suppress_browsing_features = */ true)),
+                      mock_callback_.Get());
+
+  if (!is_matching_url) {
+    EXPECT_THAT(GetUkmTriggerScriptShownToUsers(ukm_recorder_), SizeIs(0));
+    EXPECT_THAT(
+        GetUkmTriggerScriptFinished(ukm_recorder_),
+        ElementsAreArray(ToHumanReadableMetrics(
+            {{navigation_ids_[0],
+              {Metrics::TriggerScriptFinishedState::NO_TRIGGER_SCRIPT_AVAILABLE,
+               TriggerScriptProto::UNSPECIFIED_TRIGGER_UI_TYPE}}})));
+    return;
+  }
+  EXPECT_THAT(GetUkmTriggerScriptShownToUsers(ukm_recorder_),
+              ElementsAreArray(ToHumanReadableMetrics(
+                  {{navigation_ids_[0],
+                    {Metrics::TriggerScriptShownToUser::RUNNING,
+                     TriggerScriptProto::UNSPECIFIED_TRIGGER_UI_TYPE}},
+                   {navigation_ids_[0],
+                    {Metrics::TriggerScriptShownToUser::SHOWN_TO_USER,
+                     TriggerScriptProto::SHOPPING_CART_RETURNING_USER}}})));
+}
+
+const std::vector<std::pair<std::string, bool>> domains(
+    {{"https://example.com", true},
+     {"https://example.com/", true},
+     {"https://example.com/cart", true},
+     {"http://example.com", false},  // different scheme (http vs https)
+     {"https://adidas.com", false},
+     {"https://not-example.com", false}});
+
+INSTANTIATE_TEST_SUITE_P(TriggerScriptCoordinatorParameterizedTestSuite,
+                         TriggerScriptCoordinatorParameterizedTest,
+                         ValuesIn(domains));
 
 }  // namespace autofill_assistant

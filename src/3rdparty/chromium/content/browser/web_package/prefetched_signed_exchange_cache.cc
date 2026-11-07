@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -215,15 +215,13 @@ class InnerResponseURLLoader : public network::mojom::URLLoader {
     UpdateRequestResponseStartTime(response_.get());
     response_->encoded_data_length = 0;
     if (is_navigation_request) {
-      client_->OnReceiveResponse(std::move(response_),
-                                 mojo::ScopedDataPipeConsumerHandle());
       SendResponseBody();
       return;
     }
 
     if (network::cors::ShouldCheckCors(request.url, request.request_initiator,
                                        request.mode)) {
-      const auto error_status = network::cors::CheckAccessAndReportMetrics(
+      const auto result = network::cors::CheckAccessAndReportMetrics(
           request.url,
           GetHeaderString(
               *response_,
@@ -232,8 +230,8 @@ class InnerResponseURLLoader : public network::mojom::URLLoader {
               *response_,
               network::cors::header_names::kAccessControlAllowCredentials),
           request.credentials_mode, *request.request_initiator);
-      if (error_status) {
-        client_->OnComplete(network::URLLoaderCompletionStatus(*error_status));
+      if (!result.has_value()) {
+        client_->OnComplete(network::URLLoaderCompletionStatus(result.error()));
         return;
       }
     }
@@ -265,8 +263,6 @@ class InnerResponseURLLoader : public network::mojom::URLLoader {
       CrossOriginReadBlockingChecker::Result result) {
     switch (result) {
       case CrossOriginReadBlockingChecker::Result::kAllowed:
-        client_->OnReceiveResponse(std::move(response_),
-                                   mojo::ScopedDataPipeConsumerHandle());
         SendResponseBody();
         return;
       case CrossOriginReadBlockingChecker::Result::kNetError:
@@ -281,8 +277,6 @@ class InnerResponseURLLoader : public network::mojom::URLLoader {
 
     // Send sanitized response.
     network::corb::SanitizeBlockedResponseHeaders(*response_);
-    client_->OnReceiveResponse(std::move(response_),
-                               mojo::ScopedDataPipeConsumerHandle());
 
     // Send an empty response's body.
     mojo::ScopedDataPipeProducerHandle pipe_producer_handle;
@@ -294,7 +288,8 @@ class InnerResponseURLLoader : public network::mojom::URLLoader {
           network::URLLoaderCompletionStatus(net::ERR_INSUFFICIENT_RESOURCES));
       return;
     }
-    client_->OnStartLoadingResponseBody(std::move(pipe_consumer_handle));
+    client_->OnReceiveResponse(std::move(response_),
+                               std::move(pipe_consumer_handle), absl::nullopt);
 
     // Send a dummy OnComplete message.
     network::URLLoaderCompletionStatus status =
@@ -350,7 +345,8 @@ class InnerResponseURLLoader : public network::mojom::URLLoader {
             weak_factory_.GetWeakPtr(), std::move(pipe_producer_handle),
             std::make_unique<storage::BlobDataHandle>(*blob_data_handle_)));
 
-    client_->OnStartLoadingResponseBody(std::move(pipe_consumer_handle));
+    client_->OnReceiveResponse(std::move(response_),
+                               std::move(pipe_consumer_handle), absl::nullopt);
   }
 
   void BlobReaderComplete(net::Error result) {
@@ -779,7 +775,7 @@ PrefetchedSignedExchangeCache::MaybeCreateInterceptor(
   }
   auto info_list =
       GetInfoListForNavigation(*exchange, verification_time, frame_tree_node_id,
-                               isolation_info.network_isolation_key());
+                               isolation_info.network_anonymization_key());
 
   mojo::Remote<network::mojom::RestrictedCookieManager> cookie_manager;
   auto* frame = FrameTreeNode::GloballyFindByID(frame_tree_node_id);
@@ -820,25 +816,6 @@ void PrefetchedSignedExchangeCache::RecordHistograms() {
     return;
   UMA_HISTOGRAM_COUNTS_100("PrefetchedSignedExchangeCache.Count",
                            exchanges_.size());
-  int64_t body_size_total = 0u;
-  int64_t headers_size_total = 0u;
-  for (const auto& exchanges_it : exchanges_) {
-    const std::unique_ptr<const PrefetchedSignedExchangeCacheEntry>& exchange =
-        exchanges_it.second;
-    const uint64_t body_size = exchange->blob_data_handle()->size();
-    body_size_total += body_size;
-    UMA_HISTOGRAM_COUNTS_10M("PrefetchedSignedExchangeCache.BodySize",
-                             body_size);
-    DCHECK(exchange->outer_response()->headers);
-    DCHECK(exchange->inner_response()->headers);
-    headers_size_total +=
-        exchange->outer_response()->headers->raw_headers().size() +
-        exchange->inner_response()->headers->raw_headers().size();
-  }
-  UMA_HISTOGRAM_COUNTS_10M("PrefetchedSignedExchangeCache.BodySizeTotal",
-                           body_size_total);
-  UMA_HISTOGRAM_COUNTS_10M("PrefetchedSignedExchangeCache.HeadersSizeTotal",
-                           headers_size_total);
 }
 
 std::vector<blink::mojom::PrefetchedSignedExchangeInfoPtr>
@@ -846,7 +823,7 @@ PrefetchedSignedExchangeCache::GetInfoListForNavigation(
     const PrefetchedSignedExchangeCacheEntry& main_exchange,
     const base::Time& verification_time,
     int frame_tree_node_id,
-    const net::NetworkIsolationKey& network_isolation_key) {
+    const net::NetworkAnonymizationKey& network_isolation_key) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   const url::Origin outer_url_origin =

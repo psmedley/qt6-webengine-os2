@@ -27,8 +27,7 @@
 #include "libavutil/reverse.h"
 #include "avcodec.h"
 #include "codec_internal.h"
-#include "internal.h"
-#include "mathops.h"
+#include "decode.h"
 
 #define AES3_HEADER_LEN 4
 
@@ -98,11 +97,10 @@ static int s302m_parse_frame_header(AVCodecContext *avctx, const uint8_t *buf,
     return frame_size;
 }
 
-static int s302m_decode_frame(AVCodecContext *avctx, void *data,
+static int s302m_decode_frame(AVCodecContext *avctx, AVFrame *frame,
                               int *got_frame_ptr, AVPacket *avpkt)
 {
     S302Context *s = avctx->priv_data;
-    AVFrame *frame     = data;
     const uint8_t *buf = avpkt->data;
     int buf_size       = avpkt->size;
     int block_size, ret, channels;
@@ -230,12 +228,12 @@ static const AVClass s302m_class = {
 
 const FFCodec ff_s302m_decoder = {
     .p.name         = "s302m",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("SMPTE 302M"),
+    CODEC_LONG_NAME("SMPTE 302M"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_S302M,
     .p.priv_class   = &s302m_class,
     .priv_data_size = sizeof(S302Context),
-    .decode         = s302m_decode_frame,
+    FF_CODEC_DECODE_CB(s302m_decode_frame),
     .p.capabilities = AV_CODEC_CAP_CHANNEL_CONF |
                       AV_CODEC_CAP_DR1,
 };

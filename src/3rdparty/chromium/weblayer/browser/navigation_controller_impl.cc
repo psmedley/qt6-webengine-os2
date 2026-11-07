@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -595,9 +595,10 @@ void NavigationControllerImpl::DidFinishNavigation(
   // any delays from surface sync, ie a frame submitted by renderer may not
   // be displayed immediately. Such situations should be rare however, so
   // this should be good enough for the purposes needed.
-  web_contents()->GetMainFrame()->InsertVisualStateCallback(base::BindOnce(
-      &NavigationControllerImpl::OldPageNoLongerRendered,
-      weak_ptr_factory_.GetWeakPtr(), navigation_handle->GetURL()));
+  web_contents()->GetPrimaryMainFrame()->InsertVisualStateCallback(
+      base::BindOnce(&NavigationControllerImpl::OldPageNoLongerRendered,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     navigation_handle->GetURL()));
 
   navigation_map_.erase(navigation_map_.find(navigation_handle));
 }

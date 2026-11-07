@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/singleton.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -49,9 +50,9 @@ class ClipboardRestrictionService : KeyedService {
   void UpdateSettings();
 
   PrefChangeRegistrar pref_change_registrar_;
-  PrefService* pref_service_;
+  raw_ptr<PrefService> pref_service_;
 
-  url_matcher::URLMatcherConditionSet::ID next_id_;
+  base::MatcherStringPattern::ID next_id_;
   std::unique_ptr<url_matcher::URLMatcher> enable_url_matcher_;
   std::unique_ptr<url_matcher::URLMatcher> disable_url_matcher_;
 

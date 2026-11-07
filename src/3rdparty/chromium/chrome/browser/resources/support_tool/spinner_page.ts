@@ -1,16 +1,20 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import './support_tool_shared_css.js';
-import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
+import './support_tool_shared.css.js';
+import 'chrome://resources/cr_elements/cr_button/cr_button.js';
 import 'chrome://resources/polymer/v3_0/paper-spinner/paper-spinner-lite.js';
 
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
 import {BrowserProxy, BrowserProxyImpl} from './browser_proxy.js';
 import {getTemplate} from './spinner_page.html.js';
+import {SupportToolPageMixin} from './support_tool_page_mixin.js';
 
-export class SpinnerPageElement extends PolymerElement {
+const SpinnerPageElementBase = SupportToolPageMixin(PolymerElement);
+
+export class SpinnerPageElement extends SpinnerPageElementBase {
   static get is() {
     return 'spinner-page';
   }
@@ -24,7 +28,7 @@ export class SpinnerPageElement extends PolymerElement {
       pageTitle: {
         type: String,
         value: '',
-      }
+      },
     };
   }
 

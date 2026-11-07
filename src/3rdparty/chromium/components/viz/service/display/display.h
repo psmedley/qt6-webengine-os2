@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,6 @@
 #include "components/viz/service/surfaces/surface.h"
 #include "components/viz/service/surfaces/surface_manager.h"
 #include "components/viz/service/viz_service_export.h"
-#include "gpu/command_buffer/common/texture_in_use_response.h"
 #include "ui/gfx/display_color_spaces.h"
 #include "ui/gfx/overlay_transform.h"
 #include "ui/gfx/swap_result.h"
@@ -161,8 +160,6 @@ class VIZ_SERVICE_EXPORT Display : public DisplaySchedulerClient,
   void SetNeedsRedrawRect(const gfx::Rect& damage_rect) override;
   void DidReceiveSwapBuffersAck(const gfx::SwapTimings& timings,
                                 gfx::GpuFenceHandle release_fence) override;
-  void DidReceiveTextureInUseResponses(
-      const gpu::TextureInUseResponses& responses) override;
   void DidReceiveCALayerParams(
       const gfx::CALayerParams& ca_layer_params) override;
   void DidSwapWithSize(const gfx::Size& pixel_size) override;
@@ -285,22 +282,32 @@ class VIZ_SERVICE_EXPORT Display : public DisplaySchedulerClient,
   std::unique_ptr<DisplayCompositorMemoryAndTaskController> gpu_dependency_;
   std::unique_ptr<OutputSurface> output_surface_;
   const raw_ptr<SkiaOutputSurface> skia_output_surface_;
-  std::unique_ptr<DisplayDamageTracker> damage_tracker_;
-  std::unique_ptr<DisplaySchedulerBase> scheduler_;
   std::unique_ptr<DisplayResourceProvider> resource_provider_;
+  // `aggregator_` depends on `resource_provider_` so it must be declared last
+  // and destroyed first.
   std::unique_ptr<SurfaceAggregator> aggregator_;
+  // `damage_tracker_` depends on `aggregator_` so it must be declared last and
+  // destroyed first.
+  std::unique_ptr<DisplayDamageTracker> damage_tracker_;
+  // `scheduler_` depends on `damage_tracker_` so it must be declared last and
+  // destroyed first.
+  std::unique_ptr<DisplaySchedulerBase> scheduler_;
   bool last_wide_color_enabled_ = false;
   std::unique_ptr<FrameRateDecider> frame_rate_decider_;
   // This may be null if the Display is on a thread without a MessageLoop.
   scoped_refptr<base::SingleThreadTaskRunner> current_task_runner_;
-  std::unique_ptr<DirectRenderer> renderer_;
-  raw_ptr<SoftwareRenderer> software_renderer_ = nullptr;
   // Currently, this OverlayProcessor takes raw pointer to memory tracker, which
   // is owned by the OutputSurface. This OverlayProcessor also takes resource
   // locks which contains raw pointers to DisplayResourceProvider. Make sure
   // both the OutputSurface and the DisplayResourceProvider outlive the
   // Overlay Processor.
   std::unique_ptr<OverlayProcessorInterface> overlay_processor_;
+  // `renderer_` depends on `overlay_processor_` and `resource_provider_`. It
+  // must be declared last and destroyed first.
+  std::unique_ptr<DirectRenderer> renderer_;
+  // `software_renderer_` depends on `renderer_`. It must be declared last and
+  // cleared first.
+  raw_ptr<SoftwareRenderer> software_renderer_ = nullptr;
   std::vector<ui::LatencyInfo> stored_latency_info_;
   std::vector<gfx::Rect> cached_visible_region_;
 

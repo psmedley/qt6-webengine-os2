@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_component_impl.h"
 #include "third_party/blink/renderer/platform/testing/io_task_runner_testing_platform_support.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -86,7 +87,7 @@ MediaStream* CreateMediaStream(V8TestingScope& scope) {
   auto* source = MakeGarbageCollected<MediaStreamSource>(
       "sourceId", MediaStreamSource::kTypeAudio, "sourceName", false);
   auto* component =
-      MakeGarbageCollected<MediaStreamComponent>("audioTrack", source);
+      MakeGarbageCollected<MediaStreamComponentImpl>("audioTrack", source);
 
   auto* track = MakeGarbageCollected<MediaStreamTrackImpl>(
       scope.GetExecutionContext(), component);
@@ -107,7 +108,7 @@ class MockMediaRecorder : public MediaRecorder {
                       CreateMediaStream(scope),
                       MediaRecorderOptions::Create(),
                       scope.GetExceptionState()) {}
-  virtual ~MockMediaRecorder() = default;
+  ~MockMediaRecorder() override = default;
 
   MOCK_METHOD4(WriteData, void(const char*, size_t, bool, double));
   MOCK_METHOD1(OnError, void(const String& message));
@@ -139,10 +140,10 @@ class MediaRecorderHandlerFixture : public ScopedMockOverlayScrollbars {
 
   bool recording() const { return media_recorder_handler_->recording_; }
   bool hasVideoRecorders() const {
-    return !media_recorder_handler_->video_recorders_.IsEmpty();
+    return !media_recorder_handler_->video_recorders_.empty();
   }
   bool hasAudioRecorders() const {
-    return !media_recorder_handler_->audio_recorders_.IsEmpty();
+    return !media_recorder_handler_->audio_recorders_.empty();
   }
 
   void OnVideoFrameForTesting(scoped_refptr<media::VideoFrame> frame) {
@@ -431,8 +432,8 @@ TEST_P(MediaRecorderHandlerTest, OpusEncodeAudioFrames) {
   const std::unique_ptr<media::AudioBus> audio_bus2 = NextAudioBus();
 
   media::AudioParameters params(
-      media::AudioParameters::AUDIO_PCM_LINEAR, media::CHANNEL_LAYOUT_STEREO,
-      kTestAudioSampleRate,
+      media::AudioParameters::AUDIO_PCM_LINEAR,
+      media::ChannelLayoutConfig::Stereo(), kTestAudioSampleRate,
       kTestAudioSampleRate * kTestAudioBufferDurationMs / 1000);
   SetAudioFormatForTesting(params);
 

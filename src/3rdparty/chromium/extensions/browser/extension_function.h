@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,7 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/features/feature.h"
+#include "extensions/common/mojom/extra_response_data.mojom.h"
 #include "ipc/ipc_message.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
@@ -32,7 +33,6 @@
 #include "third_party/blink/public/mojom/service_worker/service_worker_object.mojom-forward.h"
 
 namespace base {
-class ListValue;
 class Value;
 }
 
@@ -106,8 +106,11 @@ class ExtensionFunction : public base::RefCountedThreadSafe<
     BAD_MESSAGE
   };
 
-  using ResponseCallback = base::OnceCallback<
-      void(ResponseType type, base::Value results, const std::string& error)>;
+  using ResponseCallback = base::OnceCallback<void(
+      ResponseType type,
+      base::Value::List results,
+      const std::string& error,
+      extensions::mojom::ExtraResponseDataPtr response_data)>;
 
   ExtensionFunction();
 
@@ -138,7 +141,8 @@ class ExtensionFunction : public base::RefCountedThreadSafe<
     virtual bool Apply() = 0;
 
    protected:
-    void SetFunctionResults(ExtensionFunction* function, base::Value results);
+    void SetFunctionResults(ExtensionFunction* function,
+                            base::Value::List results);
     void SetFunctionError(ExtensionFunction* function, std::string error);
   };
   typedef std::unique_ptr<ResponseValueObject> ResponseValue;
@@ -190,6 +194,9 @@ class ExtensionFunction : public base::RefCountedThreadSafe<
   //   * RespondNow(NoArguments())
   //   * RespondNow(OneArgument(42))
   //   * RespondNow(ArgumentList(my_result.ToValue()))
+  //   * RespondNow(WithArguments())
+  //   * RespondNow(WithArguments(42))
+  //   * RespondNow(WithArguments(42, "value", false))
   //   * RespondNow(Error("Warp core breach"))
   //   * RespondNow(Error("Warp core breach on *", GetURL()))
   //   * RespondLater(), then later,
@@ -227,23 +234,20 @@ class ExtensionFunction : public base::RefCountedThreadSafe<
   // base::Value of type LIST.
   void SetArgs(base::Value args);
 
-  // Retrieves the results of the function as a ListValue.
-  const base::ListValue* GetResultList() const;
+  // Retrieves the results of the function as a base::Value::List.
+  const base::Value::List* GetResultList() const;
 
   // Retrieves any error string from the function.
   virtual const std::string& GetError() const;
 
-  virtual void SetBadMessage();
+  void SetBadMessage();
 
   // Specifies the name of the function. A long-lived string (such as a string
   // literal) must be provided.
-  virtual void SetName(const char* name);
+  void SetName(const char* name);
   const char* name() const { return name_; }
 
   int context_id() const { return context_id_; }
-
-  void set_profile_id(void* profile_id) { profile_id_ = profile_id; }
-  void* profile_id() const { return profile_id_; }
 
   void set_extension(
       const scoped_refptr<const extensions::Extension>& extension) {
@@ -377,15 +381,20 @@ class ExtensionFunction : public base::RefCountedThreadSafe<
   // should be using the generated Result struct and ArgumentList.
   ResponseValue TwoArguments(base::Value arg1, base::Value arg2);
   // Success, a list of arguments |results| to pass to caller.
-  ResponseValue ArgumentList(std::vector<base::Value> results);
-  // TODO(crbug.com/1139221): Deprecate this when Create() returns a base::Value
-  // instead of a std::unique_ptr<>.
-  //
-  // Success, a list of arguments |results| to pass to caller.
-  // - a std::unique_ptr<> for convenience, since callers usually get this from
-  //   the result of a Create(...) call on the generated Results struct. For
-  //   example, alarms::Get::Results::Create(alarm).
-  ResponseValue ArgumentList(std::unique_ptr<base::ListValue> results);
+  ResponseValue ArgumentList(base::Value::List results);
+
+  // Success, a variadic list of arguments to pass to the caller.
+  template <typename... Args>
+  ResponseValue WithArguments(Args&&... args) {
+    if constexpr (sizeof...(Args) == 0u)
+      return ArgumentList(base::Value::List());
+
+    base::Value::List params;
+    params.reserve(sizeof...(Args));
+    (params.Append(std::forward<Args&&>(args)), ...);
+    return ArgumentList(std::move(params));
+  }
+
   // Error. chrome.runtime.lastError.message will be set to |error|.
   ResponseValue Error(std::string error);
   // Error with formatting. Args are processed using
@@ -404,10 +413,7 @@ class ExtensionFunction : public base::RefCountedThreadSafe<
   // Using this ResponseValue indicates something is wrong with the API.
   // It shouldn't be possible to have both an error *and* some arguments.
   // Some legacy APIs do rely on it though, like webstorePrivate.
-  ResponseValue ErrorWithArguments(std::vector<base::Value> args,
-                                   const std::string& error);
-  // TODO(crbug.com/1139221): Deprecate this in favor of the variant above.
-  ResponseValue ErrorWithArguments(std::unique_ptr<base::ListValue> args,
+  ResponseValue ErrorWithArguments(base::Value::List args,
                                    const std::string& error);
   // Bad message. A ResponseValue equivalent to EXTENSION_FUNCTION_VALIDATE(),
   // so this will actually kill the renderer and not respond at all.
@@ -484,17 +490,17 @@ class ExtensionFunction : public base::RefCountedThreadSafe<
   void WriteToConsole(blink::mojom::ConsoleMessageLevel level,
                       const std::string& message);
 
-  // Sets the Blob UUIDs whose ownership is being transferred to the renderer.
-  void SetTransferredBlobUUIDs(const std::vector<std::string>& blob_uuids);
+  // Sets the Blobs whose ownership is being transferred to the renderer.
+  void SetTransferredBlobs(std::vector<blink::mojom::SerializedBlobPtr> blobs);
 
   bool has_args() const { return args_.has_value(); }
 
-  const std::vector<base::Value>& args() const {
+  const base::Value::List& args() const {
     DCHECK(args_);
     return *args_;
   }
 
-  std::vector<base::Value>& mutable_args() {
+  base::Value::List& mutable_args() {
     DCHECK(args_);
     return *args_;
   }
@@ -516,19 +522,15 @@ class ExtensionFunction : public base::RefCountedThreadSafe<
   // failed, |error_| should be set.
   void SendResponseImpl(bool success);
 
-  // The callback for mojom::Renderer::TransferBlobs().
-  void OnTransferBlobsAck(int process_id,
-                          const std::vector<std::string>& blob_uuids);
-
   // The arguments to the API. Only non-null if arguments were specified.
-  absl::optional<std::vector<base::Value>> args_;
+  absl::optional<base::Value::List> args_;
 
   base::ElapsedTimer timer_;
 
   // The results of the API. This should be populated through the Respond()/
   // RespondNow() methods. In legacy implementations, this is set directly, and
   // should be set before calling SendResponse().
-  std::unique_ptr<base::ListValue> results_;
+  absl::optional<base::Value::List> results_;
 
   // Any detailed error from the API. This should be populated by the derived
   // class before Run() returns.
@@ -539,9 +541,6 @@ class ExtensionFunction : public base::RefCountedThreadSafe<
 
   // Id of this request, used to map the response back to the caller.
   int request_id_ = -1;
-
-  // The id of the profile of this function's extension.
-  raw_ptr<void> profile_id_ = nullptr;
 
   // The name of this function.
   const char* name_ = nullptr;
@@ -630,7 +629,7 @@ class ExtensionFunction : public base::RefCountedThreadSafe<
   std::unique_ptr<RenderFrameHostTracker> tracker_;
 
   // The blobs transferred to the renderer process.
-  std::vector<std::string> transferred_blob_uuids_;
+  std::vector<blink::mojom::SerializedBlobPtr> transferred_blobs_;
 
   int worker_thread_id_ = -1;
 };

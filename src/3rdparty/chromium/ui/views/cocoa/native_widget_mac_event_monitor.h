@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define UI_VIEWS_COCOA_NATIVE_WIDGET_MAC_EVENT_MONITOR_H_
 
 #include "base/callback_helpers.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/views/views_export.h"
 
@@ -36,7 +37,7 @@ class VIEWS_EXPORT NativeWidgetMacEventMonitor {
   friend class NativeWidgetMacNSWindowHost;
   explicit NativeWidgetMacEventMonitor(Client* client);
 
-  Client* const client_;
+  const raw_ptr<Client> client_;
 
   // Scoped closure runner that will unregister `this` from its
   // NativeWidgetMacNSWindowHost when `this` is destroyed.

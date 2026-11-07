@@ -28,6 +28,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/feature_list.h"
 #include "base/location.h"
 #include "base/rand_util.h"
 #include "base/task/single_thread_task_runner.h"
@@ -51,10 +52,30 @@
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkSurface.h"
 
 namespace blink {
+
+namespace {
+
+CONSTINIT const base::Feature kCanvas2DHibernation(
+    "Canvas2DHibernation",
+#if BUILDFLAG(IS_MAC)
+    // Canvas hibernation is not always enabled on MacOS X due to a bug that
+    // causes content loss. TODO: Find a better fix for crbug.com/588434
+    base::FeatureState::FEATURE_DISABLED_BY_DEFAULT
+#else
+    base::FeatureState::FEATURE_ENABLED_BY_DEFAULT
+#endif
+);
+}
+
+// static
+bool Canvas2DLayerBridge::IsHibernationEnabled() {
+  return base::FeatureList::IsEnabled(kCanvas2DHibernation);
+}
 
 Canvas2DLayerBridge::Canvas2DLayerBridge(const gfx::Size& size,
                                          RasterMode raster_mode,
@@ -68,8 +89,6 @@ Canvas2DLayerBridge::Canvas2DLayerBridge(const gfx::Size& size,
       size_(size),
       snapshot_state_(kInitialSnapshotState),
       resource_host_(nullptr),
-      random_generator_((uint32_t)base::RandUint64()),
-      bernoulli_distribution_(kRasterMetricProbability),
       last_recording_(nullptr) {
   // Used by browser tests to detect the use of a Canvas2DLayerBridge.
   TRACE_EVENT_INSTANT0("test_gpu", "Canvas2DLayerBridgeCreation",
@@ -143,21 +162,11 @@ static void HibernateWrapper(base::WeakPtr<Canvas2DLayerBridge> bridge,
   }
 }
 
-static void HibernateWrapperForTesting(
-    base::WeakPtr<Canvas2DLayerBridge> bridge) {
-  HibernateWrapper(std::move(bridge), base::TimeTicks());
-}
-
 static void LoseContextInBackgroundWrapper(
     base::WeakPtr<Canvas2DLayerBridge> bridge,
     base::TimeTicks /*idleDeadline*/) {
   if (bridge)
     bridge->LoseContext();
-}
-
-static void LoseContextInBackgroundForTestingWrapper(
-    base::WeakPtr<Canvas2DLayerBridge> bridge) {
-  LoseContextInBackgroundWrapper(std::move(bridge), base::TimeTicks());
 }
 
 void Canvas2DLayerBridge::Hibernate() {
@@ -307,6 +316,7 @@ CanvasResourceProvider* Canvas2DLayerBridge::GetOrCreateResourceProvider() {
     layer_->SetBlendBackgroundColor(opacity_mode_ != kOpaque);
     layer_->SetNearestNeighbor(resource_host_->FilterQuality() ==
                                cc::PaintFlags::FilterQuality::kNone);
+    layer_->SetHDRMetadata(resource_host_->GetHDRMetadata());
   }
   // After the page becomes visible and successfully restored the canvas
   // resource provider, set |lose_context_in_background_| to false.
@@ -359,6 +369,12 @@ void Canvas2DLayerBridge::SetFilterQuality(
                                cc::PaintFlags::FilterQuality::kNone);
 }
 
+void Canvas2DLayerBridge::SetHDRMetadata(
+    absl::optional<gfx::HDRMetadata> hdr_metadata) {
+  if (layer_)
+    layer_->SetHDRMetadata(hdr_metadata);
+}
+
 void Canvas2DLayerBridge::SetIsInHiddenPage(bool hidden) {
   if (is_hidden_ == hidden)
     return;
@@ -372,32 +388,20 @@ void Canvas2DLayerBridge::SetIsInHiddenPage(bool hidden) {
       base::FeatureList::IsEnabled(
           ::features::kCanvasContextLostInBackground)) {
     lose_context_in_background_scheduled_ = true;
-    if (dont_use_idle_scheduling_for_testing_) {
-      Thread::Current()->GetTaskRunner()->PostTask(
-          FROM_HERE, WTF::Bind(&LoseContextInBackgroundForTestingWrapper,
-                               weak_ptr_factory_.GetWeakPtr()));
-    } else {
-      ThreadScheduler::Current()->PostIdleTask(
-          FROM_HERE, WTF::Bind(&LoseContextInBackgroundWrapper,
-                               weak_ptr_factory_.GetWeakPtr()));
-    }
-  } else if (CANVAS2D_HIBERNATION_ENABLED && ResourceProvider() &&
-             IsAccelerated() && IsHidden() && !hibernation_scheduled_ &&
+    ThreadScheduler::Current()->PostIdleTask(
+        FROM_HERE, WTF::BindOnce(&LoseContextInBackgroundWrapper,
+                                 weak_ptr_factory_.GetWeakPtr()));
+  } else if (IsHibernationEnabled() && ResourceProvider() && IsAccelerated() &&
+             IsHidden() && !hibernation_scheduled_ &&
              !base::FeatureList::IsEnabled(
                  ::features::kCanvasContextLostInBackground)) {
     if (layer_)
       layer_->ClearTexture();
     logger_->ReportHibernationEvent(kHibernationScheduled);
     hibernation_scheduled_ = true;
-    if (dont_use_idle_scheduling_for_testing_) {
-      Thread::Current()->GetTaskRunner()->PostTask(
-          FROM_HERE, WTF::Bind(&HibernateWrapperForTesting,
-                               weak_ptr_factory_.GetWeakPtr()));
-    } else {
-      ThreadScheduler::Current()->PostIdleTask(
-          FROM_HERE,
-          WTF::Bind(&HibernateWrapper, weak_ptr_factory_.GetWeakPtr()));
-    }
+    ThreadScheduler::Current()->PostIdleTask(
+        FROM_HERE,
+        WTF::BindOnce(&HibernateWrapper, weak_ptr_factory_.GetWeakPtr()));
   }
   if (!IsHidden() && (IsHibernating() || lose_context_in_background_))
     GetOrCreateResourceProvider();  // Rude awakening
@@ -461,7 +465,7 @@ void Canvas2DLayerBridge::ClearPendingRasterTimers() {
   }
 
   if (raster_interface) {
-    while (!pending_raster_timers_.IsEmpty()) {
+    while (!pending_raster_timers_.empty()) {
       RasterTimer rt = pending_raster_timers_.TakeFirst();
       raster_interface->DeleteQueriesEXT(1, &rt.gl_query_id);
     }
@@ -479,7 +483,7 @@ void Canvas2DLayerBridge::FinishRasterTimers(
   }
 
   // Finish up any pending queries that are complete
-  while (!pending_raster_timers_.IsEmpty()) {
+  while (!pending_raster_timers_.empty()) {
     auto it = pending_raster_timers_.begin();
     GLuint complete = 1;
     raster_interface->GetQueryObjectuivEXT(
@@ -533,11 +537,9 @@ void Canvas2DLayerBridge::FlushRecording(bool printing) {
 
   // Sample one out of every kRasterMetricProbability frames to time
   // If the canvas is accelerated, we also need access to the raster_interface
-
-  // We are using @dont_use_idle_scheduling_for_testing_ temporarily to always
-  // measure while testing.
-  const bool will_measure = dont_use_idle_scheduling_for_testing_ ||
-                            bernoulli_distribution_(random_generator_);
+  const bool will_measure =
+      always_measure_for_testing_ ||
+      metrics_subsampler_.ShouldSample(kRasterMetricProbability);
   const bool measure_raster_metric =
       (raster_interface || !IsAccelerated()) && will_measure;
 
@@ -644,6 +646,19 @@ bool Canvas2DLayerBridge::Restore() {
   return ResourceProvider();
 }
 
+namespace {
+
+// Adapter for wrapping a CanvasResourceReleaseCallback into a
+// viz::ReleaseCallback
+void ReleaseCanvasResource(CanvasResource::ReleaseCallback callback,
+                           scoped_refptr<CanvasResource> canvas_resource,
+                           const gpu::SyncToken& sync_token,
+                           bool is_lost) {
+  std::move(callback).Run(std::move(canvas_resource), sync_token, is_lost);
+}
+
+}  // unnamed namespace
+
 bool Canvas2DLayerBridge::PrepareTransferableResource(
     cc::SharedBitmapIdRegistrar* bitmap_registrar,
     viz::TransferableResource* out_resource,
@@ -674,16 +689,20 @@ bool Canvas2DLayerBridge::PrepareTransferableResource(
   if (!frame || !frame->IsValid())
     return false;
 
-  // Note frame is kept alive via a reference kept in out_release_callback.
-  if (!frame->PrepareTransferableResource(out_resource, out_release_callback,
+  CanvasResource::ReleaseCallback release_callback;
+  if (!frame->PrepareTransferableResource(out_resource, &release_callback,
                                           kUnverifiedSyncToken) ||
       *out_resource == layer_->current_transferable_resource()) {
     // If the resource did not change, the release will be handled correctly
     // when the callback from the previous frame is dispatched. But run the
-    // |out_release_callback| to release the ref acquired above.
-    std::move(*out_release_callback).Run(gpu::SyncToken(), false /* is_lost */);
+    // |release_callback| to release the ref acquired above.
+    std::move(release_callback)
+        .Run(std::move(frame), gpu::SyncToken(), false /* is_lost */);
     return false;
   }
+  // Note: frame is kept alive via a reference kept in out_release_callback.
+  *out_release_callback = base::BindOnce(
+      ReleaseCanvasResource, std::move(release_callback), std::move(frame));
 
   return true;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -171,13 +171,16 @@ class PDFEngine {
 
     // Updates the number of find results for the current search term.  If
     // there are no matches 0 should be passed in.  Only when the plugin has
-    // finished searching should it pass in the final count with final_result
+    // finished searching should it pass in the final count with `final_result`
     // set to true.
     virtual void NotifyNumberOfFindResultsChanged(int total,
                                                   bool final_result) {}
 
-    // Updates the index of the currently selected search item.
-    virtual void NotifySelectedFindResultChanged(int current_find_index) {}
+    // Updates the index of the currently selected search item. Set
+    // `final_result` to true only when there is no subsequent
+    // `NotifyNumberOfFindResultsChanged()` call.
+    virtual void NotifySelectedFindResultChanged(int current_find_index,
+                                                 bool final_result) {}
 
     virtual void NotifyTouchSelectionOccurred() {}
 
@@ -252,7 +255,7 @@ class PDFEngine {
     virtual bool IsPrintPreview() const = 0;
 
     // Get the background color of the PDF.
-    virtual SkColor GetBackgroundColor() = 0;
+    virtual SkColor GetBackgroundColor() const = 0;
 
     // Sets selection status.
     virtual void SetIsSelecting(bool is_selecting) {}
@@ -301,7 +304,7 @@ class PDFEngine {
   virtual bool HandleInputEvent(const blink::WebInputEvent& event) = 0;
   virtual void PrintBegin() = 0;
   virtual std::vector<uint8_t> PrintPages(
-      const std::vector<int>& page_numbers,
+      const std::vector<int>& page_index,
       const blink::WebPrintParams& print_params) = 0;
   virtual void PrintEnd() = 0;
   virtual void StartFind(const std::string& text, bool case_sensitive) = 0;
@@ -312,7 +315,7 @@ class PDFEngine {
   virtual void RotateCounterclockwise() = 0;
   virtual bool IsReadOnly() const = 0;
   virtual void SetReadOnly(bool enable) = 0;
-  virtual void SetTwoUpView(bool enable) = 0;
+  virtual void SetDocumentLayout(DocumentLayout::PageSpread page_spread) = 0;
   virtual void DisplayAnnotations(bool display) = 0;
 
   // Applies the document layout options proposed by a call to
@@ -505,7 +508,7 @@ class PDFEngineExports {
 #if BUILDFLAG(IS_WIN)
   // See the definition of RenderPDFPageToDC in pdf.cc for details.
   virtual bool RenderPDFPageToDC(base::span<const uint8_t> pdf_buffer,
-                                 int page_number,
+                                 int page_index,
                                  const RenderingSettings& settings,
                                  HDC dc) = 0;
 
@@ -514,7 +517,7 @@ class PDFEngineExports {
 
   // See the definition of RenderPDFPageToBitmap in pdf.cc for details.
   virtual bool RenderPDFPageToBitmap(base::span<const uint8_t> pdf_buffer,
-                                     int page_number,
+                                     int page_index,
                                      const RenderingSettings& settings,
                                      void* bitmap_buffer) = 0;
 
@@ -551,7 +554,7 @@ class PDFEngineExports {
   // See the definition of GetPDFPageSizeByIndex in pdf.cc for details.
   virtual absl::optional<gfx::SizeF> GetPDFPageSizeByIndex(
       base::span<const uint8_t> pdf_buffer,
-      int page_number) = 0;
+      int page_index) = 0;
 };
 
 }  // namespace chrome_pdf

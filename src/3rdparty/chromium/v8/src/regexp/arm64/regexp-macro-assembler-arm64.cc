@@ -122,8 +122,8 @@ RegExpMacroAssemblerARM64::RegExpMacroAssemblerARM64(Isolate* isolate,
       exit_label_() {
   DCHECK_EQ(0, registers_to_save % 2);
   // We can cache at most 16 W registers in x0-x7.
-  STATIC_ASSERT(kNumCachedRegisters <= 16);
-  STATIC_ASSERT((kNumCachedRegisters % 2) == 0);
+  static_assert(kNumCachedRegisters <= 16);
+  static_assert((kNumCachedRegisters % 2) == 0);
   __ CallTarget();
 
   __ B(&entry_label_);   // We'll write the entry code later.
@@ -400,7 +400,7 @@ void RegExpMacroAssemblerARM64::CheckNotBackReferenceIgnoreCase(
       __ Sub(current_input_offset().X(), current_input_offset().X(),
              Operand(capture_length, SXTW));
     }
-    if (FLAG_debug_code) {
+    if (v8_flags.debug_code) {
       __ Cmp(current_input_offset().X(), Operand(current_input_offset(), SXTW));
       __ Ccmp(current_input_offset(), 0, NoFlag, eq);
       // The current input offset should be <= 0, and fit in a W register.
@@ -529,7 +529,7 @@ void RegExpMacroAssemblerARM64::CheckNotBackReference(int start_reg,
            Operand(capture_length, SXTW));
   }
 
-  if (FLAG_debug_code) {
+  if (v8_flags.debug_code) {
     __ Cmp(current_input_offset().X(), Operand(current_input_offset(), SXTW));
     __ Ccmp(current_input_offset(), 0, NoFlag, eq);
     // The current input offset should be <= 0, and fit in a W register.
@@ -640,7 +640,7 @@ void RegExpMacroAssemblerARM64::CheckBitInTable(
   CompareAndBranchOrBacktrack(w11, 0, ne, on_bit_set);
 }
 
-bool RegExpMacroAssemblerARM64::CheckSpecialCharacterClass(
+bool RegExpMacroAssemblerARM64::CheckSpecialClassRanges(
     StandardCharacterSet type, Label* on_no_match) {
   // Range checks (c in min..max) are generally implemented by an unsigned
   // (c - min) <= (max - min) check
@@ -839,7 +839,7 @@ Handle<HeapObject> RegExpMacroAssemblerARM64::GetCode(Handle<String> source) {
 
   // Initialize backtrack stack pointer. It must not be clobbered from here on.
   // Note the backtrack_stackpointer is callee-saved.
-  STATIC_ASSERT(backtrack_stackpointer() == x23);
+  static_assert(backtrack_stackpointer() == x23);
   LoadRegExpStackPointerFromMemory(backtrack_stackpointer());
 
   // Store the regexp base pointer - we'll later restore it / write it to
@@ -862,13 +862,13 @@ Handle<HeapObject> RegExpMacroAssemblerARM64::GetCode(Handle<String> source) {
     __ Mov(x10, stack_limit);
     __ Ldr(x10, MemOperand(x10));
     __ Subs(x10, sp, x10);
-
+    Operand extra_space_for_variables(num_wreg_to_allocate * kWRegSize);
     // Handle it if the stack pointer is already below the stack limit.
     __ B(ls, &stack_limit_hit);
 
     // Check if there is room for the variable number of registers above
     // the stack limit.
-    __ Cmp(x10, num_wreg_to_allocate * kWRegSize);
+    __ Cmp(x10, extra_space_for_variables);
     __ B(hs, &stack_ok);
 
     // Exit with OutOfMemory exception. There is not enough space on the stack
@@ -877,7 +877,7 @@ Handle<HeapObject> RegExpMacroAssemblerARM64::GetCode(Handle<String> source) {
     __ B(&return_w0);
 
     __ Bind(&stack_limit_hit);
-    CallCheckStackGuardState(x10);
+    CallCheckStackGuardState(x10, extra_space_for_variables);
     // If returned value is non-zero, we exit with the returned value as result.
     __ Cbnz(w0, &return_w0);
 
@@ -893,7 +893,7 @@ Handle<HeapObject> RegExpMacroAssemblerARM64::GetCode(Handle<String> source) {
 
   // Find negative length (offset of start relative to end).
   __ Sub(x10, input_start(), input_end());
-  if (FLAG_debug_code) {
+  if (v8_flags.debug_code) {
     // Check that the size of the input string chars is in range.
     __ Neg(x11, x10);
     __ Cmp(x11, SeqTwoByteString::kMaxCharsSize);
@@ -959,7 +959,7 @@ Handle<HeapObject> RegExpMacroAssemblerARM64::GetCode(Handle<String> source) {
 
       // Get string length.
       __ Sub(x10, input_end(), input_start());
-      if (FLAG_debug_code) {
+      if (v8_flags.debug_code) {
         // Check that the size of the input string chars is in range.
         __ Cmp(x10, SeqTwoByteString::kMaxCharsSize);
         __ Check(ls, AbortReason::kInputStringTooLong);
@@ -1008,7 +1008,7 @@ Handle<HeapObject> RegExpMacroAssemblerARM64::GetCode(Handle<String> source) {
 
         // We can unroll the loop here, we should not unroll for less than 2
         // registers.
-        STATIC_ASSERT(kNumRegistersToUnroll > 2);
+        static_assert(kNumRegistersToUnroll > 2);
         if (num_registers_left_on_stack <= kNumRegistersToUnroll) {
           for (int i = 0; i < num_registers_left_on_stack / 2; i++) {
             __ Ldp(capture_end, capture_start,
@@ -1248,7 +1248,7 @@ void RegExpMacroAssemblerARM64::PushBacktrack(Label* label) {
   } else {
     __ Adr(x10, label, MacroAssembler::kAdrFar);
     __ Sub(x10, x10, code_pointer());
-    if (FLAG_debug_code) {
+    if (v8_flags.debug_code) {
       __ Cmp(x10, kWRegMask);
       // The code offset has to fit in a W register.
       __ Check(ls, AbortReason::kOffsetOutOfRange);
@@ -1296,7 +1296,7 @@ void RegExpMacroAssemblerARM64::WriteStackPointerToRegister(int reg) {
   __ Mov(x10, ref);
   __ Ldr(x10, MemOperand(x10));
   __ Sub(x10, backtrack_stackpointer(), x10);
-  if (FLAG_debug_code) {
+  if (v8_flags.debug_code) {
     __ Cmp(x10, Operand(w10, SXTW));
     // The stack offset needs to fit in a W register.
     __ Check(eq, AbortReason::kOffsetOutOfRange);
@@ -1389,7 +1389,7 @@ void RegExpMacroAssemblerARM64::ClearRegisters(int reg_from, int reg_to) {
     reg_from -= kNumCachedRegisters;
     reg_to -= kNumCachedRegisters;
     // We should not unroll the loop for less than 2 registers.
-    STATIC_ASSERT(kNumRegistersToUnroll > 2);
+    static_assert(kNumRegistersToUnroll > 2);
     // We position the base pointer to (reg_from + 1).
     int base_offset = kFirstRegisterOnStack -
         kWRegSize - (kWRegSize * reg_from);
@@ -1428,13 +1428,14 @@ static T* frame_entry_address(Address re_frame, int frame_offset) {
 
 int RegExpMacroAssemblerARM64::CheckStackGuardState(
     Address* return_address, Address raw_code, Address re_frame,
-    int start_index, const byte** input_start, const byte** input_end) {
+    int start_index, const byte** input_start, const byte** input_end,
+    uintptr_t extra_space) {
   Code re_code = Code::cast(Object(raw_code));
   return NativeRegExpMacroAssembler::CheckStackGuardState(
       frame_entry<Isolate*>(re_frame, kIsolate), start_index,
       static_cast<RegExp::CallOrigin>(frame_entry<int>(re_frame, kDirectCall)),
       return_address, re_code, frame_entry_address<Address>(re_frame, kInput),
-      input_start, input_end);
+      input_start, input_end, extra_space);
 }
 
 
@@ -1453,7 +1454,8 @@ void RegExpMacroAssemblerARM64::CheckPosition(int cp_offset,
 
 // Private methods:
 
-void RegExpMacroAssemblerARM64::CallCheckStackGuardState(Register scratch) {
+void RegExpMacroAssemblerARM64::CallCheckStackGuardState(Register scratch,
+                                                         Operand extra_space) {
   DCHECK(!isolate()->IsGeneratingEmbeddedBuiltins());
   DCHECK(!masm_->options().isolate_independent_code);
 
@@ -1468,6 +1470,7 @@ void RegExpMacroAssemblerARM64::CallCheckStackGuardState(Register scratch) {
 
   __ Claim(xreg_to_claim);
 
+  __ Mov(x6, extra_space);
   // CheckStackGuardState needs the end and start addresses of the input string.
   __ Poke(input_end(), 2 * kSystemPointerSize);
   __ Add(x5, sp, 2 * kSystemPointerSize);
@@ -1712,7 +1715,7 @@ void RegExpMacroAssemblerARM64::LoadCurrentCharacterUnchecked(int cp_offset,
   }
 
   if (cp_offset != 0) {
-    if (FLAG_debug_code) {
+    if (v8_flags.debug_code) {
       __ Mov(x10, cp_offset * char_size());
       __ Add(x10, x10, Operand(current_input_offset(), SXTW));
       __ Cmp(x10, Operand(w10, SXTW));

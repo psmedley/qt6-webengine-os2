@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -126,6 +126,11 @@ interface Renderer {
   UpdateDefaultPolicyHostRestrictions(
         URLPatternSet default_policy_blocked_hosts,
         URLPatternSet default_policy_allowed_hosts);
+
+  // Tells the renderer to update the collection of user-restricted hosts.
+  UpdateUserHostRestrictions(
+        URLPatternSet user_blocked_hosts,
+        URLPatternSet user_allowed_hosts);
 
   // Tells the render view about new tab-specific permissions for an extension.
   UpdateTabSpecificPermissions(string extension_id,

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,10 @@
 #include "third_party/blink/renderer/modules/presentation/presentation_connection.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_error.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_request.h"
+
+#if BUILDFLAG(IS_ANDROID)
+#include "third_party/blink/renderer/modules/presentation/presentation_metrics.h"
+#endif
 
 namespace blink {
 
@@ -75,6 +79,9 @@ void PresentationConnectionCallbacks::OnSuccess(
                     std::move(connection_receiver));
 
   resolver_->Resolve(connection_);
+#if BUILDFLAG(IS_ANDROID)
+  PresentationMetrics::RecordPresentationConnectionResult(request_, true);
+#endif
 }
 
 void PresentationConnectionCallbacks::OnError(
@@ -82,6 +89,16 @@ void PresentationConnectionCallbacks::OnError(
   resolver_->Reject(CreatePresentationError(
       resolver_->GetScriptState()->GetIsolate(), error));
   connection_ = nullptr;
+#if BUILDFLAG(IS_ANDROID)
+  // These two error types are not recorded because it's likely that they don't
+  // represent an actual error.
+  if (error.error_type !=
+          mojom::blink::PresentationErrorType::PRESENTATION_REQUEST_CANCELLED &&
+      error.error_type !=
+          mojom::blink::PresentationErrorType::NO_PRESENTATION_FOUND) {
+    PresentationMetrics::RecordPresentationConnectionResult(request_, false);
+  }
+#endif
 }
 
 }  // namespace blink

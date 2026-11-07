@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,11 @@ enum PopupItemId {
   POPUP_ITEM_ID_PASSWORD_ACCOUNT_STORAGE_EMPTY = -25,
   POPUP_ITEM_ID_MIXED_FORM_MESSAGE = -26,
   POPUP_ITEM_ID_VIRTUAL_CREDIT_CARD_ENTRY = -27,
-  POPUP_ITEM_ID_WEBAUTHN_CREDENTIAL = -28
+  POPUP_ITEM_ID_WEBAUTHN_CREDENTIAL = -28,
+  POPUP_ITEM_ID_MERCHANT_PROMO_CODE_ENTRY = -29,
+  POPUP_ITEM_ID_SEE_PROMO_CODE_DETAILS = -30,
+  POPUP_ITEM_ID_WEBAUTHN_SIGN_IN_WITH_ANOTHER_DEVICE = -31,
+  POPUP_ITEM_ID_IBAN_ENTRY = -32,
 };
 
 // List of `PopupItemId` that trigger filling a value into an input element
@@ -47,7 +51,8 @@ constexpr PopupItemId kItemsTriggeringFieldFilling[] = {
     POPUP_ITEM_ID_USERNAME_ENTRY,
     POPUP_ITEM_ID_ACCOUNT_STORAGE_PASSWORD_ENTRY,
     POPUP_ITEM_ID_ACCOUNT_STORAGE_USERNAME_ENTRY,
-    POPUP_ITEM_ID_VIRTUAL_CREDIT_CARD_ENTRY};
+    POPUP_ITEM_ID_VIRTUAL_CREDIT_CARD_ENTRY,
+    POPUP_ITEM_ID_MERCHANT_PROMO_CODE_ENTRY};
 
 }  // namespace autofill
 

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/containers/cxx20_erase_vector.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
@@ -38,14 +39,11 @@ struct RestrictedCapturePolicy {
 }  // namespace
 
 bool IsOriginInList(const GURL& request_origin,
-                    const base::Value* allowed_origins) {
-  if (!allowed_origins || !allowed_origins->is_list())
-    return false;
-
+                    const base::Value::List& allowed_origins) {
   // Though we are not technically a Content Setting, ContentSettingsPattern
   // aligns better than URLMatcher with the rules from:
   // https://chromeenterprise.google/policies/url-patterns/.
-  for (const auto& value : allowed_origins->GetListDeprecated()) {
+  for (const auto& value : allowed_origins) {
     if (!value.is_string())
       continue;
     ContentSettingsPattern pattern =

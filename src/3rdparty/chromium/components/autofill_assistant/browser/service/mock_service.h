@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "components/autofill_assistant/browser/service/service.h"
+#include "components/autofill_assistant/browser/user_data.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace autofill_assistant {
@@ -51,6 +52,26 @@ class MockService : public Service {
               GetUserData,
               (const CollectUserDataOptions& options,
                uint64_t run_id,
+               const UserData* user_data,
+               ServiceRequestSender::ResponseCallback callback),
+              (override));
+  MOCK_METHOD(void,
+              SetDisableRpcSigning,
+              (bool disable_rpc_signing),
+              (override));
+  MOCK_METHOD(void,
+              UpdateAnnotateDomModelContext,
+              (int64_t model_version),
+              (override));
+  MOCK_METHOD(void,
+              UpdateJsFlowLibraryLoaded,
+              (bool js_flow_library_loaded),
+              (override));
+
+  MOCK_METHOD(void,
+              ReportProgress,
+              (const std::string& token,
+               const std::string& payload,
                ServiceRequestSender::ResponseCallback callback),
               (override));
 };

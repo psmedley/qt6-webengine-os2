@@ -1,12 +1,12 @@
 {
   "extends": "./node_modules/gts/tsconfig-google.json",
   "compilerOptions": {
-    "lib": ["dom", "es2016"],
+    "lib": ["dom", "es2019"],
     "module": "esnext",
     /* Output options */
     "noEmit": true,
     /* Strict type-checking options */
-    "allowJs": false,
+    "allowJs": true,
     "strict": true,
     /* tsc lint options */
     "noImplicitReturns": true,
@@ -16,9 +16,13 @@
     "allowUnreachableCode": true,
     /* Module Options */
     "moduleResolution": "node",
-    "esModuleInterop": false
+    "esModuleInterop": false,
+    "skipLibCheck": true,
   },
-  "include": ["src/**/*.ts"],
+  "include": [
+    "src/**/*.ts",
+    "src/external/**/*.js",
+  ],
   "typedocOptions": {
     "entryPointStrategy": "expand",
     "entryPoints": [

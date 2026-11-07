@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -150,8 +150,10 @@ class Pointer : public SurfaceTreeHost,
   // Remove the currently active pointer capture (if there is one).
   void DisablePointerCapture();
 
-  // Returns the effective target for |event|.
-  Surface* GetEffectiveTargetForEvent(const ui::LocatedEvent* event) const;
+  // Returns the effective target for |event| and the event's location converted
+  // to the target's coordinates.
+  Surface* GetEffectiveTargetForEvent(const ui::LocatedEvent* event,
+                                      gfx::PointF* location_in_target) const;
 
   // Change pointer focus to |surface|.
   void SetFocus(Surface* surface,
@@ -231,7 +233,7 @@ class Pointer : public SurfaceTreeHost,
 
   // If this is not nullptr, a synthetic move was sent and this points to the
   // location of a generated move that was sent which should not be forwarded.
-  absl::optional<gfx::Point> location_synthetic_move_;
+  absl::optional<gfx::Point> expected_next_mouse_location_;
 
   // The window with pointer capture. Pointer capture is enabled if and only if
   // this is not null.

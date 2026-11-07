@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,7 +61,6 @@
 #include "components/site_engagement/content/site_engagement_score.h"
 #include "components/site_engagement/content/site_engagement_service.h"
 #include "content/public/browser/browsing_data_remover.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
@@ -186,9 +185,11 @@ class PushMessagingBrowserTestBase : public InProcessBrowserTest {
     InProcessBrowserTest::SetUp();
   }
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    // Enable experimental features for subscription restrictions.
-    command_line->AppendSwitch(
-        switches::kEnableExperimentalWebPlatformFeatures);
+    if (exp_web_platform_features_enabled_) {
+      // Enable experimental features for subscription restrictions.
+      command_line->AppendSwitch(
+          switches::kEnableExperimentalWebPlatformFeatures);
+    }
 
     // HTTPS server only serves a valid cert for localhost, so this is needed to
     // load webby domains like "embedded.com" without an interstitial.
@@ -265,8 +266,8 @@ class PushMessagingBrowserTestBase : public InProcessBrowserTest {
                  content::WebContents* web_contents) {
     if (!web_contents)
       web_contents = GetBrowser()->tab_strip_model()->GetActiveWebContents();
-    return content::ExecuteScriptAndExtractString(web_contents->GetMainFrame(),
-                                                  script, result);
+    return content::ExecuteScriptAndExtractString(
+        web_contents->GetPrimaryMainFrame(), script, result);
   }
 
   gcm::GCMAppHandler* GetAppHandler() {
@@ -395,6 +396,7 @@ class PushMessagingBrowserTestBase : public InProcessBrowserTest {
   base::HistogramTester histogram_tester_;
 
   std::unique_ptr<NotificationDisplayServiceTester> notification_tester_;
+  bool exp_web_platform_features_enabled_ = true;
 
  private:
   std::unique_ptr<net::EmbeddedTestServer> https_server_;
@@ -472,7 +474,8 @@ void PushMessagingBrowserTestBase::SetupOrphanedPushSubscription(
 
   base::RunLoop run_loop;
   push_service()->SubscribeFromWorker(
-      requesting_origin, service_worker_registration_id, std::move(options),
+      requesting_origin, service_worker_registration_id,
+      /*render_process_id=*/-1, std::move(options),
       base::BindOnce(&DidRegister, run_loop.QuitClosure()));
   run_loop.Run();
 
@@ -600,6 +603,21 @@ class PushMessagingBrowserTest : public PushMessagingBrowserTestBase {
  private:
   base::test::ScopedFeatureList feature_list_;
 };
+
+// This class is used to execute PushMessagingBrowserTest tests with
+// experimental web platform features both enabled/disabled.
+class PushMessagingExpWebFeaturesBrowserTest
+    : public PushMessagingBrowserTest,
+      public testing::WithParamInterface<bool> {
+ public:
+  PushMessagingExpWebFeaturesBrowserTest() {
+    exp_web_platform_features_enabled_ = GetParam();
+  }
+};
+
+INSTANTIATE_TEST_SUITE_P(PushMessagingExpWebFeaturesBrowserTest,
+                         PushMessagingExpWebFeaturesBrowserTest,
+                         testing::Values(true, false));
 
 IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
                        SubscribeWithoutKeySuccessNotificationsGranted) {
@@ -1278,9 +1296,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, PushEventOnShutdown) {
   message.sender_id = GetTestApplicationServerKey();
   message.raw_data = "testdata";
   message.decrypted = true;
-  push_service()->Observe(chrome::NOTIFICATION_APP_TERMINATING,
-                          content::NotificationService::AllSources(),
-                          content::NotificationService::NoDetails());
+  push_service()->OnAppTerminating();
   push_service()->OnMessage(app_identifier.app_id(), message);
   EXPECT_TRUE(IsRegisteredKeepAliveEqualTo(false));
 }
@@ -2010,7 +2026,10 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, PermissionStateSaysDenied) {
   EXPECT_EQ("permission status - denied", script_result);
 }
 
-IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, CrossOriginFrame) {
+IN_PROC_BROWSER_TEST_P(PushMessagingExpWebFeaturesBrowserTest,
+                       CrossOriginFrame) {
+  bool storage_partitioned = base::FeatureList::IsEnabled(
+      net::features::kThirdPartyStoragePartitioning);
   const GURL kEmbedderURL = https_server()->GetURL(
       "embedder.com", "/push_messaging/framed_test.html");
   const GURL kRequesterURL = https_server()->GetURL("requester.com", "/");
@@ -2019,7 +2038,8 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, CrossOriginFrame) {
 
   auto* web_contents = GetBrowser()->tab_strip_model()->GetActiveWebContents();
   LOG(ERROR) << web_contents->GetLastCommittedURL();
-  auto* subframe = content::ChildFrameAt(web_contents->GetMainFrame(), 0u);
+  auto* subframe =
+      content::ChildFrameAt(web_contents->GetPrimaryMainFrame(), 0u);
   ASSERT_TRUE(subframe);
 
   // A cross-origin subframe that had not been granted the NOTIFICATIONS
@@ -2087,7 +2107,12 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, CrossOriginFrame) {
 
   ASSERT_TRUE(content::ExecuteScriptAndExtractString(
       subframe, "documentSubscribePush()", &script_result));
-  ASSERT_NO_FATAL_FAILURE(EndpointToToken(script_result));
+  if (storage_partitioned) {
+    EXPECT_EQ("AbortError - Registration failed - storage error",
+              script_result);
+  } else {
+    ASSERT_NO_FATAL_FAILURE(EndpointToToken(script_result));
+  }
 }
 
 IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, UnsubscribeSuccess) {
@@ -2845,7 +2870,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingIncognitoBrowserTest, WarningToCorrectRFH) {
   console_observer.SetPattern(kIncognitoWarningPattern);
 
   // Filter out the main frame host of the currently active page.
-  content::RenderFrameHost* rfh = web_contents()->GetMainFrame();
+  content::RenderFrameHost* rfh = web_contents()->GetPrimaryMainFrame();
   console_observer.SetFilter(base::BindLambdaForTesting(
       [&](const content::WebContentsConsoleObserver::Message& message) {
         return message.source_frame == rfh;
@@ -2879,7 +2904,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingIncognitoBrowserTest,
   // prerender page activation.
   std::string script_result;
   ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      web_contents()->GetMainFrame(), "registerServiceWorker()",
+      web_contents()->GetPrimaryMainFrame(), "registerServiceWorker()",
       &script_result));
   ASSERT_EQ("ok - service worker registered", script_result);
 
@@ -2909,7 +2934,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingIncognitoBrowserTest,
   ExecuteScriptAsync(prerender_rfh, "documentSubscribePush()");
 
   // Activate the prerendered page and wait for a response of script execution.
-  content::DOMMessageQueue message_queue;
+  content::DOMMessageQueue message_queue(web_contents());
   prerender_helper_.NavigatePrimaryPage(prerendering_url);
   // Make sure that the prerender was activated.
   ASSERT_TRUE(prerender_observer.was_activated());

@@ -1,4 +1,4 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -36,10 +36,7 @@ if (is_android) {
   android_library("java") {
     sources = [ "android/java/src/org/chromium/chrome/browser/feature_guide/notifications/FeatureNotificationGuideService.java" ]
 
-    deps = [
-      "//base:base_java",
-      "//third_party/androidx:androidx_annotation_annotation_java",
-    ]
+    deps = [ "//third_party/androidx:androidx_annotation_annotation_java" ]
     srcjar_deps = [ ":jni_enums" ]
   }
 }

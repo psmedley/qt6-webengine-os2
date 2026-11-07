@@ -1,8 +1,8 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import './print_preview_shared_css.js';
+import './print_preview_shared.css.js';
 import './settings_section.js';
 import '../strings.m.js';
 import './settings_select.js';
@@ -16,9 +16,9 @@ import {getTemplate} from './dpi_settings.html.js';
 import {SettingsMixin} from './settings_mixin.js';
 
 type LabelledDpiOption = DpiOption&SelectOption;
-export type LabelledDpiCapability = {
-  option: LabelledDpiOption[],
-};
+export interface LabelledDpiCapability {
+  option: LabelledDpiOption[];
+}
 
 const PrintPreviewDpiSettingsElementBase = SettingsMixin(PolymerElement);
 

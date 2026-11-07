@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,18 @@ namespace prefs {
 // machine. Attached to metrics reports forever thereafter.
 // Note: the 'uninstall_metrics' name is a legacy name and doesn't mean much.
 const char kInstallDate[] = "uninstall_metrics.installation_date2";
+
+// A provisional metrics client GUID used for field trial group assignments
+// before metrics reporting consent is known (i.e., during first run). This GUID
+// is never reported directly. However, if the user enables UMA, this
+// provisional client GUID becomes the metrics client GUID (see
+// |kMetricsClientID|), and this pref is cleared. In that case, the GUID may
+// be reported.
+// Note: This GUID is stored in prefs because it is possible that the user
+// closes Chrome during the FRE. We re-use this GUID in subsequent FRE runs
+// until metrics reporting consent is truly known.
+const char kMetricsProvisionalClientID[] =
+    "user_experience_metrics.provisional_client_id";
 
 // The metrics client GUID.
 // Note: The name client_id2 is a result of creating
@@ -70,6 +82,21 @@ const char kMetricsOngoingLogsMetadata[] =
 // client id and low entropy source should be reset.
 const char kMetricsResetIds[] = "user_experience_metrics.reset_metrics_ids";
 
+#if BUILDFLAG(IS_ANDROID)
+// Boolean that determines whether to use the new sampling trial
+// "PostFREFixMetricsAndCrashSampling" and feature "PostFREFixMetricsReporting"
+// to control sampling on Android Chrome. This is set to true when disabling
+// metrics reporting, or on start up if metrics reporting is not consented to
+// (including new users going through their first run). As a result, all new UMA
+// users should have this pref set to true.
+// Note: This exists due to a bug in which the old sampling rate was not being
+// applied correctly. In order for the fix to not affect the overall sampling
+// rate, this pref controls what trial/feature to use to determine whether the
+// client is sampled. See crbug/1306481.
+const char kUsePostFREFixSamplingTrial[] =
+    "user_experience_metrics.use_post_fre_fix_sampling_trial";
+#endif  // BUILDFLAG(IS_ANDROID)
+
 // Boolean that specifies whether or not crash reporting and metrics reporting
 // are sent over the network for analysis.
 const char kMetricsReportingEnabled[] =
@@ -109,11 +136,6 @@ const char kLastClonedResetTimestamp[] = "cloned_install.last_timestamp";
 const char kStabilityBrowserLastLiveTimeStamp[] =
     "user_experience_metrics.stability.browser_last_live_timestamp";
 
-// Number of times the application exited uncleanly since the last report.
-// On Android this does not count the ones due to Gms Core updates (below).
-const char kStabilityCrashCount[] =
-    "user_experience_metrics.stability.crash_count";
-
 // Number of times the application exited uncleanly since the last report
 // due to a gms core update.
 const char kStabilityCrashCountDueToGmsCoreUpdate[] =
@@ -122,10 +144,6 @@ const char kStabilityCrashCountDueToGmsCoreUpdate[] =
 // True if the previous run of the program exited cleanly.
 const char kStabilityExitedCleanly[] =
     "user_experience_metrics.stability.exited_cleanly";
-
-// Number of times an extension renderer process crashed since the last report.
-const char kStabilityExtensionRendererCrashCount[] =
-    "user_experience_metrics.stability.extension_renderer_crash_count";
 
 // The total number of samples that will be lost if ASSOCIATE_INTERNAL_PROFILE
 // isn't enabled since the previous stability recorded, this is different than
@@ -142,29 +160,22 @@ const char kStabilityFileMetricsUnsentFilesCount[] =
 const char kStabilityGmsCoreVersion[] =
     "user_experience_metrics.stability.gms_core_version";
 
-// Number of times a gpu process crashed since the last report. Currently only
-// recorded on Android.
-const char kStabilityGpuCrashCount[] =
-    "user_experience_metrics.stability.gpu_crash_count";
-
 #if BUILDFLAG(IS_ANDROID)
-// Number of times the application was launched since last report.
+// Number of times the application was launched since last report. Used on
+// Android platforms as WebView may still be interested in this metric.
 const char kStabilityLaunchCount[] =
     "user_experience_metrics.stability.launch_count";
-#endif
 
 // Number of times a page load event occurred since the last report.
 const char kStabilityPageLoadCount[] =
     "user_experience_metrics.stability.page_load_count";
 
-// Number of times a renderer process crashed since the last report.
-const char kStabilityRendererCrashCount[] =
-    "user_experience_metrics.stability.renderer_crash_count";
-
 // Number of times a renderer process successfully launched since the last
-// report.
+// report. Used on Android platforms as WebView may still be interested in this
+// metric.
 const char kStabilityRendererLaunchCount[] =
     "user_experience_metrics.stability.renderer_launch_count";
+#endif
 
 // Base64 encoded serialized UMA system profile proto from the previous session.
 const char kStabilitySavedSystemProfile[] =

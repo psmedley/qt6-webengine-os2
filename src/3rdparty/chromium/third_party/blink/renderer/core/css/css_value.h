@@ -54,7 +54,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
 
   bool IsBasicShapeValue() const {
     return class_type_ >= kBasicShapeCircleClass &&
-           class_type_ <= kBasicShapeInsetClass;
+           class_type_ <= kBasicShapeRectClass;
   }
   bool IsBasicShapeCircleValue() const {
     return class_type_ == kBasicShapeCircleClass;
@@ -67,6 +67,12 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   }
   bool IsBasicShapeInsetValue() const {
     return class_type_ == kBasicShapeInsetClass;
+  }
+  bool IsBasicShapeRectValue() const {
+    return class_type_ == kBasicShapeRectClass;
+  }
+  bool IsBasicShapeXYWHValue() const {
+    return class_type_ == kBasicShapeXYWHClass;
   }
 
   bool IsBorderImageSliceValue() const {
@@ -175,10 +181,8 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsLightDarkValuePair() const {
     return class_type_ == kLightDarkValuePairClass;
   }
-  bool IsIdSelectorValue() const { return class_type_ == kIdSelectorClass; }
-  bool IsElementOffsetValue() const {
-    return class_type_ == kElementOffsetClass;
-  }
+
+  bool IsScrollValue() const { return class_type_ == kScrollClass; }
   bool IsRatioValue() const { return class_type_ == kRatioClass; }
 
   bool HasFailedOrCanceledSubresources() const;
@@ -188,15 +192,8 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool operator==(const CSSValue&) const;
   bool operator!=(const CSSValue& o) const { return !(*this == o); }
 
-  void FinalizeGarbageCollectedObject();
   void TraceAfterDispatch(blink::Visitor* visitor) const {}
   void Trace(Visitor*) const;
-
-  // ~CSSValue should be public, because non-public ~CSSValue causes C2248
-  // error: 'blink::CSSValue::~CSSValue' : cannot access protected member
-  // declared in class 'blink::CSSValue' when compiling
-  // 'source\wtf\refcounted.h' by using msvc.
-  ~CSSValue() = default;
 
  protected:
   enum ClassType {
@@ -211,8 +208,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kURIClass,
     kValuePairClass,
     kLightDarkValuePairClass,
-    kIdSelectorClass,
-    kElementOffsetClass,
+    kScrollClass,
     kRatioClass,
 
     // Basic shape classes.
@@ -221,6 +217,8 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kBasicShapeEllipseClass,
     kBasicShapePolygonClass,
     kBasicShapeInsetClass,
+    kBasicShapeRectClass,
+    kBasicShapeXYWHClass,
 
     // Image classes.
     kImageClass,

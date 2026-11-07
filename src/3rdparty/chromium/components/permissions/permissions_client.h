@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/permissions/origin_keyed_permission_action_service.h"
 #include "components/permissions/permission_prompt.h"
 #include "components/permissions/permission_ui_selector.h"
 #include "components/permissions/permission_uma_util.h"
@@ -44,7 +45,6 @@ namespace permissions {
 class ObjectPermissionContextBase;
 class PermissionActionsHistory;
 class PermissionDecisionAutoBlocker;
-class PermissionManager;
 class PermissionPromptAndroid;
 
 // Interface to be implemented by permissions embedder to access embedder
@@ -81,16 +81,17 @@ class PermissionsClient {
       content::BrowserContext* browser_context,
       const GURL& url) = 0;
 
+  // Holds and mediates access to an in-memory origin-keyed map, that holds the
+  // last PermissionAction and its  timestamp for each Content Setting. Used for
+  // metrics collection.
+  virtual OriginKeyedPermissionActionService*
+  GetOriginKeyedPermissionActionService(
+      content::BrowserContext* browser_context) = 0;
   virtual PermissionActionsHistory* GetPermissionActionsHistory(
       content::BrowserContext* browser_context) = 0;
   // Retrieves the PermissionDecisionAutoBlocker for this context. The returned
   // pointer has the same lifetime as |browser_context|.
   virtual PermissionDecisionAutoBlocker* GetPermissionDecisionAutoBlocker(
-      content::BrowserContext* browser_context) = 0;
-
-  // Retrieves the PermissionManager for this context. The returned
-  // pointer has the same lifetime as |browser_context|.
-  virtual PermissionManager* GetPermissionManager(
       content::BrowserContext* browser_context) = 0;
 
   // Gets the ObjectPermissionContextBase for the given type and context, which
@@ -130,7 +131,7 @@ class PermissionsClient {
   using GetUkmSourceIdCallback =
       base::OnceCallback<void(absl::optional<ukm::SourceId>)>;
   virtual void GetUkmSourceId(content::BrowserContext* browser_context,
-                              const content::WebContents* web_contents,
+                              content::WebContents* web_contents,
                               const GURL& requesting_origin,
                               GetUkmSourceIdCallback callback);
 
@@ -196,8 +197,8 @@ class PermissionsClient {
 
   // Checks if `requesting_origin` and `embedding_origin` are the new tab page
   // origins.
-  virtual bool DoOriginsMatchNewTabPage(const GURL& requesting_origin,
-                                        const GURL& embedding_origin);
+  virtual bool DoURLsMatchNewTabPage(const GURL& requesting_origin,
+                                     const GURL& embedding_origin);
 
 #if BUILDFLAG(IS_ANDROID)
   // Returns whether the given origin matches the default search engine (DSE)

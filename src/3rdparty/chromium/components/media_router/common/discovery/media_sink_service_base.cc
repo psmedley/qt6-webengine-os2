@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,6 +87,10 @@ void MediaSinkServiceBase::RemoveSinkById(const MediaSink::Id& sink_id) {
 void MediaSinkServiceBase::SetTimerForTest(
     std::unique_ptr<base::OneShotTimer> timer) {
   discovery_timer_ = std::move(timer);
+}
+
+void MediaSinkServiceBase::AddSinkForTest(const MediaSinkInternal& sink) {
+  sinks_.insert_or_assign(sink.sink().id(), sink);
 }
 
 void MediaSinkServiceBase::StartTimer() {

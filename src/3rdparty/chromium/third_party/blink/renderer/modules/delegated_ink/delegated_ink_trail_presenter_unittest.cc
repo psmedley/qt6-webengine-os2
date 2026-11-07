@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -633,6 +633,9 @@ INSTANTIATE_TEST_SUITE_P(,
 // Confirm that presentation area defaults to the size of the viewport.
 // Numbers and color used were chosen arbitrarily.
 TEST_F(DelegatedInkTrailPresenterUnitTest, PresentationAreaNotProvided) {
+  LoadURL("about:blank");
+  Compositor().BeginFrame();
+
   const int kViewportHeight = 555;
   const int kViewportWidth = 333;
   SetWebViewSize(kViewportWidth, kViewportHeight);

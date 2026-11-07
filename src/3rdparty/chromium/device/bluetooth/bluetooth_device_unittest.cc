@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,13 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
+#include "base/test/test_future.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "device/bluetooth/bluetooth_remote_gatt_service.h"
 #include "device/bluetooth/public/cpp/bluetooth_address.h"
+#include "device/bluetooth/test/mock_bluetooth_adapter.h"
+#include "device/bluetooth/test/mock_bluetooth_device.h"
 #include "device/bluetooth/test/mock_pairing_delegate.h"
 #include "device/bluetooth/test/test_bluetooth_adapter_observer.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -41,6 +43,7 @@ namespace device {
 namespace {
 
 using ::testing::_;
+using ::testing::Return;
 using ::testing::StrictMock;
 
 int8_t ToInt8(BluetoothTest::TestRSSI rssi) {
@@ -133,6 +136,56 @@ TEST(BluetoothDeviceTest, CanonicalizeAddressFormat_RejectsInvalidFormats) {
     std::array<uint8_t, 6> parsed;
     EXPECT_FALSE(ParseBluetoothAddress(kInvalidFormats[i], parsed));
   }
+}
+
+TEST(BluetoothDeviceTest, GattConnectionErrorReentrancy) {
+  constexpr char kTestDeviceAddress[] = "00:11:22:33:44:55";
+
+  auto adapter = base::MakeRefCounted<MockBluetoothAdapter>();
+  MockBluetoothDevice device(adapter.get(),
+                             /*bluetooth_class=*/0, "Test Device",
+                             kTestDeviceAddress,
+                             /*initially_paired=*/false,
+                             /*connected=*/false);
+
+  EXPECT_CALL(*adapter, GetDevice(kTestDeviceAddress))
+      .WillRepeatedly(Return(&device));
+
+  EXPECT_CALL(device, CreateGattConnection(_, _))
+      .Times(2)
+      .WillRepeatedly([&](BluetoothDevice::GattConnectionCallback callback,
+                          absl::optional<BluetoothUUID> service_uuid) {
+        device.BluetoothDevice::CreateGattConnection(std::move(callback),
+                                                     service_uuid);
+      });
+  EXPECT_CALL(device, CreateGattConnectionImpl(_))
+      .WillOnce([&](absl::optional<BluetoothUUID> service_uuid) {
+        device.DidConnectGatt(BluetoothDevice::ConnectErrorCode::ERROR_FAILED);
+      });
+  EXPECT_CALL(device, IsGattConnected())
+      .WillOnce(Return(false))
+      .WillOnce(Return(true));
+
+  // Trigger potential re-entrancy problems by calling CreateGattConnection()
+  // from within the callback passed to CreateGattConnection().
+  device.CreateGattConnection(
+      base::BindLambdaForTesting(
+          [&](std::unique_ptr<BluetoothGattConnection> connection,
+              absl::optional<BluetoothDevice::ConnectErrorCode> error_code) {
+            EXPECT_FALSE(connection);
+            EXPECT_EQ(error_code,
+                      BluetoothDevice::ConnectErrorCode::ERROR_FAILED);
+            device.CreateGattConnection(
+                base::BindLambdaForTesting(
+                    [&](std::unique_ptr<BluetoothGattConnection> connection,
+                        absl::optional<BluetoothDevice::ConnectErrorCode>
+                            error_code) {
+                      EXPECT_TRUE(connection);
+                      EXPECT_FALSE(error_code);
+                    }),
+                /*service_uuid=*/absl::nullopt);
+          }),
+      /*service_uuid=*/absl::nullopt);
 }
 
 #if BUILDFLAG(IS_WIN)
@@ -299,6 +352,180 @@ TEST_P(BluetoothTestWinrtOnly, DevicePairRequestPinCodeCancelPairing) {
 
   EXPECT_FALSE(device->IsPaired());
   EXPECT_FALSE(device->ExpectingPinCode());
+}
+
+TEST_P(BluetoothTestWinrtOnly, DevicePairRequestConfirmOnlyAccept) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  InitWithFakeAdapter();
+  StartLowEnergyDiscoverySession();
+
+  BluetoothDevice* device = SimulateLowEnergyDevice(1);
+
+  ASSERT_TRUE(ConnectGatt(device));
+  EXPECT_FALSE(device->IsPaired());
+
+  SimulateConfirmOnly(device);
+  StrictMock<MockPairingDelegate> pairing_delegate;
+  EXPECT_CALL(pairing_delegate, AuthorizePairing)
+      .WillOnce([](BluetoothDevice* device) {
+        ASSERT_NE(device, nullptr);
+        device->ConfirmPairing();
+      });
+
+  base::test::TestFuture<absl::optional<BluetoothDevice::ConnectErrorCode>>
+      error_code_future;
+  device->Pair(&pairing_delegate, error_code_future.GetCallback());
+
+  EXPECT_FALSE(error_code_future.Get().has_value());
+  EXPECT_TRUE(device->IsPaired());
+}
+
+TEST_P(BluetoothTestWinrtOnly, DevicePairRequestConfirmOnlyCancel) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  InitWithFakeAdapter();
+  StartLowEnergyDiscoverySession();
+
+  BluetoothDevice* device = SimulateLowEnergyDevice(1);
+
+  ASSERT_TRUE(ConnectGatt(device));
+  EXPECT_FALSE(device->IsPaired());
+
+  SimulateConfirmOnly(device);
+  StrictMock<MockPairingDelegate> pairing_delegate;
+  EXPECT_CALL(pairing_delegate, AuthorizePairing)
+      .WillOnce([](BluetoothDevice* device) {
+        ASSERT_NE(device, nullptr);
+        ScheduleAsynchronousCancelPairing(device);
+      });
+
+  base::test::TestFuture<absl::optional<BluetoothDevice::ConnectErrorCode>>
+      error_code_future;
+  device->Pair(&pairing_delegate, error_code_future.GetCallback());
+
+  EXPECT_EQ(error_code_future.Get(), BluetoothDevice::ERROR_AUTH_CANCELED);
+  EXPECT_FALSE(device->IsPaired());
+}
+
+TEST_P(BluetoothTestWinrtOnly, DevicePairRequestConfirmPinAccept) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  InitWithFakeAdapter();
+  StartLowEnergyDiscoverySession();
+
+  BluetoothDevice* device = SimulateLowEnergyDevice(1);
+
+  ASSERT_TRUE(ConnectGatt(device));
+  EXPECT_FALSE(device->IsPaired());
+
+  SimulateDisplayPin(device, "123456");
+  StrictMock<MockPairingDelegate> pairing_delegate;
+  EXPECT_CALL(pairing_delegate, ConfirmPasskey)
+      .WillOnce([](BluetoothDevice* device, uint32_t passkey) {
+        ASSERT_NE(device, nullptr);
+        ASSERT_EQ(passkey, 123456u);
+        device->ConfirmPairing();
+      });
+
+  base::test::TestFuture<absl::optional<BluetoothDevice::ConnectErrorCode>>
+      error_code_future;
+  device->Pair(&pairing_delegate, error_code_future.GetCallback());
+
+  EXPECT_FALSE(error_code_future.Get().has_value());
+  EXPECT_TRUE(device->IsPaired());
+}
+
+TEST_P(BluetoothTestWinrtOnly, DevicePairRequestConfirmPinCancel) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  InitWithFakeAdapter();
+  StartLowEnergyDiscoverySession();
+
+  BluetoothDevice* device = SimulateLowEnergyDevice(1);
+
+  ASSERT_TRUE(ConnectGatt(device));
+  EXPECT_FALSE(device->IsPaired());
+
+  SimulateDisplayPin(device, "123456");
+  StrictMock<MockPairingDelegate> pairing_delegate;
+  EXPECT_CALL(pairing_delegate, ConfirmPasskey)
+      .WillOnce([](BluetoothDevice* device, uint32_t passkey) {
+        ASSERT_NE(device, nullptr);
+        ASSERT_EQ(passkey, 123456u);
+        ScheduleAsynchronousCancelPairing(device);
+      });
+
+  base::test::TestFuture<absl::optional<BluetoothDevice::ConnectErrorCode>>
+      error_code_future;
+  device->Pair(&pairing_delegate, error_code_future.GetCallback());
+
+  EXPECT_EQ(error_code_future.Get(), BluetoothDevice::ERROR_AUTH_CANCELED);
+  EXPECT_FALSE(device->IsPaired());
+}
+
+TEST_P(BluetoothTestWinrtOnly, DevicePairRequestConfirmPinLeadingZeroAccept) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  InitWithFakeAdapter();
+  StartLowEnergyDiscoverySession();
+
+  BluetoothDevice* device = SimulateLowEnergyDevice(1);
+
+  ASSERT_TRUE(ConnectGatt(device));
+  EXPECT_FALSE(device->IsPaired());
+
+  SimulateDisplayPin(device, "000001");
+  StrictMock<MockPairingDelegate> pairing_delegate;
+  EXPECT_CALL(pairing_delegate, ConfirmPasskey)
+      .WillOnce([](BluetoothDevice* device, uint32_t passkey) {
+        ASSERT_NE(device, nullptr);
+        ASSERT_EQ(passkey, 1u);
+        device->ConfirmPairing();
+      });
+
+  base::test::TestFuture<absl::optional<BluetoothDevice::ConnectErrorCode>>
+      error_code_future;
+  device->Pair(&pairing_delegate, error_code_future.GetCallback());
+
+  EXPECT_FALSE(error_code_future.Get().has_value());
+  EXPECT_TRUE(device->IsPaired());
+}
+
+TEST_P(BluetoothTestWinrtOnly, DevicePairRequestConfirmPinInvalid) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  InitWithFakeAdapter();
+  StartLowEnergyDiscoverySession();
+
+  BluetoothDevice* device = SimulateLowEnergyDevice(1);
+
+  ASSERT_TRUE(ConnectGatt(device));
+  EXPECT_FALSE(device->IsPaired());
+
+  SimulateDisplayPin(device, "1000000");
+  StrictMock<MockPairingDelegate> pairing_delegate;
+
+  EXPECT_CALL(pairing_delegate, ConfirmPasskey).Times(0);
+
+  base::test::TestFuture<absl::optional<BluetoothDevice::ConnectErrorCode>>
+      error_code_future;
+  device->Pair(&pairing_delegate, error_code_future.GetCallback());
+
+  EXPECT_EQ(error_code_future.Get(), BluetoothDevice::ERROR_AUTH_FAILED);
+  EXPECT_FALSE(device->IsPaired());
 }
 #endif  // BUILDFLAG(IS_WIN)
 
@@ -1193,9 +1420,9 @@ TEST_F(BluetoothTest, MAYBE_GetName_NullName) {
 // and is non trivial to implement. On ChromeOS, it is not essential for
 // this test to operate, and so it is simply skipped. Android at least
 // does require this step.
-#if !(BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS))
+#if !BUILDFLAG(IS_CHROMEOS)
   StartLowEnergyDiscoverySession();
-#endif  // !(BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS))
+#endif  // !BUILDFLAG(IS_CHROMEOS)
 
   BluetoothDevice* device = SimulateLowEnergyDevice(5);
   EXPECT_FALSE(device->GetName());

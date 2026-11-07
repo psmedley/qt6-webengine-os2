@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,8 @@ bool StructTraits<gpu::mojom::GpuDeviceDataView, gpu::GPUInfo::GPUDevice>::Read(
          data.ReadLuid(&out->luid) &&
 #endif  // BUILDFLAG(IS_WIN)
          data.ReadDriverVendor(&out->driver_vendor) &&
-         data.ReadDriverVersion(&out->driver_version);
+         data.ReadDriverVersion(&out->driver_version) &&
+         data.ReadGpuPreference(&out->gpu_preference);
 }
 
 // static
@@ -83,6 +84,23 @@ EnumTraits<gpu::mojom::VideoCodecProfile, gpu::VideoCodecProfile>::ToMojom(
       return gpu::mojom::VideoCodecProfile::HEVCPROFILE_MAIN10;
     case gpu::VideoCodecProfile::HEVCPROFILE_MAIN_STILL_PICTURE:
       return gpu::mojom::VideoCodecProfile::HEVCPROFILE_MAIN_STILL_PICTURE;
+    case gpu::VideoCodecProfile::HEVCPROFILE_REXT:
+      return gpu::mojom::VideoCodecProfile::HEVCPROFILE_REXT;
+    case gpu::VideoCodecProfile::HEVCPROFILE_HIGH_THROUGHPUT:
+      return gpu::mojom::VideoCodecProfile::HEVCPROFILE_HIGH_THROUGHPUT;
+    case gpu::VideoCodecProfile::HEVCPROFILE_MULTIVIEW_MAIN:
+      return gpu::mojom::VideoCodecProfile::HEVCPROFILE_MULTIVIEW_MAIN;
+    case gpu::VideoCodecProfile::HEVCPROFILE_SCALABLE_MAIN:
+      return gpu::mojom::VideoCodecProfile::HEVCPROFILE_SCALABLE_MAIN;
+    case gpu::VideoCodecProfile::HEVCPROFILE_3D_MAIN:
+      return gpu::mojom::VideoCodecProfile::HEVCPROFILE_3D_MAIN;
+    case gpu::VideoCodecProfile::HEVCPROFILE_SCREEN_EXTENDED:
+      return gpu::mojom::VideoCodecProfile::HEVCPROFILE_SCREEN_EXTENDED;
+    case gpu::VideoCodecProfile::HEVCPROFILE_SCALABLE_REXT:
+      return gpu::mojom::VideoCodecProfile::HEVCPROFILE_SCALABLE_REXT;
+    case gpu::VideoCodecProfile::HEVCPROFILE_HIGH_THROUGHPUT_SCREEN_EXTENDED:
+      return gpu::mojom::VideoCodecProfile::
+          HEVCPROFILE_HIGH_THROUGHPUT_SCREEN_EXTENDED;
     case gpu::VideoCodecProfile::DOLBYVISION_PROFILE0:
       return gpu::mojom::VideoCodecProfile::DOLBYVISION_PROFILE0;
     case gpu::VideoCodecProfile::DOLBYVISION_PROFILE4:
@@ -172,6 +190,32 @@ bool EnumTraits<gpu::mojom::VideoCodecProfile, gpu::VideoCodecProfile>::
       return true;
     case gpu::mojom::VideoCodecProfile::HEVCPROFILE_MAIN_STILL_PICTURE:
       *out = gpu::VideoCodecProfile::HEVCPROFILE_MAIN_STILL_PICTURE;
+      return true;
+    case gpu::mojom::VideoCodecProfile::HEVCPROFILE_REXT:
+      *out = gpu::VideoCodecProfile::HEVCPROFILE_REXT;
+      return true;
+    case gpu::mojom::VideoCodecProfile::HEVCPROFILE_HIGH_THROUGHPUT:
+      *out = gpu::VideoCodecProfile::HEVCPROFILE_HIGH_THROUGHPUT;
+      return true;
+    case gpu::mojom::VideoCodecProfile::HEVCPROFILE_MULTIVIEW_MAIN:
+      *out = gpu::VideoCodecProfile::HEVCPROFILE_MULTIVIEW_MAIN;
+      return true;
+    case gpu::mojom::VideoCodecProfile::HEVCPROFILE_SCALABLE_MAIN:
+      *out = gpu::VideoCodecProfile::HEVCPROFILE_SCALABLE_MAIN;
+      return true;
+    case gpu::mojom::VideoCodecProfile::HEVCPROFILE_3D_MAIN:
+      *out = gpu::VideoCodecProfile::HEVCPROFILE_3D_MAIN;
+      return true;
+    case gpu::mojom::VideoCodecProfile::HEVCPROFILE_SCREEN_EXTENDED:
+      *out = gpu::VideoCodecProfile::HEVCPROFILE_SCREEN_EXTENDED;
+      return true;
+    case gpu::mojom::VideoCodecProfile::HEVCPROFILE_SCALABLE_REXT:
+      *out = gpu::VideoCodecProfile::HEVCPROFILE_SCALABLE_REXT;
+      return true;
+    case gpu::mojom::VideoCodecProfile::
+        HEVCPROFILE_HIGH_THROUGHPUT_SCREEN_EXTENDED:
+      *out =
+          gpu::VideoCodecProfile::HEVCPROFILE_HIGH_THROUGHPUT_SCREEN_EXTENDED;
       return true;
     case gpu::mojom::VideoCodecProfile::DOLBYVISION_PROFILE0:
       *out = gpu::VideoCodecProfile::DOLBYVISION_PROFILE0;
@@ -400,6 +444,7 @@ bool StructTraits<gpu::mojom::GpuInfoDataView, gpu::GPUInfo>::Read(
 #if BUILDFLAG(IS_WIN)
   out->d3d12_feature_level = data.d3d12_feature_level();
   out->vulkan_version = data.vulkan_version();
+  out->shared_image_d3d = data.shared_image_d3d();
 #endif
 
   return data.ReadInitializationTime(&out->initialization_time) &&

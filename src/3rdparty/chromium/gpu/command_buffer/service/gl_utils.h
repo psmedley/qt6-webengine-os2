@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -158,10 +158,11 @@ GLenum GetTextureBindingQuery(GLenum texture_type);
 gfx::OverlayTransform GetGFXOverlayTransform(GLenum plane_transform);
 
 bool GetGFXBufferFormat(GLenum internal_format, gfx::BufferFormat* out_format);
-bool GetGFXBufferUsage(GLenum buffer_usage, gfx::BufferUsage* out_usage);
 
 bool IsASTCFormat(GLenum internal_format);
 bool IsCompressedTextureFormat(GLenum internal_format);
+
+Texture* CreateGLES2TextureWithLightRef(GLuint service_id, GLenum target);
 
 }  // namespace gles2
 }  // namespace gpu

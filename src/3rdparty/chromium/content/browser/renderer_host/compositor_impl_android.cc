@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,6 +55,7 @@
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/public/browser/android/compositor.h"
 #include "content/public/browser/android/compositor_client.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
@@ -72,6 +73,7 @@
 #include "services/viz/public/mojom/compositing/compositor_frame_sink.mojom.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkMallocPixelRef.h"
 #include "ui/android/window_android.h"
 #include "ui/display/display.h"
@@ -225,28 +227,66 @@ class CompositorImpl::AndroidHostDisplayClient : public viz::HostDisplayClient {
 class CompositorImpl::HostBeginFrameObserver
     : public viz::mojom::BeginFrameObserver {
  public:
-  explicit HostBeginFrameObserver(
-      const base::flat_set<SimpleBeginFrameObserver*>& observers)
-      : simple_begin_frame_observers_(observers) {}
+  HostBeginFrameObserver(
+      const base::flat_set<SimpleBeginFrameObserver*>& observers,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+      : simple_begin_frame_observers_(observers),
+        task_runner_(std::move(task_runner)) {}
 
   void OnStandaloneBeginFrame(const viz::BeginFrameArgs& args) override {
     if (args.type == viz::BeginFrameArgs::MISSED)
       return;
 
-    for (auto* simple_observer : simple_begin_frame_observers_) {
+    if (pending_coalesce_callback_) {
+      begin_frame_args_ = args;
+      return;
+    }
+
+    if ((base::TimeTicks::Now() - args.frame_time) > args.interval) {
+      begin_frame_args_ = args;
+      pending_coalesce_callback_ = true;
+      task_runner_->PostDelayedTask(
+          FROM_HERE,
+          base::BindOnce(
+              &CompositorImpl::HostBeginFrameObserver::CoalescedBeginFrame,
+              weak_factory_.GetWeakPtr()),
+          base::Microseconds(1));
+      return;
+    }
+
+    CallObservers(args);
+  }
+
+  mojo::PendingRemote<viz::mojom::BeginFrameObserver> GetBoundRemote() {
+    return receiver_.BindNewPipeAndPassRemote(task_runner_);
+  }
+
+ private:
+  void CoalescedBeginFrame() {
+    DCHECK(begin_frame_args_.IsValid());
+    pending_coalesce_callback_ = false;
+    viz::BeginFrameArgs args = begin_frame_args_;
+    begin_frame_args_ = viz::BeginFrameArgs();
+    CallObservers(args);
+  }
+
+  // This may be deleted as part of `CallObservers`.
+  void CallObservers(const viz::BeginFrameArgs& args) {
+    auto observers_copy = simple_begin_frame_observers_;
+    for (auto* simple_observer : observers_copy) {
       simple_observer->OnBeginFrame(args.frame_time);
     }
   }
 
-  mojo::PendingRemote<viz::mojom::BeginFrameObserver> GetBoundRemote() {
-    return receiver_.BindNewPipeAndPassRemote();
-  }
-
- private:
   const base::flat_set<SimpleBeginFrameObserver*>&
       simple_begin_frame_observers_;
+  const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+
+  bool pending_coalesce_callback_ = false;
+  viz::BeginFrameArgs begin_frame_args_;
 
   mojo::Receiver<viz::mojom::BeginFrameObserver> receiver_{this};
+  base::WeakPtrFactory<HostBeginFrameObserver> weak_factory_{this};
 };
 
 class CompositorImpl::ScopedCachedBackBuffer {
@@ -374,6 +414,7 @@ void CompositorImpl::SetRootWindow(gfx::NativeWindow root_window) {
     CreateLayerTreeHost();
     resource_manager_.Init(host_->GetUIResourceManager());
   }
+  OnUpdateOverlayTransform();
   host_->SetRootLayer(root_window_->GetLayer());
   host_->SetViewportRectAndScale(gfx::Rect(size_), root_window_->GetDipScale(),
                                  GenerateLocalSurfaceId());
@@ -427,7 +468,7 @@ void CompositorImpl::SetSurface(const base::android::JavaRef<jobject>& surface,
 
 void CompositorImpl::SetBackgroundColor(int color) {
   DCHECK(host_);
-  host_->set_background_color(color);
+  host_->set_background_color(SkColor4f::FromColor(color));
 }
 
 void CompositorImpl::CreateLayerTreeHost() {
@@ -460,11 +501,7 @@ void CompositorImpl::CreateLayerTreeHost() {
   DCHECK(!host_->IsVisible());
   host_->SetViewportRectAndScale(gfx::Rect(size_), root_window_->GetDipScale(),
                                  GenerateLocalSurfaceId());
-  const auto& display_props =
-      display::Screen::GetScreen()->GetDisplayNearestWindow(root_window_);
-  host_->set_display_transform_hint(
-      display::DisplayRotationToOverlayTransform(display_props.rotation()));
-
+  OnUpdateOverlayTransform();
   if (needs_animate_)
     host_->SetNeedsAnimate();
 }
@@ -515,6 +552,8 @@ void CompositorImpl::TearDownDisplayAndUnregisterRootFrameSink() {
   // before it can be reset.
   display_private_.reset();
   GetHostFrameSinkManager()->InvalidateFrameSinkId(frame_sink_id_);
+  if (display_client_)
+    display_client_->SetPreferredRefreshRate(0);
   display_client_.reset();
   host_begin_frame_observer_.reset();
 }
@@ -714,6 +753,11 @@ std::unique_ptr<ui::CompositorLock> CompositorImpl::GetCompositorLock(
                                          host_->DeferMainFrameUpdate());
 }
 
+void CompositorImpl::PostRequestPresentationTimeForNextFrame(
+    PresentationTimeCallback callback) {
+  RequestPresentationTimeForNextFrame(std::move(callback));
+}
+
 void CompositorImpl::DidSubmitCompositorFrame() {
   TRACE_EVENT0("compositor", "CompositorImpl::DidSubmitCompositorFrame");
   pending_frames_++;
@@ -809,8 +853,7 @@ void CompositorImpl::OnDisplayMetricsChanged(const display::Display& display,
 
   if (changed_metrics &
       display::DisplayObserver::DisplayMetric::DISPLAY_METRIC_ROTATION) {
-    host_->set_display_transform_hint(
-        display::DisplayRotationToOverlayTransform(display.rotation()));
+    OnUpdateOverlayTransform();
   }
 }
 
@@ -836,6 +879,17 @@ void CompositorImpl::OnUpdateSupportedRefreshRates(
     const std::vector<float>& supported_refresh_rates) {
   if (display_private_)
     display_private_->SetSupportedRefreshRates(supported_refresh_rates);
+}
+
+// WindowAndroid can call this callback
+// 1. when display rotation is changed
+// 2. when display type is changed in fold device(e.g., main->sub, sub->main),
+// the hint can be changed because of panel orientation. e.g., In Galaxy fold,
+// main lcd has 270 degrees panel orientation, but sub lcd does not have it.
+void CompositorImpl::OnUpdateOverlayTransform() {
+  gfx::OverlayTransform hint = root_window_->GetOverlayTransform();
+  if (host_)
+    host_->set_display_transform_hint(hint);
 }
 
 void CompositorImpl::InitializeVizLayerTreeFrameSink(
@@ -874,7 +928,6 @@ void CompositorImpl::InitializeVizLayerTreeFrameSink(
   renderer_settings.highp_threshold_min = 2048;
   renderer_settings.requires_alpha_channel = requires_alpha_channel_;
   renderer_settings.initial_screen_size = display_props.GetSizeInPixel();
-  renderer_settings.use_skia_renderer = features::IsUsingSkiaRenderer();
   renderer_settings.color_space = display_color_spaces_.GetOutputColorSpace(
       gfx::ContentColorUsage::kHDR, requires_alpha_channel_);
 
@@ -964,6 +1017,8 @@ void CompositorImpl::PreserveChildSurfaceControls() {
 
 void CompositorImpl::RequestPresentationTimeForNextFrame(
     PresentationTimeCallback callback) {
+  if (!host_)
+    return;
   host_->RequestPresentationTimeForNextFrame(std::move(callback));
 }
 
@@ -1011,8 +1066,9 @@ void CompositorImpl::MaybeUpdateObserveBeginFrame() {
   if (!display_private_)
     return;
 
-  host_begin_frame_observer_ =
-      std::make_unique<HostBeginFrameObserver>(simple_begin_frame_observers_);
+  host_begin_frame_observer_ = std::make_unique<HostBeginFrameObserver>(
+      simple_begin_frame_observers_,
+      content::GetUIThreadTaskRunner({BrowserTaskType::kUserInput}));
   display_private_->SetStandaloneBeginFrameObserver(
       host_begin_frame_observer_->GetBoundRemote());
 }

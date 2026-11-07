@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,6 +43,17 @@ struct AccessibilityTextRunInfo;
 // Wrapper around a page from the document.
 class PDFiumPage {
  public:
+  class ScopedUnloadPreventer {
+   public:
+    explicit ScopedUnloadPreventer(PDFiumPage* page);
+    ScopedUnloadPreventer(const ScopedUnloadPreventer& that);
+    ScopedUnloadPreventer& operator=(const ScopedUnloadPreventer& that);
+    ~ScopedUnloadPreventer();
+
+   private:
+    raw_ptr<PDFiumPage> page_;
+  };
+
   PDFiumPage(PDFiumEngine* engine, int i);
   PDFiumPage(const PDFiumPage&) = delete;
   PDFiumPage& operator=(const PDFiumPage&) = delete;
@@ -68,6 +79,9 @@ class PDFiumPage {
 
   // Get the bounds of the page with the crop box applied, in page pixels.
   gfx::RectF GetCroppedRect();
+
+  // Returns if the character at `char_index` is within `page_bounds`.
+  bool IsCharInPageBounds(int char_index, const gfx::RectF& page_bounds);
 
   // For all the links on the page, get their urls, underlying text ranges and
   // bounding boxes.
@@ -228,15 +242,6 @@ class PDFiumPage {
   FRIEND_TEST_ALL_PREFIXES(PDFiumPageOverlappingTest, CountCompleteOverlaps);
   FRIEND_TEST_ALL_PREFIXES(PDFiumPageOverlappingTest, CountPartialOverlaps);
   FRIEND_TEST_ALL_PREFIXES(PDFiumPageTextFieldTest, PopulateTextFields);
-
-  class ScopedUnloadPreventer {
-   public:
-    explicit ScopedUnloadPreventer(PDFiumPage* page);
-    ~ScopedUnloadPreventer();
-
-   private:
-    const raw_ptr<PDFiumPage> page_;
-  };
 
   struct Link {
     Link();

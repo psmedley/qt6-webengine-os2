@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,6 +63,10 @@ const CascadePriority* CascadeMap::Find(const CSSPropertyName& name,
   size_t index = static_cast<size_t>(name.Id());
   DCHECK_LT(index, static_cast<size_t>(kNumCSSProperties));
   return find_origin(native_properties_.Buffer()[index], origin);
+}
+
+CascadePriority& CascadeMap::Top(CascadePriorityList& list) {
+  return list.Top(backing_vector_);
 }
 
 const CascadePriority* CascadeMap::FindRevertLayer(

@@ -1,5 +1,5 @@
 #!/usr/bin/env vpython3
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,8 +7,10 @@ import json
 import os
 import sys
 
-
-import common
+# Add src/testing/ into sys.path for importing common without pylint errors.
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
+from scripts import common
 
 
 def main_run(args):
@@ -16,7 +18,7 @@ def main_run(args):
       os.path.dirname(__file__), os.path.pardir, os.path.pardir,
       'third_party', 'catapult', 'third_party', 'typ'))
   _AddToPathIfNeeded(typ_path)
-  import typ
+  import typ #pylint: disable=import-outside-toplevel
 
   top_level_dir = os.path.join(
       common.SRC_DIR, 'headless', 'lib', 'browser', 'devtools_api')

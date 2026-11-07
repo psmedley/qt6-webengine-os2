@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,7 @@
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
 #include "chromeos/crosapi/mojom/metrics_reporting.mojom.h"  // nogncheck
 #include "chromeos/lacros/lacros_service.h"
+#include "chromeos/startup/browser_params_proxy.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
 namespace settings {
@@ -59,27 +60,21 @@ void MetricsReportingHandler::HandleGetMetricsReporting(
   AllowJavascript();
   CHECK_GT(args.size(), 0u);
   const base::Value& callback_id = args[0];
-  ResolveJavascriptCallback(callback_id, *CreateMetricsReportingDict());
+  ResolveJavascriptCallback(callback_id, CreateMetricsReportingDict());
 }
 
-std::unique_ptr<base::DictionaryValue>
-    MetricsReportingHandler::CreateMetricsReportingDict() {
-  std::unique_ptr<base::DictionaryValue> dict(
-      std::make_unique<base::DictionaryValue>());
-  dict->SetBoolKey(
-      "enabled",
-      ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled());
+base::Value::Dict MetricsReportingHandler::CreateMetricsReportingDict() {
+  base::Value::Dict dict;
+  dict.Set("enabled",
+           ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled());
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
   // To match the pre-Lacros settings UX, we show the managed icon if the ash
   // device-level metrics reporting pref is managed. https://crbug.com/1148604
-  auto* lacros_chrome_service = chromeos::LacrosService::Get();
-  // Service may be null in tests.
-  bool managed = lacros_chrome_service &&
-                 lacros_chrome_service->init_params()->ash_metrics_managed ==
-                     crosapi::mojom::MetricsReportingManaged::kManaged;
-  dict->SetBoolKey("managed", managed);
+  bool managed = chromeos::BrowserParamsProxy::Get()->AshMetricsManaged() ==
+                 crosapi::mojom::MetricsReportingManaged::kManaged;
+  dict.Set("managed", managed);
 #else
-  dict->SetBoolKey("managed", IsMetricsReportingPolicyManaged());
+  dict.Set("managed", IsMetricsReportingPolicyManaged());
 #endif
   return dict;
 }
@@ -131,7 +126,7 @@ void MetricsReportingHandler::OnPrefChanged(const std::string& pref_name) {
 }
 
 void MetricsReportingHandler::SendMetricsReportingChange() {
-  FireWebUIListener("metrics-reporting-change", *CreateMetricsReportingDict());
+  FireWebUIListener("metrics-reporting-change", CreateMetricsReportingDict());
 }
 
 }  // namespace settings

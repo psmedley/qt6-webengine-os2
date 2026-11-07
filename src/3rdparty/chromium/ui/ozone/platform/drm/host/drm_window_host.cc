@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -78,13 +78,25 @@ bool DrmWindowHost::IsVisible() const {
 
 void DrmWindowHost::PrepareForShutdown() {}
 
-void DrmWindowHost::SetBounds(const gfx::Rect& bounds) {
+void DrmWindowHost::SetBoundsInPixels(const gfx::Rect& bounds) {
+  bool origin_changed = bounds_.origin() != bounds.origin();
   bounds_ = bounds;
-  delegate_->OnBoundsChanged(bounds);
+  delegate_->OnBoundsChanged({origin_changed});
   SendBoundsChange();
 }
 
-gfx::Rect DrmWindowHost::GetBounds() const {
+gfx::Rect DrmWindowHost::GetBoundsInPixels() const {
+  return bounds_;
+}
+
+void DrmWindowHost::SetBoundsInDIP(const gfx::Rect& bounds) {
+  NOTREACHED();
+  // No scaling at DRM level and should always use pixel bounds.
+}
+
+gfx::Rect DrmWindowHost::GetBoundsInDIP() const {
+  // No scaling at DRM level and should always use pixel bounds.
+  NOTREACHED();
   return bounds_;
 }
 
@@ -144,11 +156,11 @@ void DrmWindowHost::ConfineCursorToBounds(const gfx::Rect& bounds) {
   cursor_->CommitBoundsChange(widget_, bounds_, bounds);
 }
 
-void DrmWindowHost::SetRestoredBoundsInPixels(const gfx::Rect& bounds) {
+void DrmWindowHost::SetRestoredBoundsInDIP(const gfx::Rect& bounds) {
   NOTREACHED();
 }
 
-gfx::Rect DrmWindowHost::GetRestoredBoundsInPixels() const {
+gfx::Rect DrmWindowHost::GetRestoredBoundsInDIP() const {
   NOTREACHED();
   return gfx::Rect();
 }

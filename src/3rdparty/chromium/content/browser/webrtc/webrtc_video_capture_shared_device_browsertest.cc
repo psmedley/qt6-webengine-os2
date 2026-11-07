@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,15 +46,12 @@ struct TestParams {
   media::mojom::VideoBufferHandle::Tag GetExpectedBufferHandleTag() const {
     switch (buffer_type_to_request) {
       case media::VideoCaptureBufferType::kSharedMemory:
-        return media::mojom::VideoBufferHandle::Tag::SHARED_BUFFER_HANDLE;
-      case media::VideoCaptureBufferType::kSharedMemoryViaRawFileDescriptor:
-        return media::mojom::VideoBufferHandle::Tag::
-            SHARED_MEMORY_VIA_RAW_FILE_DESCRIPTOR;
+        return media::mojom::VideoBufferHandle::Tag::kUnsafeShmemRegion;
       case media::VideoCaptureBufferType::kMailboxHolder:
         NOTREACHED();
-        return media::mojom::VideoBufferHandle::Tag::SHARED_BUFFER_HANDLE;
+        return media::mojom::VideoBufferHandle::Tag::kUnsafeShmemRegion;
       case media::VideoCaptureBufferType::kGpuMemoryBuffer:
-        return media::mojom::VideoBufferHandle::Tag::GPU_MEMORY_BUFFER_HANDLE;
+        return media::mojom::VideoBufferHandle::Tag::kGpuMemoryBufferHandle;
     }
   }
 };
@@ -278,22 +275,10 @@ IN_PROC_BROWSER_TEST_P(
 INSTANTIATE_TEST_SUITE_P(
     All,
     WebRtcVideoCaptureSharedDeviceBrowserTest,
-    ::testing::Values(
-        TestParams{ServiceApi::kSingleClient,
-                   media::VideoCaptureBufferType::kSharedMemory},
-        TestParams {
-          ServiceApi::kMultiClient, media::VideoCaptureBufferType::kSharedMemory
-        }
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-        ,
-        TestParams{
-            ServiceApi::kSingleClient,
-            media::VideoCaptureBufferType::kSharedMemoryViaRawFileDescriptor},
-        TestParams {
-          ServiceApi::kMultiClient,
-              media::VideoCaptureBufferType::kSharedMemoryViaRawFileDescriptor
-        }
-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-        ));
+    ::testing::Values(TestParams{ServiceApi::kSingleClient,
+                                 media::VideoCaptureBufferType::kSharedMemory},
+                      TestParams{
+                          ServiceApi::kMultiClient,
+                          media::VideoCaptureBufferType::kSharedMemory}));
 
 }  // namespace content

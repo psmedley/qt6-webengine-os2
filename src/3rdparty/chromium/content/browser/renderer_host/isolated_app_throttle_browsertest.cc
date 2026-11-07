@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,7 +58,7 @@ class HttpsBrowserTest : public ContentBrowserTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ContentBrowserTest::SetUpCommandLine(command_line);
     mock_cert_verifier_.SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII(switches::kRestrictedApiOrigins,
+    command_line->AppendSwitchASCII(switches::kIsolatedAppOrigins,
                                     std::string("https://") + kAppHost);
   }
 
@@ -158,7 +158,7 @@ class IsolatedAppThrottleBrowserTest : public HttpsBrowserTest {
     return navigation_observer;
   }
 
-  RenderFrameHost* main_rfh() { return web_contents()->GetMainFrame(); }
+  RenderFrameHost* main_rfh() { return web_contents()->GetPrimaryMainFrame(); }
 
   WebContents* web_contents() { return shell()->web_contents(); }
 

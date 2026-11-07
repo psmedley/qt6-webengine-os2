@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,12 @@
 
 #include "base/memory/raw_ptr.h"
 #include "ui/accessibility/ax_export.h"
-#include "ui/accessibility/platform/inspect/ax_optional.h"
 #include "ui/accessibility/platform/inspect/ax_tree_indexer_mac.h"
 
 namespace ui {
 
+class AXElementWrapper;
 class AXPropertyNode;
-
-// Optional tri-state id object.
-using AXOptionalNSObject = AXOptional<id>;
 
 // Invokes a script instruction describing a call unit which represents
 // a sequence of calls.
@@ -46,7 +43,7 @@ class AX_EXPORT AXCallStatementInvoker final {
 
   // Invokes a property node for a given AXElement.
   AXOptionalNSObject InvokeForAXElement(
-      const id target,
+      const AXElementWrapper& ax_element,
       const AXPropertyNode& property_node) const;
 
   // Invokes a property node for a given AXTextMarkerRange.
@@ -61,6 +58,11 @@ class AX_EXPORT AXCallStatementInvoker final {
   // Invokes a property node for a given dictionary.
   AXOptionalNSObject InvokeForDictionary(
       const id target,
+      const AXPropertyNode& property_node) const;
+
+  // Invokes setAccessibilityFocused method.
+  AXOptionalNSObject InvokeSetAccessibilityFocused(
+      const AXElementWrapper& ax_element,
       const AXPropertyNode& property_node) const;
 
   // Returns a parameterized attribute parameter by a property node representing

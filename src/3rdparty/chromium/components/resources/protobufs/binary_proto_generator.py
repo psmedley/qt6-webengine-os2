@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 """
 from __future__ import print_function
 import abc
+from importlib import util as imp_util
 import optparse
 import os
 import re
@@ -67,10 +68,11 @@ class GoogleProtobufModuleImporter:
       raise ImportError(fullname)
 
     filepath = self._fullname_to_filepath(fullname)
-    # Only reached on Python 2; Python 3 uses find_spec() below. The imp
-    # module was removed in Python 3.12, so import it lazily.
-    import imp
-    return imp.load_source(fullname, filepath)
+    spec = imp_util.spec_from_file_location(fullname, filepath)
+    loaded = imp_util.module_from_spec(spec)
+    spec.loader.exec_module(loaded)
+
+    return loaded
 
   def find_spec(self, fullname, path=None, target=None):
     """Returns a module spec for the google.protobuf module in pyproto.

@@ -8,7 +8,7 @@ import type * as ProtocolClient from '../protocol_client/protocol_client.js';
 import type * as Protocol from '../../generated/protocol.js';
 import {Type as TargetType} from './Target.js';
 import {Target} from './Target.js';
-import type {SDKModel} from './SDKModel.js';
+import {type SDKModel} from './SDKModel.js';
 import * as Root from '../root/root.js';
 import * as Host from '../host/host.js';
 
@@ -236,6 +236,17 @@ export class TargetManager extends Common.ObjectWrapper.ObjectWrapper<EventTypes
 
   mainTarget(): Target|null {
     return this.#targetsInternal.size ? this.#targetsInternal.values().next().value : null;
+  }
+
+  mainFrameTarget(): Target|null {
+    let target = this.mainTarget();
+    if (target?.type() === TargetType.Tab) {
+      target =
+          this.targets().find(
+              t => t.parentTarget() === target && t.type() === TargetType.Frame && t.targetInfo()?.subtype === '') ||
+          null;
+    }
+    return target;
   }
 
   browserTarget(): Target|null {

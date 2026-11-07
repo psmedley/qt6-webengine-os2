@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -117,7 +117,9 @@ std::string FormatPhoneForResponse(const std::string& phone_number,
 // The cached phone number, does parsing only once, improves performance.
 class PhoneObject {
  public:
-  PhoneObject(const std::u16string& number, const std::string& default_region);
+  PhoneObject(const std::u16string& number,
+              const std::string& default_region,
+              bool infer_country_code);
   PhoneObject(const PhoneObject&);
   PhoneObject();
   ~PhoneObject();

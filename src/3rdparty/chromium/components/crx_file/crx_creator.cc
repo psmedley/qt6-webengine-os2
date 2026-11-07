@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,7 +81,8 @@ CreatorResult SignArchiveAndCreateHeader(const base::FilePath& output_path,
   // through, run ZIP through.
   auto signer = crypto::SignatureCreator::Create(
       signing_key, crypto::SignatureCreator::HashAlgorithm::SHA256);
-  signer->Update(kSignatureContext, std::size(kSignatureContext));
+  signer->Update(reinterpret_cast<const uint8_t*>(kSignatureContext),
+                 std::size(kSignatureContext));
   signer->Update(signed_header_size_octets,
                  std::size(signed_header_size_octets));
   signer->Update(

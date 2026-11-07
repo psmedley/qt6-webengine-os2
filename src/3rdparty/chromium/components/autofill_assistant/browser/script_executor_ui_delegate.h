@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,17 +13,20 @@
 #include "components/autofill_assistant/browser/client_status.h"
 #include "components/autofill_assistant/browser/details.h"
 #include "components/autofill_assistant/browser/info_box.h"
+#include "components/autofill_assistant/browser/public/external_action_delegate.h"
+#include "components/autofill_assistant/browser/public/headless_script_controller.h"
 #include "components/autofill_assistant/browser/state.h"
 #include "components/autofill_assistant/browser/tts_button_state.h"
 #include "components/autofill_assistant/browser/user_action.h"
 #include "components/autofill_assistant/browser/user_data.h"
+#include "components/autofill_assistant/browser/wait_for_dom_observer.h"
 #include "url/gurl.h"
 
 namespace autofill_assistant {
 
 // A delegate which provides the ScriptExecutor with methods to control the
 // Autofill Assistant UI.
-class ScriptExecutorUiDelegate {
+class ScriptExecutorUiDelegate : public WaitForDomObserver {
  public:
   virtual void SetStatusMessage(const std::string& message) = 0;
   virtual std::string GetStatusMessage() const = 0;
@@ -41,6 +44,8 @@ class ScriptExecutorUiDelegate {
   virtual void ClearInfoBox() = 0;
   virtual void SetCollectUserDataOptions(
       CollectUserDataOptions* collect_user_data_options) = 0;
+  virtual void SetCollectUserDataUiState(bool loading,
+                                         UserDataEventField event_field) = 0;
   virtual void SetLastSuccessfulUserDataOptions(
       std::unique_ptr<CollectUserDataOptions> collect_user_data_options) = 0;
   virtual const CollectUserDataOptions* GetLastSuccessfulUserDataOptions()
@@ -68,12 +73,32 @@ class ScriptExecutorUiDelegate {
   // Set how the sheet should behave when entering a prompt state.
   virtual void SetExpandSheetForPromptAction(bool expand) = 0;
 
+  // Shows QR Code Scan UI to the user.
+  virtual void ShowQrCodeScanUi(
+      std::unique_ptr<PromptQrCodeScanProto> qr_code_scan,
+      base::OnceCallback<void(const ClientStatus&,
+                              const absl::optional<ValueProto>&)> callback) = 0;
+
+  // Clears the QR Code Scan UI.
+  virtual void ClearQrCodeScanUi() = 0;
+
   // Sets the generic UI to show to the user.
   virtual void SetGenericUi(
       std::unique_ptr<GenericUserInterfaceProto> generic_ui,
       base::OnceCallback<void(const ClientStatus&)> end_action_callback,
       base::OnceCallback<void(const ClientStatus&)>
-          view_inflation_finished_callback) = 0;
+          view_inflation_finished_callback,
+      base::RepeatingCallback<void(const RequestBackendDataProto&)>
+          request_backend_data_callback,
+      base::RepeatingCallback<void(const ShowAccountScreenProto&)>
+          show_account_screen_callback) = 0;
+
+  // Displays the user's |email_address| account page in a platform-appropriate
+  // way. On Android, for example, this is accomplished by firing an intent to
+  // the GMS core library. |proto| defines which part of the user's account page
+  // should be displayed.
+  virtual void ShowAccountScreen(const ShowAccountScreenProto& proto,
+                                 const std::string& email_address) = 0;
 
   // Sets the persistent generic UI to show to the user.
   virtual void SetPersistentGenericUi(
@@ -86,6 +111,18 @@ class ScriptExecutorUiDelegate {
 
   // Clears the persistent generic UI.
   virtual void ClearPersistentGenericUi() = 0;
+
+  // Whether this supports external actions.
+  virtual bool SupportsExternalActions() = 0;
+
+  // Executes the external action.
+  virtual void ExecuteExternalAction(
+      const external::Action& external_action,
+      bool is_interrupt,
+      base::OnceCallback<void(ExternalActionDelegate::DomUpdateCallback)>
+          start_dom_checks_callback,
+      base::OnceCallback<void(const external::Result& result)>
+          end_action_callback) = 0;
 
  protected:
   virtual ~ScriptExecutorUiDelegate() {}

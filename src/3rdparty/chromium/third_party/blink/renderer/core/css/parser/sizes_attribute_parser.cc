@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -88,10 +88,9 @@ bool SizesAttributeParser::Parse(CSSParserTokenRange range) {
     if (!CalculateLengthInPixels(
             range.MakeSubRange(length_token_start, length_token_end), length))
       continue;
-    scoped_refptr<MediaQuerySet> media_condition =
-        MediaQueryParser::ParseMediaCondition(
-            range.MakeSubRange(media_condition_start, length_token_start),
-            execution_context_);
+    MediaQuerySet* media_condition = MediaQueryParser::ParseMediaCondition(
+        range.MakeSubRange(media_condition_start, length_token_start),
+        execution_context_);
     if (!media_condition || !MediaConditionMatches(*media_condition))
       continue;
     length_ = length;

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,7 +51,7 @@ class BrotliSourceStreamTest : public PlatformTest {
     ASSERT_TRUE(base::ReadFileToString(encoded_file_path, &encoded_buffer_));
     ASSERT_GE(kDefaultBufferSize, encoded_buffer_.size());
 
-    std::unique_ptr<MockSourceStream> source(new MockSourceStream);
+    auto source = std::make_unique<MockSourceStream>();
     source_ = source.get();
     brotli_stream_ = CreateBrotliSourceStream(std::move(source));
   }

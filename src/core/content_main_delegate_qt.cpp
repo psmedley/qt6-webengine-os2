@@ -14,7 +14,6 @@
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
-#include "media/gpu/buildflags.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -39,9 +38,6 @@
 #include "ui/base/ui_base_switches.h"
 #endif
 
-// must be included before vaapi_wrapper.h
-#include <QtCore/qcoreapplication.h>
-
 #if BUILDFLAG(IS_WIN)
 #include "media/gpu/windows/dxva_video_decode_accelerator_win.h"
 #include "media/gpu/windows/media_foundation_video_encode_accelerator_win.h"
@@ -53,9 +49,7 @@
 #include "media/gpu/mac/vt_video_decode_accelerator_mac.h"
 #endif
 
-#if BUILDFLAG(USE_VAAPI)
-#include "media/gpu/vaapi/vaapi_wrapper.h"
-#endif
+#include <QtCore/qcoreapplication.h>
 
 namespace content {
 ContentClient *GetContentClient();
@@ -77,19 +71,18 @@ struct LazyDirectoryListerCacher
 {
     LazyDirectoryListerCacher()
     {
-        base::DictionaryValue dict;
-        dict.SetString("header", l10n_util::GetStringUTF16(IDS_DIRECTORY_LISTING_HEADER));
-        dict.SetString("parentDirText", l10n_util::GetStringUTF16(IDS_DIRECTORY_LISTING_PARENT));
-        dict.SetString("headerName", l10n_util::GetStringUTF16(IDS_DIRECTORY_LISTING_NAME));
-        dict.SetString("headerSize", l10n_util::GetStringUTF16(IDS_DIRECTORY_LISTING_SIZE));
-        dict.SetString("headerDateModified",
-                       l10n_util::GetStringUTF16(IDS_DIRECTORY_LISTING_DATE_MODIFIED));
-        dict.SetString("language", l10n_util::GetLanguage(base::i18n::GetConfiguredLocale()));
-        dict.SetString("textdirection", base::i18n::IsRTL() ? "rtl" : "ltr");
+        base::Value::Dict dict;
+        dict.Set("header", l10n_util::GetStringUTF16(IDS_DIRECTORY_LISTING_HEADER));
+        dict.Set("parentDirText", l10n_util::GetStringUTF16(IDS_DIRECTORY_LISTING_PARENT));
+        dict.Set("headerName", l10n_util::GetStringUTF16(IDS_DIRECTORY_LISTING_NAME));
+        dict.Set("headerSize", l10n_util::GetStringUTF16(IDS_DIRECTORY_LISTING_SIZE));
+        dict.Set("headerDateModified", l10n_util::GetStringUTF16(IDS_DIRECTORY_LISTING_DATE_MODIFIED));
+        dict.Set("language", l10n_util::GetLanguage(base::i18n::GetConfiguredLocale()));
+        dict.Set("textdirection", base::i18n::IsRTL() ? "rtl" : "ltr");
         std::string html =
                 webui::GetI18nTemplateHtml(
                     ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(IDR_DIR_HEADER_HTML),
-                    &dict);
+                    std::move(dict));
         html_data = base::RefCountedString::TakeString(&html);
     }
 
@@ -172,21 +165,21 @@ void ContentMainDelegateQt::PreSandboxStartup()
         setlocale(LC_NUMERIC, "C");
 #endif
 
-    // from gpu_main.cc:
-#if BUILDFLAG(USE_VAAPI)
-    media::VaapiWrapper::PreSandboxInitialization();
-#endif
+    bool isBrowserProcess = !parsedCommandLine->HasSwitch(switches::kProcessType);
+    if (isBrowserProcess) {
+        // from gpu_main.cc:
 #if BUILDFLAG(IS_WIN)
-    media::DXVAVideoDecodeAccelerator::PreSandboxInitialization();
-    media::MediaFoundationVideoEncodeAccelerator::PreSandboxInitialization();
+        media::DXVAVideoDecodeAccelerator::PreSandboxInitialization();
+        media::MediaFoundationVideoEncodeAccelerator::PreSandboxInitialization();
 #endif
 
 #if BUILDFLAG(IS_MAC)
-    {
-        TRACE_EVENT0("gpu", "Initialize VideoToolbox");
-        media::InitializeVideoToolbox();
-    }
+        {
+            TRACE_EVENT0("gpu", "Initialize VideoToolbox");
+            media::InitializeVideoToolbox();
+        }
 #endif
+    }
 
     if (parsedCommandLine->HasSwitch(switches::kApplicationName)) {
         std::string appName = parsedCommandLine->GetSwitchValueASCII(switches::kApplicationName);
@@ -196,11 +189,6 @@ void ContentMainDelegateQt::PreSandboxStartup()
         media::AudioManager::SetGlobalAppName(appName);
 #endif
     }
-}
-
-void ContentMainDelegateQt::PostEarlyInitialization(bool)
-{
-    PostFieldTrialInitialization();
 }
 
 content::ContentClient *ContentMainDelegateQt::CreateContentClient()
@@ -264,7 +252,7 @@ static void SafeOverridePathImpl(const char *keyName, int key, const base::FileP
 
 #define SafeOverridePath(KEY, PATH) SafeOverridePathImpl(#KEY, KEY, PATH)
 
-bool ContentMainDelegateQt::BasicStartupComplete(int *exit_code)
+absl::optional<int> ContentMainDelegateQt::BasicStartupComplete()
 {
     SafeOverridePath(base::FILE_EXE, WebEngineLibraryInfo::getPath(base::FILE_EXE));
     SafeOverridePath(base::DIR_QT_LIBRARY_DATA, WebEngineLibraryInfo::getPath(base::DIR_QT_LIBRARY_DATA));
@@ -275,7 +263,7 @@ bool ContentMainDelegateQt::BasicStartupComplete(int *exit_code)
 
     url::CustomScheme::LoadSchemes(base::CommandLine::ForCurrentProcess());
 
-    return false;
+    return absl::nullopt;
 }
 
 } // namespace QtWebEngineCore

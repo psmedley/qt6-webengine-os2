@@ -276,34 +276,6 @@
   };
 
   /**
-   * Tests that scripts tab is populated with inspected scripts even if it
-   * hadn't been shown by the moment inspected paged refreshed.
-   * @see http://crbug.com/26312
-   */
-  TestSuite.prototype.testScriptsTabIsPopulatedOnInspectedPageRefresh = function() {
-    const test = this;
-    const debuggerModel = self.SDK.targetManager.mainTarget().model(SDK.DebuggerModel);
-    debuggerModel.addEventListener(SDK.DebuggerModel.Events.GlobalObjectCleared, waitUntilScriptIsParsed);
-
-    this.showPanel('elements').then(function() {
-      // Reload inspected page. It will reset the debugger agent.
-      test.evaluateInConsole_('window.location.reload(true);', function(resultText) {});
-    });
-
-    function waitUntilScriptIsParsed() {
-      debuggerModel.removeEventListener(SDK.DebuggerModel.Events.GlobalObjectCleared, waitUntilScriptIsParsed);
-      test.showPanel('sources').then(function() {
-        test._waitUntilScriptsAreParsed(['debugger_test_page.html'], function() {
-          test.releaseControl();
-        });
-      });
-    }
-
-    // Wait until all scripts are added to the debugger.
-    this.takeControl();
-  };
-
-  /**
    * Tests that scripts list contains content scripts.
    */
   TestSuite.prototype.testContentScriptIsPresent = function() {
@@ -377,31 +349,6 @@
 
       this._waitForScriptPause(this.releaseControl.bind(this));
     }.bind(this));
-
-    this.takeControl();
-  };
-
-  // Tests that pressing "Pause" will pause script execution if the script
-  // is already running.
-  TestSuite.prototype.testPauseWhenScriptIsRunning = function() {
-    this.showPanel('sources').then(function() {
-      this.evaluateInConsole_('setTimeout("handleClick()", 0)', didEvaluateInConsole.bind(this));
-    }.bind(this));
-
-    function didEvaluateInConsole(resultText) {
-      this.assertTrue(!isNaN(resultText), 'Failed to get timer id: ' + resultText);
-      // Wait for some time to make sure that inspected page is running the
-      // infinite loop.
-      setTimeout(testScriptPause.bind(this), 300);
-    }
-
-    function testScriptPause() {
-      // The script should be in infinite loop. Click "Pause" button to
-      // pause it and wait for the result.
-      UI.panels.sources.togglePause();
-
-      this._waitForScriptPause(this.releaseControl.bind(this));
-    }
 
     this.takeControl();
   };

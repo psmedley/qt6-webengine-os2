@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@
 #include "net/socket/next_proto.h"
 #include "net/spdy/spdy_http_utils.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_connection.h"
-#include "net/third_party/quiche/src/quiche/spdy/core/spdy_header_block.h"
+#include "net/third_party/quiche/src/quiche/spdy/core/http2_header_block.h"
 #include "quic_http_stream.h"
 
 namespace net {
@@ -40,21 +40,7 @@ class ScopedBoolSaver {
 
 BidirectionalStreamQuicImpl::BidirectionalStreamQuicImpl(
     std::unique_ptr<QuicChromiumClientSession::Handle> session)
-    : session_(std::move(session)),
-      stream_(nullptr),
-      request_info_(nullptr),
-      delegate_(nullptr),
-      response_status_(OK),
-      negotiated_protocol_(kProtoUnknown),
-      read_buffer_len_(0),
-      headers_bytes_received_(0),
-      headers_bytes_sent_(0),
-      closed_stream_received_bytes_(0),
-      closed_stream_sent_bytes_(0),
-      closed_is_first_stream_(false),
-      has_sent_headers_(false),
-      send_request_headers_automatically_(true),
-      may_invoke_callbacks_(true) {}
+    : session_(std::move(session)) {}
 
 BidirectionalStreamQuicImpl::~BidirectionalStreamQuicImpl() {
   if (stream_) {

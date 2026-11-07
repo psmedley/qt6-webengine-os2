@@ -2404,9 +2404,9 @@ static void demo_cleanup(struct demo *demo) {
     xcb_disconnect(demo->connection);
     free(demo->atom_wm_delete_window);
 #elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
-    wl_keyboard_destroy(demo->keyboard);
-    wl_pointer_destroy(demo->pointer);
-    wl_seat_destroy(demo->seat);
+    if (demo->keyboard) wl_keyboard_destroy(demo->keyboard);
+    if (demo->pointer) wl_pointer_destroy(demo->pointer);
+    if (demo->seat) wl_seat_destroy(demo->seat);
     xdg_toplevel_destroy(demo->xdg_toplevel);
     xdg_surface_destroy(demo->xdg_surface);
     wl_surface_destroy(demo->window);
@@ -3119,7 +3119,7 @@ static VkBool32 demo_check_layers(uint32_t check_count, char **check_names, uint
 #if defined(VK_USE_PLATFORM_DISPLAY_KHR)
 int find_display_gpu(int gpu_number, uint32_t gpu_count, VkPhysicalDevice *physical_devices) {
     uint32_t display_count = 0;
-    VkResult result;
+    VkResult U_ASSERT_ONLY result;
     int gpu_return = gpu_number;
     if (gpu_number >= 0) {
         result = vkGetPhysicalDeviceDisplayPropertiesKHR(physical_devices[gpu_number], &display_count, NULL);
@@ -3891,7 +3891,7 @@ static void seat_handle_capabilities(void *data, struct wl_seat *seat, enum wl_s
     if (caps & WL_SEAT_CAPABILITY_KEYBOARD) {
         demo->keyboard = wl_seat_get_keyboard(seat);
         wl_keyboard_add_listener(demo->keyboard, &keyboard_listener, demo);
-    } else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD)) {
+    } else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && demo->keyboard) {
         wl_keyboard_destroy(demo->keyboard);
         demo->keyboard = NULL;
     }

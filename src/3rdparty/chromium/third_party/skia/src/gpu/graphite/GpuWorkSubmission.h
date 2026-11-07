@@ -12,22 +12,24 @@
 
 namespace skgpu::graphite {
 class CommandBuffer;
-class Gpu;
+class SharedContext;
+class QueueManager;
 
 class GpuWorkSubmission {
 public:
     virtual ~GpuWorkSubmission();
 
     virtual bool isFinished() = 0;
-    virtual void waitUntilFinished(const Gpu*) = 0;
+    virtual void waitUntilFinished() = 0;
 
 protected:
     CommandBuffer* commandBuffer() { return fCommandBuffer.get(); }
 
-    GpuWorkSubmission(sk_sp<CommandBuffer> cmdBuffer);
+    GpuWorkSubmission(std::unique_ptr<CommandBuffer> cmdBuffer, QueueManager* queueManager);
 
 private:
-    sk_sp<CommandBuffer> fCommandBuffer;
+    std::unique_ptr<CommandBuffer> fCommandBuffer;
+    QueueManager* fQueueManager;
 };
 
 } // namespace skgpu::graphite

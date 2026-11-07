@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include <memory>
 
-#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/environment.h"
 #include "base/strings/string_split.h"
@@ -28,26 +27,15 @@
 #include "ui/gtk/gtk_compat.h"
 #include "ui/gtk/gtk_ui.h"
 #include "ui/gtk/gtk_ui_platform.h"
+#include "ui/linux/linux_ui.h"
 #include "ui/native_theme/common_theme.h"
 #include "ui/ozone/public/ozone_platform.h"
-#include "ui/views/linux_ui/linux_ui.h"
 
 namespace gtk {
 
 namespace {
 
 const char kAuraTransientParent[] = "aura-transient-parent";
-
-void CommonInitFromCommandLine(const base::CommandLine& command_line) {
-  // Callers should have already called setlocale(LC_ALL, "") and
-  // setlocale(LC_NUMERIC, "C") by now. Chrome does this in
-  // service_manager::Main.
-  DCHECK_EQ(strcmp(setlocale(LC_NUMERIC, nullptr), "C"), 0);
-  // This prevents GTK from calling setlocale(LC_ALL, ""), which potentially
-  // overwrites the LC_NUMERIC locale to something other than "C".
-  gtk_disable_setlocale();
-  GtkInit(command_line.argv());
-}
 
 GtkCssContext AppendCssNodeToStyleContextImpl(
     GtkCssContext context,
@@ -152,8 +140,15 @@ const char* GtkCssMenuScrollbar() {
                             : "GtkScrollbar#scrollbar #trough";
 }
 
-void GtkInitFromCommandLine(const base::CommandLine& command_line) {
-  CommonInitFromCommandLine(command_line);
+bool GtkInitFromCommandLine(int* argc, char** argv) {
+  // Callers should have already called setlocale(LC_ALL, "") and
+  // setlocale(LC_NUMERIC, "C") by now. Chrome does this in
+  // service_manager::Main.
+  DCHECK_EQ(strcmp(setlocale(LC_NUMERIC, nullptr), "C"), 0);
+  // This prevents GTK from calling setlocale(LC_ALL, ""), which potentially
+  // overwrites the LC_NUMERIC locale to something other than "C".
+  gtk_disable_setlocale();
+  return GtkInitCheck(argc, argv);
 }
 
 void SetGtkTransientForAura(GtkWidget* dialog, aura::Window* parent) {
@@ -232,8 +227,12 @@ CairoSurface::CairoSurface(const gfx::Size& size)
 }
 
 CairoSurface::~CairoSurface() {
-  cairo_destroy(cairo_);
-  cairo_surface_destroy(surface_);
+  // `cairo_destroy` and `cairo_surface_destroy` decrease the reference count on
+  // `cairo_` and `surface_` objects respectively. The underlying memory is
+  // freed if the reference count goes to zero. We use ExtractAsDangling() here
+  // to avoid holding a briefly dangling ptr in case the memory is freed.
+  cairo_destroy(cairo_.ExtractAsDangling());
+  cairo_surface_destroy(surface_.ExtractAsDangling());
 }
 
 SkColor CairoSurface::GetAveragePixelValue(bool frame) {
@@ -688,7 +687,7 @@ gfx::Size GetSeparatorSize(bool horizontal) {
 }
 
 float GetDeviceScaleFactor() {
-  views::LinuxUI* linux_ui = views::LinuxUI::instance();
+  ui::LinuxUi* linux_ui = ui::LinuxUi::instance();
   return linux_ui ? linux_ui->GetDeviceScaleFactor() : 1;
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,8 @@ public interface AssistantBrowserControls extends Destroyable {
      * Observer for different browser control events.
      */
     public interface Observer {
-        void onControlsOffsetChanged(int topOffset, int topControlsMinHeightOffset,
-                int bottomOffset, int bottomControlsMinHeightOffset, boolean needsAnimate);
-        void onBottomControlsHeightChanged(int bottomControlsHeight, int bottomControlsMinHeight);
+        void onControlsOffsetChanged();
+        void onBottomControlsHeightChanged();
     }
 
     void setObserver(Observer browserControlsObserver);

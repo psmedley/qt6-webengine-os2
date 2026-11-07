@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,9 +34,14 @@ class BLINK_COMMON_EXPORT
     return key.origin();
   }
 
-  static const net::SchemefulSite& top_level_site(
-      const blink::StorageKey& key) {
-    return key.top_level_site();
+  // TODO(crbug.com/1159586): Return by reference when internal copy is removed.
+  static const net::SchemefulSite top_level_site(const blink::StorageKey& key) {
+    // We use `CopyWithForceEnabledThirdPartyStoragePartitioning` to ensure the
+    // partitioned values are preserved. The constructor on the other side will
+    // properly restore `top_level_site_` as derived from origin_ if
+    // `kThirdPartyStoragePartitioning` is disabled.
+    return key.CopyWithForceEnabledThirdPartyStoragePartitioning()
+        .top_level_site();
   }
 
   static const absl::optional<base::UnguessableToken>& nonce(
@@ -46,7 +51,12 @@ class BLINK_COMMON_EXPORT
 
   static blink::mojom::AncestorChainBit ancestor_chain_bit(
       const blink::StorageKey& key) {
-    return key.ancestor_chain_bit();
+    // We use `CopyWithForceEnabledThirdPartyStoragePartitioning` to ensure the
+    // partitioned values are preserved. The constructor on the other side will
+    // properly restore `ancestor_chain_bit_`  to be `kSameSite` if
+    // `kThirdPartyStoragePartitioning` is disabled.
+    return key.CopyWithForceEnabledThirdPartyStoragePartitioning()
+        .ancestor_chain_bit();
   }
 
   static bool Read(blink::mojom::StorageKeyDataView data,

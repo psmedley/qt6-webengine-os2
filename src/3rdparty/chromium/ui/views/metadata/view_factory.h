@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,19 +46,30 @@ class BaseViewBuilderT : public internal::ViewBuilderCore {
     return std::move(this->CopyAddressTo(view_address));
   }
 
-  template <typename View>
-  Builder& CopyAddressTo(raw_ptr<View>* view_address) & {
+  template <typename View, typename Option>
+  Builder& CopyAddressTo(raw_ptr<View, Option>* view_address) & {
     *view_address = view_ ? view_.get() : root_view_.get();
     return *static_cast<Builder*>(this);
   }
 
-  template <typename View>
-  Builder&& CopyAddressTo(raw_ptr<View>* view_address) && {
+  template <typename View, typename Option>
+  Builder&& CopyAddressTo(raw_ptr<View, Option>* view_address) && {
     return std::move(this->CopyAddressTo(view_address));
   }
 
   Builder& CustomConfigure(ConfigureCallback configure_callback) & {
-    configure_callback_ = std::move(configure_callback);
+    // Allow multiple configure callbacks by chaining them.
+    if (configure_callback_) {
+      configure_callback_ = base::BindOnce(
+          [](ConfigureCallback current_callback,
+             ConfigureCallback previous_callback, ViewClass_* root_view) {
+            std::move(current_callback).Run(root_view);
+            std::move(previous_callback).Run(root_view);
+          },
+          std::move(configure_callback), std::move(configure_callback_));
+    } else {
+      configure_callback_ = std::move(configure_callback);
+    }
     return *static_cast<Builder*>(this);
   }
 
@@ -458,14 +469,14 @@ namespace views {                                                       \
    private:                                                             \
     using ViewClass_ = view_class;                                      \
    public:                                                              \
-    Builder<ViewClass_>() = default;                                    \
-    explicit Builder<ViewClass_>(ViewClass_* root_view)                 \
+    Builder() = default;                                                \
+    explicit Builder(ViewClass_* root_view)                             \
         : view_class##BuilderT<Builder<ViewClass_>>(root_view) {}       \
-    explicit Builder<ViewClass_>(std::unique_ptr<ViewClass_> view)      \
+    explicit Builder(std::unique_ptr<ViewClass_> view)                  \
         : view_class##BuilderT<Builder<ViewClass_>>(std::move(view)) {} \
-    Builder<ViewClass_>(Builder&&) = default;                           \
+    Builder(Builder&&) = default;                                       \
     Builder<ViewClass_>& operator=(Builder<ViewClass_>&&) = default;    \
-    ~Builder<ViewClass_>() = default;                                   \
+    ~Builder() = default;                                               \
     [[nodiscard]] std::unique_ptr<internal::ViewBuilderCore> Release()  \
         override {                                                      \
       return std::make_unique<Builder<view_class>>(std::move(*this));   \

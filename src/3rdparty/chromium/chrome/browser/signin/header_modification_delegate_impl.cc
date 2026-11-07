@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,7 +134,7 @@ bool HeaderModificationDelegateImpl::ShouldIgnoreGuestWebViewRequest(
     return true;
 
   if (extensions::WebViewRendererState::GetInstance()->IsGuest(
-          contents->GetMainFrame()->GetProcess()->GetID())) {
+          contents->GetPrimaryMainFrame()->GetProcess()->GetID())) {
     auto identity_api_config =
         extensions::WebAuthFlow::GetWebViewPartitionConfig(
             extensions::WebAuthFlow::GET_AUTH_TOKEN,

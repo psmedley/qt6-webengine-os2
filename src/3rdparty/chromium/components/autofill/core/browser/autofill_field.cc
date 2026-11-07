@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,10 +42,16 @@ std::unique_ptr<AutofillField> AutofillField::CreateForPasswordManagerUpload(
 }
 
 ServerFieldType AutofillField::heuristic_type() const {
-  ServerFieldType type = get_prediction(PredictionSource::kDefaultHeuristics);
+  return heuristic_type(GetActivePatternSource());
+}
+
+ServerFieldType AutofillField::heuristic_type(PatternSource s) const {
+  ServerFieldType type = local_type_predictions_[static_cast<size_t>(s)];
   // `NO_SERVER_DATA` would mean that there is no heuristic type. Client code
   // presumes there is a prediction, therefore we coalesce to `UNKNOWN_TYPE`.
-  return type > 0 ? type : UNKNOWN_TYPE;
+  // Shadow predictions however are not used and we care whether the type is
+  // `UNKNOWN_TYPE` or whether we never ran the heuristics.
+  return (type > 0 || s != GetActivePatternSource()) ? type : UNKNOWN_TYPE;
 }
 
 ServerFieldType AutofillField::server_type() const {
@@ -60,17 +66,17 @@ bool AutofillField::server_type_prediction_is_override() const {
                                      : server_predictions_[0].override();
 }
 
-void AutofillField::set_heuristic_type(ServerFieldType type) {
-  if (type >= 0 && type < MAX_VALID_FIELD_TYPE &&
-      type != FIELD_WITH_DEFAULT_VALUE) {
-    set_prediction(PredictionSource::kDefaultHeuristics, type);
-  } else {
+void AutofillField::set_heuristic_type(PatternSource s, ServerFieldType type) {
+  if (type < 0 || type > MAX_VALID_FIELD_TYPE ||
+      type == FIELD_WITH_DEFAULT_VALUE) {
     NOTREACHED();
     // This case should not be reachable; but since this has potential
     // implications on data uploaded to the server, better safe than sorry.
-    set_prediction(PredictionSource::kDefaultHeuristics, UNKNOWN_TYPE);
+    type = UNKNOWN_TYPE;
   }
-  overall_type_ = AutofillType(NO_SERVER_DATA);
+  local_type_predictions_[static_cast<size_t>(s)] = type;
+  if (s == GetActivePatternSource())
+    overall_type_ = AutofillType(NO_SERVER_DATA);
 }
 
 void AutofillField::add_possible_types_validities(
@@ -105,13 +111,6 @@ void AutofillField::SetHtmlType(HtmlFieldType type, HtmlFieldMode mode) {
   html_type_ = type;
   html_mode_ = mode;
   overall_type_ = AutofillType(NO_SERVER_DATA);
-
-  if (type == HTML_TYPE_TEL_LOCAL_PREFIX)
-    phone_part_ = PHONE_PREFIX;
-  else if (type == HTML_TYPE_TEL_LOCAL_SUFFIX)
-    phone_part_ = PHONE_SUFFIX;
-  else
-    phone_part_ = IGNORED;
 }
 
 void AutofillField::SetTypeTo(const AutofillType& type) {
@@ -133,9 +132,9 @@ AutofillType AutofillField::ComputedType() const {
     return AutofillType(server_type());
   }
 
-  // If the explicit type is cc-exp and either the server or heuristics agree on
-  // a 2 vs 4 digit specialization of cc-exp, use that specialization.
-  if (html_type_ == HTML_TYPE_CREDIT_CARD_EXP) {
+  // If the explicit type is cc-exp and either the server or heuristics agree
+  // on a 2 vs 4 digit specialization of cc-exp, use that specialization.
+  if (html_type_ == HtmlFieldType::kCreditCardExp) {
     if (server_type() == CREDIT_CARD_EXP_DATE_2_DIGIT_YEAR ||
         server_type() == CREDIT_CARD_EXP_DATE_4_DIGIT_YEAR) {
       return AutofillType(server_type());
@@ -150,7 +149,7 @@ AutofillType AutofillField::ComputedType() const {
   // return an UNKNOWN_TYPE predition, unless either the heuristic or server
   // prediction suggest that the field is credit-card related, or if the
   // |kAutofillFillAndImportFromMoreFields| feature is enabled.
-  if (html_type_ == HTML_TYPE_UNRECOGNIZED && !IsCreditCardPrediction() &&
+  if (html_type_ == HtmlFieldType::kUnrecognized && !IsCreditCardPrediction() &&
       !base::FeatureList::IsEnabled(
           features::kAutofillFillAndImportFromMoreFields)) {
     return AutofillType(html_type_, html_mode_);
@@ -158,8 +157,8 @@ AutofillType AutofillField::ComputedType() const {
 
   // If the autocomplete attribute is neither empty or unrecognized, use it
   // unconditionally.
-  if (html_type_ != HTML_TYPE_UNSPECIFIED &&
-      html_type_ != HTML_TYPE_UNRECOGNIZED) {
+  if (html_type_ != HtmlFieldType::kUnspecified &&
+      html_type_ != HtmlFieldType::kUnrecognized) {
     return AutofillType(html_type_, html_mode_);
   }
 
@@ -185,28 +184,25 @@ AutofillType AutofillField::ComputedType() const {
                                 FieldTypeGroup::kPasswordField &&
                             heuristic_type() == CREDIT_CARD_VERIFICATION_CODE);
 
-    // For new name tokens the heuristic predictions get precedence over the
-    // server predictions.
-    // TODO(crbug.com/1098943): Remove feature check once launched.
-    believe_server =
-        believe_server &&
-        !(base::FeatureList::IsEnabled(
-              features::kAutofillEnableSupportForMoreStructureInNames) &&
-          (heuristic_type() == NAME_LAST_SECOND ||
-           heuristic_type() == NAME_LAST_FIRST));
+    // For structured last name tokens the heuristic predictions get precedence
+    // over the server predictions.
+    believe_server = believe_server && heuristic_type() != NAME_LAST_SECOND &&
+                     heuristic_type() != NAME_LAST_FIRST;
 
-    // For new address tokens the heuristic predictions get precedence over the
-    // server predictions.
-    // TODO(crbug.com/1098943): Remove feature check once launched.
-    believe_server =
-        believe_server &&
-        !(base::FeatureList::IsEnabled(
-              features::kAutofillEnableSupportForMoreStructureInAddresses) &&
-          (heuristic_type() == ADDRESS_HOME_STREET_NAME ||
-           heuristic_type() == ADDRESS_HOME_HOUSE_NUMBER));
+    // For structured address tokens the heuristic predictions get precedence
+    // over the server predictions.
+    believe_server = believe_server &&
+                     heuristic_type() != ADDRESS_HOME_STREET_NAME &&
+                     heuristic_type() != ADDRESS_HOME_HOUSE_NUMBER;
 
+    // For merchant promo code fields the heuristic predictions get precedence
+    // over the server predictions.
     believe_server =
-        believe_server && !(heuristic_type() == MERCHANT_PROMO_CODE);
+        believe_server && (heuristic_type() != MERCHANT_PROMO_CODE);
+
+    // For international bank account number (IBAN) fields the heuristic
+    // predictions get precedence over the server predictions.
+    believe_server = believe_server && (heuristic_type() != IBAN_VALUE);
 
     if (believe_server)
       return AutofillType(server_type());
@@ -216,17 +212,12 @@ AutofillType AutofillField::ComputedType() const {
 }
 
 AutofillType AutofillField::Type() const {
-  // If the corresponding feature is enabled, server predictions that are an
-  // override are granted precedence unconditionally.
-  if (base::FeatureList::IsEnabled(
-          features::kAutofillServerTypeTakesPrecedence) &&
-      server_type_prediction_is_override() && server_type() != NO_SERVER_DATA) {
+  // Server Overrides are granted precedence unconditionally.
+  if (server_type_prediction_is_override() && server_type() != NO_SERVER_DATA)
     return AutofillType(server_type());
-  }
 
-  if (overall_type_.GetStorableType() != NO_SERVER_DATA) {
+  if (overall_type_.GetStorableType() != NO_SERVER_DATA)
     return overall_type_;
-  }
   return ComputedType();
 }
 
@@ -245,16 +236,14 @@ std::string AutofillField::FieldSignatureAsStr() const {
 }
 
 bool AutofillField::IsFieldFillable() const {
-  if (!base::FeatureList::IsEnabled(features::kAutofillFixFillableFieldTypes))
-    return !Type().IsUnknown();
-
   ServerFieldType field_type = Type().GetStorableType();
   return IsFillableFieldType(field_type);
 }
 
 bool AutofillField::ShouldSuppressPromptDueToUnrecognizedAutocompleteAttribute()
     const {
-  return html_type_ == HTML_TYPE_UNRECOGNIZED && !IsCreditCardPrediction() &&
+  return html_type_ == HtmlFieldType::kUnrecognized &&
+         !IsCreditCardPrediction() &&
          base::FeatureList::IsEnabled(
              features::kAutofillFillAndImportFromMoreFields);
 }

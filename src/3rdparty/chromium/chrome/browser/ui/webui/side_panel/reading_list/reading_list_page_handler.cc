@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,6 +37,7 @@
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/mojom/window_open_disposition.mojom.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/base/window_open_disposition_utils.h"
 #include "url/gurl.h"
 
 namespace {
@@ -191,7 +192,7 @@ void ReadingListPageHandler::OpenURL(
   base::RecordAction(
       base::UserMetricsAction("SidePanel.ReadingList.Navigation"));
   RecordBookmarkLaunch(
-      BOOKMARK_LAUNCH_LOCATION_SIDE_PANEL_READING_LIST,
+      BookmarkLaunchLocation::kSidePanelPendingList,
       profile_metrics::GetBrowserProfileType(Profile::FromWebUI(web_ui_)));
 }
 
@@ -200,6 +201,15 @@ void ReadingListPageHandler::UpdateReadStatus(const GURL& url, bool read) {
   base::RecordAction(
       base::UserMetricsAction(read ? "DesktopReadingList.MarkAsRead"
                                    : "DesktopReadingList.MarkAsUnread"));
+}
+
+void ReadingListPageHandler::MarkCurrentTabAsRead() {
+  Browser* browser = chrome::FindLastActive();
+  if (!browser)
+    return;
+
+  chrome::MarkCurrentTabAsReadInReadLater(browser);
+  base::RecordAction(base::UserMetricsAction("DesktopReadingList.MarkAsRead"));
 }
 
 void ReadingListPageHandler::AddCurrentTab() {
@@ -309,7 +319,7 @@ reading_list::mojom::ReadLaterEntryPtr ReadingListPageHandler::GetEntryData(
           url_formatter::kFormatUrlOmitHTTPS |
           url_formatter::kFormatUrlOmitTrivialSubdomains |
           url_formatter::kFormatUrlTrimAfterHost,
-      net::UnescapeRule::NORMAL, nullptr, nullptr, nullptr));
+      base::UnescapeRule::NORMAL, nullptr, nullptr, nullptr));
   entry_data->update_time = entry->UpdateTime();
   entry_data->read = entry->IsRead();
   entry_data->display_time_since_update =
@@ -362,10 +372,11 @@ void ReadingListPageHandler::UpdateCurrentPageActionButton() {
     return;
 
   reading_list::mojom::CurrentPageActionButtonState new_state;
-  if (!reading_list_model_->IsUrlSupported(url.value()) ||
-      (reading_list_model_->GetEntryByURL(url.value()) &&
-       !reading_list_model_->GetEntryByURL(url.value())->IsRead())) {
+  if (!reading_list_model_->IsUrlSupported(url.value())) {
     new_state = reading_list::mojom::CurrentPageActionButtonState::kDisabled;
+  } else if ((reading_list_model_->GetEntryByURL(url.value()) &&
+              !reading_list_model_->GetEntryByURL(url.value())->IsRead())) {
+    new_state = reading_list::mojom::CurrentPageActionButtonState::kMarkAsRead;
   } else {
     new_state = reading_list::mojom::CurrentPageActionButtonState::kAdd;
   }

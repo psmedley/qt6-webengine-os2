@@ -6,10 +6,10 @@ import * as TextUtils from '../../models/text_utils/text_utils.js';
 import type * as Protocol from '../../generated/protocol.js';
 
 import {cssMetadata} from './CSSMetadata.js';
-import type {CSSModel, Edit} from './CSSModel.js';
+import {type CSSModel, type Edit} from './CSSModel.js';
 import {CSSProperty} from './CSSProperty.js';
-import type {CSSRule} from './CSSRule.js';
-import type {Target} from './Target.js';
+import {type CSSRule} from './CSSRule.js';
+import {type Target} from './Target.js';
 
 export class CSSStyleDeclaration {
   readonly #cssModelInternal: CSSModel;
@@ -62,19 +62,15 @@ export class CSSStyleDeclaration {
 
     if (payload.cssText && this.range) {
       const cssText = new TextUtils.Text.Text(payload.cssText);
-      let start: {
-        line: number,
-        column: number,
-      }|{
-        line: number,
-        column: number,
-      } = {line: this.range.startLine, column: this.range.startColumn};
+      let start = {line: this.range.startLine, column: this.range.startColumn};
       for (const cssProperty of payload.cssProperties) {
         const range = cssProperty.range;
         if (range) {
           parseUnusedText.call(this, cssText, start.line, start.column, range.startLine, range.startColumn);
           start = {line: range.endLine, column: range.endColumn};
         }
+        // TODO(changhaohan): we should try not including longhand properties anymore, because
+        // they are already included in the longhandProperties field in a shorthand property.
         this.#allPropertiesInternal.push(
             CSSProperty.parsePayload(this, this.#allPropertiesInternal.length, cssProperty));
       }
@@ -184,7 +180,7 @@ export class CSSStyleDeclaration {
       for (const shorthand of shorthands) {
         if (propertiesSet.has(shorthand)) {
           continue;
-        }  // There already is a shorthand this #longhands falls under.
+        }  // There already is a shorthand this #longhand falls under.
         const shorthandValue = this.#shorthandValues.get(shorthand);
         if (!shorthandValue) {
           continue;
@@ -301,18 +297,6 @@ export class CSSStyleDeclaration {
   isPropertyImplicit(name: string): boolean {
     const property = this.#activePropertyMap.get(name);
     return property ? property.implicit : false;
-  }
-
-  longhandProperties(name: string): CSSProperty[] {
-    const longhands = cssMetadata().getLonghands(name.toLowerCase());
-    const result = [];
-    for (let i = 0; longhands && i < longhands.length; ++i) {
-      const property = this.#activePropertyMap.get(longhands[i]);
-      if (property) {
-        result.push(property);
-      }
-    }
-    return result;
   }
 
   propertyAt(index: number): CSSProperty|null {

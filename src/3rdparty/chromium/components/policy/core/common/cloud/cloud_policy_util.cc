@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,6 +54,10 @@
 #include "chromeos/system/statistics_provider.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chromeos/startup/browser_params_proxy.h"
 #endif
 
 #if BUILDFLAG(IS_WIN)
@@ -159,7 +163,7 @@ std::string GetOSArchitecture() {
 }
 
 std::string GetOSUsername() {
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS) || BUILDFLAG(IS_APPLE)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_APPLE)
   struct passwd* creds = getpwuid(getuid());
   if (!creds || !creds->pw_name)
     return std::string();
@@ -185,6 +189,18 @@ std::string GetOSUsername() {
   if (!user)
     return std::string();
   return user->GetAccountId().GetUserEmail();
+#elif BUILDFLAG(IS_CHROMEOS_LACROS)
+  const chromeos::BrowserParamsProxy* init_params =
+      chromeos::BrowserParamsProxy::Get();
+  if (init_params->DeviceAccount()) {
+    return init_params->DeviceAccount()->raw_email;
+  }
+  // Fallback if init params are missing.
+  struct passwd* creds = getpwuid(getuid());
+  if (!creds || !creds->pw_name)
+    return std::string();
+
+  return creds->pw_name;
 #elif BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA)
   // TODO(crbug.com/1257674): This should be fully implemented when there is
   // support in fuchsia.
@@ -214,6 +230,14 @@ std::string GetDeviceName() {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   return chromeos::system::StatisticsProvider::GetInstance()
       ->GetEnterpriseMachineID();
+#elif BUILDFLAG(IS_CHROMEOS_LACROS)
+  const chromeos::BrowserParamsProxy* init_params =
+      chromeos::BrowserParamsProxy::Get();
+  if (init_params->DeviceProperties() &&
+      init_params->DeviceProperties()->serial_number.has_value()) {
+    return init_params->DeviceProperties()->serial_number.value();
+  }
+  return GetMachineName();
 #else
   return GetMachineName();
 #endif

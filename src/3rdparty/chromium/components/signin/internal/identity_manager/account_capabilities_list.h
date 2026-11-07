@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,10 @@ ACCOUNT_CAPABILITY(kIsSubjectToParentalControlsCapabilityName,
                    IS_SUBJECT_TO_PARENTAL_CONTROLS_CAPABILITY_NAME,
                    "accountcapabilities/guydolldmfya")
 
+ACCOUNT_CAPABILITY(kIsAllowedForMachineLearningCapabilityName,
+                   IS_ALLOWED_FOR_MACHINE_LEARNING_CAPABILITY_NAME,
+                   "accountcapabilities/g42tslldmfya")
+
 ACCOUNT_CAPABILITY(kCanOfferExtendedChromeSyncPromosCapabilityName,
                    CAN_OFFER_EXTENDED_CHROME_SYNC_PROMOS_CAPABILITY_NAME,
                    "accountcapabilities/gi2tklldmfya")
@@ -31,3 +35,7 @@ ACCOUNT_CAPABILITY(kCanRunChromePrivacySandboxTrialsCapabilityName,
 ACCOUNT_CAPABILITY(kCanStopParentalSupervisionCapabilityName,
                    CAN_STOP_PARENTAL_SUPERVISION_CAPABILITY_NAME,
                    "accountcapabilities/guzdslldmfya")
+
+ACCOUNT_CAPABILITY(kCanToggleAutoUpdatesName,
+                   CAN_TOGGLE_AUTO_UPDATES_NAME,
+                   "accountcapabilities/gu4dmlldmfya")

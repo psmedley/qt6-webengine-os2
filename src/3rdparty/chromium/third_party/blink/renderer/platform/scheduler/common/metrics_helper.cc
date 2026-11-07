@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,6 +41,7 @@ scheduling_metrics::ThreadType ConvertBlinkThreadType(ThreadType thread_type) {
     case ThreadType::kRealtimeAudioWorkletThread:
     case ThreadType::kSemiRealtimeAudioWorkletThread:
     case ThreadType::kFontThread:
+    case ThreadType::kPreloadScannerThread:
       return scheduling_metrics::ThreadType::kRendererOtherBlinkThread;
   }
 }

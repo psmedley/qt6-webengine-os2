@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,6 +33,9 @@ class BertModelExecutor
 
  private:
   const proto::OptimizationTarget optimization_target_;
+
+  // -1 tells TFLite to use its own default number of threads.
+  const int num_threads_ = -1;
 };
 
 }  // namespace optimization_guide

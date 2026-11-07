@@ -19,31 +19,35 @@
 #include <string>
 
 #include "src/tint/ast/attribute.h"
+#include "src/tint/ast/expression.h"
 
 namespace tint::ast {
 
 /// A struct member align attribute
-class StructMemberAlignAttribute final
-    : public Castable<StructMemberAlignAttribute, Attribute> {
- public:
-  /// constructor
-  /// @param pid the identifier of the program that owns this node
-  /// @param src the source of this node
-  /// @param align the align value
-  StructMemberAlignAttribute(ProgramID pid, const Source& src, uint32_t align);
-  ~StructMemberAlignAttribute() override;
+class StructMemberAlignAttribute final : public Castable<StructMemberAlignAttribute, Attribute> {
+  public:
+    /// constructor
+    /// @param pid the identifier of the program that owns this node
+    /// @param nid the unique node identifier
+    /// @param src the source of this node
+    /// @param align the align expression
+    StructMemberAlignAttribute(ProgramID pid,
+                               NodeID nid,
+                               const Source& src,
+                               const ast::Expression* align);
+    ~StructMemberAlignAttribute() override;
 
-  /// @returns the WGSL name for the attribute
-  std::string Name() const override;
+    /// @returns the WGSL name for the attribute
+    std::string Name() const override;
 
-  /// Clones this node and all transitive child nodes using the `CloneContext`
-  /// `ctx`.
-  /// @param ctx the clone context
-  /// @return the newly cloned node
-  const StructMemberAlignAttribute* Clone(CloneContext* ctx) const override;
+    /// Clones this node and all transitive child nodes using the `CloneContext`
+    /// `ctx`.
+    /// @param ctx the clone context
+    /// @return the newly cloned node
+    const StructMemberAlignAttribute* Clone(CloneContext* ctx) const override;
 
-  /// The align value
-  const uint32_t align;
+    /// The align expression
+    const ast::Expression* const expr;
 };
 
 }  // namespace tint::ast

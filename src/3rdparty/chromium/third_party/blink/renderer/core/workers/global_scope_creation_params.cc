@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,6 @@ GlobalScopeCreationParams::GlobalScopeCreationParams(
     HttpsState starter_https_state,
     WorkerClients* worker_clients,
     std::unique_ptr<WebContentSettingsClient> content_settings_client,
-    absl::optional<network::mojom::IPAddressSpace> response_address_space,
     const Vector<OriginTrialFeature>* inherited_trial_features,
     const base::UnguessableToken& parent_devtools_token,
     std::unique_ptr<WorkerSettings> worker_settings,
@@ -45,11 +44,15 @@ GlobalScopeCreationParams::GlobalScopeCreationParams(
     ukm::SourceId ukm_source_id,
     const absl::optional<ExecutionContextToken>& parent_context_token,
     bool parent_cross_origin_isolated_capability,
-    bool parent_direct_socket_capability)
-    : script_url(script_url.Copy()),
+    bool parent_isolated_application_capability,
+    InterfaceRegistry* interface_registry,
+    scoped_refptr<base::SingleThreadTaskRunner>
+        agent_group_scheduler_compositor_task_runner,
+    const SecurityOrigin* top_level_frame_security_origin)
+    : script_url(script_url),
       script_type(script_type),
-      global_scope_name(global_scope_name.IsolatedCopy()),
-      user_agent(user_agent.IsolatedCopy()),
+      global_scope_name(global_scope_name),
+      user_agent(user_agent),
       ua_metadata(ua_metadata.value_or(blink::UserAgentMetadata())),
       web_worker_fetch_context(std::move(web_worker_fetch_context)),
       outside_content_security_policies(
@@ -62,7 +65,6 @@ GlobalScopeCreationParams::GlobalScopeCreationParams(
       starter_https_state(starter_https_state),
       worker_clients(worker_clients),
       content_settings_client(std::move(content_settings_client)),
-      response_address_space(response_address_space),
       parent_devtools_token(parent_devtools_token),
       worker_settings(std::move(worker_settings)),
       v8_cache_options(v8_cache_options),
@@ -81,7 +83,15 @@ GlobalScopeCreationParams::GlobalScopeCreationParams(
       parent_context_token(parent_context_token),
       parent_cross_origin_isolated_capability(
           parent_cross_origin_isolated_capability),
-      parent_direct_socket_capability(parent_direct_socket_capability) {
+      parent_isolated_application_capability(
+          parent_isolated_application_capability),
+      interface_registry(interface_registry),
+      agent_group_scheduler_compositor_task_runner(
+          std::move(agent_group_scheduler_compositor_task_runner)),
+      top_level_frame_security_origin(
+          top_level_frame_security_origin
+              ? top_level_frame_security_origin->IsolatedCopy()
+              : nullptr) {
   this->inherited_trial_features =
       std::make_unique<Vector<OriginTrialFeature>>();
   if (inherited_trial_features) {

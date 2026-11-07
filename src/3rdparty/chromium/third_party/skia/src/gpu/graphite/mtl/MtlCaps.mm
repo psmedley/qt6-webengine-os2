@@ -10,17 +10,17 @@
 #include "include/gpu/graphite/TextureInfo.h"
 #include "include/gpu/graphite/mtl/MtlTypes.h"
 #include "src/gpu/graphite/CommandBuffer.h"
+#include "src/gpu/graphite/ComputePipelineDesc.h"
 #include "src/gpu/graphite/GraphicsPipelineDesc.h"
 #include "src/gpu/graphite/GraphiteResourceKey.h"
+#include "src/gpu/graphite/TextureProxy.h"
 #include "src/gpu/graphite/mtl/MtlUtils.h"
 #include "src/sksl/SkSLUtil.h"
 
 namespace skgpu::graphite {
 
-MtlCaps::MtlCaps(const id<MTLDevice> device)
+MtlCaps::MtlCaps(const id<MTLDevice> device, const ContextOptions& options)
         : Caps() {
-    fShaderCaps = std::make_unique<SkSL::ShaderCaps>();
-
     this->initGPUFamily(device);
     this->initCaps(device);
     this->initShaderCaps();
@@ -28,6 +28,8 @@ MtlCaps::MtlCaps(const id<MTLDevice> device)
     this->initFormatTable();
 
     // Metal-specific MtlCaps
+
+    this->finishInitialization(options);
 }
 
 // translates from older MTLFeatureSet interface to MTLGPUFamily interface
@@ -222,14 +224,19 @@ void MtlCaps::initCaps(const id<MTLDevice> device) {
     }
 
     // We use constant address space for our uniform buffers which has various alignment
-    // requirements for the offset when binding the buffer. On MacOS the offset must align to 256.
-    // On iOS we must align to the max of the data type consumed by the vertex function or 4 bytes.
-    // We can ignore the data type and just always use 16 bytes on iOS.
+    // requirements for the offset when binding the buffer. On MacOS Intel the offset must align
+    // to 256. On iOS or Apple Silicon we must align to the max of the data type consumed by the
+    // vertex function or 4 bytes, or we can ignore the data type and just use 16 bytes.
     if (this->isMac()) {
         fRequiredUniformBufferAlignment = 256;
     } else {
         fRequiredUniformBufferAlignment = 16;
     }
+
+    // Metal does not distinguish between uniform and storage buffers.
+    fRequiredStorageBufferAlignment = fRequiredUniformBufferAlignment;
+    fStorageBufferSupport = true;
+    fStorageBufferPreferred = true;
 
     if (@available(macOS 10.12, ios 14.0, *)) {
         fClampToBorderSupport = (this->isMac() || fFamilyGroup >= 7);
@@ -276,6 +283,10 @@ void MtlCaps::initShaderCaps() {
     shaderCaps->fFloatIs32Bits = true;
 }
 
+// Define this so we can use it to initialize arrays and work around
+// the fact that MTLPixelFormatB5G6R5Unorm is not always available.
+#define kMTLPixelFormatB5G6R5Unorm MTLPixelFormat(40)
+
 // These are all the valid MTLPixelFormats that we currently support in Skia.  They are roughly
 // ordered from most frequently used to least to improve look up times in arrays.
 static constexpr MTLPixelFormat kMtlFormats[] = {
@@ -283,6 +294,9 @@ static constexpr MTLPixelFormat kMtlFormats[] = {
     MTLPixelFormatR8Unorm,
     MTLPixelFormatA8Unorm,
     MTLPixelFormatBGRA8Unorm,
+    kMTLPixelFormatB5G6R5Unorm,
+
+    MTLPixelFormatRGBA16Float,
 
     MTLPixelFormatStencil8,
     MTLPixelFormatDepth32Float,
@@ -322,7 +336,7 @@ void MtlCaps::setColorType(SkColorType colorType, std::initializer_list<MTLPixel
 }
 
 size_t MtlCaps::GetFormatIndex(MTLPixelFormat pixelFormat) {
-    static_assert(SK_ARRAY_COUNT(kMtlFormats) == MtlCaps::kNumMtlFormats,
+    static_assert(std::size(kMtlFormats) == MtlCaps::kNumMtlFormats,
                   "Size of kMtlFormats array must match static value in header");
     for (size_t i = 0; i < MtlCaps::kNumMtlFormats; ++i) {
         if (kMtlFormats[i] == pixelFormat) {
@@ -334,6 +348,12 @@ size_t MtlCaps::GetFormatIndex(MTLPixelFormat pixelFormat) {
 
 void MtlCaps::initFormatTable() {
     FormatInfo* info;
+
+    if (@available(macOS 11.0, iOS 8.0, *)) {
+        if (this->isApple()) {
+            SkASSERT(kMTLPixelFormatB5G6R5Unorm == MTLPixelFormatB5G6R5Unorm);
+        }
+    }
 
     // Format: RGBA8Unorm
     {
@@ -417,6 +437,38 @@ void MtlCaps::initFormatTable() {
         }
     }
 
+    // Format: B5G6R5Unorm
+    if (@available(macOS 11.0, iOS 8.0, *)) {
+        if (this->isApple()) {
+            info = &fFormatTable[GetFormatIndex(MTLPixelFormatB5G6R5Unorm)];
+            info->fFlags = FormatInfo::kAllFlags;
+            info->fColorTypeInfoCount = 1;
+            info->fColorTypeInfos.reset(new ColorTypeInfo[info->fColorTypeInfoCount]());
+            int ctIdx = 0;
+            // Format: B5G6R5Unorm, Surface: kBGR_565
+            {
+                auto& ctInfo = info->fColorTypeInfos[ctIdx++];
+                ctInfo.fColorType = kRGB_565_SkColorType;
+                ctInfo.fFlags = ColorTypeInfo::kUploadData_Flag | ColorTypeInfo::kRenderable_Flag;
+            }
+        }
+    }
+
+    // Format: RGBA16Float
+    {
+        info = &fFormatTable[GetFormatIndex(MTLPixelFormatRGBA16Float)];
+        info->fFlags = FormatInfo::kAllFlags;
+        info->fColorTypeInfoCount = 1;
+        info->fColorTypeInfos.reset(new ColorTypeInfo[info->fColorTypeInfoCount]());
+        int ctIdx = 0;
+        // Format: RGBA16Float, Surface: RGBA_F16
+        {
+            auto& ctInfo = info->fColorTypeInfos[ctIdx++];
+            ctInfo.fColorType = kRGBA_F16_SkColorType;
+            ctInfo.fFlags = ColorTypeInfo::kUploadData_Flag | ColorTypeInfo::kRenderable_Flag;
+        }
+    }
+
     /*
      * Non-color formats
      */
@@ -457,11 +509,18 @@ void MtlCaps::initFormatTable() {
 
     this->setColorType(kAlpha_8_SkColorType,          { MTLPixelFormatR8Unorm,
                                                         MTLPixelFormatA8Unorm });
+    if (@available(macOS 11.0, iOS 8.0, *)) {
+        if (this->isApple()) {
+            this->setColorType(kRGB_565_SkColorType, {MTLPixelFormatB5G6R5Unorm});
+        }
+    }
+
     this->setColorType(kRGBA_8888_SkColorType,        { MTLPixelFormatRGBA8Unorm });
     this->setColorType(kRGB_888x_SkColorType,         { MTLPixelFormatRGBA8Unorm });
     this->setColorType(kBGRA_8888_SkColorType,        { MTLPixelFormatBGRA8Unorm });
     this->setColorType(kGray_8_SkColorType,           { MTLPixelFormatR8Unorm });
     this->setColorType(kR8_unorm_SkColorType,         { MTLPixelFormatR8Unorm });
+    this->setColorType(kRGBA_F16_SkColorType,         { MTLPixelFormatRGBA16Float });
 }
 
 TextureInfo MtlCaps::getDefaultSampledTextureInfo(SkColorType colorType,
@@ -473,10 +532,15 @@ TextureInfo MtlCaps::getDefaultSampledTextureInfo(SkColorType colorType,
         usage |= MTLTextureUsageRenderTarget;
     }
 
+    MtlPixelFormat format = this->getFormatFromColorType(colorType);
+    if (format == MTLPixelFormatInvalid) {
+        return {};
+    }
+
     MtlTextureInfo info;
     info.fSampleCount = 1;
     info.fLevelCount = levelCount;
-    info.fFormat = this->getFormatFromColorType(colorType);
+    info.fFormat = format;
     info.fUsage = usage;
     info.fStorageMode = MTLStorageModePrivate;
     info.fFramebufferOnly = false;
@@ -484,30 +548,44 @@ TextureInfo MtlCaps::getDefaultSampledTextureInfo(SkColorType colorType,
     return info;
 }
 
-TextureInfo MtlCaps::getDefaultMSAATextureInfo(SkColorType colorType,
-                                               uint32_t sampleCount,
-                                               Protected) const {
+MTLStorageMode MtlCaps::getDefaultMSAAStorageMode(Discardable discardable) const {
+    // Try to use memoryless if it's available (only on new Apple silicon)
+    if (discardable == Discardable::kYes && this->isApple()) {
+        if (@available(macOS 11.0, iOS 10.0, *)) {
+            return MTLStorageModeMemoryless;
+        }
+    }
+    // If it's not discardable or not available, private is the best option
+    return MTLStorageModePrivate;
+}
+
+TextureInfo MtlCaps::getDefaultMSAATextureInfo(const TextureInfo& singleSampledInfo,
+                                               Discardable discardable) const {
+    const MtlTextureSpec& singleSpec = singleSampledInfo.mtlTextureSpec();
+
     MTLTextureUsage usage = MTLTextureUsageRenderTarget;
 
     MtlTextureInfo info;
-    info.fSampleCount = sampleCount;
+    info.fSampleCount = this->defaultMSAASamples();
     info.fLevelCount = 1;
-    info.fFormat = this->getFormatFromColorType(colorType);
+    info.fFormat = singleSpec.fFormat;
     info.fUsage = usage;
-    info.fStorageMode = MTLStorageModePrivate;
+    info.fStorageMode = this->getDefaultMSAAStorageMode(discardable);
     info.fFramebufferOnly = false;
 
     return info;
 }
 
 TextureInfo MtlCaps::getDefaultDepthStencilTextureInfo(
-            Mask<DepthStencilFlags> depthStencilType, uint32_t sampleCount, Protected) const {
+            SkEnumBitMask<DepthStencilFlags> depthStencilType,
+            uint32_t sampleCount,
+            Protected) const {
     MtlTextureInfo info;
     info.fSampleCount = sampleCount;
     info.fLevelCount = 1;
     info.fFormat = MtlDepthStencilFlagsToFormat(depthStencilType);
     info.fUsage = MTLTextureUsageRenderTarget;
-    info.fStorageMode = MTLStorageModePrivate;
+    info.fStorageMode = this->getDefaultMSAAStorageMode(Discardable::kYes);
     info.fFramebufferOnly = false;
 
     return info;
@@ -516,7 +594,9 @@ TextureInfo MtlCaps::getDefaultDepthStencilTextureInfo(
 const Caps::ColorTypeInfo* MtlCaps::getColorTypeInfo(
         SkColorType ct, const TextureInfo& textureInfo) const {
     MTLPixelFormat mtlFormat = static_cast<MTLPixelFormat>(textureInfo.mtlTextureSpec().fFormat);
-    SkASSERT(mtlFormat != MTLPixelFormatInvalid);
+    if (mtlFormat == MTLPixelFormatInvalid) {
+        return nullptr;
+    }
 
     const FormatInfo& info = this->getFormatInfo(mtlFormat);
     for (int i = 0; i < info.fColorTypeInfoCount; ++i) {
@@ -534,23 +614,50 @@ UniqueKey MtlCaps::makeGraphicsPipelineKey(const GraphicsPipelineDesc& pipelineD
     UniqueKey pipelineKey;
     {
         static const skgpu::UniqueKey::Domain kGraphicsPipelineDomain = UniqueKey::GenerateDomain();
-        SkSpan<const uint32_t> pipelineDescKey = pipelineDesc.asKey();
-        UniqueKey::Builder builder(&pipelineKey, kGraphicsPipelineDomain,
-                                   pipelineDescKey.size() + 1, "GraphicsPipeline");
+        // 4 uint32_t's (render step id, paint id, uint64 renderpass desc)
+        UniqueKey::Builder builder(&pipelineKey, kGraphicsPipelineDomain, 4, "GraphicsPipeline");
         // add graphicspipelinedesc key
-        for (unsigned int i = 0; i < pipelineDescKey.size(); ++i) {
-            builder[i] = pipelineDescKey[i];
-        }
+        builder[0] = pipelineDesc.renderStepID();
+        builder[1] = pipelineDesc.paintParamsID().asUInt();
+
         // add renderpassdesc key
-        MtlTextureInfo colorInfo, depthStencilInfo;
-        renderPassDesc.fColorAttachment.fTextureInfo.getMtlTextureInfo(&colorInfo);
-        renderPassDesc.fDepthStencilAttachment.fTextureInfo.getMtlTextureInfo(&depthStencilInfo);
-        SkASSERT(colorInfo.fFormat < 65535 && depthStencilInfo.fFormat < 65535);
-        uint32_t renderPassKey = colorInfo.fFormat << 16 | depthStencilInfo.fFormat;
-        builder[pipelineDescKey.size()] = renderPassKey;
+        uint64_t renderPassKey = this->getRenderPassDescKey(renderPassDesc);
+        builder[2] = renderPassKey & 0xFFFFFFFF;
+        builder[3] = (renderPassKey >> 32) & 0xFFFFFFFF;
         builder.finish();
     }
 
+    return pipelineKey;
+}
+
+uint64_t MtlCaps::getRenderPassDescKey(const RenderPassDesc& renderPassDesc) const {
+    MtlTextureInfo colorInfo, depthStencilInfo;
+    renderPassDesc.fColorAttachment.fTextureInfo.getMtlTextureInfo(&colorInfo);
+    renderPassDesc.fDepthStencilAttachment.fTextureInfo.getMtlTextureInfo(&depthStencilInfo);
+    SkASSERT(colorInfo.fFormat < 65535 && depthStencilInfo.fFormat < 65535);
+    uint32_t colorAttachmentKey = colorInfo.fFormat << 16 | colorInfo.fSampleCount;
+    uint32_t dsAttachmentKey = depthStencilInfo.fFormat << 16 | depthStencilInfo.fSampleCount;
+    return (((uint64_t) colorAttachmentKey) << 32) | dsAttachmentKey;
+}
+
+UniqueKey MtlCaps::makeComputePipelineKey(const ComputePipelineDesc& pipelineDesc) const {
+    UniqueKey pipelineKey;
+    {
+        static const skgpu::UniqueKey::Domain kComputePipelineDomain = UniqueKey::GenerateDomain();
+        SkSpan<const uint32_t> pipelineDescKey = pipelineDesc.asKey();
+        UniqueKey::Builder builder(
+                &pipelineKey, kComputePipelineDomain, pipelineDescKey.size(), "ComputePipeline");
+        // Add ComputePipelineDesc key
+        for (unsigned int i = 0; i < pipelineDescKey.size(); ++i) {
+            builder[i] = pipelineDescKey[i];
+        }
+
+        // TODO(b/240615224): The local work group size may need to factor into the key on platforms
+        // that don't support specialization constants and require the workgroup/threadgroup size to
+        // be specified in the shader text (D3D12, Vulkan 1.0, and OpenGL).
+
+        builder.finish();
+    }
     return pipelineKey;
 }
 
@@ -592,6 +699,77 @@ uint32_t MtlCaps::maxRenderTargetSampleCount(MTLPixelFormat format) const {
 
 size_t MtlCaps::getTransferBufferAlignment(size_t bytesPerPixel) const {
     return std::max(bytesPerPixel, getMinBufferAlignment());
+}
+
+bool MtlCaps::supportsWritePixels(const TextureInfo& texInfo) const {
+    MtlTextureInfo mtlInfo;
+    texInfo.getMtlTextureInfo(&mtlInfo);
+    if (mtlInfo.fFramebufferOnly) {
+        return false;
+    }
+
+    if (texInfo.numSamples() > 1) {
+        return false;
+    }
+
+    return true;
+}
+
+bool MtlCaps::supportsReadPixels(const TextureInfo& texInfo) const {
+    MtlTextureInfo mtlInfo;
+    texInfo.getMtlTextureInfo(&mtlInfo);
+    if (mtlInfo.fFramebufferOnly) {
+        return false;
+    }
+
+    // We disallow reading back directly from compressed textures.
+    if (MtlFormatIsCompressed((MTLPixelFormat)mtlInfo.fFormat)) {
+        return false;
+    }
+
+    if (texInfo.numSamples() > 1) {
+        return false;
+    }
+
+    return true;
+}
+
+SkColorType MtlCaps::supportedWritePixelsColorType(SkColorType dstColorType,
+                                                   const TextureInfo& dstTextureInfo,
+                                                   SkColorType srcColorType) const {
+    MtlTextureInfo mtlInfo;
+    dstTextureInfo.getMtlTextureInfo(&mtlInfo);
+
+    const FormatInfo& info = this->getFormatInfo((MTLPixelFormat)mtlInfo.fFormat);
+    for (int i = 0; i < info.fColorTypeInfoCount; ++i) {
+        const auto& ctInfo = info.fColorTypeInfos[i];
+        if (ctInfo.fColorType == dstColorType) {
+            return dstColorType;
+        }
+    }
+    return kUnknown_SkColorType;
+}
+
+SkColorType MtlCaps::supportedReadPixelsColorType(SkColorType srcColorType,
+                                                  const TextureInfo& srcTextureInfo,
+                                                  SkColorType dstColorType) const {
+    MtlTextureInfo mtlInfo;
+    srcTextureInfo.getMtlTextureInfo(&mtlInfo);
+
+    // TODO: handle compressed formats
+    if (MtlFormatIsCompressed((MTLPixelFormat)mtlInfo.fFormat)) {
+        SkASSERT(this->isTexturable((MTLPixelFormat)mtlInfo.fFormat));
+        return kUnknown_SkColorType;
+    }
+
+    const FormatInfo& info = this->getFormatInfo((MTLPixelFormat)mtlInfo.fFormat);
+    for (int i = 0; i < info.fColorTypeInfoCount; ++i) {
+        const auto& ctInfo = info.fColorTypeInfos[i];
+        if (ctInfo.fColorType == srcColorType) {
+            return srcColorType;
+        }
+    }
+    return kUnknown_SkColorType;
 }
 
 // There are only a few possible valid sample counts (1, 2, 4, 8, 16). So we can key on those 5

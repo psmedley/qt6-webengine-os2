@@ -46,19 +46,19 @@ bool SaveXFADocumentData(CPDFXFA_Context* pContext,
   if (!pPDFDocument)
     return false;
 
-  CPDF_Dictionary* pRoot = pPDFDocument->GetRoot();
+  RetainPtr<CPDF_Dictionary> pRoot = pPDFDocument->GetMutableRoot();
   if (!pRoot)
     return false;
 
-  CPDF_Dictionary* pAcroForm = pRoot->GetDictFor("AcroForm");
+  RetainPtr<CPDF_Dictionary> pAcroForm = pRoot->GetMutableDictFor("AcroForm");
   if (!pAcroForm)
     return false;
 
-  CPDF_Object* pXFA = pAcroForm->GetObjectFor("XFA");
+  RetainPtr<CPDF_Object> pXFA = pAcroForm->GetMutableObjectFor("XFA");
   if (!pXFA)
     return true;
 
-  CPDF_Array* pArray = pXFA->AsArray();
+  CPDF_Array* pArray = pXFA->AsMutableArray();
   if (!pArray)
     return false;
 
@@ -66,7 +66,7 @@ bool SaveXFADocumentData(CPDFXFA_Context* pContext,
   int iFormIndex = -1;
   int iDataSetsIndex = -1;
   for (int i = 0; i < size - 1; i++) {
-    const CPDF_Object* pPDFObj = pArray->GetObjectAt(i);
+    RetainPtr<const CPDF_Object> pPDFObj = pArray->GetObjectAt(i);
     if (!pPDFObj->IsString())
       continue;
     if (pPDFObj->GetString() == "form")
@@ -75,32 +75,34 @@ bool SaveXFADocumentData(CPDFXFA_Context* pContext,
       iDataSetsIndex = i + 1;
   }
 
-  CPDF_Stream* pFormStream = nullptr;
+  RetainPtr<CPDF_Stream> pFormStream;
   if (iFormIndex != -1) {
     // Get form CPDF_Stream
-    CPDF_Object* pFormPDFObj = pArray->GetObjectAt(iFormIndex);
+    RetainPtr<CPDF_Object> pFormPDFObj = pArray->GetMutableObjectAt(iFormIndex);
     if (pFormPDFObj->IsReference()) {
-      CPDF_Object* pFormDirectObj = pFormPDFObj->GetDirect();
+      RetainPtr<CPDF_Object> pFormDirectObj = pFormPDFObj->GetMutableDirect();
       if (pFormDirectObj && pFormDirectObj->IsStream()) {
-        pFormStream = pFormDirectObj->AsStream();
+        pFormStream.Reset(pFormDirectObj->AsMutableStream());
       }
     } else if (pFormPDFObj->IsStream()) {
-      pFormStream = pFormPDFObj->AsStream();
+      pFormStream.Reset(pFormPDFObj->AsMutableStream());
     }
   }
 
-  CPDF_Stream* pDataSetsStream = nullptr;
+  RetainPtr<CPDF_Stream> pDataSetsStream;
   if (iDataSetsIndex != -1) {
     // Get datasets CPDF_Stream
-    CPDF_Object* pDataSetsPDFObj = pArray->GetObjectAt(iDataSetsIndex);
+    RetainPtr<CPDF_Object> pDataSetsPDFObj =
+        pArray->GetMutableObjectAt(iDataSetsIndex);
     if (pDataSetsPDFObj->IsReference()) {
-      CPDF_Reference* pDataSetsRefObj = pDataSetsPDFObj->AsReference();
-      CPDF_Object* pDataSetsDirectObj = pDataSetsRefObj->GetDirect();
+      CPDF_Reference* pDataSetsRefObj = pDataSetsPDFObj->AsMutableReference();
+      RetainPtr<CPDF_Object> pDataSetsDirectObj =
+          pDataSetsRefObj->GetMutableDirect();
       if (pDataSetsDirectObj && pDataSetsDirectObj->IsStream()) {
-        pDataSetsStream = pDataSetsDirectObj->AsStream();
+        pDataSetsStream.Reset(pDataSetsDirectObj->AsMutableStream());
       }
     } else if (pDataSetsPDFObj->IsStream()) {
-      pDataSetsStream = pDataSetsPDFObj->AsStream();
+      pDataSetsStream.Reset(pDataSetsPDFObj->AsMutableStream());
     }
   }
   // L"datasets"
@@ -115,7 +117,7 @@ bool SaveXFADocumentData(CPDFXFA_Context* pContext,
           pDataSetsStream->InitStreamFromFile(pFileWrite, std::move(pDataDict));
         }
       } else {
-        CPDF_Stream* pData = pPDFDocument->NewIndirect<CPDF_Stream>();
+        auto pData = pPDFDocument->NewIndirect<CPDF_Stream>();
         pData->InitStreamFromFile(pFileWrite, std::move(pDataDict));
         int iLast = fxcrt::CollectionSize<int>(*pArray) - 2;
         pArray->InsertNewAt<CPDF_String>(iLast, "datasets", false);
@@ -135,7 +137,7 @@ bool SaveXFADocumentData(CPDFXFA_Context* pContext,
         if (pFormStream)
           pFormStream->InitStreamFromFile(pFileWrite, std::move(pDataDict));
       } else {
-        CPDF_Stream* pData = pPDFDocument->NewIndirect<CPDF_Stream>();
+        auto pData = pPDFDocument->NewIndirect<CPDF_Stream>();
         pData->InitStreamFromFile(pFileWrite, std::move(pDataDict));
         int iLast = fxcrt::CollectionSize<int>(*pArray) - 2;
         pArray->InsertNewAt<CPDF_String>(iLast, "form", false);
