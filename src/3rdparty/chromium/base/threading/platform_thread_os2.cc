@@ -14,48 +14,95 @@ namespace base {
 
 namespace internal {
 
-bool SetCurrentThreadPriorityForPlatform(ThreadPriority priority) {
-  ULONG cls = 0;
+namespace {
+
+// OS/2 priority classes, from lowest to highest: PRTYC_IDLETIME,
+// PRTYC_REGULAR (where the desktop and normal applications run),
+// PRTYC_FOREGROUNDSERVER and PRTYC_TIMECRITICAL. Threads in a higher class
+// always run before threads in a lower one, so only threads that do very
+// little work per wakeup may be placed above PRTYC_REGULAR; otherwise a busy
+// page (e.g. video playback) starves the whole desktop. Within a class the
+// level ranges from 0 (the default) to PRTYD_MAXIMUM (31).
+//
+// - BACKGROUND:      PRTYC_IDLETIME
+// - NORMAL:          PRTYC_REGULAR, level 0 (the default for new threads)
+// - DISPLAY:         PRTYC_REGULAR, raised level. Used by the renderer main
+//                    and compositor threads, the browser UI/IO threads, Viz
+//                    and GPU threads, which can be CPU-bound for long periods.
+// - REALTIME_AUDIO:  PRTYC_FOREGROUNDSERVER, level 0. Audio threads only do a
+//                    short amount of work per buffer, but must not be
+//                    starved by regular threads.
+constexpr LONG kDisplayLevel = 16;
+
+struct OS2Priority {
+  ULONG cls;
+  LONG level;
+};
+
+OS2Priority ToOS2Priority(ThreadPriority priority) {
   switch (priority) {
     case ThreadPriority::BACKGROUND:
-      cls = PRTYC_IDLETIME;
-      break;
+      return {PRTYC_IDLETIME, 0};
     case ThreadPriority::NORMAL:
-      cls = PRTYC_REGULAR;
-      break;
+      return {PRTYC_REGULAR, 0};
     case ThreadPriority::DISPLAY:
-      cls = PRTYC_FOREGROUNDSERVER;
-      break;
+      return {PRTYC_REGULAR, kDisplayLevel};
     case ThreadPriority::REALTIME_AUDIO:
-      cls = PRTYC_TIMECRITICAL;
-      break;
+      return {PRTYC_FOREGROUNDSERVER, 0};
   }
-  return DosSetPriority(PRTYS_THREAD, cls, 0, _gettid()) == NO_ERROR;
+  return {PRTYC_REGULAR, 0};
+}
+
+// Returns the current thread's priority class and level.
+bool GetCurrentOS2Priority(ULONG* cls, LONG* level) {
+  PTIB ptib;
+  if (DosGetInfoBlocks(&ptib, NULL) != NO_ERROR)
+    return false;
+  // The priority class is in the high byte of the low word, the level in the
+  // low byte.
+  ULONG pri = ptib->tib_ptib2->tib2_ulpri;
+  *cls = (pri >> 8) & 0xFF;
+  *level = pri & 0xFF;
+  return true;
+}
+
+}  // namespace
+
+bool SetCurrentThreadPriorityForPlatform(ThreadPriority priority) {
+  const OS2Priority target = ToOS2Priority(priority);
+  // Changing the class resets the level, so set the class first and then
+  // move the level to the target (|delta| is relative to the current level).
+  // A thread ID of 0 means the current thread.
+  if (DosSetPriority(PRTYS_THREAD, target.cls, 0, 0) != NO_ERROR)
+    return false;
+  ULONG cls;
+  LONG level;
+  if (!GetCurrentOS2Priority(&cls, &level))
+    return false;
+  if (level != target.level &&
+      DosSetPriority(PRTYS_THREAD, PRTYC_NOCHANGE, target.level - level, 0) !=
+          NO_ERROR) {
+    return false;
+  }
+  return true;
 }
 
 absl::optional<ThreadPriority> GetCurrentThreadPriorityForPlatform() {
-  absl::optional<ThreadPriority> prio = absl::nullopt;
-  PTIB ptib;
-  APIRET arc = DosGetInfoBlocks(&ptib, NULL);
-  if (arc == NO_ERROR) {
-    // The priority class is packed into the high byte of the low word.
-    ULONG cls = (ptib->tib_ptib2->tib2_ulpri >> 8) & 0xFF;
-    switch (cls) {
-      case PRTYC_IDLETIME:
-        prio = absl::make_optional(ThreadPriority::BACKGROUND);
-        break;
-      case PRTYC_REGULAR:
-        prio = absl::make_optional(ThreadPriority::NORMAL);
-        break;
-      case PRTYC_FOREGROUNDSERVER:
-        prio = absl::make_optional(ThreadPriority::DISPLAY);
-        break;
-      case PRTYC_TIMECRITICAL:
-        prio = absl::make_optional(ThreadPriority::REALTIME_AUDIO);
-        break;
-    }
+  ULONG cls;
+  LONG level;
+  if (!GetCurrentOS2Priority(&cls, &level))
+    return absl::nullopt;
+  switch (cls) {
+    case PRTYC_IDLETIME:
+      return ThreadPriority::BACKGROUND;
+    case PRTYC_REGULAR:
+      return level >= kDisplayLevel ? ThreadPriority::DISPLAY
+                                    : ThreadPriority::NORMAL;
+    case PRTYC_FOREGROUNDSERVER:
+    case PRTYC_TIMECRITICAL:
+      return ThreadPriority::REALTIME_AUDIO;
   }
-  return prio;
+  return absl::nullopt;
 }
 
 }  // namespace internal
