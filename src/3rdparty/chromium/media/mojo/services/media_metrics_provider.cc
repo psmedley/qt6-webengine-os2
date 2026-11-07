@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "build/build_config.h"
 #include "build/chromecast_buildflags.h"
 #include "media/base/key_systems.h"
+#include "media/base/video_codecs.h"
 #include "media/learning/mojo/mojo_learning_task_controller_service.h"
 #include "media/mojo/services/video_decode_stats_recorder.h"
 #include "media/mojo/services/watch_time_recorder.h"
@@ -22,9 +23,9 @@
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "media/filters/decrypting_video_decoder.h"
-#endif  // !BUILDFLAG(IS_ANDROID)
+#endif
 
-#if BUILDFLAG(IS_FUCHSIA) || (BUILDFLAG(IS_CHROMECAST) && BUILDFLAG(IS_ANDROID))
+#if BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_CAST_ANDROID)
 #include "media/mojo/services/playback_events_recorder.h"
 #endif
 
@@ -103,22 +104,8 @@ MediaMetricsProvider::~MediaMetricsProvider() {
 std::string MediaMetricsProvider::GetUMANameForAVStream(
     const PipelineInfo& player_info) {
   constexpr char kPipelineUmaPrefix[] = "Media.PipelineStatus.AudioVideo.";
-  std::string uma_name = kPipelineUmaPrefix;
-  // TODO(xhwang): Use a helper function to simply the codec name mapping.
-  if (player_info.video_codec == VideoCodec::kVP8)
-    uma_name += "VP8.";
-  else if (player_info.video_codec == VideoCodec::kVP9)
-    uma_name += "VP9.";
-  else if (player_info.video_codec == VideoCodec::kH264)
-    uma_name += "H264.";
-  else if (player_info.video_codec == VideoCodec::kAV1)
-    uma_name += "AV1.";
-  else if (player_info.video_codec == VideoCodec::kHEVC)
-    uma_name += "HEVC.";
-  else if (player_info.video_codec == VideoCodec::kDolbyVision)
-    uma_name += "DolbyVision.";
-  else
-    return uma_name + "Other";
+  std::string uma_name =
+      kPipelineUmaPrefix + GetCodecNameForUMA(player_info.video_codec) + ".";
 
   // Add Renderer name when not using the default RendererImpl.
   if (renderer_type_ == RendererType::kMediaFoundation) {
@@ -263,6 +250,16 @@ void MediaMetricsProvider::OnError(const PipelineStatus& status) {
   uma_info_.last_pipeline_status = status.code();
 }
 
+void MediaMetricsProvider::OnFallback(const PipelineStatus& status) {
+  DCHECK(initialized_);
+  if (is_shutting_down_cb_.Run()) {
+    DVLOG(1) << __func__ << ": Error " << PipelineStatusToString(status)
+             << " ignored since it is reported during shutdown.";
+    return;
+  }
+  // Do nothing for now.
+}
+
 void MediaMetricsProvider::SetIsEME() {
   // This may be called before Initialize().
   uma_info_.is_eme = true;
@@ -340,7 +337,7 @@ void MediaMetricsProvider::AcquireVideoDecodeStatsRecorder(
 
 void MediaMetricsProvider::AcquirePlaybackEventsRecorder(
     mojo::PendingReceiver<mojom::PlaybackEventsRecorder> receiver) {
-#if BUILDFLAG(IS_FUCHSIA) || (BUILDFLAG(IS_CHROMECAST) && BUILDFLAG(IS_ANDROID))
+#if BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_CAST_ANDROID)
   PlaybackEventsRecorder::Create(std::move(receiver));
 #endif
 }

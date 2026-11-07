@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,8 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/sequenced_task_runner.h"
+#include "base/time/time.h"
+#include "content/common/content_export.h"
 #include "content/services/auction_worklet/auction_downloader.h"
 #include "content/services/auction_worklet/auction_v8_helper.h"
 #include "services/network/public/mojom/url_loader_factory.mojom-forward.h"
@@ -35,21 +37,23 @@ class AuctionDownloader;
 // UnboundScript or WasmModuleObject on the V8 thread. Create via the
 // appropriate subclass. That also provides the way extracting the appropriate
 // type from Result.
-class WorkletLoaderBase {
+class CONTENT_EXPORT WorkletLoaderBase {
  public:
   // The result of loading JS or Wasm, memory-managing the underlying V8 object.
   //
   // This helps ensure that the script handle is deleted on the right thread
   // even in case when the callback handling the result is destroyed.
-  class Result {
+  class CONTENT_EXPORT Result {
    public:
     Result();
     Result(scoped_refptr<AuctionV8Helper> v8_helper,
            v8::Global<v8::UnboundScript> script,
-           size_t original_size_bytes);
+           size_t original_size_bytes,
+           base::TimeDelta download_time);
     Result(scoped_refptr<AuctionV8Helper> v8_helper,
            v8::Global<v8::WasmModuleObject> module,
-           size_t original_size_bytes);
+           size_t original_size_bytes,
+           base::TimeDelta download_time);
     Result(Result&&);
     ~Result();
 
@@ -59,6 +63,7 @@ class WorkletLoaderBase {
     bool success() const;
 
     size_t original_size_bytes() const { return original_size_bytes_; }
+    base::TimeDelta download_time() const { return download_time_; }
 
    private:
     friend class WorkletLoader;
@@ -85,6 +90,8 @@ class WorkletLoaderBase {
     // Used only for metrics; the original size of the uncompiled JS or WASM
     // body.
     size_t original_size_bytes_ = 0;
+    // Used only for metrics; the time required to download.
+    base::TimeDelta download_time_;
   };
 
   using LoadWorkletCallback =
@@ -121,19 +128,22 @@ class WorkletLoaderBase {
       std::unique_ptr<std::string> body,
       absl::optional<std::string> error_msg,
       scoped_refptr<base::SequencedTaskRunner> user_thread_task_runner,
-      base::WeakPtr<WorkletLoaderBase> weak_instance);
+      base::WeakPtr<WorkletLoaderBase> weak_instance,
+      base::TimeDelta download_time);
 
   static Result CompileJs(const std::string& body,
                           scoped_refptr<AuctionV8Helper> v8_helper,
                           const GURL& source_url,
                           AuctionV8Helper::DebugId* debug_id,
-                          absl::optional<std::string>& error_msg);
+                          absl::optional<std::string>& error_msg,
+                          base::TimeDelta download_time);
 
   static Result CompileWasm(const std::string& body,
                             scoped_refptr<AuctionV8Helper> v8_helper,
                             const GURL& source_url,
                             AuctionV8Helper::DebugId* debug_id,
-                            absl::optional<std::string>& error_msg);
+                            absl::optional<std::string>& error_msg,
+                            base::TimeDelta download_time);
 
   void DeliverCallbackOnUserThread(Result result,
                                    absl::optional<std::string> error_msg);
@@ -142,6 +152,7 @@ class WorkletLoaderBase {
   const AuctionDownloader::MimeType mime_type_;
   const scoped_refptr<AuctionV8Helper> v8_helper_;
   const scoped_refptr<AuctionV8Helper::DebugId> debug_id_;
+  const base::TimeTicks start_time_;
 
   std::unique_ptr<AuctionDownloader> auction_downloader_;
   LoadWorkletCallback load_worklet_callback_;
@@ -150,7 +161,7 @@ class WorkletLoaderBase {
 };
 
 // Utility for loading and compiling worklet JavaScript.
-class WorkletLoader : public WorkletLoaderBase {
+class CONTENT_EXPORT WorkletLoader : public WorkletLoaderBase {
  public:
   // Starts loading the resource on construction. Callback will be invoked
   // asynchronously once the data has been fetched and compiled or an error has
@@ -171,7 +182,7 @@ class WorkletLoader : public WorkletLoaderBase {
   static v8::Global<v8::UnboundScript> TakeScript(Result&& result);
 };
 
-class WorkletWasmLoader : public WorkletLoaderBase {
+class CONTENT_EXPORT WorkletWasmLoader : public WorkletLoaderBase {
  public:
   // Starts loading the resource on construction. Callback will be invoked
   // asynchronously once the data has been fetched and compiled or an error has

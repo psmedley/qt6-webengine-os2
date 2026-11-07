@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check_is_test.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
@@ -127,6 +128,8 @@ void BrowserPolicyConnector::ScheduleServiceInitialization(
   // initialized (unit tests).
   if (device_management_service_)
     device_management_service_->ScheduleInitialization(delay_milliseconds);
+  else
+    CHECK_IS_TEST();
 }
 
 bool BrowserPolicyConnector::ProviderHasPolicies(
@@ -141,30 +144,31 @@ bool BrowserPolicyConnector::ProviderHasPolicies(
 }
 
 std::string BrowserPolicyConnector::GetDeviceManagementUrl() const {
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kDeviceManagementUrl) &&
-      IsCommandLineSwitchSupported())
-    return command_line->GetSwitchValueASCII(switches::kDeviceManagementUrl);
-  else
-    return kDefaultDeviceManagementServerUrl;
+  return GetUrlOverride(switches::kDeviceManagementUrl,
+                        kDefaultDeviceManagementServerUrl);
 }
 
 std::string BrowserPolicyConnector::GetRealtimeReportingUrl() const {
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kRealtimeReportingUrl) &&
-      IsCommandLineSwitchSupported())
-    return command_line->GetSwitchValueASCII(switches::kRealtimeReportingUrl);
-  else
-    return kDefaultRealtimeReportingServerUrl;
+  return GetUrlOverride(switches::kRealtimeReportingUrl,
+                        kDefaultRealtimeReportingServerUrl);
 }
 
 std::string BrowserPolicyConnector::GetEncryptedReportingUrl() const {
+  return GetUrlOverride(switches::kEncryptedReportingUrl,
+                        kDefaultEncryptedReportingServerUrl);
+}
+
+std::string BrowserPolicyConnector::GetUrlOverride(
+    const char* flag,
+    const char* default_value) const {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEncryptedReportingUrl) &&
-      IsCommandLineSwitchSupported())
-    return command_line->GetSwitchValueASCII(switches::kEncryptedReportingUrl);
-  else
-    return kDefaultEncryptedReportingServerUrl;
+  if (command_line->HasSwitch(flag)) {
+    if (IsCommandLineSwitchSupported())
+      return command_line->GetSwitchValueASCII(flag);
+    else
+      LOG(WARNING) << flag << " not supported on this channel";
+  }
+  return default_value;
 }
 
 // static

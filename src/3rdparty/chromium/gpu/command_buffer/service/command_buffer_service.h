@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,7 +71,8 @@ union CommandBufferEntry;
 // API to manage the put and get pointers.
 class GPU_EXPORT CommandBufferService : public CommandBufferServiceBase {
  public:
-  static const int kParseCommandsSlice = 20;
+  static const int kParseCommandsSliceSmall = 20;
+  static const int kParseCommandsSliceLarge = 100;
 
   CommandBufferService(CommandBufferServiceClient* client,
                        MemoryTracker* memory_tracker);

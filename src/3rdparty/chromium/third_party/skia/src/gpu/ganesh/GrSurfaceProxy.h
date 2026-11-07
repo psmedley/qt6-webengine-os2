@@ -73,6 +73,7 @@ public:
         GrTextureType fTextureType;
         GrProtected fProtected;
         SkBudgeted fBudgeted;
+        std::string_view fLabel;
     };
 
     struct LazyCallbackResult {
@@ -299,6 +300,8 @@ public:
         return fGpuMemorySize;
     }
 
+    std::string_view getLabel() const { return fLabel; }
+
     enum class RectsMustMatch : bool {
         kNo = false,
         kYes = true
@@ -322,6 +325,7 @@ public:
                                       SkIRect srcRect,
                                       SkBackingFit,
                                       SkBudgeted,
+                                      std::string_view label,
                                       RectsMustMatch = RectsMustMatch::kNo,
                                       sk_sp<GrRenderTask>* outTask = nullptr);
 
@@ -332,6 +336,7 @@ public:
                                       GrMipmapped,
                                       SkBackingFit,
                                       SkBudgeted,
+                                      std::string_view label,
                                       sk_sp<GrRenderTask>* outTask = nullptr);
 
 #if GR_TEST_UTILS

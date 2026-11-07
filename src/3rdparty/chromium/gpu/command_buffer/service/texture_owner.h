@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,6 @@
 #include "ui/gl/android/scoped_java_surface.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
-#include "ui/gl/gl_image.h"
 #include "ui/gl/gl_surface.h"
 
 namespace base {
@@ -53,11 +52,6 @@ class GPU_GLES2_EXPORT TextureOwner
   // whether SurfaceControl is being used or not.
   enum class Mode {
     kAImageReaderInsecure,
-
-    // This mode indicates that the frame is going to be used in multi-threaded
-    // compositor where compositor is running on a different gpu thread and
-    // context than chrome's gpu main thread/context.
-    kAImageReaderInsecureMultithreaded,
     kAImageReaderInsecureSurfaceControl,
     kAImageReaderSecureSurfaceControl,
     kSurfaceTextureInsecure
@@ -66,7 +60,7 @@ class GPU_GLES2_EXPORT TextureOwner
       std::unique_ptr<gles2::AbstractTexture> texture,
       Mode mode,
       scoped_refptr<SharedContextState> context_state,
-      scoped_refptr<RefCountedLock> drdc_lock = nullptr);
+      scoped_refptr<RefCountedLock> drdc_lock);
 
   TextureOwner(const TextureOwner&) = delete;
   TextureOwner& operator=(const TextureOwner&) = delete;
@@ -139,6 +133,7 @@ class GPU_GLES2_EXPORT TextureOwner
   friend class base::DeleteHelper<TextureOwner>;
 
   // Used to restore texture binding to GL_TEXTURE_EXTERNAL_OES target.
+  // TODO(crbug.com/1367187): Fold into gl::ScopedRestoreTexture.
   class ScopedRestoreTextureBinding {
    public:
     ScopedRestoreTextureBinding() {

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -114,17 +114,17 @@ void BackgroundSyncControllerImpl::GetParameterOverrides(
   if (!variations::GetVariationParams(kFieldTrialName, &field_params))
     return;
 
-  if (base::LowerCaseEqualsASCII(field_params[kDisabledParameterName],
-                                 "true")) {
+  if (base::EqualsCaseInsensitiveASCII(field_params[kDisabledParameterName],
+                                       "true")) {
     parameters->disable = true;
   }
 
-  if (base::LowerCaseEqualsASCII(field_params[kKeepBrowserAwakeParameterName],
-                                 "true")) {
+  if (base::EqualsCaseInsensitiveASCII(
+          field_params[kKeepBrowserAwakeParameterName], "true")) {
     parameters->keep_browser_awake_till_events_complete = true;
   }
 
-  if (base::LowerCaseEqualsASCII(
+  if (base::EqualsCaseInsensitiveASCII(
           field_params[kSkipPermissionsCheckParameterName], "true")) {
     parameters->skip_permissions_check_for_testing = true;
   }
@@ -195,8 +195,8 @@ void BackgroundSyncControllerImpl::GetParameterOverrides(
   if (delegate_->ShouldDisableAndroidNetworkDetection()) {
     parameters->rely_on_android_network_detection = false;
   } else if (base::Contains(field_params, kRelyOnAndroidNetworkDetection)) {
-    if (base::LowerCaseEqualsASCII(field_params[kRelyOnAndroidNetworkDetection],
-                                   "true")) {
+    if (base::EqualsCaseInsensitiveASCII(
+            field_params[kRelyOnAndroidNetworkDetection], "true")) {
       parameters->rely_on_android_network_detection = true;
     }
   }

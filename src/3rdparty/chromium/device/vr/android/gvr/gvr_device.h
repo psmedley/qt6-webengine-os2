@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,10 +36,6 @@ class DEVICE_VR_EXPORT GvrDevice : public VRDeviceBase,
   void PauseTracking() override;
   void ResumeTracking() override;
   void ShutdownSession(mojom::XRRuntime::ShutdownSessionCallback) override;
-
-  void OnDisplayConfigurationChanged(
-      JNIEnv* env,
-      const base::android::JavaRef<jobject>& obj);
 
  private:
   void OnStartPresentResult(mojom::XRSessionPtr session);

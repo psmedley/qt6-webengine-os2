@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,10 @@
 #include "components/reputation/core/safety_tips.pb.h"
 
 namespace reputation {
+
+// Retrieve any existing Safety Tips config proto if set, or create a new one
+// otherwise.
+std::unique_ptr<SafetyTipsConfig> GetOrCreateSafetyTipsConfig();
 
 // Initialize component configuration. Necessary to enable Safety Tips for
 // testing, as no heuristics trigger if the allowlist is inaccessible.

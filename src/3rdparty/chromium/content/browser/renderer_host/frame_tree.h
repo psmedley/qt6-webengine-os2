@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,12 +19,14 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/safe_ref.h"
 #include "base/memory/weak_ptr.h"
+#include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/renderer_host/navigator.h"
 #include "content/browser/renderer_host/navigator_delegate.h"
 #include "content/browser/renderer_host/render_frame_host_manager.h"
 #include "content/common/content_export.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/service_manager/public/mojom/interface_provider.mojom.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/frame/frame_owner_element_type.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-forward.h"
@@ -67,9 +69,14 @@ class CONTENT_EXPORT FrameTree {
  public:
   class NodeRange;
 
-  class CONTENT_EXPORT NodeIterator
-      : public std::iterator<std::forward_iterator_tag, FrameTreeNode*> {
+  class CONTENT_EXPORT NodeIterator {
    public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = FrameTreeNode*;
+    using difference_type = std::ptrdiff_t;
+    using pointer = FrameTreeNode**;
+    using reference = FrameTreeNode*&;
+
     NodeIterator(const NodeIterator& other);
     ~NodeIterator();
 
@@ -88,17 +95,19 @@ class CONTENT_EXPORT FrameTree {
 
     NodeIterator(const std::vector<FrameTreeNode*>& starting_nodes,
                  const FrameTreeNode* root_of_subtree_to_skip,
-                 bool should_descend_into_inner_trees);
+                 bool should_descend_into_inner_trees,
+                 bool include_delegate_nodes_for_inner_frame_trees);
 
     void AdvanceNode();
 
     // `current_node_` and `root_of_subtree_to_skip_` are not a raw_ptr<...> for
     // performance reasons (based on analysis of sampling profiler data and
     // tab_search:top100:2020).
-    FrameTreeNode* current_node_;
-    const FrameTreeNode* const root_of_subtree_to_skip_;
+    RAW_PTR_EXCLUSION FrameTreeNode* current_node_;
+    RAW_PTR_EXCLUSION const FrameTreeNode* const root_of_subtree_to_skip_;
 
     const bool should_descend_into_inner_trees_;
+    const bool include_delegate_nodes_for_inner_frame_trees_;
     base::circular_deque<FrameTreeNode*> queue_;
   };
 
@@ -115,11 +124,13 @@ class CONTENT_EXPORT FrameTree {
 
     NodeRange(const std::vector<FrameTreeNode*>& starting_nodes,
               const FrameTreeNode* root_of_subtree_to_skip,
-              bool should_descend_into_inner_trees);
+              bool should_descend_into_inner_trees,
+              bool include_delegate_nodes_for_inner_frame_trees);
 
     const std::vector<FrameTreeNode*> starting_nodes_;
     const raw_ptr<const FrameTreeNode> root_of_subtree_to_skip_;
     const bool should_descend_into_inner_trees_;
+    const bool include_delegate_nodes_for_inner_frame_trees_;
   };
 
   class CONTENT_EXPORT Delegate {
@@ -138,13 +149,11 @@ class CONTENT_EXPORT FrameTree {
     // indicator for loading.
     virtual void DidStopLoading() = 0;
 
-    // The load progress was changed.
-    virtual void DidChangeLoadProgress() = 0;
-
     // Returns the delegate's top loading tree, which should be used to infer
-    // the values of loading-related states. The state of IsLoading() is a
-    // WebContents level concept and LoadingTree would return the frame tree to
-    // which loading events should be directed.
+    // the values of loading-related states. The state of
+    // IsLoadingIncludingInnerFrameTrees() is a WebContents level concept and
+    // LoadingTree would return the frame tree to which loading events should be
+    // directed.
     //
     // TODO(crbug.com/1261928): Remove this method and directly rely on
     // GetOutermostMainFrame() once portals and guest views are migrated to
@@ -196,6 +205,8 @@ class CONTENT_EXPORT FrameTree {
 
   // A set of delegates are remembered here so that we can create
   // RenderFrameHostManagers.
+  // `dev_tools_frame_token` is the devtools token for the root `FrameTreeNode`
+  // of this new `FrameTree`.
   FrameTree(BrowserContext* browser_context,
             Delegate* delegate,
             NavigationControllerDelegate* navigation_controller_delegate,
@@ -205,7 +216,8 @@ class CONTENT_EXPORT FrameTree {
             RenderWidgetHostDelegate* render_widget_delegate,
             RenderFrameHostManager::Delegate* manager_delegate,
             PageDelegate* page_delegate,
-            Type type);
+            Type type,
+            const base::UnguessableToken& devtools_frame_token);
 
   FrameTree(const FrameTree&) = delete;
   FrameTree& operator=(const FrameTree&) = delete;
@@ -229,7 +241,8 @@ class CONTENT_EXPORT FrameTree {
 
   Type type() const { return type_; }
 
-  FrameTreeNode* root() const { return root_; }
+  FrameTreeNode* root() { return &root_; }
+  const FrameTreeNode* root() const { return &root_; }
 
   bool is_prerendering() const { return type_ == FrameTree::Type::kPrerender; }
 
@@ -298,8 +311,11 @@ class CONTENT_EXPORT FrameTree {
   // Returns a range to iterate over all FrameTreeNodes in a subtree, starting
   // from, but not including |parent|, as well as any FrameTreeNodes of inner
   // frame trees. Note that this includes inner frame trees of inner WebContents
-  // as well.
-  static NodeRange SubtreeAndInnerTreeNodes(RenderFrameHostImpl* parent);
+  // as well. If `include_delegate_nodes_for_inner_frame_trees` is true the
+  // delegate RenderFrameHost owning the inner frame tree will also be returned.
+  static NodeRange SubtreeAndInnerTreeNodes(
+      RenderFrameHostImpl* parent,
+      bool include_delegate_nodes_for_inner_frame_trees = false);
 
   // Adds a new child frame to the frame tree. |process_id| is required to
   // disambiguate |new_routing_id|, and it must match the process of the
@@ -324,12 +340,15 @@ class CONTENT_EXPORT FrameTree {
       mojo::PendingReceiver<blink::mojom::BrowserInterfaceBroker>
           browser_interface_broker_receiver,
       blink::mojom::PolicyContainerBindParamsPtr policy_container_bind_params,
+      mojo::PendingAssociatedReceiver<blink::mojom::AssociatedInterfaceProvider>
+          associated_interface_provider_receiver,
       blink::mojom::TreeScopeType scope,
       const std::string& frame_name,
       const std::string& frame_unique_name,
       bool is_created_by_script,
       const blink::LocalFrameToken& frame_token,
       const base::UnguessableToken& devtools_frame_token,
+      const blink::DocumentToken& document_token,
       const blink::FramePolicy& frame_policy,
       const blink::mojom::FrameOwnerProperties& frame_owner_properties,
       bool was_discarded,
@@ -376,7 +395,6 @@ class CONTENT_EXPORT FrameTree {
   scoped_refptr<RenderViewHostImpl> CreateRenderViewHost(
       SiteInstance* site_instance,
       int32_t main_frame_routing_id,
-      bool swapped_out,
       bool renderer_initiated_creation,
       scoped_refptr<BrowsingContextState> main_browsing_context_state);
 
@@ -430,10 +448,7 @@ class CONTENT_EXPORT FrameTree {
 
   // Returns true if at least one of the nodes in this frame tree or nodes in
   // any inner frame tree of the same WebContents is loading.
-  //
-  // TODO(crbug.com/1293846): Rename to IsLoadingIncludingInnerFrameTrees() to
-  // adapt to new logic.
-  bool IsLoading() const;
+  bool IsLoadingIncludingInnerFrameTrees() const;
 
   // Set page-level focus in all SiteInstances involved in rendering
   // this FrameTree, not including the current main frame's
@@ -445,11 +460,14 @@ class CONTENT_EXPORT FrameTree {
   // identified by |group|.
   void SetPageFocus(SiteInstanceGroup* group, bool is_focused);
 
-  // Walks the current frame tree and registers any origins matching |origin|,
-  // either the last committed origin of a RenderFrameHost or the origin
-  // associated with a NavigationRequest that has been assigned to a
-  // SiteInstance, as not-opted-in for origin isolation.
-  void RegisterExistingOriginToPreventOptInIsolation(
+  // Walks the current frame tree and registers any origins matching
+  // `previously_visited_origin`, either the last committed origin of a
+  // RenderFrameHost or the origin associated with a NavigationRequest that has
+  // been assigned to a SiteInstance, as having the default origin isolation
+  // state. This is only necessary when `previously_visited_origin` is seen with
+  // an OriginAgentCluster header explicitly requesting something other than the
+  // default.
+  void RegisterExistingOriginAsHavingDefaultIsolation(
       const url::Origin& previously_visited_origin,
       NavigationRequest* navigation_request_to_exclude);
 
@@ -494,11 +512,29 @@ class CONTENT_EXPORT FrameTree {
   // each inner FrameTree is attached.
   void FocusOuterFrameTrees();
 
+  absl::optional<blink::features::FencedFramesImplementationType>
+  FencedFramesImplementationType() const {
+    return fenced_frames_impl_;
+  }
+
+  bool IsFencedFramesMPArchBased() const {
+    return fenced_frames_impl_.has_value() &&
+           fenced_frames_impl_.value() ==
+               blink::features::FencedFramesImplementationType::kMPArch;
+  }
+  bool IsFencedFramesShadowDOMBased() const {
+    return fenced_frames_impl_.has_value() &&
+           fenced_frames_impl_.value() ==
+               blink::features::FencedFramesImplementationType::kShadowDOM;
+  }
+
  private:
   friend class FrameTreeTest;
   FRIEND_TEST_ALL_PREFIXES(RenderFrameHostImplBrowserTest, RemoveFocusedFrame);
   FRIEND_TEST_ALL_PREFIXES(PortalBrowserTest, NodesForIsLoading);
-  FRIEND_TEST_ALL_PREFIXES(FencedFrameBrowserTest, NodesForIsLoading);
+  FRIEND_TEST_ALL_PREFIXES(FencedFrameMPArchBrowserTest, NodesForIsLoading);
+  FRIEND_TEST_ALL_PREFIXES(RenderFrameHostManagerTest,
+                           CreateRenderViewAfterProcessKillAndClosedProxy);
 
   // Returns a range to iterate over all FrameTreeNodes in the frame tree in
   // breadth-first traversal order, skipping the subtree rooted at
@@ -536,24 +572,21 @@ class CONTENT_EXPORT FrameTree {
   // more RenderFrameHosts or RenderFrameProxyHosts using it.
   RenderViewHostMap render_view_host_map_;
 
-  // This is an owned ptr to the root FrameTreeNode, which never changes over
-  // the lifetime of the FrameTree. It is not a scoped_ptr because we need the
-  // pointer to remain valid even while the FrameTreeNode is being destroyed,
-  // since it's common for a node to test whether it's the root node.
-  raw_ptr<FrameTreeNode> root_;
+  // Indicates type of frame tree.
+  const Type type_;
 
   int focused_frame_tree_node_id_;
 
   // Overall load progress.
   double load_progress_;
 
+  absl::optional<blink::features::FencedFramesImplementationType>
+      fenced_frames_impl_;
+
   // Whether the initial empty page has been accessed by another page, making it
   // unsafe to show the pending URL. Usually false unless another window tries
   // to modify the blank page.  Always false after the first commit.
   bool has_accessed_initial_main_document_ = false;
-
-  // Indicates type of frame tree.
-  const Type type_;
 
   bool is_being_destroyed_ = false;
 
@@ -561,6 +594,13 @@ class CONTENT_EXPORT FrameTree {
   // Whether Shutdown() was called.
   bool was_shut_down_ = false;
 #endif
+
+  // The root FrameTreeNode.
+  //
+  // Note: It is common for a node to test whether it's the root node, via the
+  // `root()` method, even while `root_` is running its destructor.
+  // For that reason, we want to destroy |root_| before any other fields.
+  FrameTreeNode root_;
 
   base::WeakPtrFactory<FrameTree> weak_ptr_factory_{this};
 };

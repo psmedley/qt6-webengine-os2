@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,9 @@
 #include "base/logging.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/mock_callback.h"
-#include "base/token.h"
 #include "content/public/test/browser_task_environment.h"
 #include "media/base/video_codecs.h"
 #include "media/cdm/cdm_capability.h"
-#include "media/cdm/cdm_type.h"
 #include "mojo/public/cpp/bindings/equals_traits.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"

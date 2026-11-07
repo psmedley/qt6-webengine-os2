@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,9 @@
 #include "base/containers/flat_map.h"
 #include "components/autofill_assistant/browser/cud_condition.pb.h"
 #include "components/autofill_assistant/browser/metrics.h"
+#include "components/autofill_assistant/browser/public/password_change/website_login_manager.h"
 #include "components/autofill_assistant/browser/service.pb.h"
 #include "components/autofill_assistant/browser/user_action.h"
-#include "components/autofill_assistant/browser/website_login_manager.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
@@ -61,7 +61,13 @@ enum UserDataEventType {
   ENTRY_CREATED
 };
 
-enum UserDataEventField { CONTACT_EVENT, CREDIT_CARD_EVENT, SHIPPING_EVENT };
+enum class UserDataEventField {
+  NONE,
+  CONTACT_EVENT,
+  PHONE_NUMBER_EVENT,
+  CREDIT_CARD_EVENT,
+  SHIPPING_EVENT
+};
 
 // Represents a concrete login choice in the UI, e.g., 'Guest checkout' or
 // a particular Chrome PWM login account.
@@ -123,6 +129,7 @@ struct Contact {
 
   absl::optional<std::string> identifier;
   std::unique_ptr<autofill::AutofillProfile> profile;
+  bool can_edit = true;
 };
 
 // Struct for holding a phone number. This is a wrapper around AutofillProfile
@@ -134,6 +141,7 @@ struct PhoneNumber {
 
   absl::optional<std::string> identifier;
   std::unique_ptr<autofill::AutofillProfile> profile;
+  bool can_edit = true;
 };
 
 // Struct for holding an address. This is a wrapper around AutofillProfile to
@@ -166,6 +174,9 @@ struct UserDataMetrics {
       Metrics::CollectUserDataResult::FAILURE;
 
   Metrics::UserDataSource user_data_source = Metrics::UserDataSource::UNKNOWN;
+
+  int number_of_profiles_deduplicated_for_contact = 0;
+  int number_of_profiles_deduplicated_for_address = 0;
 
   // Selection states.
   Metrics::UserDataSelectionState contact_selection_state =
@@ -220,6 +231,9 @@ class UserData {
       available_payment_instruments_;
 
   absl::optional<WebsiteLoginManager::Login> selected_login_;
+
+  std::vector<std::unique_ptr<Contact>> transient_contacts_;
+  std::vector<std::unique_ptr<PhoneNumber>> transient_phone_numbers_;
 
   // Return true if address has been selected, otherwise return false.
   // Note that selected_address() might return nullptr when
@@ -313,8 +327,7 @@ struct CollectUserDataOptions {
   std::vector<RequiredDataPiece> required_billing_address_data_pieces;
 
   bool should_store_data_changes = false;
-  bool can_edit_contacts = true;
-  bool use_gms_core_edit_dialogs = false;
+  bool use_alternative_edit_dialogs = false;
 
   absl::optional<std::string> add_payment_instrument_action_token;
   absl::optional<std::string> add_address_token;
@@ -353,7 +366,7 @@ struct CollectUserDataOptions {
       additional_actions_callback;
   base::OnceCallback<void(int, UserData*, const UserModel*)>
       terms_link_callback;
-  base::OnceCallback<void(UserData*)> reload_data_callback;
+  base::OnceCallback<void(UserDataEventField, UserData*)> reload_data_callback;
   // Called whenever there is a change to the selected user data.
   base::RepeatingCallback<void(UserDataEventField, UserDataEventType)>
       selected_user_data_changed_callback;

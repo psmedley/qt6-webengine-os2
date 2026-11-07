@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -237,7 +237,7 @@ TEST_F(WebApkIconHasherTest, SVGImage) {
                       std::vector<gfx::Size>{gfx::Size(10, 10)}));
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_EQ("16586085245996049349", runner.icon().hash);
+  EXPECT_EQ("12895188166704127516", runner.icon().hash);
   EXPECT_FALSE(runner.icon().unsafe_data.empty());
 }
 

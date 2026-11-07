@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,7 @@
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_reuse_detector.h"
+#include "components/password_manager/core/browser/password_store_backend_error.h"
 #include "components/password_manager/core/browser/webauthn_credentials_delegate.h"
 #include "components/profile_metrics/browser_profile_type.h"
 #include "components/safe_browsing/buildflags.h"
@@ -99,6 +100,8 @@ enum class SyncState {
   kAccountPasswordsActiveNormalEncryption
 };
 
+enum class ErrorMessageFlowType { kSaveFlow, kFillFlow };
+
 // An abstraction of operations that depend on the embedders (e.g. Chrome)
 // environment. PasswordManagerClient is instantiated once per WebContents.
 // Main frame w.r.t WebContents refers to the primary main frame so usages of
@@ -133,6 +136,9 @@ class PasswordManagerClient {
   // Checks if manual filling fallback is enabled for the page that has |url|
   // address.
   virtual bool IsFillingFallbackEnabled(const GURL& url) const;
+
+  // Checks if the auto sign-in functionality is enabled.
+  virtual bool IsAutoSignInEnabled() const;
 
   // Informs the embedder of a password form that can be saved or updated in
   // password store if the user allows it. The embedder is not required to
@@ -186,6 +192,14 @@ class PasswordManagerClient {
       const url::Origin& origin,
       CredentialsCallback callback) = 0;
 
+#if BUILDFLAG(IS_ANDROID)
+  // Shows the error message that suggests the user to sign in to "save" or
+  // "use" passwords, depending on the |flow_type|. If the |error_type|
+  // indicates that signing in again won't help, the message won't be shown.
+  virtual void ShowPasswordManagerErrorMessage(
+      ErrorMessageFlowType flow_type,
+      password_manager::PasswordStoreBackendErrorType error_type);
+
   // Instructs the client to show the Touch To Fill UI.
   virtual void ShowTouchToFill(
       PasswordManagerDriver* driver,
@@ -194,6 +208,7 @@ class PasswordManagerClient {
   // Informs `PasswordReuseDetectionManager` about reused passwords selected
   // from the AllPasswordsBottomSheet.
   virtual void OnPasswordSelected(const std::u16string& text);
+#endif
 
   // Returns a pointer to a BiometricAuthenticator. Might be null if
   // BiometricAuthentication is not available for a given platform.
@@ -264,11 +279,13 @@ class PasswordManagerClient {
   // form into which a password was filled. |federated_matches| are the stored
   // federated matches relevant to the filled form, this argument may be null.
   // They are never filled, but might be needed in the UI, for example. Default
-  // implementation is a noop.
+  // implementation is a noop. |was_autofilled_on_pageload| contains information
+  // if password form was autofilled on pageload.
   virtual void PasswordWasAutofilled(
       const std::vector<const PasswordForm*>& best_matches,
       const url::Origin& origin,
-      const std::vector<const PasswordForm*>* federated_matches);
+      const std::vector<const PasswordForm*>* federated_matches,
+      bool was_autofilled_on_pageload);
 
   // Sends username/password from |preferred_match| for filling in the http auth
   // prompt.
@@ -294,6 +311,9 @@ class PasswordManagerClient {
 
   // Gets prefs associated with this embedder.
   virtual PrefService* GetPrefs() const = 0;
+
+  // Gets local state prefs.
+  virtual PrefService* GetLocalStatePrefs() const = 0;
 
   // Gets the sync service associated with this client.
   virtual const syncer::SyncService* GetSyncService() const = 0;
@@ -366,7 +386,7 @@ class PasswordManagerClient {
   virtual const CredentialsFilter* GetStoreResultFilter() const = 0;
 
   // Returns a LogManager instance.
-  virtual const autofill::LogManager* GetLogManager() const;
+  virtual autofill::LogManager* GetLogManager();
 
   // Record that we saw a password field on this page.
   virtual void AnnotateNavigationEntry(bool has_password_field);
@@ -392,12 +412,16 @@ class PasswordManagerClient {
   // warning dialog if it looks like the page is phishy.
   // The |username| is the user name of the reused password. The user name
   // can be an email or a username for a non-GAIA or saved-password reuse. No
-  // validation has been done on it.
+  // validation has been done on it. The |domain| is the origin of the webpage
+  // where password reuse happens. The |reused_password_hash| is the hash of the
+  // reused password.
   virtual void CheckProtectedPasswordEntry(
       metrics_util::PasswordType reused_password_type,
       const std::string& username,
       const std::vector<MatchingReusedCredential>& matching_reused_credentials,
-      bool password_field_exists) = 0;
+      bool password_field_exists,
+      uint64_t reused_password_hash,
+      const std::string& domain) = 0;
 
   // Records a Chrome Sync event that GAIA password reuse was detected.
   virtual void LogPasswordReuseDetectedEvent() = 0;
@@ -467,11 +491,15 @@ class PasswordManagerClient {
   // Returns if the Autofill Assistant UI is shown.
   virtual bool IsAutofillAssistantUIVisible() const = 0;
 
-  // Returns the WebAuthnCredentialsDelegate, if available.
-  virtual WebAuthnCredentialsDelegate* GetWebAuthnCredentialsDelegate();
+  // Returns the WebAuthnCredentialsDelegate for the given driver, if available.
+  virtual WebAuthnCredentialsDelegate* GetWebAuthnCredentialsDelegateForDriver(
+      PasswordManagerDriver* driver);
 
   // Returns the Chrome channel for the installation.
   virtual version_info::Channel GetChannel() const;
+
+  // Refreshes password manager settings stored in prefs.
+  virtual void RefreshPasswordManagerSettingsIfNeeded() const;
 };
 
 }  // namespace password_manager

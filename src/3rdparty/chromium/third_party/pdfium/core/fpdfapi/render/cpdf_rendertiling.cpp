@@ -37,7 +37,8 @@ RetainPtr<CFX_DIBitmap> DrawPatternBitmap(
     return nullptr;
   }
   CFX_DefaultRenderDevice bitmap_device;
-  bitmap_device.Attach(pBitmap, false, nullptr, false);
+  bitmap_device.AttachWithBackdropAndGroupKnockout(
+      pBitmap, /*pBackdropBitmap=*/nullptr, /*bGroupKnockout=*/true);
   pBitmap->Clear(0);
   CFX_FloatRect cell_bbox =
       pPattern->pattern_to_form().TransformRect(pPattern->bbox());
@@ -58,8 +59,10 @@ RetainPtr<CFX_DIBitmap> DrawPatternBitmap(
   context.AppendLayer(pPatternForm, mtPattern2Bitmap);
   context.Render(&bitmap_device, nullptr, &options, nullptr);
 #if defined(_SKIA_SUPPORT_PATHS_)
-  bitmap_device.Flush(true);
-  pBitmap->UnPreMultiply();
+  if (CFX_DefaultRenderDevice::SkiaPathsIsDefaultRenderer()) {
+    bitmap_device.Flush(true);
+    pBitmap->UnPreMultiply();
+  }
 #endif
   return pBitmap;
 }
@@ -120,8 +123,8 @@ RetainPtr<CFX_DIBitmap> CPDF_RenderTiling::Draw(
     if (!pPattern->colored())
       pStates = CPDF_RenderStatus::CloneObjStates(pPageObj, bStroke);
 
-    const CPDF_Dictionary* pFormDict = pPatternForm->GetDict();
-    const CPDF_Dictionary* pFormResource = pFormDict->GetDictFor("Resources");
+    RetainPtr<const CPDF_Dictionary> pFormResource =
+        pPatternForm->GetDict()->GetDictFor("Resources");
     for (int col = min_col; col <= max_col; col++) {
       for (int row = min_row; row <= max_row; row++) {
         CFX_PointF original = mtPattern2Device.Transform(

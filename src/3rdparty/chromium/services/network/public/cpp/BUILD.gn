@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -31,12 +31,12 @@ jumbo_component("cpp") {
   output_name = "network_cpp"
 
   sources = [
-    "bfcache_opt_in_parser.cc",
-    "bfcache_opt_in_parser.h",
     "client_hints.cc",
     "client_hints.h",
     "constants.cc",
     "constants.h",
+    "content_language_parser.cc",
+    "content_language_parser.h",
     "content_security_policy/content_security_policy.cc",
     "content_security_policy/content_security_policy.h",
     "content_security_policy/csp_context.cc",
@@ -130,6 +130,8 @@ jumbo_component("cpp") {
     "trust_token_operation_authorization.h",
     "url_util.cc",
     "url_util.h",
+    "variants_header_parser.cc",
+    "variants_header_parser.h",
     "weak_wrapper_shared_url_loader_factory.cc",
     "weak_wrapper_shared_url_loader_factory.h",
     "web_sandbox_flags.cc",
@@ -186,6 +188,12 @@ component("ip_address_mojom_support") {
   sources = [
     "address_list_mojom_traits.cc",
     "address_list_mojom_traits.h",
+    "alternate_protocol_usage_mojom_traits.cc",
+    "alternate_protocol_usage_mojom_traits.h",
+    "connection_endpoint_metadata_mojom_traits.cc",
+    "connection_endpoint_metadata_mojom_traits.h",
+    "host_resolver_endpoint_result_mojom_traits.cc",
+    "host_resolver_endpoint_result_mojom_traits.h",
     "ip_address_mojom_traits.cc",
     "ip_address_mojom_traits.h",
     "ip_endpoint_mojom_traits.cc",
@@ -205,6 +213,7 @@ component("cookies_mojom_support") {
   ]
   deps = [
     ":crash_keys",
+    ":first_party_sets_mojom_support",
     ":schemeful_site_mojom_support",
     "//net",
     "//services/network/public/mojom:cookies_mojom_shared",
@@ -281,6 +290,21 @@ component("schemeful_site_mojom_support") {
   defines = [ "IS_NETWORK_CPP_SCHEMEFUL_IMPL" ]
 }
 
+# This component is separate from cpp_base as it is a dependency of
+# //services/network/public/mojom:cookies_mojom.
+jumbo_component("first_party_sets_mojom_support") {
+  sources = [
+    "first_party_sets_mojom_traits.cc",
+    "first_party_sets_mojom_traits.h",
+  ]
+  deps = [
+    ":schemeful_site_mojom_support",
+    "//net",
+    "//services/network/public/mojom:mojom_first_party_sets_shared",
+  ]
+  defines = [ "IS_FIRST_PARTY_SETS_MOJOM_TRAITS_IMPL" ]
+}
+
 jumbo_component("cpp_base") {
   output_name = "network_cpp_base"
 
@@ -303,6 +327,8 @@ jumbo_component("cpp_base") {
     "isolation_info_mojom_traits.h",
     "load_timing_info_mojom_traits.cc",
     "load_timing_info_mojom_traits.h",
+    "network_anonymization_key_mojom_traits.cc",
+    "network_anonymization_key_mojom_traits.h",
     "network_interface_mojom_traits.cc",
     "network_interface_mojom_traits.h",
     "network_ipc_param_traits.cc",
@@ -311,14 +337,14 @@ jumbo_component("cpp_base") {
     "network_isolation_key_mojom_traits.h",
     "optional_trust_token_params.cc",
     "optional_trust_token_params.h",
-    "origin_policy.cc",
-    "origin_policy.h",
     "resource_request.cc",
     "resource_request.h",
     "resource_request_body.cc",
     "resource_request_body.h",
     "transferable_directory.cc",
     "transferable_directory.h",
+    "transferable_socket.cc",
+    "transferable_socket.h",
     "trust_token_parameterization.h",
     "url_loader_completion_status.cc",
     "url_loader_completion_status.h",
@@ -353,11 +379,13 @@ jumbo_component("cpp_base") {
   ]
   deps = [
     ":buildflags",
+    ":first_party_sets_mojom_support",
     "//base",
     "//ipc",
     "//mojo/public/mojom/base",
     "//net",
     "//services/network/public/mojom:cookies_mojom",
+    "//services/network/public/mojom:mojom_first_party_sets",
     "//services/network/public/mojom:url_loader_base",
   ]
   defines = [ "IS_NETWORK_CPP_BASE_IMPL" ]
@@ -411,8 +439,8 @@ source_set("tests") {
   testonly = true
 
   sources = [
-    "bfcache_opt_in_parser_unittest.cc",
     "client_hints_unittest.cc",
+    "content_language_parser_unittest.cc",
     "content_security_policy/content_security_policy_unittest.cc",
     "content_security_policy/csp_context_unittest.cc",
     "content_security_policy/csp_source_list_unittest.cc",
@@ -434,6 +462,7 @@ source_set("tests") {
     "digitally_signed_mojom_traits_unittest.cc",
     "empty_url_loader_client_unittest.cc",
     "file_enumeration_entry_mojom_traits_unittest.cc",
+    "first_party_sets_mojom_traits_unittest.cc",
     "header_util_unittest.cc",
     "host_resolver_mojom_traits_unittest.cc",
     "initiator_lock_compatibility_unittest.cc",
@@ -445,6 +474,7 @@ source_set("tests") {
     "mutable_network_traffic_annotation_tag_mojom_traits_unittest.cc",
     "mutable_partial_network_traffic_annotation_tag_mojom_traits_unittest.cc",
     "net_log_mojom_traits_unittest.cc",
+    "network_anonymization_key_mojom_traits_unittest.cc",
     "network_connection_tracker_unittest.cc",
     "network_isolation_key_mojom_traits_unittest.cc",
     "network_mojom_traits_unittest.cc",
@@ -458,8 +488,10 @@ source_set("tests") {
     "supports_loading_mode/supports_loading_mode_parser_unittest.cc",
     "timing_allow_origin_parser_unittest.cc",
     "transferable_directory_unittest.cc",
+    "transferable_socket_unittest.cc",
     "url_loader_completion_status_mojom_traits_unittest.cc",
     "url_request_mojom_traits_unittest.cc",
+    "variants_header_parser_unittest.cc",
     "web_sandbox_flags_unittests.cc",
     "x_frame_options_parser_unittest.cc",
   ]
@@ -498,4 +530,13 @@ fuzzer_test("xfo_fuzzer") {
 fuzzer_test("cors_fuzzer") {
   sources = [ "cors/cors_fuzzer.cc" ]
   deps = [ ":cpp" ]
+}
+
+fuzzer_test("client_hints_fuzzer") {
+  sources = [ "client_hints_fuzzer.cc" ]
+  deps = [
+    ":cpp",
+    "//base",
+    "//base:i18n",
+  ]
 }

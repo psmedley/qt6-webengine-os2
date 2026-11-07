@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,8 @@ class ExtensionsGuestViewManagerDelegate
                      int instance_id) override;
   bool IsGuestAvailableToContext(guest_view::GuestViewBase* guest) override;
   bool IsOwnedByExtension(guest_view::GuestViewBase* guest) override;
-  void RegisterAdditionalGuestViewTypes() override;
+  void RegisterAdditionalGuestViewTypes(
+      guest_view::GuestViewManager* manager) override;
 
  private:
   const raw_ptr<content::BrowserContext> context_;

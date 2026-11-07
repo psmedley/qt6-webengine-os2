@@ -48,23 +48,23 @@
 #include "src/core/SkClipStack.h"
 #include "src/core/SkDevice.h"
 #include "src/core/SkFontPriv.h"
-#include "src/core/SkGlyphRun.h"
 #include "src/core/SkTLazy.h"
 #include "src/image/SkImage_Base.h"
 #include "src/shaders/SkShaderBase.h"
+#include "src/text/GlyphRun.h"
 #include "src/xml/SkXMLWriter.h"
 
-#include <string>
 #include <memory>
+#include <string>
 #include <utility>
 
+#if SK_SUPPORT_GPU
+class SkMesh;
+#endif
 class SkBlender;
 class SkVertices;
 struct SkSamplingOptions;
 
-#ifdef SK_ENABLE_SKSL
-#include "include/core/SkCustomMesh.h"
-#endif
 #ifdef SK_CODEC_DECODES_JPEG
 #include "src/codec/SkJpegCodec.h"
 #endif
@@ -130,10 +130,10 @@ static const char* cap_map[]  = {
     "round", // kRound_Cap
     "square" // kSquare_Cap
 };
-static_assert(SK_ARRAY_COUNT(cap_map) == SkPaint::kCapCount, "missing_cap_map_entry");
+static_assert(std::size(cap_map) == SkPaint::kCapCount, "missing_cap_map_entry");
 
 static const char* svg_cap(SkPaint::Cap cap) {
-    SkASSERT(cap < SK_ARRAY_COUNT(cap_map));
+    SkASSERT(static_cast<size_t>(cap) < std::size(cap_map));
     return cap_map[cap];
 }
 
@@ -143,10 +143,10 @@ static const char* join_map[] = {
     "round", // kRound_Join
     "bevel"  // kBevel_Join
 };
-static_assert(SK_ARRAY_COUNT(join_map) == SkPaint::kJoinCount, "missing_join_map_entry");
+static_assert(std::size(join_map) == SkPaint::kJoinCount, "missing_join_map_entry");
 
 static const char* svg_join(SkPaint::Join join) {
-    SkASSERT(join < SK_ARRAY_COUNT(join_map));
+    SkASSERT(join < std::size(join_map));
     return join_map[join];
 }
 
@@ -208,7 +208,7 @@ bool RequiresViewportReset(const SkPaint& paint) {
   return false;
 }
 
-void AddPath(const SkGlyphRun& glyphRun, const SkPoint& offset, SkPath* path) {
+void AddPath(const sktext::GlyphRun& glyphRun, const SkPoint& offset, SkPath* path) {
     struct Rec {
         SkPath*        fPath;
         const SkPoint  fOffset;
@@ -346,8 +346,9 @@ private:
 
     void addPaint(const SkPaint& paint, const Resources& resources);
 
-
-    SkString addLinearGradientDef(const SkShader::GradientInfo& info, const SkShader* shader);
+    SkString addLinearGradientDef(const SkShaderBase::GradientInfo& info,
+                                  const SkShader* shader,
+                                  const SkMatrix& localMatrix);
 
     SkXMLWriter*               fWriter;
     ResourceBucket*            fResourceBucket;
@@ -435,12 +436,11 @@ Resources SkSVGDevice::AutoElement::addResources(const MxCp& mc, const SkPaint& 
 void SkSVGDevice::AutoElement::addGradientShaderResources(const SkShader* shader,
                                                           const SkPaint& paint,
                                                           Resources* resources) {
-    SkShader::GradientInfo grInfo;
-    memset(&grInfo, 0, sizeof(grInfo));
-    const auto gradient_type = shader->asAGradient(&grInfo);
+    SkShaderBase::GradientInfo grInfo;
+    const auto gradient_type = as_SB(shader)->asGradient(&grInfo);
 
-    if (gradient_type != SkShader::kColor_GradientType &&
-        gradient_type != SkShader::kLinear_GradientType) {
+    if (gradient_type != SkShaderBase::GradientType::kColor &&
+        gradient_type != SkShaderBase::GradientType::kLinear) {
         // TODO: other gradient support
         return;
     }
@@ -450,15 +450,16 @@ void SkSVGDevice::AutoElement::addGradientShaderResources(const SkShader* shader
     grInfo.fColors = grColors.get();
     grInfo.fColorOffsets = grOffsets.get();
 
-    // One more call to get the actual colors/offsets.
-    shader->asAGradient(&grInfo);
+    // One more call to get the actual colors/offsets and local matrix.
+    SkMatrix localMatrix;
+    as_SB(shader)->asGradient(&grInfo, &localMatrix);
     SkASSERT(grInfo.fColorCount <= grColors.count());
     SkASSERT(grInfo.fColorCount <= grOffsets.count());
 
     SkASSERT(grColors.size() > 0);
-    resources->fPaintServer = gradient_type == SkShader::kColor_GradientType
+    resources->fPaintServer = gradient_type == SkShaderBase::GradientType::kColor
             ? svg_color(grColors[0])
-            : SkStringPrintf("url(#%s)", addLinearGradientDef(grInfo, shader).c_str());
+            : SkStringPrintf("url(#%s)", addLinearGradientDef(grInfo, shader, localMatrix).c_str());
 }
 
 void SkSVGDevice::AutoElement::addColorFilterResources(const SkColorFilter& cf,
@@ -601,7 +602,7 @@ void SkSVGDevice::AutoElement::addShaderResources(const SkPaint& paint, Resource
     const SkShader* shader = paint.getShader();
     SkASSERT(shader);
 
-    if (shader->asAGradient(nullptr) != SkShader::kNone_GradientType) {
+    if (as_SB(shader)->asGradient() != SkShaderBase::GradientType::kNone) {
         this->addGradientShaderResources(shader, paint, resources);
     } else if (shader->isAImage()) {
         this->addImageShaderResources(shader, paint, resources);
@@ -609,8 +610,9 @@ void SkSVGDevice::AutoElement::addShaderResources(const SkPaint& paint, Resource
     // TODO: other shader types?
 }
 
-SkString SkSVGDevice::AutoElement::addLinearGradientDef(const SkShader::GradientInfo& info,
-                                                        const SkShader* shader) {
+SkString SkSVGDevice::AutoElement::addLinearGradientDef(const SkShaderBase::GradientInfo& info,
+                                                        const SkShader* shader,
+                                                        const SkMatrix& localMatrix) {
     SkASSERT(fResourceBucket);
     SkString id = fResourceBucket->addLinearGradient();
 
@@ -624,8 +626,8 @@ SkString SkSVGDevice::AutoElement::addLinearGradientDef(const SkShader::Gradient
         gradient.addAttribute("x2", info.fPoint[1].x());
         gradient.addAttribute("y2", info.fPoint[1].y());
 
-        if (!as_SB(shader)->getLocalMatrix().isIdentity()) {
-            this->addAttribute("gradientTransform", svg_transform(as_SB(shader)->getLocalMatrix()));
+        if (!localMatrix.isIdentity()) {
+            this->addAttribute("gradientTransform", svg_transform(localMatrix));
         }
 
         SkASSERT(info.fColorCount >= 2);
@@ -1017,7 +1019,7 @@ void SkSVGDevice::drawImageRect(const SkImage* image, const SkRect* src, const S
 
 class SVGTextBuilder : SkNoncopyable {
 public:
-    SVGTextBuilder(SkPoint origin, const SkGlyphRun& glyphRun)
+    SVGTextBuilder(SkPoint origin, const sktext::GlyphRun& glyphRun)
             : fOrigin(origin) {
         auto runSize = glyphRun.runSize();
         SkAutoSTArray<64, SkUnichar> unichars(runSize);
@@ -1105,11 +1107,12 @@ private:
 };
 
 void SkSVGDevice::onDrawGlyphRunList(SkCanvas* canvas,
-                                     const SkGlyphRunList& glyphRunList,
-                                     const SkPaint& paint)  {
+                                     const sktext::GlyphRunList& glyphRunList,
+                                     const SkPaint& initialPaint,
+                                     const SkPaint& drawingPaint)  {
     SkASSERT(!glyphRunList.hasRSXForm());
     const auto draw_as_path = (fFlags & SkSVGCanvas::kConvertTextToPaths_Flag) ||
-                               paint.getPathEffect();
+                              drawingPaint.getPathEffect();
 
     if (draw_as_path) {
         // Emit a single <path> element.
@@ -1118,14 +1121,14 @@ void SkSVGDevice::onDrawGlyphRunList(SkCanvas* canvas,
             AddPath(glyphRun, glyphRunList.origin(), &path);
         }
 
-        this->drawPath(path, paint);
+        this->drawPath(path, drawingPaint);
 
         return;
     }
 
     // Emit one <text> element for each run.
     for (auto& glyphRun : glyphRunList) {
-        AutoElement elem("text", this, fResourceBucket.get(), MxCp(this), paint);
+        AutoElement elem("text", this, fResourceBucket.get(), MxCp(this), drawingPaint);
         elem.addTextAttributes(glyphRun.font());
 
         SVGTextBuilder builder(glyphRunList.origin(), glyphRun);
@@ -1140,7 +1143,7 @@ void SkSVGDevice::drawVertices(const SkVertices*, sk_sp<SkBlender>, const SkPain
 }
 
 #ifdef SK_ENABLE_SKSL
-void SkSVGDevice::drawCustomMesh(SkCustomMesh, sk_sp<SkBlender>, const SkPaint&) {
+void SkSVGDevice::drawMesh(const SkMesh&, sk_sp<SkBlender>, const SkPaint&) {
     // todo
 }
 #endif

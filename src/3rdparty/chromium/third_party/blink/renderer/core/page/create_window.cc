@@ -26,13 +26,13 @@
 
 #include "third_party/blink/renderer/core/page/create_window.h"
 
+#include "base/check_op.h"
 #include "base/feature_list.h"
-#include "base/metrics/histogram_macros.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/common/frame/from_ad_state.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink.h"
+#include "third_party/blink/public/mojom/window_features/window_features.mojom-blink.h"
 #include "third_party/blink/public/web/web_view_client.h"
 #include "third_party/blink/public/web/web_window_features.h"
 #include "third_party/blink/renderer/core/core_initializer.h"
@@ -67,7 +67,8 @@ static bool IsWindowFeaturesSeparator(UChar c) {
 }
 
 WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
-                                              LocalDOMWindow* dom_window) {
+                                              LocalDOMWindow* dom_window,
+                                              const KURL& url) {
   WebWindowFeatures window_features;
 
   bool attribution_reporting_enabled =
@@ -76,7 +77,7 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
 
   // This code follows the HTML spec, specifically
   // https://html.spec.whatwg.org/C/#concept-window-open-features-tokenize
-  if (feature_string.IsEmpty())
+  if (feature_string.empty())
     return window_features;
 
   bool ui_features_were_disabled = false;
@@ -85,8 +86,8 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
   unsigned key_begin, key_end;
   unsigned value_begin, value_end;
 
-  String buffer = feature_string.LowerASCII();
-  unsigned length = buffer.length();
+  const String buffer = feature_string.LowerASCII();
+  const unsigned length = buffer.length();
   for (unsigned i = 0; i < length;) {
     // skip to first non-separator (start of key name), but don't skip
     // past the end of the string
@@ -146,16 +147,16 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
 
     // Listing a key with no value is shorthand for key=yes
     int value;
-    if (value_string.IsEmpty() || value_string == "yes" ||
+    constexpr auto kLoose = WTF::NumberParsingOptions::Loose();
+    if (value_string.empty() || value_string == "yes" ||
         value_string == "true") {
       value = 1;
     } else if (value_string.Is8Bit()) {
       value = CharactersToInt(value_string.Characters8(), value_string.length(),
-                              WTF::NumberParsingOptions::kLoose, nullptr);
+                              kLoose, nullptr);
     } else {
-      value =
-          CharactersToInt(value_string.Characters16(), value_string.length(),
-                          WTF::NumberParsingOptions::kLoose, nullptr);
+      value = CharactersToInt(value_string.Characters16(),
+                              value_string.length(), kLoose, nullptr);
     }
 
     if (!ui_features_were_disabled && key_string != "noopener" &&
@@ -203,9 +204,36 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
       window_features.persistent = true;
     } else if (attribution_reporting_enabled &&
                key_string == "attributionsrc") {
-      window_features.impression =
-          dom_window->GetFrame()->GetAttributionSrcLoader()->RegisterNavigation(
-              dom_window->CompleteURL(value_string.ToString()));
+      // attributionsrc values are URLs, and as such their original case needs
+      // to be retained for correctness. Positions in both `feature_string` and
+      // `buffer` correspond because ASCII-lowercasing doesn't add, remove, or
+      // swap character positions; it only does in-place transformations of
+      // capital ASCII characters. See crbug.com/1338698 for details.
+      DCHECK_EQ(feature_string.length(), buffer.length());
+      const StringView original_case_value_string(feature_string, value_begin,
+                                                  value_end - value_begin);
+
+      // attributionsrc values are encoded in order to support embedded special
+      // characters, such as '='.
+      const String decoded = DecodeURLEscapeSequences(
+          original_case_value_string.ToString(), DecodeURLMode::kUTF8);
+
+      if (!decoded.empty()) {
+        window_features.impression =
+            dom_window->GetFrame()
+                ->GetAttributionSrcLoader()
+                ->RegisterNavigation(dom_window->CompleteURL(decoded));
+      }
+
+      // If the impression could not be set, or if the value was empty, mark
+      // attribution eligibility by adding an impression.
+      if (!window_features.impression &&
+          dom_window->GetFrame()->GetAttributionSrcLoader()->CanRegister(
+              url,
+              /*element=*/nullptr,
+              /*request_id=*/absl::nullopt)) {
+        window_features.impression = blink::Impression();
+      }
     }
   }
 
@@ -236,21 +264,16 @@ static void MaybeLogWindowOpen(LocalFrame& opener_frame) {
   if (!ad_tracker)
     return;
 
-  bool is_ad_subframe = opener_frame.IsAdSubframe();
+  bool is_ad_frame = opener_frame.IsAdFrame();
   bool is_ad_script_in_stack =
       ad_tracker->IsAdScriptInStack(AdTracker::StackType::kBottomAndTop);
-  FromAdState state =
-      blink::GetFromAdState(is_ad_subframe, is_ad_script_in_stack);
-
-  // Log to UMA.
-  UMA_HISTOGRAM_ENUMERATION("Blink.WindowOpen.FromAdState", state);
 
   // Log to UKM.
   ukm::UkmRecorder* ukm_recorder = opener_frame.GetDocument()->UkmRecorder();
   ukm::SourceId source_id = opener_frame.GetDocument()->UkmSourceID();
   if (source_id != ukm::kInvalidSourceId) {
     ukm::builders::AbusiveExperienceHeuristic_WindowOpen(source_id)
-        .SetFromAdSubframe(is_ad_subframe)
+        .SetFromAdSubframe(is_ad_frame)
         .SetFromAdScript(is_ad_script_in_stack)
         .Record(ukm_recorder);
   }
@@ -276,7 +299,7 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
     if (opener_window
             .CheckAndGetJavascriptUrl(request.JavascriptWorld().get(), url,
                                       nullptr /* element */)
-            .IsEmpty()) {
+            .empty()) {
       return nullptr;
     }
   }
@@ -352,7 +375,10 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
 
   frame.View()->SetCanHaveScrollbars(features.scrollbars_visible);
 
-  gfx::Rect window_rect = page->GetChromeClient().RootWindowRect(frame);
+  mojom::blink::WindowFeaturesPtr window_features =
+      mojom::blink::WindowFeatures::New();
+  window_features->bounds = page->GetChromeClient().RootWindowRect(frame);
+  gfx::Rect& window_rect = window_features->bounds;
   if (features.x_set)
     window_rect.set_x(features.x);
   if (features.y_set)
@@ -363,7 +389,7 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
     window_rect.set_height(features.height);
 
   page->GetChromeClient().Show(frame, opener_frame,
-                               request.GetNavigationPolicy(), window_rect,
+                               request.GetNavigationPolicy(), *window_features,
                                consumed_user_gesture);
   MaybeLogWindowOpen(opener_frame);
   return &frame;

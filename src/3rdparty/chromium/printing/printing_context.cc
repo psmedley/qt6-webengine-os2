@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -91,7 +91,22 @@ mojom::ResultCode PrintingContext::OnError() {
   return result;
 }
 
-mojom::ResultCode PrintingContext::UsePdfSettings() {
+void PrintingContext::SetDefaultPrintableAreaForVirtualPrinters() {
+  gfx::Size paper_size(GetPdfPaperSizeDeviceUnits());
+  if (!settings_->requested_media().size_microns.IsEmpty()) {
+    float device_microns_per_device_unit = static_cast<float>(kMicronsPerInch) /
+                                           settings_->device_units_per_inch();
+    paper_size = gfx::Size(settings_->requested_media().size_microns.width() /
+                               device_microns_per_device_unit,
+                           settings_->requested_media().size_microns.height() /
+                               device_microns_per_device_unit);
+  }
+  gfx::Rect paper_rect(0, 0, paper_size.width(), paper_size.height());
+  settings_->SetPrinterPrintableArea(paper_size, paper_rect,
+                                     /*landscape_needs_flip=*/true);
+}
+
+void PrintingContext::UsePdfSettings() {
   base::Value::Dict pdf_settings;
   pdf_settings.Set(kSettingHeaderFooterEnabled, false);
   pdf_settings.Set(kSettingShouldPrintBackgrounds, false);
@@ -101,8 +116,9 @@ mojom::ResultCode PrintingContext::UsePdfSettings() {
   pdf_settings.Set(kSettingCollate, true);
   pdf_settings.Set(kSettingCopies, 1);
   pdf_settings.Set(kSettingColor, static_cast<int>(mojom::ColorModel::kColor));
-  pdf_settings.Set(kSettingDpiHorizontal, kPointsPerInch);
-  pdf_settings.Set(kSettingDpiVertical, kPointsPerInch);
+  // DPI value should match GetPdfCapabilities().
+  pdf_settings.Set(kSettingDpiHorizontal, kDefaultPdfDpi);
+  pdf_settings.Set(kSettingDpiVertical, kDefaultPdfDpi);
   pdf_settings.Set(kSettingDuplexMode,
                    static_cast<int>(printing::mojom::DuplexMode::kSimplex));
   pdf_settings.Set(kSettingLandscape, false);
@@ -112,7 +128,17 @@ mojom::ResultCode PrintingContext::UsePdfSettings() {
   pdf_settings.Set(kSettingScaleFactor, 100);
   pdf_settings.Set(kSettingRasterizePdf, false);
   pdf_settings.Set(kSettingPagesPerSheet, 1);
-  return UpdatePrintSettings(std::move(pdf_settings));
+  mojom::ResultCode result = UpdatePrintSettings(std::move(pdf_settings));
+  // TODO(thestig): Downgrade these to DCHECKs after shipping these CHECKs to
+  // production without any failures.
+  CHECK_EQ(result, mojom::ResultCode::kSuccess);
+  // UsePdfSettings() should never fail and the returned DPI should always be a
+  // well-known value that is safe to use as a divisor.
+#if BUILDFLAG(IS_MAC)
+  CHECK_EQ(settings_->device_units_per_inch(), kPointsPerInch);
+#else
+  CHECK_EQ(settings_->device_units_per_inch(), kDefaultPdfDpi);
+#endif
 }
 
 mojom::ResultCode PrintingContext::UpdatePrintSettings(
@@ -142,26 +168,23 @@ mojom::ResultCode PrintingContext::UpdatePrintSettings(
   if (!open_in_external_preview &&
       (printer_type == mojom::PrinterType::kPdf ||
        printer_type == mojom::PrinterType::kExtension)) {
-    settings_->set_dpi(kDefaultPdfDpi);
-    gfx::Size paper_size(GetPdfPaperSizeDeviceUnits());
-    if (!settings_->requested_media().size_microns.IsEmpty()) {
-      float device_microns_per_device_unit =
-          static_cast<float>(kMicronsPerInch) /
-          settings_->device_units_per_inch();
-      paper_size =
-          gfx::Size(settings_->requested_media().size_microns.width() /
-                        device_microns_per_device_unit,
-                    settings_->requested_media().size_microns.height() /
-                        device_microns_per_device_unit);
-    }
-    gfx::Rect paper_rect(0, 0, paper_size.width(), paper_size.height());
-    settings_->SetPrinterPrintableArea(paper_size, paper_rect, true);
+    if (settings_->page_setup_device_units().printable_area().IsEmpty())
+      SetDefaultPrintableAreaForVirtualPrinters();
     return mojom::ResultCode::kSuccess;
   }
+
+  // The `open_in_external_preview` case does not care about the printable area.
+  // Local printers set their printable area within UpdatePrinterSettings().
+  DCHECK(open_in_external_preview ||
+         printer_type == mojom::PrinterType::kLocal);
 
   PrinterSettings printer_settings {};
 #if BUILDFLAG(IS_MAC)
     printer_settings.external_preview = open_in_external_preview;
+#endif
+    printer_settings.show_system_dialog = job_settings.FindBool(kSettingShowSystemDialog).value_or(false);
+#if BUILDFLAG(IS_WIN)
+    printer_settings.page_count = job_settings.FindInt(kSettingPreviewPageCount).value_or(0);
 #endif
   return UpdatePrinterSettings(printer_settings);
 }

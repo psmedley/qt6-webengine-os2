@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,12 +21,17 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/numerics/checked_math.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/ranges/algorithm.h"
 #include "base/sequence_checker.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/device_event_log/device_event_log.h"
 #include "services/device/public/cpp/usb/usb_utils.h"
 #include "services/device/usb/usb_device_linux.h"
+
+#if BUILDFLAG(IS_CHROMEOS)
+#include "chromeos/dbus/permission_broker/permission_broker_client.h"
+#endif
 
 namespace device {
 
@@ -419,12 +424,17 @@ UsbDeviceHandleUsbfs::UsbDeviceHandleUsbfs(
     scoped_refptr<UsbDevice> device,
     base::ScopedFD fd,
     base::ScopedFD lifeline_fd,
+    const std::string& client_id,
     scoped_refptr<base::SequencedTaskRunner> blocking_task_runner)
     : device_(std::move(device)),
       fd_(fd.get()),
       task_runner_(base::ThreadTaskRunnerHandle::Get()) {
   DCHECK(device_);
   DCHECK(fd.is_valid());
+
+  if (!client_id.empty()) {
+    client_id_ = client_id;
+  }
 
   helper_ = base::SequenceBound<BlockingTaskRunnerHelper>(
       std::move(blocking_task_runner), std::move(fd), std::move(lifeline_fd),
@@ -494,16 +504,16 @@ void UsbDeviceHandleUsbfs::ClaimInterface(int interface_number,
     return;
   }
 
-  // It appears safe to assume that this ioctl will not block.
-  int rc = HANDLE_EINTR(ioctl(fd_, USBDEVFS_CLAIMINTERFACE, &interface_number));
-  if (rc) {
-    USB_PLOG(DEBUG) << "Failed to claim interface " << interface_number;
-  } else {
-    interfaces_[interface_number].alternate_setting = 0;
-    RefreshEndpointInfo();
+#if BUILDFLAG(IS_CHROMEOS)
+  if (client_id_.has_value()) {
+    chromeos::PermissionBrokerClient::Get()->DetachInterface(
+        client_id_.value(), interface_number,
+        base::BindOnce(&UsbDeviceHandleUsbfs::DetachInterfaceComplete, this,
+                       interface_number, std::move(callback)));
+    return;
   }
-  task_runner_->PostTask(FROM_HERE,
-                         base::BindOnce(std::move(callback), rc == 0));
+#endif
+  DetachInterfaceComplete(interface_number, std::move(callback), true);
 }
 
 void UsbDeviceHandleUsbfs::ReleaseInterface(int interface_number,
@@ -753,10 +763,37 @@ void UsbDeviceHandleUsbfs::SetAlternateInterfaceSettingComplete(
     bool success) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (success && device_) {
-    interfaces_[interface_number].alternate_setting = alternate_setting;
-    RefreshEndpointInfo();
+    auto it = interfaces_.find(interface_number);
+    if (it != interfaces_.end()) {
+      it->second.alternate_setting = alternate_setting;
+      RefreshEndpointInfo();
+    }
   }
   std::move(callback).Run(success);
+}
+
+void UsbDeviceHandleUsbfs::DetachInterfaceComplete(int interface_number,
+                                                   ResultCallback callback,
+                                                   bool success) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (!success) {
+    task_runner_->PostTask(FROM_HERE,
+                           base::BindOnce(std::move(callback), false));
+    return;
+  }
+
+  // It appears safe to assume that this ioctl will not block.
+  int rc = HANDLE_EINTR(ioctl(fd_, USBDEVFS_CLAIMINTERFACE, &interface_number));
+  if (rc) {
+    USB_PLOG(DEBUG) << "Failed to claim interface " << interface_number;
+  } else {
+    interfaces_[interface_number].alternate_setting = 0;
+    RefreshEndpointInfo();
+  }
+
+  task_runner_->PostTask(FROM_HERE,
+                         base::BindOnce(std::move(callback), rc == 0));
 }
 
 void UsbDeviceHandleUsbfs::ReleaseInterfaceComplete(int interface_number,
@@ -775,6 +812,14 @@ void UsbDeviceHandleUsbfs::ReleaseInterfaceComplete(int interface_number,
     // Only refresh endpoints if a device is still attached.
     RefreshEndpointInfo();
   }
+
+#if BUILDFLAG(IS_CHROMEOS)
+  if (client_id_.has_value()) {
+    chromeos::PermissionBrokerClient::Get()->ReattachInterface(
+        client_id_.value(), interface_number, std::move(callback));
+    return;
+  }
+#endif
   std::move(callback).Run(true);
 }
 
@@ -940,11 +985,8 @@ void UsbDeviceHandleUsbfs::OnTimeout(Transfer* transfer) {
 std::unique_ptr<UsbDeviceHandleUsbfs::Transfer>
 UsbDeviceHandleUsbfs::RemoveFromTransferList(Transfer* transfer_ptr) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  auto it = std::find_if(
-      transfers_.begin(), transfers_.end(),
-      [transfer_ptr](const std::unique_ptr<Transfer>& transfer) -> bool {
-        return transfer.get() == transfer_ptr;
-      });
+  auto it = base::ranges::find(transfers_, transfer_ptr,
+                               &std::unique_ptr<Transfer>::get);
   DCHECK(it != transfers_.end());
   std::unique_ptr<Transfer> transfer = std::move(*it);
   transfers_.erase(it);

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/compiler_specific.h"
 #include "base/containers/circular_deque.h"
 #include "base/containers/flat_set.h"
 #include "base/memory/raw_ptr.h"
@@ -19,12 +18,13 @@
 #include "base/observer_list.h"
 #include "base/threading/sequence_bound.h"
 #include "content/browser/aggregation_service/aggregation_service.h"
+#include "content/browser/aggregation_service/report_scheduler_timer.h"
 #include "content/browser/attribution_reporting/attribution_manager.h"
 #include "content/browser/attribution_reporting/attribution_report.h"
-#include "content/browser/attribution_reporting/attribution_report_scheduler.h"
 #include "content/browser/attribution_reporting/attribution_report_sender.h"
 #include "content/browser/attribution_reporting/attribution_storage.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/storage_partition.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/abseil-cpp/absl/types/variant.h"
 
@@ -44,14 +44,15 @@ class Origin;
 namespace content {
 
 class AggregatableReport;
+class AggregatableReportRequest;
 class AttributionCookieChecker;
 class AttributionDataHostManager;
 class AttributionStorage;
 class AttributionStorageDelegate;
 class CreateReportResult;
 class StoragePartitionImpl;
+class StoredSource;
 
-struct DeactivatedSource;
 struct SendResult;
 
 // UI thread class that manages the lifetime of the underlying attribution
@@ -61,7 +62,25 @@ class CONTENT_EXPORT AttributionManagerImpl : public AttributionManager {
  public:
   // Configures underlying storage to be setup in memory, rather than on
   // disk. This speeds up initialization to avoid timeouts in test environments.
-  static void RunInMemoryForTesting();
+  class CONTENT_EXPORT ScopedUseInMemoryStorageForTesting {
+   public:
+    ScopedUseInMemoryStorageForTesting();
+
+    ~ScopedUseInMemoryStorageForTesting();
+
+    ScopedUseInMemoryStorageForTesting(
+        const ScopedUseInMemoryStorageForTesting&) = delete;
+    ScopedUseInMemoryStorageForTesting& operator=(
+        const ScopedUseInMemoryStorageForTesting&) = delete;
+
+    ScopedUseInMemoryStorageForTesting(ScopedUseInMemoryStorageForTesting&&) =
+        delete;
+    ScopedUseInMemoryStorageForTesting& operator=(
+        ScopedUseInMemoryStorageForTesting&&) = delete;
+
+   private:
+    const bool previous_;
+  };
 
   static std::unique_ptr<AttributionManagerImpl> CreateForTesting(
       const base::FilePath& user_data_directory,
@@ -72,15 +91,19 @@ class CONTENT_EXPORT AttributionManagerImpl : public AttributionManager {
       std::unique_ptr<AttributionReportSender> report_sender,
       StoragePartitionImpl* storage_partition);
 
+  static std::unique_ptr<AttributionManagerImpl> CreateWithNewDbForTesting(
+      StoragePartitionImpl* storage_partition,
+      const base::FilePath& user_data_directory,
+      scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy);
+
   AttributionManagerImpl(
       StoragePartitionImpl* storage_partition,
       const base::FilePath& user_data_directory,
       scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy);
-  AttributionManagerImpl(const AttributionManagerImpl& other) = delete;
-  AttributionManagerImpl& operator=(const AttributionManagerImpl& other) =
-      delete;
-  AttributionManagerImpl(AttributionManagerImpl&& other) = delete;
-  AttributionManagerImpl& operator=(AttributionManagerImpl&& other) = delete;
+  AttributionManagerImpl(const AttributionManagerImpl&) = delete;
+  AttributionManagerImpl& operator=(const AttributionManagerImpl&) = delete;
+  AttributionManagerImpl(AttributionManagerImpl&&) = delete;
+  AttributionManagerImpl& operator=(AttributionManagerImpl&&) = delete;
   ~AttributionManagerImpl() override;
 
   // AttributionManager:
@@ -92,26 +115,28 @@ class CONTENT_EXPORT AttributionManagerImpl : public AttributionManager {
   void GetActiveSourcesForWebUI(
       base::OnceCallback<void(std::vector<StoredSource>)> callback) override;
   void GetPendingReportsForInternalUse(
-      AttributionReport::ReportType report_type,
+      AttributionReport::Types report_types,
+      int limit,
       base::OnceCallback<void(std::vector<AttributionReport>)> callback)
       override;
   void SendReportsForWebUI(const std::vector<AttributionReport::Id>& ids,
                            base::OnceClosure done) override;
   void ClearData(base::Time delete_begin,
                  base::Time delete_end,
-                 base::RepeatingCallback<bool(const url::Origin&)> filter,
+                 StoragePartition::StorageKeyMatcherFunction filter,
+                 BrowsingDataFilterBuilder* filter_builder,
+                 bool delete_rate_limit_data,
                  base::OnceClosure done) override;
-
-  using SourceOrTrigger = absl::variant<StorableSource, AttributionTrigger>;
-
-  void MaybeEnqueueEventForTesting(SourceOrTrigger event);
-
-  void AddAggregatableAttributionForTesting(AttributionReport report);
+  void NotifyFailedSourceRegistration(
+      const std::string& header_value,
+      const url::Origin& reporting_origin,
+      attribution_reporting::mojom::SourceRegistrationError) override;
 
  private:
   friend class AttributionManagerImplTest;
 
   using ReportSentCallback = AttributionReportSender::ReportSentCallback;
+  using SourceOrTrigger = absl::variant<StorableSource, AttributionTrigger>;
 
   AttributionManagerImpl(
       StoragePartitionImpl* storage_partition,
@@ -151,8 +176,9 @@ class CONTENT_EXPORT AttributionManagerImpl : public AttributionManager {
       AttributionReport report,
       bool is_debug_report,
       ReportSentCallback callback,
+      AggregatableReportRequest,
       absl::optional<AggregatableReport> assembled_report,
-      AggregationService::AssemblyStatus status);
+      AggregationService::AssemblyStatus);
   void MarkReportCompleted(AttributionReport::Id report_id);
 
   void OnSourceStored(StorableSource source,
@@ -162,16 +188,10 @@ class CONTENT_EXPORT AttributionManagerImpl : public AttributionManager {
   void MaybeSendDebugReport(AttributionReport&&);
 
   void NotifySourcesChanged();
-  void NotifyReportsChanged(AttributionReport::ReportType report_type);
-  void NotifySourceDeactivated(const DeactivatedSource& source);
+  void NotifyReportsChanged(AttributionReport::Type report_type);
   void NotifyReportSent(bool is_debug_report, AttributionReport, SendResult);
 
   bool IsReportAllowed(const AttributionReport&) const;
-
-  // Friend to expose the AttributionStorage for certain tests.
-  friend std::vector<AttributionReport> GetAttributionReportsForTesting(
-      AttributionManagerImpl* manager,
-      base::Time max_report_time);
 
   // Never null.
   const raw_ptr<StoragePartitionImpl> storage_partition_;
@@ -191,7 +211,7 @@ class CONTENT_EXPORT AttributionManagerImpl : public AttributionManager {
 
   base::SequenceBound<AttributionStorage> attribution_storage_;
 
-  AttributionReportScheduler scheduler_;
+  ReportSchedulerTimer scheduler_timer_;
 
   std::unique_ptr<AttributionDataHostManager> data_host_manager_;
 

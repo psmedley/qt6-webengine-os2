@@ -1,15 +1,17 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.h"
 
 #include <stdint.h>
+
 #include <string>
 #include <utility>
 
 #include "base/hash/hash.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/ranges/algorithm.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/bind_post_task.h"
 #include "base/task/single_thread_task_runner.h"
@@ -111,15 +113,15 @@ scoped_refptr<media::VideoFrame> CopyFrame(
                        frame->stride(media::VideoFrame::kYPlane),
                        frame->data(media::VideoFrame::kUVPlane),
                        frame->stride(media::VideoFrame::kUVPlane),
-                       new_frame->data(media::VideoFrame::kYPlane),
+                       new_frame->writable_data(media::VideoFrame::kYPlane),
                        new_frame->stride(media::VideoFrame::kYPlane),
-                       new_frame->data(media::VideoFrame::kUVPlane),
+                       new_frame->writable_data(media::VideoFrame::kUVPlane),
                        new_frame->stride(media::VideoFrame::kUVPlane),
                        coded_size.width(), coded_size.height());
     } else if (frame->format() == media::PIXEL_FORMAT_ARGB) {
       libyuv::ARGBCopy(frame->data(media::VideoFrame::kARGBPlane),
                        frame->stride(media::VideoFrame::kARGBPlane),
-                       new_frame->data(media::VideoFrame::kARGBPlane),
+                       new_frame->writable_data(media::VideoFrame::kARGBPlane),
                        new_frame->stride(media::VideoFrame::kARGBPlane),
                        coded_size.width(), coded_size.height());
     } else {
@@ -129,18 +131,18 @@ scoped_refptr<media::VideoFrame> CopyFrame(
                        frame->stride(media::VideoFrame::kUPlane),
                        frame->data(media::VideoFrame::kVPlane),
                        frame->stride(media::VideoFrame::kVPlane),
-                       new_frame->data(media::VideoFrame::kYPlane),
+                       new_frame->writable_data(media::VideoFrame::kYPlane),
                        new_frame->stride(media::VideoFrame::kYPlane),
-                       new_frame->data(media::VideoFrame::kUPlane),
+                       new_frame->writable_data(media::VideoFrame::kUPlane),
                        new_frame->stride(media::VideoFrame::kUPlane),
-                       new_frame->data(media::VideoFrame::kVPlane),
+                       new_frame->writable_data(media::VideoFrame::kVPlane),
                        new_frame->stride(media::VideoFrame::kVPlane),
                        coded_size.width(), coded_size.height());
     }
     if (frame->format() == media::PIXEL_FORMAT_I420A) {
       libyuv::CopyPlane(frame->data(media::VideoFrame::kAPlane),
                         frame->stride(media::VideoFrame::kAPlane),
-                        new_frame->data(media::VideoFrame::kAPlane),
+                        new_frame->writable_data(media::VideoFrame::kAPlane),
                         new_frame->stride(media::VideoFrame::kAPlane),
                         coded_size.width(), coded_size.height());
     }
@@ -182,7 +184,7 @@ WebMediaPlayerMSCompositor::WebMediaPlayerMSCompositor(
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
     MediaStreamDescriptor* media_stream_descriptor,
     std::unique_ptr<WebVideoFrameSubmitter> submitter,
-    WebMediaPlayer::SurfaceLayerMode surface_layer_mode,
+    bool use_surface_layer,
     const base::WeakPtr<WebMediaPlayerMS>& player)
     : video_frame_compositor_task_runner_(video_frame_compositor_task_runner),
       io_task_runner_(io_task_runner),
@@ -196,7 +198,7 @@ WebMediaPlayerMSCompositor::WebMediaPlayerMSCompositor(
       stopped_(true),
       render_started_(!stopped_) {
   weak_this_ = weak_ptr_factory_.GetWeakPtr();
-  if (surface_layer_mode != WebMediaPlayer::SurfaceLayerMode::kNever) {
+  if (use_surface_layer) {
     submitter_ = std::move(submitter);
 
     PostCrossThreadTask(
@@ -214,7 +216,7 @@ WebMediaPlayerMSCompositor::WebMediaPlayerMSCompositor(
     video_components = media_stream_descriptor->VideoComponents();
 
   const bool remote_video =
-      video_components.size() && video_components[0]->Source()->Remote();
+      video_components.size() && video_components[0]->Remote();
 
   if (remote_video && Platform::Current()->RTCSmoothnessAlgorithmEnabled()) {
     base::AutoLock auto_lock(current_frame_lock_);
@@ -292,6 +294,11 @@ void WebMediaPlayerMSCompositor::SetForceBeginFrames(bool enable) {
   submitter_->SetForceBeginFrames(enable);
 }
 
+WebMediaPlayerMSCompositor::Metadata WebMediaPlayerMSCompositor::GetMetadata() {
+  base::AutoLock auto_lock(current_frame_lock_);
+  return current_metadata_;
+}
+
 void WebMediaPlayerMSCompositor::SetForceSubmit(bool force_submit) {
   DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
   submitter_->SetForceSubmit(force_submit);
@@ -301,18 +308,6 @@ void WebMediaPlayerMSCompositor::SetIsPageVisible(bool is_visible) {
   DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
   if (submitter_)
     submitter_->SetIsPageVisible(is_visible);
-}
-
-gfx::Size WebMediaPlayerMSCompositor::GetCurrentSize() {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  base::AutoLock auto_lock(current_frame_lock_);
-  return current_frame_ ? current_frame_->natural_size() : gfx::Size();
-}
-
-base::TimeDelta WebMediaPlayerMSCompositor::GetCurrentTime() {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  base::AutoLock auto_lock(current_frame_lock_);
-  return current_frame_.get() ? current_frame_->timestamp() : base::TimeDelta();
 }
 
 size_t WebMediaPlayerMSCompositor::total_frame_count() {
@@ -373,6 +368,15 @@ void WebMediaPlayerMSCompositor::RecordFrameDecodedStats(
         *frame_rtp_timestamp - *last_enqueued_frame_rtp_timestamp_);
   }
   last_enqueued_frame_rtp_timestamp_ = frame_rtp_timestamp;
+}
+
+void WebMediaPlayerMSCompositor::SetMetadata() {
+  DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
+  current_frame_lock_.AssertAcquired();
+  current_metadata_.natural_size = current_frame_->natural_size();
+  current_metadata_.video_transform =
+      current_frame_->metadata().transformation.value_or(
+          media::kNoTransformation);
 }
 
 void WebMediaPlayerMSCompositor::EnqueueFrame(
@@ -503,6 +507,9 @@ bool WebMediaPlayerMSCompositor::HasCurrentFrame() {
 scoped_refptr<media::VideoFrame> WebMediaPlayerMSCompositor::GetCurrentFrame() {
   DVLOG(3) << __func__;
   base::AutoLock auto_lock(current_frame_lock_);
+  if (!current_frame_)
+    return nullptr;
+
   TRACE_EVENT_INSTANT1("media", "WebMediaPlayerMSCompositor::GetCurrentFrame",
                        TRACE_EVENT_SCOPE_THREAD, "Timestamp",
                        current_frame_->timestamp().InMicroseconds());
@@ -558,6 +565,21 @@ base::TimeDelta WebMediaPlayerMSCompositor::GetPreferredRenderInterval() {
   return rendering_frame_buffer_->average_frame_duration();
 }
 
+void WebMediaPlayerMSCompositor::OnContextLost() {
+  DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
+  // current_frame_'s resource in the context has been lost, so current_frame_
+  // is not valid any more. current_frame_ should be reset. Now the compositor
+  // has no concept of resetting current_frame_, so a black frame is set.
+  base::AutoLock auto_lock(current_frame_lock_);
+  if (!current_frame_ || (!current_frame_->HasTextures() &&
+                          !current_frame_->HasGpuMemoryBuffer())) {
+    return;
+  }
+  scoped_refptr<media::VideoFrame> black_frame =
+      media::VideoFrame::CreateBlackFrame(current_frame_->natural_size());
+  SetCurrentFrame(std::move(black_frame), false, absl::nullopt);
+}
+
 void WebMediaPlayerMSCompositor::StartRendering() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   {
@@ -587,11 +609,8 @@ bool WebMediaPlayerMSCompositor::MapTimestampsToRenderTimeTicks(
          io_task_runner_->BelongsToCurrentThread());
 #endif
   for (const base::TimeDelta& timestamp : timestamps) {
-    auto* it =
-        std::find_if(pending_frames_info_.begin(), pending_frames_info_.end(),
-                     [&timestamp](PendingFrameInfo& info) {
-                       return info.timestamp == timestamp;
-                     });
+    auto* it = base::ranges::find(pending_frames_info_, timestamp,
+                                  &PendingFrameInfo::timestamp);
     DCHECK(it != pending_frames_info_.end());
     wall_clock_times->push_back(it->reference_time);
   }
@@ -713,6 +732,7 @@ void WebMediaPlayerMSCompositor::SetCurrentFrame(
 
   current_frame_ = std::move(frame);
   current_frame_is_copy_ = is_copy;
+  SetMetadata();
 
   current_frame_receive_time_ = current_frame_->metadata().receive_time;
   current_frame_rtp_timestamp_ = static_cast<uint32_t>(

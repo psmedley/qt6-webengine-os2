@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
+#include "third_party/blink/public/platform/web_content_settings_client.h"
 #include "third_party/blink/public/platform/web_url_loader_factory.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/platform/web_worker_fetch_context.h"
@@ -138,6 +139,7 @@ WorkerFetchContext::CreateWebSocketHandshakeThrottle() {
 
 bool WorkerFetchContext::ShouldBlockFetchByMixedContentCheck(
     mojom::blink::RequestContextType request_context,
+    network::mojom::blink::IPAddressSpace target_address_space,
     const absl::optional<ResourceRequest::RedirectInfo>& redirect_info,
     const KURL& url,
     ReportingDisposition reporting_disposition,
@@ -156,7 +158,7 @@ bool WorkerFetchContext::ShouldBlockFetchByMixedContentCheck(
 bool WorkerFetchContext::ShouldBlockFetchAsCredentialedSubresource(
     const ResourceRequest& resource_request,
     const KURL& url) const {
-  if ((!url.User().IsEmpty() || !url.Pass().IsEmpty()) &&
+  if ((!url.User().empty() || !url.Pass().empty()) &&
       resource_request.GetRequestContext() !=
           mojom::blink::RequestContextType::XML_HTTP_REQUEST) {
     if (Url().User() != url.User() || Url().Pass() != url.Pass()) {
@@ -187,6 +189,8 @@ void WorkerFetchContext::PrepareRequest(ResourceRequest& request,
                                         ResourceLoaderOptions& options,
                                         WebScopedVirtualTimePauser&,
                                         ResourceType resource_type) {
+  request.SetUkmSourceId(GetExecutionContext()->UkmSourceID());
+
   String user_agent = global_scope_->UserAgent();
   probe::ApplyUserAgentOverride(Probe(), &user_agent);
   DCHECK(!user_agent.IsNull());
@@ -211,32 +215,21 @@ void WorkerFetchContext::AddAdditionalRequestHeaders(ResourceRequest& request) {
   // permissions policies for workers and/or deprecating this inclusion.
   if (save_data_enabled_)
     request.SetHttpHeaderField(http_names::kSaveData, "on");
-
-  AddBackForwardCacheExperimentHTTPHeaderIfNeeded(request);
 }
 
 void WorkerFetchContext::AddResourceTiming(const ResourceTimingInfo& info) {
-  // TODO(nhiroki): Add ResourceTiming API support once it's spec'ed for
-  // worklets.
-  if (global_scope_->IsWorkletGlobalScope())
-    return;
   const SecurityOrigin* security_origin = GetResourceFetcherProperties()
                                               .GetFetchClientSettingsObject()
                                               .GetSecurityOrigin();
   mojom::blink::ResourceTimingInfoPtr mojo_info =
       Performance::GenerateResourceTiming(*security_origin, info,
                                           *global_scope_);
-  // |info| is taken const-ref but this can make destructive changes to
-  // WorkerTimingContainer on |info| when a page is controlled by a service
-  // worker.
   resource_timing_notifier_->AddResourceTiming(std::move(mojo_info),
-                                               info.InitiatorType(),
-                                               info.TakeWorkerTimingReceiver());
+                                               info.InitiatorType());
 }
 
 void WorkerFetchContext::PopulateResourceRequest(
     ResourceType type,
-    const ClientHintsPreferences& hints_preferences,
     const FetchParameters::ResourceWidth& resource_width,
     ResourceRequest& out_request,
     const ResourceLoaderOptions& options) {
@@ -250,12 +243,6 @@ void WorkerFetchContext::PopulateResourceRequest(
   SetFirstPartyCookie(out_request);
   if (!out_request.TopFrameOrigin())
     out_request.SetTopFrameOrigin(GetTopFrameOrigin());
-}
-
-mojo::PendingReceiver<mojom::blink::WorkerTimingContainer>
-WorkerFetchContext::TakePendingWorkerTimingReceiver(int request_id) {
-  return GetWebWorkerFetchContext()->TakePendingWorkerTimingReceiver(
-      request_id);
 }
 
 std::unique_ptr<ResourceLoadInfoNotifierWrapper>

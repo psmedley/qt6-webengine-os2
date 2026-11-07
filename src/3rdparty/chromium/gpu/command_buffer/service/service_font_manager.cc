@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,13 @@
 
 #include <inttypes.h>
 
+#include <type_traits>
+
 #include "base/bits.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/numerics/checked_math.h"
 #include "base/rand_util.h"
 #include "base/strings/stringprintf.h"
 #include "components/crash/core/common/crash_key.h"
@@ -27,8 +30,7 @@ class Deserializer {
 
   template <typename T>
   bool Read(T* val) {
-    static_assert(base::is_trivially_copyable<T>::value,
-                  "Not trivially copyable");
+    static_assert(std::is_trivially_copyable_v<T>);
     if (!AlignMemory(sizeof(T), alignof(T)))
       return false;
 
@@ -99,6 +101,11 @@ class ServiceFontManager::SkiaDiscardableManager
     if (!font_manager_)
       return true;
     return font_manager_->DeleteHandle(handle_id);
+  }
+
+  void assertHandleValid(SkDiscardableHandleId handle_id) override {
+    CHECK(font_manager_);
+    font_manager_->AssertHandle(handle_id);
   }
 
   void notifyCacheMiss(SkStrikeClient::CacheMissType type,
@@ -251,6 +258,26 @@ bool ServiceFontManager::Unlock(
     it->second.Unlock();
   }
   return true;
+}
+
+void ServiceFontManager::AssertHandle(SkDiscardableHandleId handle_id) {
+  base::AutoLock hold(lock_);
+  auto it = discardable_handle_map_.find(handle_id);
+  CHECK(it != discardable_handle_map_.end());
+
+  static crash_reporter::CrashKeyString<2> crash_key_destroyed(
+      "font_manager::destroyed");
+  crash_reporter::ScopedCrashKeyString auto_clear_destroyed(
+      &crash_key_destroyed, destroyed_ ? "1" : "0");
+  static crash_reporter::CrashKeyString<8> crash_key_ref_count(
+      "font_manager::Handle::ref_count");
+  crash_reporter::ScopedCrashKeyString auto_clear_ref_count(
+      &crash_key_ref_count, base::StringPrintf("%d", it->second.ref_count()));
+  if (destroyed_) {
+    CHECK(it->second.ref_count() > 0);
+  } else {
+    CHECK(it->second.IsLocked());
+  }
 }
 
 bool ServiceFontManager::DeleteHandle(SkDiscardableHandleId handle_id) {

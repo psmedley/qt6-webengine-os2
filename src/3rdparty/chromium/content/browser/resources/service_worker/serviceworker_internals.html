@@ -23,6 +23,10 @@
         <span>Fetch handler existence:</span>
         <span jscontent="$this.fetch_handler_existence"></span>
       </div>
+      <div class="serviceworker-fetch-handler-type">
+        <span>Fetch handler type:</span>
+        <span jscontent="$this.fetch_handler_type"></span>
+      </div>
       <div class="serviceworker-script_url">
         <span>Script:</span>
         <span jscontent="$this.script_url"></span>
@@ -91,7 +95,7 @@
           <div class="serviceworker-nonce"
             jsdisplay="$this.ancestor_chain_bit == 'CrossSite'">
             <span>nonce:</span>
-            <span jscontent="$this.active"></span>
+            <span jscontent="$this.nonce"></span>
           </div>
         </div>
       </div>
@@ -119,12 +123,12 @@
       </div>
       <div class="registration-controls" jsdisplay="!$this.unregistered">
         <button href="#" class="unregister"
-            jsvalues=".cmdArgs:{partition_id:$partition_id,scope:scope}">
+            jsvalues=".cmdArgs:{partition_id:$partition_id,scope:scope,storage_key:storage_key}">
           Unregister
         </button>
         <button href="#" class="start"
             jsdisplay="$this.active.running_status != 'RUNNING'"
-             jsvalues=".cmdArgs:{partition_id:$partition_id,scope:scope}">
+             jsvalues=".cmdArgs:{partition_id:$partition_id,scope:scope,storage_key:storage_key}">
           Start
         </button>
         <span class="operation-status" style="display: none">Running...</span>

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,8 +33,7 @@ namespace test6 {
 
 }  // namespace
 
-namespace net {
-namespace registry_controlled_domains {
+namespace net::registry_controlled_domains {
 
 namespace {
 
@@ -644,5 +643,4 @@ TEST_F(RegistryControlledDomainTest, Permissive) {
 #endif
 }
 
-}  // namespace registry_controlled_domains
-}  // namespace net
+}  // namespace net::registry_controlled_domains

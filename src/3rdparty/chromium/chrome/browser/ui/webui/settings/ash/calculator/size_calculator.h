@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,15 +18,13 @@
 #include "base/observer_list_types.h"
 #include "chrome/browser/ash/crostini/crostini_manager.h"
 #include "chrome/browser/browsing_data/site_data_size_collector.h"
-#include "chromeos/dbus/cryptohome/UserDataAuth.pb.h"
-#include "chromeos/dbus/cryptohome/rpc.pb.h"
+#include "chromeos/ash/components/dbus/cryptohome/UserDataAuth.pb.h"
+#include "chromeos/ash/components/dbus/cryptohome/rpc.pb.h"
 #include "components/user_manager/user.h"
 
 class Profile;
 
-namespace chromeos {
-namespace settings {
-namespace calculator {
+namespace ash::settings::calculator {
 
 // Base class for the calculation of a specific storage item. Instances of this
 // class rely on their observers calling StartCalculation, and are designed to
@@ -324,8 +322,6 @@ class OtherUsersSizeCalculator : public SizeCalculator {
   base::WeakPtrFactory<OtherUsersSizeCalculator> weak_ptr_factory_{this};
 };
 
-}  // namespace calculator
-}  // namespace settings
-}  // namespace chromeos
+}  // namespace ash::settings::calculator
 
 #endif  // CHROME_BROWSER_UI_WEBUI_SETTINGS_ASH_CALCULATOR_SIZE_CALCULATOR_H_

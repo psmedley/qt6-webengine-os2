@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,7 +43,7 @@ Channel::MessagePtr WaitForBrokerMessage(
     LOG(ERROR) << "Invalid node channel message";
     error = true;
   } else if (incoming_fds.size() != expected_num_handles) {
-    LOG(ERROR) << "Received unexpected number of handles";
+    DLOG(ERROR) << "Received unexpected number of handles";
     error = true;
   }
 

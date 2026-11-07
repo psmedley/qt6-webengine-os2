@@ -1,9 +1,10 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/task/delayed_task_handle.h"
 
+#include "base/memory/raw_ptr.h"
 #include "base/test/gtest_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -33,7 +34,7 @@ class TestDelegate : public DelayedTaskHandle::Delegate {
   bool is_valid_ = true;
 
   // Indicates if CancelTask() was invoked, if not null. Must outlives |this|.
-  bool* was_cancel_task_called_;
+  raw_ptr<bool> was_cancel_task_called_;
 };
 
 }  // namespace

@@ -18,7 +18,7 @@
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/widestring.h"
 #include "core/fxge/cfx_face.h"
-#include "core/fxge/fx_freetype.h"
+#include "core/fxge/freetype/fx_freetype.h"
 
 class CFGAS_GEFont;
 class IFX_SeekableReadStream;
@@ -118,9 +118,9 @@ class CFGAS_FontMgr {
 
 #else   // BUILDFLAG(IS_WIN)
   bool EnumFontsFromFontMapper();
-  void RegisterFace(RetainPtr<CFX_Face> pFace, const WideString* pFaceName);
+  void RegisterFace(RetainPtr<CFX_Face> pFace, const WideString& wsFaceName);
   void RegisterFaces(const RetainPtr<IFX_SeekableReadStream>& pFontStream,
-                     const WideString* pFaceName);
+                     const WideString& wsFaceName);
   std::vector<CFGAS_FontDescriptorInfo> MatchFonts(FX_CodePage wCodePage,
                                                    uint32_t dwFontStyles,
                                                    const WideString& FontName,

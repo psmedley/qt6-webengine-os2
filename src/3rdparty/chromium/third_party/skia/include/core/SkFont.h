@@ -331,7 +331,7 @@ public:
         @param text        character storage encoded with SkTextEncoding
         @param byteLength  length of character storage in bytes
         @param bounds      returns bounding box relative to (0, 0) if not nullptr
-        @return            number of glyphs represented by text of length byteLength
+        @return            the sum of the default advance widths
     */
     SkScalar measureText(const void* text, size_t byteLength, SkTextEncoding encoding,
                          SkRect* bounds = nullptr) const {
@@ -347,7 +347,7 @@ public:
         @param byteLength  length of character storage in bytes
         @param bounds      returns bounding box relative to (0, 0) if not nullptr
         @param paint       optional; may be nullptr
-        @return            number of glyphs represented by text of length byteLength
+        @return            the sum of the default advance widths
     */
     SkScalar measureText(const void* text, size_t byteLength, SkTextEncoding encoding,
                          SkRect* bounds, const SkPaint* paint) const;
@@ -498,6 +498,8 @@ public:
      */
     void dump() const;
 
+    using sk_is_trivially_relocatable = std::true_type;
+
 private:
     enum PrivFlags {
         kForceAutoHinting_PrivFlag      = 1 << 0,
@@ -523,11 +525,13 @@ private:
     uint8_t     fEdging;
     uint8_t     fHinting;
 
+    static_assert(::sk_is_trivially_relocatable<decltype(fTypeface)>::value);
+
     SkScalar setupForAsPaths(SkPaint*);
     bool hasSomeAntiAliasing() const;
 
     friend class SkFontPriv;
-    friend class SkGlyphRunListPainter;
+    friend class SkGlyphRunListPainterCPU;
     friend class SkStrikeSpec;
     friend class SkRemoteGlyphCacheTest;
 };

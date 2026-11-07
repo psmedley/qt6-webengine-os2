@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/environment.h"
 #include "base/files/file_util.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/process/process_metrics.h"
 #include "base/run_loop.h"
 #include "base/strings/pattern.h"
@@ -26,7 +27,6 @@
 #include "base/threading/scoped_blocking_call.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "testing/gtest/include/gtest/gtest-death-test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -39,6 +39,11 @@
 #include "base/win/scoped_variant.h"
 #include "base/win/wmi.h"
 #endif  // BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(IS_MAC)
+#include "base/system/sys_info_internal.h"
+#include "base/test/scoped_feature_list.h"
+#endif  // BUILDFLAG(IS_MAC)
 
 namespace base {
 
@@ -56,12 +61,28 @@ TEST_F(SysInfoTest, NumProcs) {
   EXPECT_GE(SysInfo::NumberOfProcessors(), 1);
 }
 
+#if BUILDFLAG(IS_MAC)
+TEST_F(SysInfoTest, NumProcsWithSecurityMitigationEnabled) {
+  // Verify that the number of number of available processors available when CPU
+  // security mitigation is enabled is the number of available "physical"
+  // processors.
+  test::ScopedFeatureList feature_list_;
+  feature_list_.InitAndEnableFeature(kNumberOfCoresWithCpuSecurityMitigation);
+  SysInfo::SetIsCpuSecurityMitigationsEnabled(true);
+  EXPECT_EQ(internal::NumberOfProcessors(),
+            internal::NumberOfPhysicalProcessors());
+
+  // Reset to default value
+  SysInfo::SetIsCpuSecurityMitigationsEnabled(false);
+}
+#endif  // BUILDFLAG(IS_MAC)
+
 TEST_F(SysInfoTest, AmountOfMem) {
   // We aren't actually testing that it's correct, just that it's sane.
-  EXPECT_GT(SysInfo::AmountOfPhysicalMemory(), 0);
+  EXPECT_GT(SysInfo::AmountOfPhysicalMemory(), 0u);
   EXPECT_GT(SysInfo::AmountOfPhysicalMemoryMB(), 0);
   // The maxmimal amount of virtual memory can be zero which means unlimited.
-  EXPECT_GE(SysInfo::AmountOfVirtualMemory(), 0);
+  EXPECT_GE(SysInfo::AmountOfVirtualMemory(), 0u);
 }
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
@@ -79,27 +100,27 @@ TEST_F(SysInfoTest, MAYBE_AmountOfAvailablePhysicalMemory) {
   if (info.available != 0) {
     // If there is MemAvailable from kernel.
     EXPECT_LT(info.available, info.total);
-    const int64_t amount = SysInfo::AmountOfAvailablePhysicalMemory(info);
+    const uint64_t amount = SysInfo::AmountOfAvailablePhysicalMemory(info);
     // We aren't actually testing that it's correct, just that it's sane.
     // Available memory is |free - reserved + reclaimable (inactive, non-free)|.
     // On some android platforms, reserved is a substantial portion.
     const int available =
 #if BUILDFLAG(IS_ANDROID)
-        info.free - kReservedPhysicalMemory;
+        std::max(info.free - kReservedPhysicalMemory, 0);
 #else
         info.free;
 #endif  // BUILDFLAG(IS_ANDROID)
-    EXPECT_GT(amount, static_cast<int64_t>(available) * 1024);
-    EXPECT_LT(amount / 1024, info.available);
+    EXPECT_GT(amount, checked_cast<uint64_t>(available) * 1024);
+    EXPECT_LT(amount / 1024, checked_cast<uint64_t>(info.available));
     // Simulate as if there is no MemAvailable.
     info.available = 0;
   }
 
   // There is no MemAvailable. Check the fallback logic.
-  const int64_t amount = SysInfo::AmountOfAvailablePhysicalMemory(info);
+  const uint64_t amount = SysInfo::AmountOfAvailablePhysicalMemory(info);
   // We aren't actually testing that it's correct, just that it's sane.
-  EXPECT_GT(amount, static_cast<int64_t>(info.free) * 1024);
-  EXPECT_LT(amount / 1024, info.total);
+  EXPECT_GT(amount, checked_cast<uint64_t>(info.free) * 1024);
+  EXPECT_LT(amount / 1024, checked_cast<uint64_t>(info.total));
 }
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) ||
         // BUILDFLAG(IS_ANDROID)
@@ -234,7 +255,7 @@ TEST_F(SysInfoTest, GetHardwareInfo) {
   EXPECT_TRUE(IsStringUTF8(hardware_info->model));
   bool empty_result_expected =
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_WIN) || \
-    BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+    BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
       false;
 #else
       true;
@@ -299,7 +320,7 @@ TEST_F(SysInfoTest, GetHardwareInfoWMIMatchRegistry) {
 }
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
 
 TEST_F(SysInfoTest, GoogleChromeOSVersionNumbers) {
   int32_t os_major_version = -1;
@@ -429,6 +450,6 @@ TEST_F(SysInfoTest, ScopedRunningOnChromeOS) {
   EXPECT_EQ(was_running, SysInfo::IsRunningOnChromeOS());
 }
 
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 }  // namespace base

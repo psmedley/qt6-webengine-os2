@@ -159,6 +159,9 @@
     ],
     "use_clang_coverage": true
   },
+  "$build/flakiness": {
+    "check_for_flakiness": true
+  },
   "$build/goma": {
     "enable_ats": false,
     "jobs": 300,
@@ -174,9 +177,5 @@
     ]
   },
   "builder_group": "tryserver.chromium.win",
-  "orchestrator": {
-    "builder_group": "tryserver.chromium.win",
-    "builder_name": "win10_chromium_x64_rel_ng"
-  },
   "recipe": "chromium/compilator"
 }

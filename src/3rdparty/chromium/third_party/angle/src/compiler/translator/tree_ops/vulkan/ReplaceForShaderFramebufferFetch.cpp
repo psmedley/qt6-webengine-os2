@@ -252,7 +252,8 @@ TIntermTyped *CreateSubpassLoadFuncCall(TSymbolTable *symbolTable,
                                         TBasicType inputType,
                                         TIntermSequence *arguments)
 {
-    return CreateBuiltInFunctionCallNode("subpassLoad", arguments, *symbolTable, kESSLVulkanOnly);
+    return CreateBuiltInFunctionCallNode("subpassLoad", arguments, *symbolTable,
+                                         kESSLInternalBackendBuiltIns);
 }
 
 class ReplaceSubpassInputUtils
@@ -359,7 +360,8 @@ bool ReplaceSubpassInputUtils::declareSubpassInputVariableImpl(
         return false;
     }
 
-    TType *inputAttachmentType = new TType(subpassInputType, EbpUndefined, EvqUniform, 1);
+    TType *inputAttachmentType =
+        new TType(subpassInputType, declaredVarSym->getPrecision(), EvqUniform, 1);
     TLayoutQualifier inputAttachmentQualifier     = inputAttachmentType->getLayoutQualifier();
     inputAttachmentQualifier.inputAttachmentIndex = inputAttachmentIndex;
     inputAttachmentType->setLayoutQualifier(inputAttachmentQualifier);
@@ -605,10 +607,10 @@ bool ReplaceInOutUtils::loadInputAttachmentData()
 
 }  // anonymous namespace
 
-ANGLE_NO_DISCARD bool ReplaceLastFragData(TCompiler *compiler,
-                                          TIntermBlock *root,
-                                          TSymbolTable *symbolTable,
-                                          std::vector<ShaderVariable> *uniforms)
+[[nodiscard]] bool ReplaceLastFragData(TCompiler *compiler,
+                                       TIntermBlock *root,
+                                       TSymbolTable *symbolTable,
+                                       std::vector<ShaderVariable> *uniforms)
 {
     // Common variables
     InputAttachmentIdxSet constIndices;
@@ -678,10 +680,10 @@ ANGLE_NO_DISCARD bool ReplaceLastFragData(TCompiler *compiler,
     return true;
 }
 
-ANGLE_NO_DISCARD bool ReplaceInOutVariables(TCompiler *compiler,
-                                            TIntermBlock *root,
-                                            TSymbolTable *symbolTable,
-                                            std::vector<ShaderVariable> *uniforms)
+[[nodiscard]] bool ReplaceInOutVariables(TCompiler *compiler,
+                                         TIntermBlock *root,
+                                         TSymbolTable *symbolTable,
+                                         std::vector<ShaderVariable> *uniforms)
 {
     // Common variables
     InputAttachmentIdxSet constIndices;

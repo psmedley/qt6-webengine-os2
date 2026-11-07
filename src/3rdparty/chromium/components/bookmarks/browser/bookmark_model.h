@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,7 @@
 #include "components/bookmarks/browser/bookmark_client.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/bookmarks/browser/bookmark_undo_provider.h"
+#include "components/bookmarks/common/bookmark_metrics.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/image/image.h"
@@ -177,10 +178,14 @@ class BookmarkModel : public BookmarkUndoProvider,
   const gfx::Image& GetFavicon(const BookmarkNode* node);
 
   // Sets the title of |node|.
-  void SetTitle(const BookmarkNode* node, const std::u16string& title);
+  void SetTitle(const BookmarkNode* node,
+                const std::u16string& title,
+                metrics::BookmarkEditSource source);
 
   // Sets the URL of |node|.
-  void SetURL(const BookmarkNode* node, const GURL& url);
+  void SetURL(const BookmarkNode* node,
+              const GURL& url,
+              metrics::BookmarkEditSource source);
 
   // Sets the date added time of |node|.
   void SetDateAdded(const BookmarkNode* node, base::Time date_added);
@@ -220,9 +225,23 @@ class BookmarkModel : public BookmarkUndoProvider,
       absl::optional<base::Time> creation_time = absl::nullopt,
       absl::optional<base::GUID> guid = absl::nullopt);
 
-  // Adds a url at the specified position with the given |creation_time|,
-  // |meta_info| and |guid|. If no GUID is provided (i.e. nullopt), then a
-  // random one will be generated. If a GUID is provided, it must be valid.
+  // Adds a new bookmark for the given `url` at the specified position with the
+  // given `meta_info`. Used for bookmarks being added through some direct user
+  // action (e.g. the bookmark star).
+  const BookmarkNode* AddNewURL(
+      const BookmarkNode* parent,
+      size_t index,
+      const std::u16string& title,
+      const GURL& url,
+      const BookmarkNode::MetaInfoMap* meta_info = nullptr);
+
+  // Adds a url at the specified position with the given `creation_time`,
+  // `meta_info`, `guid`, and `last_used_time`. If no GUID is provided
+  // (i.e. nullopt), then a random one will be generated. If a GUID is
+  // provided, it must be valid. Used for bookmarks not being added from
+  // direct user actions (e.g. created via sync, locally modified bookmark
+  // or pre-existing bookmark). `added_by_user` is true when a new bookmark was
+  // added by the user and false when a node is added by sync or duplicated.
   const BookmarkNode* AddURL(
       const BookmarkNode* parent,
       size_t index,
@@ -230,7 +249,8 @@ class BookmarkModel : public BookmarkUndoProvider,
       const GURL& url,
       const BookmarkNode::MetaInfoMap* meta_info = nullptr,
       absl::optional<base::Time> creation_time = absl::nullopt,
-      absl::optional<base::GUID> guid = absl::nullopt);
+      absl::optional<base::GUID> guid = absl::nullopt,
+      bool added_by_user = false);
 
   // Sorts the children of |parent|, notifying observers by way of the
   // BookmarkNodeChildrenReordered method.
@@ -250,6 +270,14 @@ class BookmarkModel : public BookmarkUndoProvider,
   // importing to exclude the newly created folders from showing up in the
   // combobox of most recently modified folders.
   void ResetDateFolderModified(const BookmarkNode* node);
+
+  // Updates the last used `time` for the given `id` / `url`.
+  void UpdateLastUsedTime(const BookmarkNode* node, const base::Time time);
+
+  // Clears the last used time for the given time range. Called when the user
+  // clears their history. Time() and Time::Max() are used for min/max values.
+  void ClearLastUsedTimeInRange(const base::Time delete_begin,
+                                const base::Time delete_end);
 
   // Returns up to |max_count| bookmarks containing each term from |query| in
   // either the title, URL, or, if |match_ancestor_titles| is true, the titles
@@ -283,6 +311,16 @@ class BookmarkModel : public BookmarkUndoProvider,
                           const BookmarkNode::MetaInfoMap& meta_info_map);
   void DeleteNodeMetaInfo(const BookmarkNode* node,
                           const std::string& key);
+
+  // Sets/deletes local meta info of |node|.
+  void SetNodeUnsyncedMetaInfo(const BookmarkNode* node,
+                               const std::string& key,
+                               const std::string& value);
+  void SetNodeUnsyncedMetaInfoMap(
+      const BookmarkNode* node,
+      const BookmarkNode::MetaInfoMap& meta_info_map);
+  void DeleteUnsyncedNodeMetaInfo(const BookmarkNode* node,
+                                  const std::string& key);
 
   // Adds |key| to the set of meta info keys that are not copied when a node is
   // cloned.
@@ -335,11 +373,13 @@ class BookmarkModel : public BookmarkUndoProvider,
   // Called when done loading. Updates internal state and notifies observers.
   void DoneLoading(std::unique_ptr<BookmarkLoadDetails> details);
 
-  // Adds the |node| at |parent| in the specified |index| and notifies its
-  // observers.
+  // Adds the `node` at `parent` in the specified `index` and notifies its
+  // observers. `added_by_user` is true when a new bookmark was added by the
+  // user and false when a node is added by sync or duplicated.
   BookmarkNode* AddNode(BookmarkNode* parent,
                         size_t index,
-                        std::unique_ptr<BookmarkNode> node);
+                        std::unique_ptr<BookmarkNode> node,
+                        bool added_by_user = false);
 
   // Adds |node| to |index_| and recursively invokes this for all children.
   void AddNodeToIndexRecursive(const BookmarkNode* node);
@@ -377,6 +417,15 @@ class BookmarkModel : public BookmarkUndoProvider,
   void set_next_node_id(int64_t id) { next_node_id_ = id; }
 
   BookmarkUndoDelegate* undo_delegate() const;
+
+  // Implementation of `UpdateLastUsedTime` which gives the option to skip
+  // saving the change to `BookmarkStorage. Used to efficiently make changes
+  // to multiple bookmarks.
+  void UpdateLastUsedTimeImpl(const BookmarkNode* node, base::Time time);
+
+  void ClearLastUsedTimeInRangeRecursive(BookmarkNode* node,
+                                         const base::Time delete_begin,
+                                         const base::Time delete_end);
 
   std::unique_ptr<BookmarkClient> client_;
 

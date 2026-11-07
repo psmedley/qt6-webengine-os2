@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -96,19 +96,17 @@ class OzonePlatformHeadless : public OzonePlatform {
   }
   void InitScreen(PlatformScreen* screen) override {}
   std::unique_ptr<InputMethod> CreateInputMethod(
-      internal::InputMethodDelegate* delegate,
+      ImeKeyEventDispatcher* ime_key_event_dispatcher,
       gfx::AcceleratedWidget widget) override {
-    return std::make_unique<InputMethodMinimal>(delegate);
+    return std::make_unique<InputMethodMinimal>(ime_key_event_dispatcher);
   }
 
-// Desktop Linux, not ChromeOS.
-#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS_ASH) && \
-    !BUILDFLAG(IS_CHROMEOS_LACROS) && !BUILDFLAG(IS_CHROMECAST)
+// Desktop Linux, not CastOS.
+#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CASTOS)
   const PlatformProperties& GetPlatformProperties() override {
     static base::NoDestructor<OzonePlatform::PlatformProperties> properties;
     static bool initialized = false;
     if (!initialized) {
-      properties->uses_external_vulkan_image_factory = true;
       initialized = true;
     }
     return *properties;

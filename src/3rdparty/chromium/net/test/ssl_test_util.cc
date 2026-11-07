@@ -1,15 +1,17 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/test/ssl_test_util.h"
+
+#include <string>
 
 #include "third_party/boringssl/src/include/openssl/hpke.h"
 
 namespace net {
 
 bssl::UniquePtr<SSL_ECH_KEYS> MakeTestEchKeys(
-    const char* public_name,
+    base::StringPiece public_name,
     size_t max_name_len,
     std::vector<uint8_t>* ech_config_list) {
   bssl::ScopedEVP_HPKE_KEY key;
@@ -20,8 +22,8 @@ bssl::UniquePtr<SSL_ECH_KEYS> MakeTestEchKeys(
   uint8_t* ech_config;
   size_t ech_config_len;
   if (!SSL_marshal_ech_config(&ech_config, &ech_config_len,
-                              /*config_id=*/1, key.get(), public_name,
-                              max_name_len)) {
+                              /*config_id=*/1, key.get(),
+                              std::string(public_name).c_str(), max_name_len)) {
     return nullptr;
   }
   bssl::UniquePtr<uint8_t> scoped_ech_config(ech_config);

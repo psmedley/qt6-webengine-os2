@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -339,8 +339,7 @@ TEST(ChunkedUploadDataStreamTest, RewindWhileReading) {
 
 // Check the behavior of ChunkedUploadDataStream::Writer.
 TEST(ChunkedUploadDataStreamTest, ChunkedUploadDataStreamWriter) {
-  std::unique_ptr<ChunkedUploadDataStream> stream(
-      new ChunkedUploadDataStream(0));
+  auto stream = std::make_unique<ChunkedUploadDataStream>(0);
   std::unique_ptr<ChunkedUploadDataStream::Writer> writer(
       stream->CreateWriter());
 

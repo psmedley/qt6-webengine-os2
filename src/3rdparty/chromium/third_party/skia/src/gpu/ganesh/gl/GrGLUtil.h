@@ -196,8 +196,6 @@ enum class GrGLRenderer {
 
     kGalliumLLVM,
 
-    kVirgl,
-
     kMali4xx,
     /** G-3x, G-5x, or G-7x */
     kMaliG,
@@ -209,6 +207,8 @@ enum class GrGLRenderer {
     kAMDRadeonR9M4xx,     // AMD Radeon R9 M400 Series
     kAMDRadeonPro5xxx,    // AMD Radeon Pro 5000 Series
     kAMDRadeonProVegaxx,  // AMD Radeon Pro Vega
+
+    kWebGL,
 
     kOther
 };
@@ -230,6 +230,7 @@ enum class GrGLANGLEBackend {
     kUnknown,
     kD3D9,
     kD3D11,
+    kMetal,
     kOpenGL
 };
 
@@ -310,8 +311,14 @@ struct GrGLDriverInfo {
     GrGLDriver        fANGLEDriver        = GrGLDriver::kUnknown;
     GrGLDriverVersion fANGLEDriverVersion = GR_GL_DRIVER_UNKNOWN_VER;
 
+    GrGLVendor        fWebGLVendor        = GrGLVendor::kOther;
+    GrGLRenderer      fWebGLRenderer      = GrGLRenderer::kOther;
+
     // Are we running over the Chrome interprocess command buffer?
     bool fIsOverCommandBuffer = false;
+
+    // Running over virgl guest driver.
+    bool fIsRunningOverVirgl = false;
 };
 
 GrGLDriverInfo GrGLGetDriverInfo(const GrGLInterface*);

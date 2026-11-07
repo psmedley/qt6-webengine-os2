@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -441,10 +441,6 @@ TEST_P(LayerTreeHostReadbackPixelTest, MultipleReadbacksOnLayer) {
 ReadbackTestConfig const kTestConfigs[] = {
     ReadbackTestConfig{viz::RendererType::kSoftware, TestReadBackType::kBitmap},
 #if BUILDFLAG(ENABLE_GL_BACKEND_TESTS)
-#if BUILDFLAG(ENABLE_GL_RENDERER_TESTS)
-    ReadbackTestConfig{viz::RendererType::kGL, TestReadBackType::kTexture},
-    ReadbackTestConfig{viz::RendererType::kGL, TestReadBackType::kBitmap},
-#endif  // BUILDFLAG(ENABLE_GL_RENDERER_TESTS)
     ReadbackTestConfig{viz::RendererType::kSkiaGL, TestReadBackType::kTexture},
     ReadbackTestConfig{viz::RendererType::kSkiaGL, TestReadBackType::kBitmap},
 #endif  // BUILDFLAG(ENABLE_GL_BACKEND_TESTS)

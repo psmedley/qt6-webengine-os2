@@ -22,7 +22,7 @@
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 
 typedef struct C93DecoderContext {
     AVFrame *pictures[2];
@@ -120,7 +120,7 @@ static inline void draw_n_color(uint8_t *out, int stride, int width,
     }
 }
 
-static int decode_frame(AVCodecContext *avctx, void *data,
+static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
                         int *got_frame, AVPacket *avpkt)
 {
     const uint8_t *buf = avpkt->data;
@@ -251,7 +251,7 @@ static int decode_frame(AVCodecContext *avctx, void *data,
             memcpy(newpic->data[1], oldpic->data[1], 256 * 4);
     }
 
-    if ((ret = av_frame_ref(data, newpic)) < 0)
+    if ((ret = av_frame_ref(rframe, newpic)) < 0)
         return ret;
     *got_frame = 1;
 
@@ -260,13 +260,13 @@ static int decode_frame(AVCodecContext *avctx, void *data,
 
 const FFCodec ff_c93_decoder = {
     .p.name         = "c93",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Interplay C93"),
+    CODEC_LONG_NAME("Interplay C93"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_C93,
     .priv_data_size = sizeof(C93DecoderContext),
     .init           = decode_init,
     .close          = decode_end,
-    .decode         = decode_frame,
+    FF_CODEC_DECODE_CB(decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

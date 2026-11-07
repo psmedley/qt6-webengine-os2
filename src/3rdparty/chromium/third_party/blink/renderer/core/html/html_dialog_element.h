@@ -56,7 +56,7 @@ class CORE_EXPORT HTMLDialogElement final : public HTMLElement {
     return_value_ = return_value;
   }
 
-  void CloseWatcherFiredCancel();
+  void CloseWatcherFiredCancel(Event*);
   void CloseWatcherFiredClose();
 
  private:
@@ -65,12 +65,15 @@ class CORE_EXPORT HTMLDialogElement final : public HTMLElement {
   void SetIsModal(bool is_modal);
   void ScheduleCloseEvent();
 
+  // https://html.spec.whatwg.org/C/#the-dialog-element
+  // Chooses the focused element when show() or showModal() is invoked.
+  static void SetFocusForDialog(HTMLDialogElement* dialog);
+
   bool is_modal_;
   String return_value_;
   WeakMember<Element> previously_focused_element_;
 
   Member<CloseWatcher> close_watcher_;
-  bool cancel_fired_since_last_close_ = false;
 };
 
 }  // namespace blink

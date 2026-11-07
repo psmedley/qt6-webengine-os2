@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -82,6 +82,20 @@ struct CONTENT_EXPORT MediaStreamRequest {
   // audio being played out locally.
   bool disable_local_echo;
 
+  // If audio is requested, |exclude_system_audio| can indicate that
+  // system-audio should nevertheless not be offered to the user.
+  bool exclude_system_audio = false;
+
+  // Flag to indicate that the current tab should be excluded from the list of
+  // tabs offered to the user.
+  bool exclude_self_browser_surface = false;
+
+  // Flag to indicate a preference for which display surface type (screen,
+  // windows, or tabs) should be most prominently offered to the user. The
+  // browser may disregard this preference.
+  blink::mojom::PreferredDisplaySurface preferred_display_surface =
+      blink::mojom::PreferredDisplaySurface::NO_PREFERENCE;
+
   // Flag to indicate whether the request is for PTZ use.
   bool request_pan_tilt_zoom_permission;
 };
@@ -117,6 +131,14 @@ class MediaStreamUI {
       std::vector<DesktopMediaID> screen_capture_ids,
       StateChangeCallback state_change) = 0;
 
+  // Called when the device is stopped because desktop capture identified by
+  // |label| source is about to be changed from |old_media_id| to
+  // |new_media_id|. Note that the switch is not necessarily completed.
+  virtual void OnDeviceStoppedForSourceChange(
+      const std::string& label,
+      const DesktopMediaID& old_media_id,
+      const DesktopMediaID& new_media_id) = 0;
+
   virtual void OnDeviceStopped(const std::string& label,
                                const DesktopMediaID& media_id) = 0;
 
@@ -144,10 +166,10 @@ class MediaStreamUI {
 };
 
 // Callback used return results of media access requests.
-using MediaResponseCallback =
-    base::OnceCallback<void(const blink::MediaStreamDevices& devices,
-                            blink::mojom::MediaStreamRequestResult result,
-                            std::unique_ptr<MediaStreamUI> ui)>;
+using MediaResponseCallback = base::OnceCallback<void(
+    const blink::mojom::StreamDevicesSet& stream_devices_set,
+    blink::mojom::MediaStreamRequestResult result,
+    std::unique_ptr<MediaStreamUI> ui)>;
 }  // namespace content
 
 #endif  // CONTENT_PUBLIC_BROWSER_MEDIA_STREAM_REQUEST_H_

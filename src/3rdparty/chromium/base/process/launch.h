@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,6 @@
 #include "base/strings/string_piece.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 
 #if BUILDFLAG(IS_WIN)
 #include "base/win/windows_types.h"
@@ -309,11 +308,11 @@ struct BASE_EXPORT LaunchOptions {
   bool new_process_group = false;
 #endif  // BUILDFLAG(IS_POSIX)
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   // If non-negative, the specified file descriptor will be set as the launched
   // process' controlling terminal.
   int ctrl_terminal_fd = -1;
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 };
 
 // Launch a process via the command line |cmdline|.
@@ -435,7 +434,7 @@ BASE_EXPORT LaunchOptions LaunchOptionsForTest();
 //
 // It is unsafe to use any pthread APIs after ForkWithFlags().
 // However, performing an exec() will lift this restriction.
-BASE_EXPORT pid_t ForkWithFlags(unsigned long flags, pid_t* ptid, pid_t* ctid);
+BASE_EXPORT pid_t ForkWithFlags(int flags, pid_t* ptid, pid_t* ctid);
 #endif
 
 namespace internal {

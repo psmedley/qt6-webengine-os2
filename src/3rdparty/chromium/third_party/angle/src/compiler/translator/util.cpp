@@ -278,6 +278,9 @@ GLenum GLVariableType(const TType &type)
 
             return kBoolGLType[type.getNominalSize() - 1];
 
+        case EbtYuvCscStandardEXT:
+            return GL_UNSIGNED_INT;
+
         case EbtSampler2D:
             return GL_SAMPLER_2D;
         case EbtSampler3D:
@@ -380,11 +383,16 @@ GLenum GLVariableType(const TType &type)
             return GL_UNSIGNED_INT_ATOMIC_COUNTER;
         case EbtSamplerVideoWEBGL:
             return GL_SAMPLER_VIDEO_IMAGE_WEBGL;
+        case EbtPixelLocalANGLE:
+        case EbtIPixelLocalANGLE:
+        case EbtUPixelLocalANGLE:
+            // TODO(anglebug.com/7279): For now, we can expect PLS handles to be rewritten to images
+            // before anyone calls into here.
+            [[fallthrough]];
         default:
             UNREACHABLE();
+            return GL_NONE;
     }
-
-    return GL_NONE;
 }
 
 GLenum GLVariablePrecision(const TType &type)
@@ -592,9 +600,7 @@ InterpolationType GetInterpolationType(TQualifier qualifier)
             return INTERPOLATION_SAMPLE;
         default:
             UNREACHABLE();
-#if !UNREACHABLE_IS_NORETURN
             return INTERPOLATION_SMOOTH;
-#endif
     }
 }
 
@@ -672,9 +678,7 @@ TType GetShaderVariableBasicType(const sh::ShaderVariable &var)
             return TType(EbtUInt, 4);
         default:
             UNREACHABLE();
-#if !UNREACHABLE_IS_NORETURN
             return TType();
-#endif
     }
 }
 
@@ -744,6 +748,18 @@ bool IsBuiltinFragmentInputVariable(TQualifier qualifier)
 bool IsShaderOutput(TQualifier qualifier)
 {
     return IsVaryingOut(qualifier) || IsBuiltinOutputVariable(qualifier);
+}
+
+bool IsFragmentOutput(TQualifier qualifier)
+{
+    switch (qualifier)
+    {
+        case EvqFragmentOut:
+        case EvqFragmentInOut:
+            return true;
+        default:
+            return false;
+    }
 }
 
 bool IsOutputESSL(ShShaderOutput output)

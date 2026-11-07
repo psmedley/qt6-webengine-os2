@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "services/network/public/cpp/client_hints.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
+#include "third_party/blink/public/common/permissions_policy/origin_with_possible_wildcards.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/inspector/inspector_audits_issue.h"
 #include "third_party/blink/renderer/core/permissions_policy/permissions_policy_parser.h"
@@ -21,34 +22,35 @@ void UpdateWindowPermissionsPolicyWithDelegationSupportForClientHints(
     const String& header_value,
     const KURL& url,
     ClientHintsPreferences::Context* context,
-    bool is_http_equiv,
-    bool is_preload_or_sync_parser) {
-  // If it's not http-equiv and it's not a preload-or-sync-parser visible
-  // meta tag, then we need to warn the dev that javascript injected the tag.
-  if (!is_http_equiv && !is_preload_or_sync_parser && local_dom_window &&
+    network::MetaCHType type,
+    bool is_doc_preloader_or_sync_parser) {
+  // If it's not http-equiv="accept-ch" and it's not a preload-or-sync-parser
+  // visible meta tag, then we need to warn the dev that js injected the tag.
+  if (type != network::MetaCHType::HttpEquivAcceptCH &&
+      !is_doc_preloader_or_sync_parser && local_dom_window &&
       RuntimeEnabledFeatures::ClientHintThirdPartyDelegationEnabled()) {
     AuditsIssue::ReportClientHintIssue(
         local_dom_window, ClientHintIssueReason::kMetaTagModifiedHTML);
   }
 
-  // If no hints were set, this is a http-equiv tag, this tag was added by
-  // javascript, the `local_dom_window` is missing, or the feature is disabled,
+  // If no hints were set, this is a http-equiv="accept-ch" tag, this tag was
+  // added by js, the `local_dom_window` is missing, or the feature is disabled,
   // there's nothing more to do.
-  if (!client_hints_preferences.UpdateFromMetaTagAcceptCH(
-          header_value, url, context, is_http_equiv,
-          is_preload_or_sync_parser) ||
-      is_http_equiv || !is_preload_or_sync_parser || !local_dom_window ||
+  if (!client_hints_preferences.UpdateFromMetaCH(
+          header_value, url, context, type, is_doc_preloader_or_sync_parser) ||
+      type == network::MetaCHType::HttpEquivAcceptCH ||
+      !is_doc_preloader_or_sync_parser || !local_dom_window ||
       !RuntimeEnabledFeatures::ClientHintThirdPartyDelegationEnabled()) {
     return;
   }
 
   // Note: .Ascii() would convert tab to ?, which is undesirable.
-  absl::optional<network::ClientHintToDelegatedThirdPartiesHeader> parsed_ch =
+  network::ClientHintToDelegatedThirdPartiesHeader parsed_ch =
       network::ParseClientHintToDelegatedThirdPartiesHeader(
-          header_value.Latin1());
+          header_value.Latin1(), type);
 
   // If invalid origins were seen in the allow list we need to warn the dev.
-  if (parsed_ch.value().had_invalid_origins) {
+  if (parsed_ch.had_invalid_origins) {
     AuditsIssue::ReportClientHintIssue(
         local_dom_window,
         ClientHintIssueReason::kMetaTagAllowListInvalidOrigin);
@@ -58,18 +60,23 @@ void UpdateWindowPermissionsPolicyWithDelegationSupportForClientHints(
   auto* const current_policy =
       local_dom_window->GetSecurityContext().GetPermissionsPolicy();
   ParsedPermissionsPolicy container_policy;
-  for (const auto& pair : parsed_ch.value().map) {
+  for (const auto& pair : parsed_ch.map) {
     const auto& policy_name = GetClientHintToPolicyFeatureMap().at(pair.first);
 
     // We need to retain any preexisting settings, just adding new origins.
     const auto& allow_list =
         current_policy->GetAllowlistForFeature(policy_name);
-    std::set<url::Origin> origin_set(allow_list.AllowedOrigins().begin(),
-                                     allow_list.AllowedOrigins().end());
-    origin_set.insert(pair.second.begin(), pair.second.end());
+    std::set<blink::OriginWithPossibleWildcards> origin_set(
+        allow_list.AllowedOrigins().begin(), allow_list.AllowedOrigins().end());
+    for (const auto& origin : pair.second) {
+      origin_set.insert(
+          blink::OriginWithPossibleWildcards(origin,
+                                             /*has_subdomain_wildcard=*/false));
+    }
     auto declaration = ParsedPermissionsPolicyDeclaration(
         policy_name,
-        std::vector<url::Origin>(origin_set.begin(), origin_set.end()),
+        std::vector<blink::OriginWithPossibleWildcards>(origin_set.begin(),
+                                                        origin_set.end()),
         allow_list.MatchesAll(), allow_list.MatchesOpaqueSrc());
     container_policy.push_back(declaration);
   }
@@ -133,7 +140,7 @@ void UpdateIFrameContainerPolicyWithDelegationSupportForClientHints(
         maybe_window_allow_list.value().MatchesAll();
     merged_policy.matches_opaque_src |=
         maybe_window_allow_list.value().MatchesOpaqueSrc();
-    std::set<url::Origin> origin_set;
+    std::set<blink::OriginWithPossibleWildcards> origin_set;
     if (!merged_policy.matches_all_origins) {
       origin_set.insert(merged_policy.allowed_origins.begin(),
                         merged_policy.allowed_origins.end());
@@ -142,7 +149,7 @@ void UpdateIFrameContainerPolicyWithDelegationSupportForClientHints(
           maybe_window_allow_list.value().AllowedOrigins().end());
     }
     merged_policy.allowed_origins =
-        std::vector<url::Origin>(origin_set.begin(), origin_set.end());
+        std::vector(origin_set.begin(), origin_set.end());
     container_policy.push_back(merged_policy);
   }
 }

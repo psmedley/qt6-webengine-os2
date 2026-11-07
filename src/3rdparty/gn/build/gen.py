@@ -285,7 +285,7 @@ def WriteGenericNinja(path, static_libraries, executables,
 
   template_filename = os.path.join(SCRIPT_DIR, {
       'msvc': 'build_win.ninja.template',
-      'mingw': 'build_linux.ninja.template',
+      'mingw': 'build_mingw.ninja.template',
       'msys': 'build_linux.ninja.template',
       'darwin': 'build_mac.ninja.template',
       'linux': 'build_linux.ninja.template',
@@ -569,6 +569,9 @@ def WriteGNNinja(path, platform, host, options, args_list):
         ldflags.extend(['/MACHINE:x64'])
     else:
         ldflags.extend(['/MACHINE:x86'])
+
+    if not options.ld.endswith('lld-link.exe'):
+        ldflags.extend(['/link'])
 
   static_libraries = {
       'base': {'sources': [

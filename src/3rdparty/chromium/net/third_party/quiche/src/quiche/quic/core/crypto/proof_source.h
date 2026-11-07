@@ -173,7 +173,7 @@ class QUIC_EXPORT_PRIVATE ProofSource {
   //
   // If returns a non-empty list, ComputeTlsSignature will only be called with a
   // algorithm in the list.
-  virtual absl::InlinedVector<uint16_t, 8> SupportedTlsSignatureAlgorithms()
+  virtual QuicSignatureAlgorithmVector SupportedTlsSignatureAlgorithms()
       const = 0;
 
   class QUIC_EXPORT_PRIVATE DecryptCallback {
@@ -219,7 +219,7 @@ class QUIC_EXPORT_PRIVATE ProofSource {
     // |in|. If decryption fails, the callback is invoked with an empty
     // vector.
     virtual void Decrypt(absl::string_view in,
-                         std::unique_ptr<DecryptCallback> callback) = 0;
+                         std::shared_ptr<DecryptCallback> callback) = 0;
   };
 
   // Returns the TicketCrypter used for encrypting and decrypting TLS
@@ -310,6 +310,7 @@ class QUIC_EXPORT_PRIVATE ProofSourceHandle {
   virtual QuicAsyncStatus SelectCertificate(
       const QuicSocketAddress& server_address,
       const QuicSocketAddress& client_address,
+      const QuicConnectionId& original_connection_id,
       absl::string_view ssl_capabilities, const std::string& hostname,
       absl::string_view client_hello, const std::string& alpn,
       absl::optional<std::string> alps,

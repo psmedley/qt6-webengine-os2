@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,6 +31,8 @@ class MESSAGE_CENTER_EXPORT NotificationView : public NotificationViewBase {
   // TODO(crbug/1262372): Move this to private once CaptureModeNotificationView
   // does not depend on this class.
   void Layout() override;
+
+  SkColor GetActionButtonColorForTesting(views::LabelButton* action_button);
 
  private:
   friend class NotificationViewTest;
@@ -71,6 +73,8 @@ class MESSAGE_CENTER_EXPORT NotificationView : public NotificationViewBase {
   // destroyed when the ink drop is visible.
   std::vector<views::View*> GetChildrenForLayerAdjustment();
 
+  void HeaderRowPressed();
+
   // Notification title, which is dynamically created inside view hierarchy.
   raw_ptr<views::Label> title_view_ = nullptr;
 
@@ -85,6 +89,8 @@ class MESSAGE_CENTER_EXPORT NotificationView : public NotificationViewBase {
   // Owned by views properties. Guaranteed to be not null for the lifetime of
   // |this| because views properties are the last thing cleaned up.
   raw_ptr<NotificationViewPathGenerator> highlight_path_generator_ = nullptr;
+
+  base::WeakPtrFactory<NotificationView> weak_ptr_factory_{this};
 };
 
 }  // namespace message_center

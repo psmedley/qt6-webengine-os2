@@ -17,6 +17,7 @@ generate_css("css_files") {
     "navigatorTree.css",
     "navigatorView.css",
     "scopeChainSidebarPane.css",
+    "sourcesNavigator.css",
     "sourcesPanel.css",
     "sourcesView.css",
     "threadsSidebarPane.css",
@@ -28,6 +29,7 @@ devtools_module("sources") {
   sources = [
     "AddSourceMapURLDialog.ts",
     "BreakpointEditDialog.ts",
+    "BreakpointsSidebarPane.ts",
     "CSSPlugin.ts",
     "CallStackSidebarPane.ts",
     "CoveragePlugin.ts",

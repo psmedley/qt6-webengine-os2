@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -440,6 +440,15 @@ void ViewAndroid::OnCursorChanged(const Cursor& cursor) {
     Java_ViewAndroidDelegate_onCursorChanged(env, delegate,
                                              static_cast<int>(cursor.type()));
   }
+}
+
+void ViewAndroid::SetHoverActionStylusWritable(bool stylus_writable) {
+  ScopedJavaLocalRef<jobject> delegate(GetViewAndroidDelegate());
+  if (delegate.is_null())
+    return;
+  JNIEnv* env = base::android::AttachCurrentThread();
+  Java_ViewAndroidDelegate_setHoverActionStylusWritable(env, delegate,
+                                                        stylus_writable);
 }
 
 void ViewAndroid::OnBackgroundColorChanged(unsigned int color) {

@@ -87,11 +87,17 @@ void SetValidationEnable(CHECK_ENABLED &enable_data, const ValidationCheckEnable
         case VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_IMG:
             enable_data[vendor_specific_img] = true;
             break;
+        case VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_NVIDIA:
+            enable_data[vendor_specific_nvidia] = true;
+            break;
         case VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_ALL:
             enable_data[vendor_specific_arm] = true;
             enable_data[vendor_specific_amd] = true;
             enable_data[vendor_specific_img] = true;
+            enable_data[vendor_specific_nvidia] = true;
             break;
+        case VALIDATION_CHECK_ENABLE_SYNCHRONIZATION_VALIDATION_QUEUE_SUBMIT:
+            enable_data[sync_validation_queue_submit] = true;
         default:
             assert(true);
     }
@@ -241,9 +247,9 @@ void CreateFilterMessageIdList(std::string raw_id_list, std::string delimiter, s
         token = GetNextToken(&raw_id_list, delimiter, &pos);
         uint32_t int_id = TokenToUint(token);
         if (int_id == 0) {
-            size_t id_hash = XXH32(token.c_str(), strlen(token.c_str()), 8);  // String
+            const uint32_t id_hash = XXH32(token.data(), token.size(), 8);  // String
             if (id_hash != 0) {
-                int_id = static_cast<uint32_t>(id_hash);
+                int_id = id_hash;
             }
         }
         if ((int_id != 0) && (std::find(filter_list.begin(), filter_list.end(), int_id)) == filter_list.end()) {
@@ -387,17 +393,17 @@ void ProcessConfigAndEnvSettings(ConfigAndEnvSettings *settings_data) {
     message_limit.append(".duplicate_message_limit");
     fine_grained_locking.append(".fine_grained_locking");
     std::string list_of_config_enables = getLayerOption(enable_key.c_str());
-    std::string list_of_env_enables = GetLayerEnvVar("VK_LAYER_ENABLES");
+    std::string list_of_env_enables = GetEnvironment("VK_LAYER_ENABLES");
     std::string list_of_config_disables = getLayerOption(disable_key.c_str());
-    std::string list_of_env_disables = GetLayerEnvVar("VK_LAYER_DISABLES");
+    std::string list_of_env_disables = GetEnvironment("VK_LAYER_DISABLES");
     std::string list_of_config_filter_ids = getLayerOption(filter_msg_key.c_str());
-    std::string list_of_env_filter_ids = GetLayerEnvVar("VK_LAYER_MESSAGE_ID_FILTER");
+    std::string list_of_env_filter_ids = GetEnvironment("VK_LAYER_MESSAGE_ID_FILTER");
     std::string list_of_config_stypes = getLayerOption(stypes_key.c_str());
-    std::string list_of_env_stypes = GetLayerEnvVar("VK_LAYER_CUSTOM_STYPE_LIST");
+    std::string list_of_env_stypes = GetEnvironment("VK_LAYER_CUSTOM_STYPE_LIST");
     std::string config_message_limit = getLayerOption(message_limit.c_str());
-    std::string env_message_limit = GetLayerEnvVar("VK_LAYER_DUPLICATE_MESSAGE_LIMIT");
+    std::string env_message_limit = GetEnvironment("VK_LAYER_DUPLICATE_MESSAGE_LIMIT");
     std::string config_fine_grained_locking = getLayerOption(fine_grained_locking.c_str());
-    std::string env_fine_grained_locking = GetLayerEnvVar("VK_LAYER_FINE_GRAINED_LOCKING");
+    std::string env_fine_grained_locking = GetEnvironment("VK_LAYER_FINE_GRAINED_LOCKING");
 
 #if defined(_WIN32)
     std::string env_delimiter = ";";
@@ -420,5 +426,5 @@ void ProcessConfigAndEnvSettings(ConfigAndEnvSettings *settings_data) {
     if (config_limit_setting != 0) {
         *settings_data->duplicate_message_limit = config_limit_setting;
     }
-    *settings_data->fine_grained_locking = SetBool(config_fine_grained_locking, env_fine_grained_locking, false);
+    *settings_data->fine_grained_locking = SetBool(config_fine_grained_locking, env_fine_grained_locking, true);
 }

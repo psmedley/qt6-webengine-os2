@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,12 @@
 #include "base/metrics/field_trial_params.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/system/sys_info.h"
 #include "build/build_config.h"
 #include "components/optimization_guide/core/insertion_ordered_set.h"
 #include "components/optimization_guide/core/optimization_guide_constants.h"
-#include "components/optimization_guide/core/optimization_guide_prefs.h"
 #include "components/optimization_guide/core/optimization_guide_switches.h"
 #include "components/optimization_guide/machine_learning_tflite_buildflags.h"
-#include "components/prefs/pref_service.h"
 #include "components/variations/hashing.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/url_util.h"
@@ -78,98 +77,120 @@ bool IsSupportedLocaleForFeature(const std::string locale,
 
 // Enables the syncing of the Optimization Hints component, which provides
 // hints for what optimizations can be applied on a page load.
-const base::Feature kOptimizationHints{"OptimizationHints",
-                                       base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Feature flag that contains a feature param that specifies the field trials
-// that are allowed to be sent up to the Optimization Guide Server.
-const base::Feature kOptimizationHintsFieldTrials{
-    "OptimizationHintsFieldTrials", base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kOptimizationHints,
+             "OptimizationHints",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables fetching from a remote Optimization Guide Service.
-const base::Feature kRemoteOptimizationGuideFetching{
-    "OptimizationHintsFetching", base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kRemoteOptimizationGuideFetching,
+             "OptimizationHintsFetching",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
-const base::Feature kRemoteOptimizationGuideFetchingAnonymousDataConsent {
-  "OptimizationHintsFetchingAnonymousDataConsent",
-#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
-      base::FEATURE_ENABLED_BY_DEFAULT
-#else   // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-      base::FEATURE_DISABLED_BY_DEFAULT
-#endif  // BUILDFLAG(IS_ANDROID)
-};
+BASE_FEATURE(kRemoteOptimizationGuideFetchingAnonymousDataConsent,
+             "OptimizationHintsFetchingAnonymousDataConsent",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables performance info in the context menu and fetching from a remote
 // Optimization Guide Service.
-const base::Feature kContextMenuPerformanceInfoAndRemoteHintFetching{
-    "ContextMenuPerformanceInfoAndRemoteHintFetching",
-    base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kContextMenuPerformanceInfoAndRemoteHintFetching,
+             "ContextMenuPerformanceInfoAndRemoteHintFetching",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enables the prediction of optimization targets.
-const base::Feature kOptimizationTargetPrediction{
-    "OptimizationTargetPrediction", base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kOptimizationTargetPrediction,
+             "OptimizationTargetPrediction",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables the downloading of models.
-const base::Feature kOptimizationGuideModelDownloading {
-  "OptimizationGuideModelDownloading",
+BASE_FEATURE(kOptimizationGuideModelDownloading,
+             "OptimizationGuideModelDownloading",
 #if BUILDFLAG(BUILD_WITH_TFLITE_LIB)
-      base::FEATURE_ENABLED_BY_DEFAULT
+             base::FEATURE_ENABLED_BY_DEFAULT
 #else   // BUILD_WITH_TFLITE_LIB
-      base::FEATURE_DISABLED_BY_DEFAULT
+             base::FEATURE_DISABLED_BY_DEFAULT
 #endif  // !BUILD_WITH_TFLITE_LIB
-};
+);
 
 // Enables page content to be annotated.
-const base::Feature kPageContentAnnotations{"PageContentAnnotations",
-                                            enabled_by_default_desktop_only};
+BASE_FEATURE(kPageContentAnnotations,
+             "PageContentAnnotations",
+             enabled_by_default_desktop_only);
+
+// Enables fetching page metadata from the remote Optimization Guide service.
+BASE_FEATURE(kRemotePageMetadata,
+             "RemotePageMetadata",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enables the page entities model to be annotated on every page load.
-const base::Feature kPageEntitiesPageContentAnnotations{
-    "PageEntitiesPageContentAnnotations", enabled_by_default_desktop_only};
+BASE_FEATURE(kPageEntitiesPageContentAnnotations,
+             "PageEntitiesPageContentAnnotations",
+             enabled_by_default_desktop_only);
 // Enables the page visibility model to be annotated on every page load.
-const base::Feature kPageVisibilityPageContentAnnotations{
-    "PageVisibilityPageContentAnnotations", base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kPageVisibilityPageContentAnnotations,
+             "PageVisibilityPageContentAnnotations",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // This feature flag does not allow for the entities model to load the name and
 // prefix filters.
-const base::Feature kPageEntitiesModelBypassFilters{
-    "PageEntitiesModelBypassFilters", base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kPageEntitiesModelBypassFilters,
+             "PageEntitiesModelBypassFilters",
+             enabled_by_default_desktop_only);
 
 // This feature flag enables resetting the entities model on shutdown.
-const base::Feature kPageEntitiesModelResetOnShutdown{
-    "PageEntitiesModelResetOnShutdown", base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kPageEntitiesModelResetOnShutdown,
+             "PageEntitiesModelResetOnShutdown",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enables push notification of hints.
-const base::Feature kPushNotifications{"OptimizationGuidePushNotifications",
-                                       base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kPushNotifications,
+             "OptimizationGuidePushNotifications",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // This feature flag does not turn off any behavior, it is only used for
 // experiment parameters.
-const base::Feature kPageTextExtraction{
-    "OptimizationGuidePageContentExtraction", base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kPageTextExtraction,
+             "OptimizationGuidePageContentExtraction",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables the validation of optimization guide metadata.
-const base::Feature kOptimizationGuideMetadataValidation{
-    "OptimizationGuideMetadataValidation", base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kOptimizationGuideMetadataValidation,
+             "OptimizationGuideMetadataValidation",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
-const base::Feature kPageTopicsBatchAnnotations{
-    "PageTopicsBatchAnnotations", base::FEATURE_ENABLED_BY_DEFAULT};
-const base::Feature kPageVisibilityBatchAnnotations{
-    "PageVisibilityBatchAnnotations", base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kPageTopicsBatchAnnotations,
+             "PageTopicsBatchAnnotations",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kPageVisibilityBatchAnnotations,
+             "PageVisibilityBatchAnnotations",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
-const base::Feature kUseLocalPageEntitiesMetadataProvider{
-    "UseLocalPageEntitiesMetadataProvider", base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kUseLocalPageEntitiesMetadataProvider,
+             "UseLocalPageEntitiesMetadataProvider",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
-const base::Feature kBatchAnnotationsValidation{
-    "BatchAnnotationsValidation", base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kPageContentAnnotationsValidation,
+             "PageContentAnnotationsValidation",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
-const base::Feature kPreventLongRunningPredictionModels{
-    "PreventLongRunningPredictionModels", base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kPreventLongRunningPredictionModels,
+             "PreventLongRunningPredictionModels",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
-const base::Feature
-    kOptimizationGuideUseContinueOnShutdownForPageContentAnnotations{
-        "OptimizationGuideUseContinueOnShutdownForPageContentAnnotations",
-        base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kOptimizationGuideUseContinueOnShutdownForPageContentAnnotations,
+             "OptimizationGuideUseContinueOnShutdownForPageContentAnnotations",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kOverrideNumThreadsForModelExecution,
+             "OverrideNumThreadsForModelExecution",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kOptGuideEnableXNNPACKDelegateWithTFLite,
+             "OptGuideEnableXNNPACKDelegateWithTFLite",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kOptimizationHintsComponent,
+             "OptimizationHintsComponent",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // The default value here is a bit of a guess.
 // TODO(crbug/1163244): This should be tuned once metrics are available.
@@ -208,7 +229,7 @@ size_t MaxHostsForRecordingSuccessfullyCovered() {
 base::TimeDelta StoredFetchedHintsFreshnessDuration() {
   return base::Days(GetFieldTrialParamByFeatureAsInt(
       kRemoteOptimizationGuideFetching,
-      "max_store_duration_for_featured_hints_in_days", 7));
+      "max_store_duration_for_featured_hints_in_days", 1));
 }
 
 std::string GetOptimizationGuideServiceAPIKey() {
@@ -267,10 +288,8 @@ bool IsOptimizationHintsEnabled() {
   return base::FeatureList::IsEnabled(kOptimizationHints);
 }
 
-bool IsRemoteFetchingEnabled(PrefService* pref_service) {
-  return base::FeatureList::IsEnabled(kRemoteOptimizationGuideFetching) &&
-         pref_service->GetBoolean(
-             optimization_guide::prefs::kOptimizationGuideFetchingEnabled);
+bool IsRemoteFetchingEnabled() {
+  return base::FeatureList::IsEnabled(kRemoteOptimizationGuideFetching);
 }
 
 bool IsPushNotificationsEnabled() {
@@ -295,7 +314,7 @@ int MaxServerBloomFilterByteSize() {
 base::TimeDelta GetHostHintsFetchRefreshDuration() {
   return base::Hours(GetFieldTrialParamByFeatureAsInt(
       kRemoteOptimizationGuideFetching, "hints_fetch_refresh_duration_in_hours",
-      72));
+      1));
 }
 
 base::TimeDelta GetActiveTabsFetchRefreshDuration() {
@@ -418,7 +437,7 @@ base::TimeDelta PredictionModelFetchRetryDelay() {
 
 base::TimeDelta PredictionModelFetchStartupDelay() {
   return base::Milliseconds(GetFieldTrialParamByFeatureAsInt(
-      kOptimizationTargetPrediction, "fetch_startup_delay_ms", 2000));
+      kOptimizationTargetPrediction, "fetch_startup_delay_ms", 10000));
 }
 
 base::TimeDelta PredictionModelFetchInterval() {
@@ -426,28 +445,20 @@ base::TimeDelta PredictionModelFetchInterval() {
       kOptimizationTargetPrediction, "fetch_interval_hours", 24));
 }
 
-absl::optional<base::TimeDelta> ModelExecutionTimeout() {
-  if (!base::FeatureList::IsEnabled(kPreventLongRunningPredictionModels)) {
-    return absl::nullopt;
-  }
-  return base::Milliseconds(GetFieldTrialParamByFeatureAsInt(
-      kPreventLongRunningPredictionModels, "model_execution_timeout_ms", 2000));
+bool IsModelExecutionWatchdogEnabled() {
+  return base::FeatureList::IsEnabled(kPreventLongRunningPredictionModels);
 }
 
-base::flat_set<uint32_t> FieldTrialNameHashesAllowedForFetch() {
-  std::string value = base::GetFieldTrialParamValueByFeature(
-      kOptimizationHintsFieldTrials, "allowed_field_trial_names");
-  if (value.empty())
-    return {};
-
-  std::vector<std::string> allowed_field_trial_names = base::SplitString(
-      value, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
-  base::flat_set<uint32_t> allowed_field_trial_name_hashes;
-  for (const auto& allowed_field_trial_name : allowed_field_trial_names) {
-    allowed_field_trial_name_hashes.insert(
-        variations::HashName(allowed_field_trial_name));
-  }
-  return allowed_field_trial_name_hashes;
+base::TimeDelta ModelExecutionWatchdogDefaultTimeout() {
+  return base::Milliseconds(GetFieldTrialParamByFeatureAsInt(
+      kPreventLongRunningPredictionModels, "model_execution_timeout_ms",
+#if defined(_DEBUG)
+      // Debug builds take a much longer time to run.
+      60 * 1000
+#else
+      2000
+#endif
+      ));
 }
 
 bool IsModelDownloadingEnabled() {
@@ -464,14 +475,10 @@ bool IsPageContentAnnotationEnabled() {
   return base::FeatureList::IsEnabled(kPageContentAnnotations);
 }
 
-uint64_t MaxSizeForPageContentTextDump() {
-  return static_cast<uint64_t>(base::GetFieldTrialParamByFeatureAsInt(
-      kPageContentAnnotations, "max_size_for_text_dump_in_bytes", 1024));
-}
-
-bool ShouldAnnotateTitleInsteadOfPageContent() {
+bool ShouldPersistSearchMetadataForNonGoogleSearches() {
   return base::GetFieldTrialParamByFeatureAsBool(
-      kPageContentAnnotations, "annotate_title_instead_of_page_content", true);
+      kPageContentAnnotations,
+      "persist_search_metadata_for_non_google_searches", true);
 }
 
 bool ShouldWriteContentAnnotationsToHistoryService() {
@@ -503,9 +510,13 @@ bool ShouldExecutePageVisibilityModelOnPageContent(const std::string& locale) {
                                      kPageVisibilityPageContentAnnotations);
 }
 
-bool RemotePageEntitiesEnabled() {
-  return GetFieldTrialParamByFeatureAsBool(kPageContentAnnotations,
-                                           "fetch_remote_page_entities", false);
+bool RemotePageMetadataEnabled() {
+  return base::FeatureList::IsEnabled(kRemotePageMetadata);
+}
+
+int GetMinimumPageCategoryScoreToPersist() {
+  return GetFieldTrialParamByFeatureAsInt(kRemotePageMetadata,
+                                          "min_page_category_score", 85);
 }
 
 base::TimeDelta GetOnloadDelayForHintsFetching() {
@@ -563,31 +574,80 @@ size_t AnnotateVisitBatchSize() {
                                           "annotate_visit_batch_size", 1));
 }
 
-bool BatchAnnotationsValidationEnabled() {
-  return base::FeatureList::IsEnabled(kBatchAnnotationsValidation);
+bool PageContentAnnotationValidationEnabledForType(AnnotationType type) {
+  if (base::FeatureList::IsEnabled(kPageContentAnnotationsValidation)) {
+    if (GetFieldTrialParamByFeatureAsBool(kPageContentAnnotationsValidation,
+                                          AnnotationTypeToString(type),
+                                          false)) {
+      return true;
+    }
+  }
+
+  base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
+  switch (type) {
+    case AnnotationType::kPageTopics:
+      return cmd->HasSwitch(
+          switches::kPageContentAnnotationsValidationPageTopics);
+    case AnnotationType::kPageEntities:
+      return cmd->HasSwitch(
+          switches::kPageContentAnnotationsValidationPageEntities);
+    case AnnotationType::kContentVisibility:
+      return cmd->HasSwitch(
+          switches::kPageContentAnnotationsValidationContentVisibility);
+    default:
+      NOTREACHED();
+      break;
+  }
+
+  return false;
 }
 
-base::TimeDelta BatchAnnotationValidationStartupDelay() {
-  return base::Seconds(
-      std::max(1, GetFieldTrialParamByFeatureAsInt(kBatchAnnotationsValidation,
-                                                   "startup_delay", 30)));
+base::TimeDelta PageContentAnnotationValidationStartupDelay() {
+  return switches::PageContentAnnotationsValidationStartupDelay().value_or(
+      base::Seconds(std::max(
+          1, GetFieldTrialParamByFeatureAsInt(kPageContentAnnotationsValidation,
+                                              "startup_delay", 30))));
 }
 
-size_t BatchAnnotationsValidationBatchSize() {
-  int batch_size = GetFieldTrialParamByFeatureAsInt(kBatchAnnotationsValidation,
-                                                    "batch_size", 25);
-  return std::max(1, batch_size);
-}
-
-bool BatchAnnotationsValidationUsePageTopics() {
-  return GetFieldTrialParamByFeatureAsBool(kBatchAnnotationsValidation,
-                                           "use_page_topics", false);
+size_t PageContentAnnotationsValidationBatchSize() {
+  return switches::PageContentAnnotationsValidationBatchSize().value_or(
+      std::max(1, GetFieldTrialParamByFeatureAsInt(
+                      kPageContentAnnotationsValidation, "batch_size", 25)));
 }
 
 size_t MaxVisitAnnotationCacheSize() {
   int batch_size = GetFieldTrialParamByFeatureAsInt(
       kPageContentAnnotations, "max_visit_annotation_cache_size", 50);
   return std::max(1, batch_size);
+}
+
+absl::optional<int> OverrideNumThreadsForOptTarget(
+    proto::OptimizationTarget opt_target) {
+  if (!base::FeatureList::IsEnabled(kOverrideNumThreadsForModelExecution)) {
+    return absl::nullopt;
+  }
+
+  // 0 is an invalid value to pass to TFLite, so make that nullopt. -1 is valid,
+  // but not anything less than that.
+  int num_threads = GetFieldTrialParamByFeatureAsInt(
+      kOverrideNumThreadsForModelExecution,
+      proto::OptimizationTarget_Name(opt_target), 0);
+  if (num_threads == 0 || num_threads < -1) {
+    return absl::nullopt;
+  }
+
+  // Cap to the number of CPUs on the device.
+  return std::min(num_threads, base::SysInfo::NumberOfProcessors());
+}
+
+bool TFLiteXNNPACKDelegateEnabled() {
+  return base::FeatureList::IsEnabled(kOptGuideEnableXNNPACKDelegateWithTFLite);
+}
+
+bool ShouldCheckFailedComponentVersionPref() {
+  return GetFieldTrialParamByFeatureAsBool(
+      kOptimizationHintsComponent, "check_failed_component_version_pref",
+      false);
 }
 
 }  // namespace features

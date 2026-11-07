@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,12 @@
 
 namespace rust_gtest_interop {
 
-testing::Test* rust_gtest_default_factory(void (*body)()) {
+testing::Test* rust_gtest_default_factory(void (*body)(testing::Test*)) {
   return rust_gtest_factory_for_subclass<testing::Test>(body);
 }
 
 void rust_gtest_add_test(GtestFactoryFunction gtest_factory,
-                         void (*test_function)(),
+                         void (*test_function)(testing::Test*),
                          const char* test_suite_name,
                          const char* test_name,
                          const char* file,

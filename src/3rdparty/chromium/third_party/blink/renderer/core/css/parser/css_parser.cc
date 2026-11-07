@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,7 @@
 #include "third_party/blink/renderer/core/css/style_color.h"
 #include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
+#include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -42,14 +43,15 @@ void CSSParser::ParseDeclarationListForInspector(
                                                   observer);
 }
 
-CSSSelectorList CSSParser::ParseSelector(
+CSSSelectorVector CSSParser::ParseSelector(
     const CSSParserContext* context,
     StyleSheetContents* style_sheet_contents,
-    const String& selector) {
+    const String& selector,
+    Arena& arena) {
   CSSTokenizer tokenizer(selector);
   const auto tokens = tokenizer.TokenizeToEOF();
   return CSSSelectorParser::ParseSelector(CSSParserTokenRange(tokens), context,
-                                          style_sheet_contents);
+                                          style_sheet_contents, arena);
 }
 
 CSSSelectorList CSSParser::ParsePageSelector(
@@ -59,7 +61,7 @@ CSSSelectorList CSSParser::ParsePageSelector(
   CSSTokenizer tokenizer(selector);
   const auto tokens = tokenizer.TokenizeToEOF();
   return CSSParserImpl::ParsePageSelector(CSSParserTokenRange(tokens),
-                                          style_sheet_contents);
+                                          style_sheet_contents, context);
 }
 
 StyleRuleBase* CSSParser::ParseRule(const CSSParserContext* context,
@@ -74,9 +76,11 @@ ParseSheetResult CSSParser::ParseSheet(
     StyleSheetContents* style_sheet,
     const String& text,
     CSSDeferPropertyParsing defer_property_parsing,
-    bool allow_import_rules) {
+    bool allow_import_rules,
+    std::unique_ptr<CachedCSSTokenizer> tokenizer) {
   return CSSParserImpl::ParseStyleSheet(
-      text, context, style_sheet, defer_property_parsing, allow_import_rules);
+      text, context, style_sheet, defer_property_parsing, allow_import_rules,
+      std::move(tokenizer));
 }
 
 void CSSParser::ParseSheetForInspector(const CSSParserContext* context,
@@ -109,7 +113,7 @@ MutableCSSPropertyValueSet::SetResult CSSParser::ParseValue(
     StyleSheetContents* style_sheet,
     const ExecutionContext* execution_context) {
   DCHECK(ThreadState::Current()->IsAllocationAllowed());
-  if (string.IsEmpty()) {
+  if (string.empty()) {
     return MutableCSSPropertyValueSet::kParseError;
   }
 
@@ -150,7 +154,7 @@ MutableCSSPropertyValueSet::SetResult CSSParser::ParseValueForCustomProperty(
     bool is_animation_tainted) {
   DCHECK(ThreadState::Current()->IsAllocationAllowed());
   DCHECK(CSSVariableParser::IsValidVariableName(property_name));
-  if (value.IsEmpty()) {
+  if (value.empty()) {
     return MutableCSSPropertyValueSet::kParseError;
   }
   CSSParserMode parser_mode = declaration->CssParserMode();
@@ -183,7 +187,7 @@ const CSSValue* CSSParser::ParseSingleValue(CSSPropertyID property_id,
                                             const String& string,
                                             const CSSParserContext* context) {
   DCHECK(ThreadState::Current()->IsAllocationAllowed());
-  if (string.IsEmpty())
+  if (string.empty())
     return nullptr;
   if (CSSValue* value = CSSParserFastPaths::MaybeParseValue(property_id, string,
                                                             context->Mode()))
@@ -247,7 +251,7 @@ bool CSSParser::ParseSupportsCondition(
 
 bool CSSParser::ParseColor(Color& color, const String& string, bool strict) {
   DCHECK(ThreadState::Current()->IsAllocationAllowed());
-  if (string.IsEmpty())
+  if (string.empty())
     return false;
 
   // The regular color parsers don't resolve named colors, so explicitly
@@ -304,7 +308,7 @@ const CSSValue* CSSParser::ParseFontFaceDescriptor(
 CSSPrimitiveValue* CSSParser::ParseLengthPercentage(
     const String& string,
     const CSSParserContext* context) {
-  if (string.IsEmpty() || !context)
+  if (string.empty() || !context)
     return nullptr;
   CSSTokenizer tokenizer(string);
   const auto tokens = tokenizer.TokenizeToEOF();

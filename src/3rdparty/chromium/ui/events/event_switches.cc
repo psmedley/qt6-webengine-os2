@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,13 @@ namespace switches {
 // crbug.com/394380 for details.
 const char kCompensateForUnstablePinchZoom[] =
     "compensate-for-unstable-pinch-zoom";
+
+// Overrides touch slop distance for gesture detection. The touch slop distance
+// is the maximum distance from the starting point of a touch sequence that a
+// gesture can travel before it can no longer be considered a tap. Scroll
+// gestures can only begin after this distance has been travelled. The switch
+// value is a floating point number that is interpreted as a distance in pixels.
+const char kTouchSlopDistance[] = "touch-slop-distance";
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 // Tells chrome to interpret events from these devices as touch events. Only
@@ -33,6 +40,12 @@ const char kEdgeTouchFiltering[] = "edge-touch-filtering";
 // Disable CancelAllTouches() function for the implementation on cancel single
 // touches.
 const char kDisableCancelAllTouches[] = "disable-cancel-all-touches";
+
+// Enables logic to detect microphone mute switch device state, which disables
+// internal audio input when toggled.
+constexpr char kEnableMicrophoneMuteSwitchDeviceSwitch[] =
+    "enable-microphone-mute-switch-device";
+
 #endif
 
 }  // namespace switches

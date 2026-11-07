@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,7 +51,7 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
                         const std::string& user_agent,
                         const HostPortPair& endpoint,
                         const NetLogWithSource& source_net_log,
-                        HttpAuthController* auth_controller,
+                        scoped_refptr<HttpAuthController> auth_controller,
                         ProxyDelegate* proxy_delegate);
 
   SpdyProxyClientSocket(const SpdyProxyClientSocket&) = delete;
@@ -76,9 +76,6 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   bool WasAlpnNegotiated() const override;
   NextProto GetNegotiatedProtocol() const override;
   bool GetSSLInfo(SSLInfo* ssl_info) override;
-  void GetConnectionAttempts(ConnectionAttempts* out) const override;
-  void ClearConnectionAttempts() override {}
-  void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
   int64_t GetTotalReceivedBytes() const override;
   void ApplySocketTag(const SocketTag& tag) override;
 
@@ -124,9 +121,9 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
     STATE_CLOSED
   };
 
-  // Calls |callback.Run(result)|. Used to run a callback posted to the
+  // Calls `write_callback_(result)`. Used to run a callback posted to the
   // message loop.
-  void RunWriteCallback(CompletionOnceCallback callback, int result) const;
+  void RunWriteCallback(int result);
 
   void OnIOComplete(int result);
 
@@ -176,13 +173,13 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
 
   // User provided buffer for the Read() response.
   scoped_refptr<IOBuffer> user_buffer_;
-  size_t user_buffer_len_;
+  size_t user_buffer_len_ = 0;
 
   // User specified number of bytes to be written.
-  int write_buffer_len_;
+  int write_buffer_len_ = 0;
 
   // True if the transport socket has ever sent data.
-  bool was_ever_used_;
+  bool was_ever_used_ = false;
 
   const NetLogWithSource net_log_;
   const NetLogSource source_dependency_;
@@ -198,13 +195,7 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   };
   EndStreamState end_stream_state_ = EndStreamState::kNone;
 
-  // The default weak pointer factory.
   base::WeakPtrFactory<SpdyProxyClientSocket> weak_factory_{this};
-
-  // Only used for posting write callbacks. Weak pointers created by this
-  // factory are invalidated in Disconnect().
-  base::WeakPtrFactory<SpdyProxyClientSocket> write_callback_weak_factory_{
-      this};
 };
 
 }  // namespace net

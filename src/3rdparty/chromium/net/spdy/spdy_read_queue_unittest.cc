@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,7 @@
 #include "net/spdy/spdy_buffer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace net {
-namespace test {
+namespace net::test {
 namespace {
 
 const char kData[] = "SPDY read queue test data.\0Some more data.";
@@ -134,5 +133,4 @@ TEST_F(SpdyReadQueueTest, Clear) {
   EXPECT_TRUE(read_queue.IsEmpty());
 }
 
-}  // namespace test
-}  // namespace net
+}  // namespace net::test

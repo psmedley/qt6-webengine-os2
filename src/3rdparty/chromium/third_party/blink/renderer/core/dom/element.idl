@@ -24,6 +24,12 @@
 enum NativeScrollBehavior { "disable-native-scroll", "perform-before-native-scroll", "perform-after-native-scroll" };
 callback ScrollStateCallback = void (ScrollState scrollState);
 
+// https://drafts.csswg.org/cssom-view/#dictdef-checkvisibilityoptions
+dictionary CheckVisibilityOptions {
+  boolean checkOpacity = false;
+  boolean checkVisibilityCSS = false;
+};
+
 // https://dom.spec.whatwg.org/#interface-element
 
 [
@@ -111,6 +117,9 @@ callback ScrollStateCallback = void (ScrollState scrollState);
     [Measure] DOMRectList getClientRects();
     [Affects=Nothing, Measure, RuntimeCallStatsCounter=ElementGetBoundingClientRect] DOMRect getBoundingClientRect();
 
+    // https://drafts.csswg.org/cssom-view/#dom-element-checkvisibility
+    [RuntimeEnabled=checkVisibility] boolean checkVisibility(optional CheckVisibilityOptions options = {});
+
     // TODO(sunyunjia): Add default value for scrollIntoView() once
     // crbug.com/734599 is fixed.
     void scrollIntoView(optional (ScrollIntoViewOptions or boolean) arg = {});
@@ -129,18 +138,14 @@ callback ScrollStateCallback = void (ScrollState scrollState);
     readonly attribute long clientWidth;
     readonly attribute long clientHeight;
 
-    // Typed OM
-    // https://drafts.css-houdini.org/css-typed-om/#inline-stylepropertymap-objects
-    [SameObject, MeasureAs=CSSTypedOMStylePropertyMap] readonly attribute StylePropertyMap attributeStyleMap;
-
     // Non-standard API
     [MeasureAs=ElementScrollIntoViewIfNeeded] void scrollIntoViewIfNeeded(optional boolean centerIfNeeded);
 
-    // The Popup API
-    [MeasureAs=ElementShowPopup,RuntimeEnabled=HTMLPopupAttribute] void showPopup();
-    [MeasureAs=ElementHidePopup,RuntimeEnabled=HTMLPopupAttribute] void hidePopup();
-    [Unscopable,CEReactions,RuntimeEnabled=HTMLPopupAttribute,Reflect] attribute DOMString popup;
-    [CEReactions,RuntimeEnabled=HTMLPopupAttribute,Reflect] attribute boolean initiallyOpen;
+    // The Pop-up API
+    [MeasureAs=ElementShowPopup,RuntimeEnabled=HTMLPopupAttribute,RaisesException] void showPopUp();
+    [MeasureAs=ElementHidePopup,RuntimeEnabled=HTMLPopupAttribute,RaisesException] void hidePopUp();
+    [Unscopable,CEReactions,RuntimeEnabled=HTMLPopupAttribute,MeasureAs=AnyPopupAttribute,Reflect,ReflectOnly=("auto","hint","manual"),ReflectEmpty="auto",ReflectInvalid="manual"] attribute DOMString? popUp;
+    [CEReactions,RuntimeEnabled=HTMLPopupAttribute,Reflect] attribute boolean defaultOpen;
 
     // Experimental accessibility API
     [RuntimeEnabled=ComputedAccessibilityInfo] readonly attribute DOMString? computedRole;
@@ -157,6 +162,11 @@ callback ScrollStateCallback = void (ScrollState scrollState);
 
     // Element Timing
     [CEReactions, Reflect=elementtiming] attribute DOMString elementTiming;
+
+    // CSS Toggles
+    // See https://tabatkins.github.io/css-toggle/#dom and
+    // https://github.com/tabatkins/css-toggle/issues/26
+    [RuntimeEnabled=CSSToggles, SameObject] readonly attribute CSSToggleMap toggles;
 };
 
 Element includes ParentNode;

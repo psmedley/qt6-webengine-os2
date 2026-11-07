@@ -1,3 +1,6 @@
+# Copyright (C) 2022 The Qt Company Ltd.
+# SPDX-License-Identifier: BSD-3-Clause
+
 include(../../httpserver/httpserver.cmake)
 include(../../util/util.cmake)
 
@@ -22,6 +25,7 @@ set(testList
     tst_datalist.qml
     tst_desktopBehaviorLoadHtml.qml
     tst_download.qml
+    tst_dragHandlerUnderView.qml
     tst_favicon.qml
     tst_faviconDatabase.qml
     tst_filePicker.qml

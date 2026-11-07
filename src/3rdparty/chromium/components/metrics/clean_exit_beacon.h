@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,16 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "components/version_info/channel.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 class PrefRegistrySimple;
 class PrefService;
 
 namespace metrics {
+
+// The name of the beacon file, which is relative to the user data directory
+// and used to store the CleanExitBeacon value and the variations crash streak.
+extern const base::FilePath::CharType kCleanExitBeaconFilename[];
 
 // Captures all possible beacon value permutations for two distinct beacons.
 // Exposed for testing.
@@ -51,32 +54,14 @@ enum class BeaconFileState {
   kMaxValue = kMissingBeacon,
 };
 
-// Denotes whether Chrome is monitoring for browser crashes via the
-// CleanExitBeacon, and if so, whether the monitoring is due to the Extended
-// Variations Safe Mode experiment or the status quo code. Exposed for
-// testing.
-enum class BeaconMonitoringStage {
-  // The beacon file lacks a monitoring stage. This is possible because the
-  // monitoring stage was added in a later milestone. Used by only experiment
-  // group clients.
-  kMissing = 0,
-  // Chrome is not monitoring for crashes.
-  kNotMonitoring = 1,
-  // Chrome is monitoring for crashes earlier on in startup as a result of the
-  // experiment. Used by only experiment group clients.
-  kExtended = 2,
-  // Chrome is monitoring for crashes in the code covered by the status quo
-  // Variations Safe Mode mechanism.
-  kStatusQuo = 3,
-  kMaxValue = kStatusQuo,
-};
-
 // Reads and updates a beacon used to detect whether the previous browser
 // process exited cleanly.
 class CleanExitBeacon {
  public:
-  // Instantiates a CleanExitBeacon whose value is stored in |local_state|'s
-  // kStabilityExitedCleanly pref. |local_state| must be fully initialized.
+  // Instantiates a CleanExitBeacon whose value is stored in
+  // |has_exited_cleanly_|. The value is persisted in the beacon file on
+  // platforms that support this mechanism and in Local State on platforms that
+  // don't.
   //
   // On Windows, |backup_registry_key| stores a backup of the beacon to verify
   // that the pref's value corresponds to the registry's. |backup_registry_key|
@@ -84,15 +69,10 @@ class CleanExitBeacon {
   // mechanism embedded inside CleanExitBeacon.
   //
   // |user_data_dir| is the path to the client's user data directory. If empty,
-  // a separate file will not be used for Variations Safe Mode prefs.
-  //
-  // TODO(crbug/1241702): Remove |channel| at the end of the Extended Variations
-  // Safe Mode experiment. |channel| is used to enable the experiment on only
-  // certain channels.
+  // the beacon file is not used.
   CleanExitBeacon(const std::wstring& backup_registry_key,
                   const base::FilePath& user_data_dir,
-                  PrefService* local_state,
-                  version_info::Channel channel);
+                  PrefService* local_state);
 
   virtual ~CleanExitBeacon() = default;
 
@@ -114,19 +94,31 @@ class CleanExitBeacon {
     return initial_browser_last_live_timestamp_;
   }
 
-  // Sets the beacon value to |exited_cleanly| and updates the last live
-  // timestamp. If |is_extended_safe_mode| is true, then the beacon value is
-  // written to disk synchronously. If false, a write is scheduled, and for
-  // clients in the Extended Variations Safe Mode experiment, a synchronous
-  // write is done, too.
+  // Returns true if Extended Variations Safe Mode is supported on this
+  // platform. Android WebLayer and WebView do not support this.
+  bool IsExtendedSafeModeSupported() const;
+
+  // Sets the beacon value to |exited_cleanly| and writes the value to disk if
+  // the current value (see has_exited_cleanly_) is not already
+  // |exited_cleanly|. Note that on platforms that do not support the beacon
+  // file, the write is scheduled, so the value may not be persisted if the
+  // browser process crashes.
   //
-  // Note: |is_extended_safe_mode| should be true only for some clients in the
-  // Extended Variations Safe Mode experiment.
+  // Also, updates the last live timestamp.
+  //
+  // |is_extended_safe_mode| denotes whether Chrome is about to start watching
+  // for browser crashes early on in startup as a part of Extended Variations
+  // Safe Mode, which is supported by most, but not all, platforms.
+  //
+  // TODO(crbug/1341125): Consider removing |is_extended_safe_mode|.
   void WriteBeaconValue(bool exited_cleanly,
                         bool is_extended_safe_mode = false);
 
   // Updates the last live timestamp.
   void UpdateLastLiveTimestamp();
+
+  const base::FilePath GetUserDataDirForTesting() const;
+  base::FilePath GetBeaconFilePathForTesting() const;
 
   // Registers local state prefs used by this class.
   static void RegisterPrefs(PrefRegistrySimple* registry);
@@ -134,6 +126,11 @@ class CleanExitBeacon {
   // Updates both Local State and NSUserDefaults beacon values.
   static void SetStabilityExitedCleanlyForTesting(PrefService* local_state,
                                                   bool exited_cleanly);
+
+  // Creates and returns a well-formed beacon file contents with the given
+  // values.
+  static std::string CreateBeaconFileContentsForTesting(bool exited_cleanly,
+                                                        int crash_streak);
 
   // Resets both Local State and NSUserDefaults beacon values.
   static void ResetStabilityExitedCleanlyForTesting(PrefService* local_state);
@@ -164,18 +161,19 @@ class CleanExitBeacon {
  private:
   // Returns true if the previous session exited cleanly. Either Local State
   // or |beacon_file_contents| is used to get this information. Which is used
-  // depends on the client's Extended Variations Safe Mode experiment group in
-  // the previous session. Also, records several metrics.
+  // depends on the client's platform and the existence of a valid beacon file.
+  // Also, records several metrics.
   //
   // Should be called only once: at startup.
-  //
-  // TODO(crbug/1241702): Update this comment when experimentation is over.
   bool DidPreviousSessionExitCleanly(base::Value* beacon_file_contents);
 
-  // Writes |exited_cleanly|, |monitoring_stage|, and the crash streak to the
-  // file located at |beacon_file_path_|.
-  void WriteBeaconFile(bool exited_cleanly,
-                       BeaconMonitoringStage monitoring_stage) const;
+  // Returns true if the beacon file is supported on this platform. Android
+  // WebLayer and WebView do not support this.
+  bool IsBeaconFileSupported() const;
+
+  // Writes |exited_cleanly| and the crash streak to the file located at
+  // |beacon_file_path_|.
+  void WriteBeaconFile(bool exited_cleanly) const;
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_IOS)
   // Returns whether Chrome exited cleanly in the previous session according to
@@ -196,12 +194,6 @@ class CleanExitBeacon {
   static void ResetUserDefaultsBeacon();
 #endif  // BUILDFLAG(IS_IOS)
 
-#if BUILDFLAG(IS_ANDROID)
-  // Denotes the time at which Chrome clients in the Extended Variations Safe
-  // Mode experiment's enabled group start watching for browser crashes.
-  base::TimeTicks extended_monitoring_stage_start_time_;
-#endif
-
   // Indicates whether the CleanExitBeacon has been initialized.
   bool initialized_ = false;
 
@@ -218,15 +210,16 @@ class CleanExitBeacon {
   // the browser was known to be alive.
   const base::Time initial_browser_last_live_timestamp_;
 
-  // The client's channel, e.g. Canary. Used to help determine whether the
-  // client should participate in the Extended Variations Safe Mode experiment.
-  // TODO(crbug/1241702): Remove at the end of the experiment.
-  const version_info::Channel channel_;
-
   bool did_previous_session_exit_cleanly_ = false;
 
-  // Where the clean exit beacon and the variations crash streak may be stored
-  // for some clients in the Extended Variations Safe Mode experiment.
+  // Denotes the current beacon value for this session, which is updated via
+  // CleanExitBeacon::WriteBeaconValue(). When `false`, Chrome is watching for
+  // browser crashes. When `true`, Chrome has stopped watching for crashes. When
+  // unset, Chrome has neither started nor stopped watching for crashes.
+  absl::optional<bool> has_exited_cleanly_ = absl::nullopt;
+
+  // Where the clean exit beacon and the variations crash streak are stored on
+  // platforms that support the beacon file.
   base::FilePath beacon_file_path_;
 };
 

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -336,9 +336,9 @@ DomKey KeycodeConverter::KeyStringToDomKey(base::StringPiece key) {
   }
   // Otherwise, if the string contains a single Unicode character,
   // the key value is that character.
-  const auto key_length = static_cast<int32_t>(key.length());
-  int32_t char_index = 0;
-  uint32_t character;
+  const size_t key_length = key.length();
+  size_t char_index = 0;
+  base_icu::UChar32 character;
   if (base::ReadUnicodeCharacter(key.data(), key_length, &char_index,
                                  &character) &&
       ++char_index == key_length) {

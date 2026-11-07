@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -228,11 +228,11 @@ ExtensionBuilder& ExtensionBuilder::SetManifestVersion(int manifest_version) {
 ExtensionBuilder& ExtensionBuilder::AddJSON(base::StringPiece json) {
   CHECK(manifest_data_);
   std::string wrapped_json = base::StringPrintf("{%s}", json.data());
-  base::JSONReader::ValueWithError parsed =
-      base::JSONReader::ReadAndReturnValueWithError(wrapped_json);
-  CHECK(parsed.value) << "Failed to parse json for extension '"
-                      << manifest_data_->name << "':" << parsed.error_message;
-  return MergeManifest(*parsed.value);
+  auto parsed = base::JSONReader::ReadAndReturnValueWithError(wrapped_json);
+  CHECK(parsed.has_value())
+      << "Failed to parse json for extension '" << manifest_data_->name
+      << "':" << parsed.error().message;
+  return MergeManifest(*parsed);
 }
 
 ExtensionBuilder& ExtensionBuilder::SetPath(const base::FilePath& path) {

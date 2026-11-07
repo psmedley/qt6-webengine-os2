@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,14 +49,6 @@ class MetricsServiceAccessor {
       MetricsService* metrics_service,
       base::StringPiece trial_name,
       base::StringPiece group_name,
-      variations::SyntheticTrialAnnotationMode annotation_mode);
-
-  // Same as RegisterSyntheticFieldTrial above, but takes in the trial and group
-  // names as hashes rather than computing those hashes from the strings.
-  static bool RegisterSyntheticFieldTrialWithNameAndGroupHash(
-      MetricsService* metrics_service,
-      uint32_t trial_name_hash,
-      uint32_t group_name_hash,
       variations::SyntheticTrialAnnotationMode annotation_mode);
 
   // IsMetricsReportingEnabled() in non-official builds unconditionally returns

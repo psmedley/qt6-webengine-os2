@@ -1,5 +1,5 @@
 <!--
-Copyright 2020 The Chromium Authors. All rights reserved.
+Copyright 2020 The Chromium Authors
 Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
@@ -23,7 +23,7 @@ chromium-metrics-reviews@google.com.
 <histograms>
 
 <histogram name="Geolocation.AuthorizationActionExistingUser"
-    enum="GeolocationAuthorizationAction" expires_after="2022-08-14">
+    enum="GeolocationAuthorizationAction" expires_after="2022-10-16">
   <owner>mattreynolds@chromium.org</owner>
   <owner>device-dev@chromium.org</owner>
   <summary>
@@ -34,6 +34,10 @@ chromium-metrics-reviews@google.com.
 
 <histogram base="true" name="Geolocation.Header.LocationAge" units="seconds"
     expires_after="M85">
+  <obsolete>
+    Code for recording this histogram was removed in July 2022. Recording this
+    long-expired histogram was slowing down navigations.
+  </obsolete>
   <owner>kcarattini@chromium.org</owner>
   <owner>dominickn@chromium.org</owner>
   <summary>
@@ -45,6 +49,10 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="Geolocation.Header.PermissionState"
     enum="GeolocationHeaderPermissionState" expires_after="M85">
+  <obsolete>
+    Code for recording this histogram was removed in July 2022. Recording this
+    long-expired histogram was slowing down navigations.
+  </obsolete>
   <owner>kcarattini@chromium.org</owner>
   <owner>dominickn@chromium.org</owner>
   <summary>
@@ -56,6 +64,10 @@ chromium-metrics-reviews@google.com.
 
 <histogram base="true" name="Geolocation.Header.TimeListening" units="ms"
     expires_after="M85">
+  <obsolete>
+    Code for recording this histogram was removed in July 2022. Recording this
+    long-expired histogram was slowing down navigations.
+  </obsolete>
   <owner>kcarattini@chromium.org</owner>
   <owner>dominickn@chromium.org</owner>
   <summary>
@@ -76,13 +88,6 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
-<histogram name="Geolocation.LocationUpdate.ErrorCode"
-    enum="GeopositionErrorCode" expires_after="2022-09-11">
-  <owner>mattreynolds@chromium.org</owner>
-  <owner>device-dev@chromium.org</owner>
-  <summary>Error code for the geoposition sent to the renderers.</summary>
-</histogram>
-
 <histogram name="Geolocation.NetworkLocationRequest.AccessPoints" units="units"
     expires_after="M85">
   <owner>mattreynolds@chromium.org</owner>
@@ -93,7 +98,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Geolocation.NetworkLocationRequest.Event"
-    enum="NetworkLocationRequestEvent" expires_after="2022-10-04">
+    enum="NetworkLocationRequestEvent" expires_after="2023-02-12">
   <owner>mattreynolds@chromium.org</owner>
   <owner>device-dev@chromium.org</owner>
   <summary>
@@ -105,14 +110,14 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Geolocation.NetworkLocationRequest.NetError"
-    enum="NetErrorCodes" expires_after="2022-09-25">
+    enum="NetErrorCodes" expires_after="2023-02-12">
   <owner>JamesHollyer@chromium.org</owner>
   <owner>device-dev@chromium.org</owner>
   <summary>Network errors in NetworkLocationRequest.</summary>
 </histogram>
 
 <histogram name="Geolocation.NetworkLocationRequest.ResponseCode"
-    enum="HttpResponseCode" expires_after="2022-09-25">
+    enum="HttpResponseCode" expires_after="2023-02-12">
   <owner>mattreynolds@chromium.org</owner>
   <owner>device-dev@chromium.org</owner>
   <summary>
@@ -205,6 +210,16 @@ chromium-metrics-reviews@google.com.
     duration. This means no position was received within the allowed time from
     the browser process due to e.g. a slow network or an unresponsive system
     location provider.
+  </summary>
+</histogram>
+
+<histogram name="Geolocation.WifiDataProviderCommon.WifiScanTaskTime"
+    units="ms" expires_after="2023-07-15">
+  <owner>reillyg@chromium.org</owner>
+  <owner>deviceapi-team@google.com</owner>
+  <summary>
+    Records the time taken on Windows, macOS and Linux to query the operating
+    system for nearby access points.
   </summary>
 </histogram>
 

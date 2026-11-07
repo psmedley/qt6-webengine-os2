@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,11 +36,10 @@ GetAssemblyParameters(const HarfBuzzFace* harfbuzz_face,
   Vector<OpenTypeMathStretchData::GlyphPartRecord> parts =
       OpenTypeMathSupport::GetGlyphPartRecords(harfbuzz_face, base_glyph,
                                                stretch_axis, italic_correction);
-  if (parts.IsEmpty())
+  if (parts.empty())
     return absl::nullopt;
 
-  hb_font_t* hb_font =
-      harfbuzz_face->GetScaledFont(nullptr, HarfBuzzFace::kNoVerticalLayout);
+  hb_font_t* const hb_font = harfbuzz_face->GetScaledFont();
 
   auto hb_stretch_axis =
       stretch_axis == OpenTypeMathStretchData::StretchAxis::Horizontal

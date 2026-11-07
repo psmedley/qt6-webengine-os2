@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -52,9 +52,13 @@ source_set("audio") {
     "//media/base/android",
   ]
   sources = [
+    "aecdump_recording_manager.cc",
+    "aecdump_recording_manager.h",
     "agc_audio_stream.h",
     "alive_checker.cc",
     "alive_checker.h",
+    "audio_bus_pool.cc",
+    "audio_bus_pool.h",
     "audio_debug_file_writer.cc",
     "audio_debug_file_writer.h",
     "audio_debug_recording_helper.cc",
@@ -76,6 +80,7 @@ source_set("audio") {
     "audio_input_device.h",
     "audio_input_ipc.cc",
     "audio_input_ipc.h",
+    "audio_io.cc",
     "audio_io.h",
     "audio_manager.cc",
     "audio_manager.h",
@@ -134,6 +139,8 @@ source_set("audio") {
     "scoped_task_runner_observer.h",
     "simple_sources.cc",
     "simple_sources.h",
+    "system_glitch_reporter.cc",
+    "system_glitch_reporter.h",
     "wav_audio_handler.cc",
     "wav_audio_handler.h",
   ]
@@ -202,6 +209,15 @@ source_set("audio") {
       "win/waveout_output_win.cc",
       "win/waveout_output_win.h",
     ]
+
+    if (enable_platform_dts_audio) {
+      sources += [
+        "win/audio_edid_scan_win.cc",
+        "win/audio_edid_scan_win.h",
+      ]
+    }
+
+    deps += [ "//media/base/win:media_foundation_util" ]
 
     libs += [
       "dxguid.lib",
@@ -276,7 +292,7 @@ source_set("audio") {
         "cras/audio_manager_chromeos.cc",
         "cras/audio_manager_chromeos.h",
       ]
-      deps += [ "//ash/components/audio" ]
+      deps += [ "//chromeos/ash/components/audio" ]
     } else if (is_linux || is_chromeos_lacros) {
       sources += [
         "cras/audio_manager_cras.cc",
@@ -318,7 +334,6 @@ source_set("audio") {
       "fuchsia/audio_output_stream_fuchsia.h",
     ]
     deps += [
-      "//media/fuchsia/audio",
       "//media/fuchsia/common",
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.media",
       "//third_party/fuchsia-sdk/sdk/pkg/sys_cpp",
@@ -359,6 +374,8 @@ static_library("test_support") {
     "audio_system_test_util.h",
     "audio_unittest_util.cc",
     "audio_unittest_util.h",
+    "mock_aecdump_recording_manager.cc",
+    "mock_aecdump_recording_manager.h",
     "mock_audio_debug_recording_manager.cc",
     "mock_audio_debug_recording_manager.h",
     "mock_audio_manager.cc",
@@ -395,7 +412,9 @@ static_library("test_support") {
 source_set("unit_tests") {
   testonly = true
   sources = [
+    "aecdump_recording_manager_unittest.cc",
     "alive_checker_unittest.cc",
+    "audio_bus_pool_unittest.cc",
     "audio_debug_file_writer_unittest.cc",
     "audio_debug_recording_helper_unittest.cc",
     "audio_debug_recording_manager_unittest.cc",
@@ -445,30 +464,34 @@ source_set("unit_tests") {
     ]
   }
 
-  if (is_chromeos_ash || is_chromecast) {
+  if (is_chromeos_ash || is_castos || is_cast_android) {
     sources += [
       "test_data.h",
       "wav_audio_handler_unittest.cc",
     ]
+  }
 
-    if (!is_chromecast) {
-      deps += [
-        "//ash/components/audio",
-        "//chromeos/dbus/audio",
-      ]
-    }
+  if (is_chromeos_ash) {
+    deps += [
+      "//chromeos/ash/components/audio",
+      "//chromeos/ash/components/dbus/audio",
+    ]
 
     if (use_cras) {
-      sources += [
-        "cras/audio_manager_chromeos_unittest.cc",
-        "cras/cras_input_unittest.cc",
-        "cras/cras_unified_unittest.cc",
-      ]
+      sources += [ "cras/audio_manager_chromeos_unittest.cc" ]
     }
   }
 
   if (is_chromeos_lacros && use_cras) {
     sources += [ "cras/audio_manager_cras_unittest.cc" ]
+  }
+
+  if (use_cras) {
+    sources += [
+      "cras/audio_manager_cras_base_unittest.cc",
+      "cras/cras_input_unittest.cc",
+      "cras/cras_unified_unittest.cc",
+    ]
   }
 
   if (is_win) {

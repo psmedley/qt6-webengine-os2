@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -156,22 +156,23 @@ ScriptPromise IdleDetector::start(ScriptState* script_state,
 
   mojo::PendingRemote<mojom::blink::IdleMonitor> remote;
   receiver_.Bind(remote.InitWithNewPipeAndPassReceiver(), task_runner_);
-  receiver_.set_disconnect_handler(WTF::Bind(
+  receiver_.set_disconnect_handler(WTF::BindOnce(
       &IdleDetector::OnMonitorDisconnected, WrapWeakPersistent(this)));
 
   resolver_ = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver_->Promise();
   IdleManager::From(context)->AddMonitor(
       std::move(remote),
-      WTF::Bind(&IdleDetector::OnAddMonitor, WrapWeakPersistent(this),
-                WrapPersistent(resolver_.Get())));
+      WTF::BindOnce(&IdleDetector::OnAddMonitor, WrapWeakPersistent(this),
+                    WrapPersistent(resolver_.Get())));
   return promise;
 }
 
 void IdleDetector::SetTaskRunnerForTesting(
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    const base::TickClock* tick_clock) {
   task_runner_ = std::move(task_runner);
-  timer_.MoveToNewTaskRunner(task_runner_);
+  timer_.SetTaskRunnerForTesting(task_runner_, tick_clock);
 }
 
 void IdleDetector::Abort(AbortSignal* signal) {

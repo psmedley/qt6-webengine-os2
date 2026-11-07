@@ -4,15 +4,12 @@
 
 #include "src/api/api-natives.h"
 
-#include "src/api/api-inl.h"
 #include "src/common/message-template.h"
 #include "src/execution/isolate-inl.h"
 #include "src/heap/heap-inl.h"
 #include "src/logging/runtime-call-stats-scope.h"
 #include "src/objects/api-callbacks.h"
-#include "src/objects/hash-table-inl.h"
 #include "src/objects/lookup.h"
-#include "src/objects/property-cell.h"
 #include "src/objects/templates.h"
 
 namespace v8 {
@@ -95,10 +92,10 @@ MaybeHandle<Object> DefineAccessorProperty(Isolate* isolate,
                             Handle<FunctionTemplateInfo>::cast(setter)),
         Object);
   }
-  RETURN_ON_EXCEPTION(
-      isolate,
-      JSObject::DefineAccessor(object, name, getter, setter, attributes),
-      Object);
+  RETURN_ON_EXCEPTION(isolate,
+                      JSObject::DefineOwnAccessorIgnoreAttributes(
+                          object, name, getter, setter, attributes),
+                      Object);
   return object;
 }
 
@@ -532,7 +529,7 @@ MaybeHandle<JSFunction> InstantiateFunction(
   if (!data->needs_access_check() &&
       data->GetNamedPropertyHandler().IsUndefined(isolate) &&
       data->GetIndexedPropertyHandler().IsUndefined(isolate)) {
-    function_type = FLAG_embedder_instance_types && data->HasInstanceType()
+    function_type = v8_flags.embedder_instance_types && data->HasInstanceType()
                         ? static_cast<InstanceType>(data->InstanceType())
                         : JS_API_OBJECT_TYPE;
   }

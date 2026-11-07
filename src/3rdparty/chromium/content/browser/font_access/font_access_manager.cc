@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "content/browser/font_access/font_enumeration_data_source.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/global_routing_id.h"
@@ -26,6 +27,7 @@
 #include "content/public/common/content_client.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/font_access/font_enumeration_table.pb.h"
+#include "third_party/blink/public/common/permissions/permission_utils.h"
 #include "third_party/blink/public/mojom/frame/lifecycle.mojom-shared.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom-shared.h"
 
@@ -100,7 +102,7 @@ void FontAccessManager::EnumerateLocalFonts(
   DCHECK(permission_controller);
 
   auto status = permission_controller->GetPermissionStatusForCurrentDocument(
-      PermissionType::LOCAL_FONTS, rfh);
+      blink::PermissionType::LOCAL_FONTS, rfh);
 
   if (status != blink::mojom::PermissionStatus::ASK) {
     // Permission has been requested before.
@@ -121,7 +123,7 @@ void FontAccessManager::EnumerateLocalFonts(
       blink::mojom::UserActivationNotificationType::kNone);
 
   permission_controller->RequestPermissionFromCurrentDocument(
-      PermissionType::LOCAL_FONTS, rfh,
+      blink::PermissionType::LOCAL_FONTS, rfh,
       /*user_gesture=*/true,
       base::BindOnce(&FontAccessManager::DidRequestPermission,
                      weak_ptr_factory_.GetWeakPtr(), std::move(callback)));

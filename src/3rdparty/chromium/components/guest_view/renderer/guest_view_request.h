@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,7 +28,7 @@ class GuestViewAttachRequest {
   GuestViewAttachRequest(GuestViewContainer* container,
                          int render_frame_routing_id,
                          int guest_instance_id,
-                         std::unique_ptr<base::DictionaryValue> params,
+                         base::Value::Dict params,
                          v8::Local<v8::Function> callback,
                          v8::Isolate* isolate);
 
@@ -55,7 +55,7 @@ class GuestViewAttachRequest {
   v8::Isolate* const isolate_;
   const int render_frame_routing_id_;
   const int guest_instance_id_;
-  std::unique_ptr<base::DictionaryValue> params_;
+  base::Value::Dict params_;
 
   base::WeakPtrFactory<GuestViewAttachRequest> weak_ptr_factory_{this};
 };

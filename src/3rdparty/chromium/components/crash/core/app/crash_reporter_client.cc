@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,7 +81,11 @@ bool CrashReporterClient::GetIsPerUserInstall() {
 int CrashReporterClient::GetResultCodeRespawnFailed() {
   return 0;
 }
-#endif
+
+std::wstring CrashReporterClient::GetWerRuntimeExceptionModule() {
+  return std::wstring();
+}
+#endif  // BUILDFLAG(IS_WIN)
 
 #if BUILDFLAG(IS_WIN) || (BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC))
 bool CrashReporterClient::GetShouldDumpLargerDumps() {

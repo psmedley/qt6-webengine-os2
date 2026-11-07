@@ -10,19 +10,24 @@
 
 #include "include/core/SkMaskFilter.h"
 #include "include/core/SkPathEffect.h"
+#include "include/core/SkSpan.h"
 #include "src/core/SkDescriptor.h"
-#include "src/core/SkStrikeForGPU.h"
+#include "src/text/StrikeForGPU.h"
 
 #include <tuple>
 
-#if SK_SUPPORT_GPU
-#include "src/gpu/ganesh/text/GrSDFTControl.h"
-class GrStrikeCache;
-class GrTextStrike;
+#if SK_SUPPORT_GPU || defined(SK_GRAPHITE_ENABLED)
+#include "src/text/gpu/SDFTControl.h"
+
+namespace sktext::gpu {
+class StrikeCache;
+class TextStrike;
+}
 #endif
 
 class SkFont;
 class SkPaint;
+class SkStrike;
 class SkStrikeCache;
 class SkSurfaceProps;
 
@@ -45,19 +50,21 @@ public:
             SkScalerContextFlags scalerContextFlags,
             const SkMatrix& deviceMatrix);
 
+    // A strike for finding the max size for transforming masks. This is used to calculate the
+    // maximum dimension of a SubRun of text.
+    static SkStrikeSpec MakeTransformMask(
+            const SkFont& font,
+            const SkPaint& paint,
+            const SkSurfaceProps& surfaceProps,
+            SkScalerContextFlags scalerContextFlags,
+            const SkMatrix& deviceMatrix);
+
     // Create a strike spec for path style cache entries.
     static std::tuple<SkStrikeSpec, SkScalar> MakePath(
             const SkFont& font,
             const SkPaint& paint,
             const SkSurfaceProps& surfaceProps,
             SkScalerContextFlags scalerContextFlags);
-
-    static std::tuple<SkStrikeSpec, SkScalar> MakeSourceFallback(
-            const SkFont& font,
-            const SkPaint& paint,
-            const SkSurfaceProps& surfaceProps,
-            SkScalerContextFlags scalerContextFlags,
-            SkScalar maxSourceGlyphDimension);
 
     // Create a canonical strike spec for device-less measurements.
     static std::tuple<SkStrikeSpec, SkScalar> MakeCanonicalized(
@@ -69,19 +76,21 @@ public:
     // Make a strike spec for PDF Vector strikes
     static SkStrikeSpec MakePDFVector(const SkTypeface& typeface, int* size);
 
-#if SK_SUPPORT_GPU
+#if SK_SUPPORT_GPU || defined(SK_GRAPHITE_ENABLED)
     // Create a strike spec for scaled distance field text.
-    static std::tuple<SkStrikeSpec, SkScalar, GrSDFTMatrixRange> MakeSDFT(
+    static std::tuple<SkStrikeSpec, SkScalar, sktext::gpu::SDFTMatrixRange> MakeSDFT(
             const SkFont& font,
             const SkPaint& paint,
             const SkSurfaceProps& surfaceProps,
             const SkMatrix& deviceMatrix,
-            const GrSDFTControl& control);
+            const SkPoint& textLocation,
+            const sktext::gpu::SDFTControl& control);
 
-    sk_sp<GrTextStrike> findOrCreateGrStrike(GrStrikeCache* cache) const;
+    sk_sp<sktext::gpu::TextStrike> findOrCreateTextStrike(sktext::gpu::StrikeCache* cache) const;
 #endif
 
-    SkScopedStrikeForGPU findOrCreateScopedStrike(SkStrikeForGPUCacheInterface* cache) const;
+    sktext::ScopedStrikeForGPU findOrCreateScopedStrike(
+            sktext::StrikeForGPUCacheInterface* cache) const;
 
     sk_sp<SkStrike> findOrCreateStrike() const;
 

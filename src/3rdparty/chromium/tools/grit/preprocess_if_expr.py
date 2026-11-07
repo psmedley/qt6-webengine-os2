@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -19,7 +19,7 @@ _CWD = os.getcwd()
 
 class PreprocessIfExprNode(grit.node.base.Node):
   def __init__(self):
-    super(PreprocessIfExprNode, self).__init__()
+    super().__init__()
 
   def PreprocessIfExpr(self, content, removal_comments_extension):
     return grit.format.html_inline.CheckConditionalElements(
@@ -45,8 +45,7 @@ class PreprocessIfExprNode(grit.node.base.Node):
 
 def ParseDefinesArg(definesArg):
   defines = {}
-  for define_arg in definesArg:
-    define, = define_arg
+  for define in definesArg:
     parts = [part.strip() for part in define.split('=', 1)]
     name = parts[0]
     val = True if len(parts) == 1 else parts[1]
@@ -79,7 +78,7 @@ def main(argv):
   parser.add_argument('--out-folder', required=True)
   parser.add_argument('--out-manifest')
   parser.add_argument('--in-files', required=True, nargs="*")
-  parser.add_argument('-D', '--defines', nargs="*", action='append')
+  parser.add_argument('-D', '--defines', action='append')
   parser.add_argument('-E', '--environment')
   parser.add_argument('-t', '--target')
   parser.add_argument('--enable_removal_comments', action='store_true')
@@ -95,7 +94,7 @@ def main(argv):
   for input_file in args.in_files:
     in_path = os.path.join(in_folder, input_file)
     content = ""
-    with io.open(in_path, encoding='utf-8', mode='r') as f:
+    with open(in_path, encoding='utf-8') as f:
       content = f.read()
 
     removal_comments_extension = None  # None means no removal comments
@@ -117,7 +116,12 @@ def main(argv):
       # for overlapping directories hit the makedirs line at the same time.
       if e.errno != errno.EEXIST:
         raise
-    if os.path.exists(out_path) and os.path.samefile(out_path, in_path):
+
+    # Delete the target file before witing it, as it may be hardlinked to other
+    # files, which can break the build. This is the case in particular if the
+    # file was "copied" to different locations with GN (as GN's copy is actually
+    # a hard link under the hood). See https://crbug.com/1332497
+    if os.path.exists(out_path):
       os.remove(out_path)
 
     # Detect and delete any stale TypeScript files present in the output folder,
@@ -131,14 +135,14 @@ def main(argv):
       if os.path.exists(to_check):
         os.remove(to_check)
 
-    with io.open(out_path, mode='wb') as f:
+    with open(out_path, mode='wb') as f:
       f.write(preprocessed.encode('utf-8'))
 
   if args.out_manifest:
     manifest_data = {}
     manifest_data['base_dir'] = '%s' % args.out_folder
     manifest_data['files'] = args.in_files
-    manifest_file = io.open(
+    manifest_file = open(
         os.path.normpath(os.path.join(_CWD, args.out_manifest)), 'w',
         encoding='utf-8', newline='\n')
     json.dump(manifest_data, manifest_file)

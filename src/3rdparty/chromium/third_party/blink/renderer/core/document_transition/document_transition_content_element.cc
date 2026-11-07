@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,12 @@ DocumentTransitionContentElement::DocumentTransitionContentElement(
     PseudoId pseudo_id,
     const AtomicString& document_transition_tag,
     viz::SharedElementResourceId resource_id,
-    bool is_live_content_element)
+    bool is_live_content_element,
+    const DocumentTransitionStyleTracker* style_tracker)
     : DocumentTransitionPseudoElementBase(parent,
                                           pseudo_id,
-                                          document_transition_tag),
+                                          document_transition_tag,
+                                          style_tracker),
       resource_id_(resource_id),
       is_live_content_element_(is_live_content_element) {
   DCHECK(resource_id_.IsValid());

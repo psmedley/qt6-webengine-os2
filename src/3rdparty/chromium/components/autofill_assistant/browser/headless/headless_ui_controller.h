@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,15 +11,19 @@
 
 #include "base/callback_helpers.h"
 #include "components/autofill_assistant/browser/autofill_assistant_impl.h"
-#include "components/autofill_assistant/browser/controller_observer.h"
+#include "components/autofill_assistant/browser/empty_controller_observer.h"
 #include "components/autofill_assistant/browser/execution_delegate.h"
 #include "components/autofill_assistant/browser/script_executor_ui_delegate.h"
 
 namespace autofill_assistant {
 
-class HeadlessUiController : public ScriptExecutorUiDelegate {
+class HeadlessUiController : public ScriptExecutorUiDelegate,
+                             public EmptyControllerObserver {
  public:
-  HeadlessUiController();
+  // The |action_extension_delegate| parameter can be null but if an extension
+  // action is requested it will cause the script to fail.
+  explicit HeadlessUiController(
+      ExternalActionDelegate* action_extension_delegate);
 
   // Overrides ScriptExecutorUiDelegate
   void SetStatusMessage(const std::string& message) override;
@@ -53,11 +57,25 @@ class HeadlessUiController : public ScriptExecutorUiDelegate {
       std::unique_ptr<FormProto> form,
       base::RepeatingCallback<void(const FormProto::Result*)> changed_callback,
       base::OnceCallback<void(const ClientStatus&)> cancel_callback) override;
+  void ShowQrCodeScanUi(
+      std::unique_ptr<PromptQrCodeScanProto> qr_code_scan,
+      base::OnceCallback<void(const ClientStatus&,
+                              const absl::optional<ValueProto>&)> callback)
+      override;
+  void ClearQrCodeScanUi() override;
   void SetGenericUi(
       std::unique_ptr<GenericUserInterfaceProto> generic_ui,
       base::OnceCallback<void(const ClientStatus&)> end_action_callback,
       base::OnceCallback<void(const ClientStatus&)>
-          view_inflation_finished_callback) override;
+          view_inflation_finished_callback,
+      base::RepeatingCallback<void(const RequestBackendDataProto&)>
+          request_backend_data_callback,
+      base::RepeatingCallback<void(const ShowAccountScreenProto&)>
+          show_account_screen_callback) override;
+
+  void ShowAccountScreen(const ShowAccountScreenProto& proto,
+                         const std::string& email_address) override;
+
   void SetPersistentGenericUi(
       std::unique_ptr<GenericUserInterfaceProto> generic_ui,
       base::OnceCallback<void(const ClientStatus&)>
@@ -68,10 +86,31 @@ class HeadlessUiController : public ScriptExecutorUiDelegate {
 
   void SetExpandSheetForPromptAction(bool expand) override;
   void SetCollectUserDataOptions(CollectUserDataOptions* options) override;
+  void SetCollectUserDataUiState(bool loading,
+                                 UserDataEventField event_field) override;
   void SetLastSuccessfulUserDataOptions(std::unique_ptr<CollectUserDataOptions>
                                             collect_user_data_options) override;
   const CollectUserDataOptions* GetLastSuccessfulUserDataOptions()
       const override;
+  bool SupportsExternalActions() override;
+  void ExecuteExternalAction(
+      const external::Action& external_action,
+      bool is_interrupt,
+      base::OnceCallback<void(ExternalActionDelegate::DomUpdateCallback)>
+          start_dom_checks_callback,
+      base::OnceCallback<void(const external::Result& result)>
+          end_action_callback) override;
+  void OnInterruptStarted() override;
+  void OnInterruptFinished() override;
+
+  // Overrides ControllerObserver.
+  void OnTouchableAreaChanged(
+      const RectF& visual_viewport,
+      const std::vector<RectF>& touchable_areas,
+      const std::vector<RectF>& restricted_areas) override;
+
+ private:
+  const raw_ptr<ExternalActionDelegate> action_extension_delegate_;
 };
 
 }  // namespace autofill_assistant

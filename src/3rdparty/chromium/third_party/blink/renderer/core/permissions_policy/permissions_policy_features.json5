@@ -65,11 +65,17 @@
     {
       name: "AttributionReporting",
       permissions_policy_name: "attribution-reporting",
+      feature_default: "EnableForAll",
       depends_on: ["AttributionReporting"],
     },
     {
       name: "Autoplay",
       permissions_policy_name: "autoplay",
+    },
+    {
+      name: "Bluetooth",
+      permissions_policy_name: "bluetooth",
+      depends_on: ["WebBluetooth"],
     },
     {
       name: "BrowsingTopics",
@@ -104,13 +110,12 @@
       permissions_policy_name: "ch-ect",
     },
     {
-      name: "ClientHintPartitionedCookies",
-      permissions_policy_name: "ch-partitioned-cookies",
-      depends_on: ["PartitionedCookies"],
-    },
-    {
       name: "ClientHintPrefersColorScheme",
       permissions_policy_name: "ch-prefers-color-scheme",
+    },
+    {
+      name: "ClientHintPrefersReducedMotion",
+      permissions_policy_name: "ch-prefers-reduced-motion",
     },
     {
       name: "ClientHintRTT",
@@ -137,9 +142,7 @@
     {
       name: "ClientHintUAPlatform",
       permissions_policy_name: "ch-ua-platform",
-      default_value_behind_flag: [
-        ["UACHPlatformEnabledByDefault", "EnableForAll"],
-      ],
+      feature_default: "EnableForAll",
     },
     {
       name: "ClientHintUAModel",
@@ -162,7 +165,6 @@
     {
       name: "ClientHintUAFullVersionList",
       permissions_policy_name: "ch-ua-full-version-list",
-      depends_on: ["UserAgentClientHintFullVersionList"],
     },
     {
       name: "ClientHintUAPlatformVersion",
@@ -201,7 +203,6 @@
     {
       name: "CrossOriginIsolated",
       permissions_policy_name: "cross-origin-isolated",
-      depends_on: ["CrossOriginIsolation"],
     },
     {
       name: "DirectSockets",
@@ -234,6 +235,11 @@
       depends_on: ["FreezeFramesOnVisibility"],
     },
     {
+      name: "IdentityCredentialsGet",
+      permissions_policy_name: "identity-credentials-get",
+      depends_on: ["FedCmIframeSupport"],
+    },
+    {
       name: "FocusWithoutUserActivation",
       permissions_policy_name: "focus-without-user-activation",
       feature_default: "EnableForAll",
@@ -251,7 +257,7 @@
     {
       name: "Gamepad",
       permissions_policy_name: "gamepad",
-      depends_on: ["RestrictGamepadAccess"],
+      feature_default: "EnableForAll",
     },
     {
       name: "Geolocation",
@@ -341,9 +347,15 @@
       depends_on: ["SharedAutofill"],
     },
     {
+      name: "SharedStorage",
+      permissions_policy_name: "shared-storage",
+      feature_default: "EnableForAll",
+      depends_on: ["SharedStorageAPI"],
+    },
+    {
       name: "StorageAccessAPI",
       feature_default: "EnableForAll",
-      permissions_policy_name: "storage-access-api",
+      permissions_policy_name: "storage-access",
       depends_on: ["StorageAccessAPI"],
     },
     {
@@ -360,6 +372,12 @@
       name: "Usb",
       permissions_policy_name: "usb",
       depends_on: ["WebUSB"],
+    },
+    {
+      name: "Unload",
+      permissions_policy_name: "unload",
+      feature_default: "EnableForAll",
+      depends_on: ["PermissionsPolicyUnload"],
     },
     {
       name: "VerticalScroll",
@@ -381,6 +399,11 @@
       name: "WindowPlacement",
       permissions_policy_name: "window-placement",
       depends_on: ["WindowPlacement"],
+    },
+    {
+      name: "LocalFonts",
+      permissions_policy_name: "local-fonts",
+      depends_on: ["FontAccess"],
     },
   ],
 }

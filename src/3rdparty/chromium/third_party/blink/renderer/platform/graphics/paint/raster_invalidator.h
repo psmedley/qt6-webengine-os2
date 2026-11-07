@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_RASTER_INVALIDATOR_H_
 
 #include "base/callback.h"
+#include "base/check_op.h"
 #include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/platform/graphics/compositing/chunk_to_layer_mapper.h"
 #include "third_party/blink/renderer/platform/graphics/paint/float_clip_rect.h"
@@ -62,6 +63,9 @@ class PLATFORM_EXPORT RasterInvalidator {
   friend class RasterInvalidatorTest;
 
   struct PaintChunkInfo {
+    DISALLOW_NEW();
+
+   public:
     PaintChunkInfo(const RasterInvalidator& invalidator,
                    const ChunkToLayerMapper& mapper,
                    const PaintChunkIterator& chunk_it)
@@ -106,6 +110,7 @@ class PLATFORM_EXPORT RasterInvalidator {
   void GenerateRasterInvalidations(RasterInvalidationFunction,
                                    const PaintChunkSubset&,
                                    bool layer_offset_or_state_changed,
+                                   bool layer_effect_changed,
                                    Vector<PaintChunkInfo>& new_chunks_info);
 
   ALWAYS_INLINE const PaintChunk& GetOldChunk(wtf_size_t index) const;

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "base/test/mock_callback.h"
 #include "components/autofill_assistant/browser/actions/mock_action_delegate.h"
 #include "components/autofill_assistant/browser/client_status.h"
-#include "components/autofill_assistant/browser/mock_website_login_manager.h"
+#include "components/autofill_assistant/browser/public/password_change/mock_website_login_manager.h"
 #include "components/autofill_assistant/browser/value_util.h"
 #include "components/password_manager/core/browser/mock_password_change_success_tracker.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -21,6 +21,7 @@ const char kMemoryKeyForGeneratedPassword[] = "memory-key-for-generation";
 const char kOrigin[] = "https://example.com";
 const char kUsername[] = "username";
 const char kGeneratedPassword[] = "mX.12pq";
+const bool kPhished = false;
 }  // namespace
 
 namespace autofill_assistant {
@@ -82,7 +83,8 @@ TEST_F(SaveGeneratedPasswordActionTest, SavedPassword) {
       mock_password_change_success_tracker_,
       OnChangePasswordFlowCompleted(GURL(kOrigin), kUsername,
                                     PasswordChangeSuccessTracker::EndEvent::
-                                        kAutomatedGeneratedPasswordFlow));
+                                        kAutomatedFlowGeneratedPasswordChosen,
+                                    kPhished));
 
   action.ProcessAction(callback_.Get());
 

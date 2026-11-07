@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,10 +29,10 @@ struct NET_EXPORT BidirectionalStreamRequestInfo {
 
   // Whether to allow early data to be used with this request, overriding the
   // early data based on the |method| semantics.
-  bool allow_early_data_override;
+  bool allow_early_data_override = false;
 
   // Request priority.
-  RequestPriority priority;
+  RequestPriority priority = LOW;
 
   // Socket tag to apply to sockets used to process this request.
   SocketTag socket_tag;
@@ -41,11 +41,11 @@ struct NET_EXPORT BidirectionalStreamRequestInfo {
   HttpRequestHeaders extra_headers;
 
   // Whether END_STREAM should be set on the request HEADER frame.
-  bool end_stream_on_headers;
+  bool end_stream_on_headers = false;
 
   // Whether the implementor of the BidirectionalStream should monitor
   // the status of the connection for the lifetime of this stream.
-  bool detect_broken_connection;
+  bool detect_broken_connection = false;
 
   // Suggests the period the broken connection detector should use to check
   // the status of the connection.

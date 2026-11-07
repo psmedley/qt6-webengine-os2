@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,17 @@ const char kInitiationTranslateTargetInULPHistogram[] =
 const char kInitiationTopAcceptLanguageInULPHistogram[] =
     "LanguageUsage.ULP.Initiation.TopAcceptLanguageInULP";
 const char kInitiationAcceptLanguagesULPOverlapHistogram[] =
-    "LanguageUsage.ULP.Initiation.AcceptLanguagesULPOverlap";
+    "LanguageUsage.ULP.Initiation.AcceptLanguagesULPOverlap.Base";
+const char kInitiationNeverLanguagesMissingFromULP[] =
+    "LanguageUsage.ULP.Initiation.NeverLanguagesMissingFromULP";
+const char kInitiationNeverLanguagesMissingFromULPCount[] =
+    "LanguageUsage.ULP.Initiation.NeverLanguagesMissingFromULP.Count";
+const char kInitiationAcceptLanguagesPageLanguageOverlapHistogram[] =
+    "LanguagesUsage.ULP.Initiation.AcceptLanguagesPageLanguageOverlap.Base";
+const char kInitiationPageLanguagesMissingFromULPHistogram[] =
+    "LanguagesUsage.ULP.Initiation.PageLanguagesMissingFromULP";
+const char kInitiationPageLanguagesMissingFromULPCountHistogram[] =
+    "LanguagesUsage.ULP.Initiation.PageLanguagesMissingFromULP.Count";
 
 // Keep up to date with ULPLanguageStatus in
 // //tools/metrics/histograms/enums.xml.
@@ -60,16 +70,37 @@ class ULPMetricsLogger {
   virtual void RecordInitiationAcceptLanguagesULPOverlap(
       int overlap_ratio_percent);
 
+  // Record each Never Translate language that does not have a base match with a
+  // ULP language.
+  virtual void RecordInitiationNeverLanguagesMissingFromULP(
+      const std::vector<std::string>& never_languages);
+
+  // Record the count of Never Translate languages that do not have a base match
+  // with a ULP language.
+  virtual void RecordInitiationNeverLanguagesMissingFromULPCount(int count);
+
+  virtual void RecordInitiationAcceptLanguagesPageLanguageOverlap(
+      int overlap_ratio_percent);
+  virtual void RecordInitiationPageLanguagesMissingFromULP(
+      const std::vector<std::string>& page_languages);
+  virtual void RecordInitiationPageLanguagesMissingFromULPCount(int count);
+
   // Returns an enum that indicates whether `language` is present in
   // `ulp_languages` and, if so, whether it was the first entry.
-  virtual ULPLanguageStatus DetermineLanguageStatus(
+  static ULPLanguageStatus DetermineLanguageStatus(
       const std::string& language,
       const std::vector<std::string>& ulp_languages);
 
   // Returns a number from 0-100 that indicates the ratio of ulp_languages that
-  // are present in accept_languages.
-  virtual int ULPLanguagesInAcceptLanguagesRatio(
+  // are present in accept_languages. Only language bases are compared (e.g
+  // pt-BR == pt-MZ).
+  static int LanguagesOverlapRatio(
       const std::vector<std::string> accept_languages,
+      const std::vector<std::string> ulp_languages);
+
+  // Returns a vector with languages that do not have a ULP base language match.
+  static std::vector<std::string> RemoveULPLanguages(
+      const std::vector<std::string> languages,
       const std::vector<std::string> ulp_languages);
 };
 

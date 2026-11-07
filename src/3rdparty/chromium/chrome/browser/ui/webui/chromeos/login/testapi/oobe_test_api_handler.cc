@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,22 +7,27 @@
 #include "ash/constants/ash_features.h"
 #include "ash/constants/ash_switches.h"
 #include "ash/public/ash_interfaces.h"
-#include "ash/public/mojom/cros_display_config.mojom.h"
+#include "ash/public/cpp/tablet_mode.h"
 #include "base/bind.h"
 #include "base/check.h"
 #include "base/logging.h"
+#include "base/notreached.h"
 #include "base/values.h"
 #include "build/branding_buildflags.h"
 #include "chrome/browser/ash/login/existing_user_controller.h"
 #include "chrome/browser/ash/login/helper.h"
 #include "chrome/browser/ash/login/oobe_screen.h"
+#include "chrome/browser/ash/login/quick_unlock/quick_unlock_utils.h"
+#include "chrome/browser/ash/login/screens/hid_detection_screen.h"
 #include "chrome/browser/ash/login/screens/network_screen.h"
 #include "chrome/browser/ash/login/startup_utils.h"
 #include "chrome/browser/ash/login/ui/login_display_host.h"
 #include "chrome/browser/ash/login/wizard_controller.h"
 #include "chrome/browser/ash/policy/enrollment/enrollment_requisition_manager.h"
 #include "chrome/browser/ui/ash/login_screen_client_impl.h"
+#include "chromeos/ash/components/assistant/buildflags.h"
 #include "components/account_id/account_id.h"
+#include "services/device/public/mojom/input_service.mojom.h"
 
 namespace chromeos {
 
@@ -36,6 +41,8 @@ void OobeTestAPIHandler::DeclareJSCallbacks() {
   AddCallback("OobeTestApi.loginWithPin", &OobeTestAPIHandler::LoginWithPin);
   AddCallback("OobeTestApi.advanceToScreen",
               &OobeTestAPIHandler::AdvanceToScreen);
+  AddCallback("OobeTestApi.skipToLoginForTesting",
+              &OobeTestAPIHandler::SkipToLoginForTesting);
   AddCallback("OobeTestApi.skipPostLoginScreens",
               &OobeTestAPIHandler::SkipPostLoginScreens);
   AddCallback("OobeTestApi.loginAsGuest", &OobeTestAPIHandler::LoginAsGuest);
@@ -47,6 +54,8 @@ void OobeTestAPIHandler::DeclareJSCallbacks() {
   // this one you need to add a function into login/test_api/test_api.js.
   AddCallback("OobeTestApi.getPrimaryDisplayName",
               &OobeTestAPIHandler::HandleGetPrimaryDisplayName);
+  AddCallback("OobeTestApi.emulateDevicesForTesting",
+              &OobeTestAPIHandler::EmulateDevicesConnectedForTesting);
 }
 
 void OobeTestAPIHandler::InitializeDeprecated() {}
@@ -68,6 +77,32 @@ void OobeTestAPIHandler::GetAdditionalParameters(base::Value::Dict* dict) {
             StartupUtils::IsEulaAccepted() ||
                 !features::IsOobeConsolidatedConsentEnabled() ||
                 !BUILDFLAG(GOOGLE_CHROME_BRANDING));
+
+  dict->Set("testapi_isFingerprintSupported",
+            ash::quick_unlock::IsFingerprintSupported());
+
+  dict->Set("testapi_isLibAssistantEnabled",
+#if BUILDFLAG(ENABLE_CROS_LIBASSISTANT)
+            true
+#else
+            false
+#endif
+  );
+
+  dict->Set("testapi_isBrandedBuild",
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+            true
+#else
+            false
+#endif
+  );
+
+  dict->Set("testapi_isOobeInTabletMode",
+            ash::TabletMode::Get()->InTabletMode() ||
+                ash::switches::ShouldOobeUseTabletModeFirstRun());
+  dict->Set("testapi_shouldSkipConsolidatedConsent",
+            !features::IsOobeConsolidatedConsentEnabled() ||
+                !BUILDFLAG(GOOGLE_CHROME_BRANDING));
 }
 
 void OobeTestAPIHandler::LoginWithPin(const std::string& username,
@@ -83,8 +118,47 @@ void OobeTestAPIHandler::AdvanceToScreen(const std::string& screen) {
   ash::LoginDisplayHost::default_host()->StartWizard(ash::OobeScreenId(screen));
 }
 
+void OobeTestAPIHandler::SkipToLoginForTesting() {
+  ash::WizardController* controller =
+      ash::WizardController::default_controller();
+  if (!controller || !controller->is_initialized()) {
+    LOG(ERROR)
+        << "SkipToLoginForTesting is called when WizardController is not yet "
+           "initialized. Please report at https://crbug.com/1336940";
+    return;
+  }
+  controller->SkipToLoginForTesting();  // IN-TEST
+}
+
+void OobeTestAPIHandler::EmulateDevicesConnectedForTesting() {
+  HIDDetectionScreen* screen_ = static_cast<HIDDetectionScreen*>(
+      ash::WizardController::default_controller()->GetScreen(
+          HIDDetectionView::kScreenId));
+  auto touchscreen = device::mojom::InputDeviceInfo::New();
+  touchscreen->id = "fake_touchscreen";
+  touchscreen->subsystem = device::mojom::InputDeviceSubsystem::SUBSYSTEM_INPUT;
+  touchscreen->type = device::mojom::InputDeviceType::TYPE_UNKNOWN;
+  touchscreen->is_touchscreen = true;
+  screen_->InputDeviceAddedForTesting(std::move(touchscreen));  // IN-TEST
+
+  auto mouse = device::mojom::InputDeviceInfo::New();
+  mouse->id = "fake_mouse";
+  mouse->subsystem = device::mojom::InputDeviceSubsystem::SUBSYSTEM_INPUT;
+  mouse->type = device::mojom::InputDeviceType::TYPE_USB;
+  mouse->is_mouse = true;
+  screen_->InputDeviceAddedForTesting(std::move(mouse));  // IN-TEST
+
+  auto keyboard = device::mojom::InputDeviceInfo::New();
+  keyboard->id = "fake_keyboard";
+  keyboard->subsystem = device::mojom::InputDeviceSubsystem::SUBSYSTEM_INPUT;
+  keyboard->type = device::mojom::InputDeviceType::TYPE_USB;
+  keyboard->is_keyboard = true;
+  screen_->InputDeviceAddedForTesting(std::move(keyboard));  // IN-TEST
+}
+
 void OobeTestAPIHandler::SkipPostLoginScreens() {
-  ash::WizardController::SkipPostLoginScreensForTesting();
+  ash::WizardController::default_controller()
+      ->SkipPostLoginScreensForTesting();  // IN-TEST
 }
 
 void OobeTestAPIHandler::LoginAsGuest() {
@@ -99,9 +173,10 @@ void OobeTestAPIHandler::LoginAsGuest() {
 void OobeTestAPIHandler::ShowGaiaDialog() {
   LoginDisplayHost::default_host()->ShowGaiaDialog(EmptyAccountId());
 }
+
 void OobeTestAPIHandler::HandleGetPrimaryDisplayName(
     const std::string& callback_id) {
-  mojo::Remote<ash::mojom::CrosDisplayConfigController> cros_display_config;
+  mojo::Remote<crosapi::mojom::CrosDisplayConfigController> cros_display_config;
   ash::BindCrosDisplayConfigController(
       cros_display_config.BindNewPipeAndPassReceiver());
 
@@ -113,9 +188,9 @@ void OobeTestAPIHandler::HandleGetPrimaryDisplayName(
 
 void OobeTestAPIHandler::OnGetDisplayUnitInfoList(
     const std::string& callback_id,
-    std::vector<ash::mojom::DisplayUnitInfoPtr> info_list) {
+    std::vector<crosapi::mojom::DisplayUnitInfoPtr> info_list) {
   std::string display_name;
-  for (const ash::mojom::DisplayUnitInfoPtr& info : info_list) {
+  for (const crosapi::mojom::DisplayUnitInfoPtr& info : info_list) {
     if (info->is_primary) {
       display_name = info->name;
       break;

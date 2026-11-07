@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -16,24 +16,6 @@ import time
 
 # This is hardcoded to be src/ relative to this script.
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-CHROME_SANDBOX_ENV = 'CHROME_DEVEL_SANDBOX'
-CHROME_SANDBOX_PATH = '/opt/chromium/chrome_sandbox'
-
-
-def get_sandbox_env(env):
-  """Returns the environment flags needed for the SUID sandbox to work."""
-  extra_env = {}
-  chrome_sandbox_path = env.get(CHROME_SANDBOX_ENV, CHROME_SANDBOX_PATH)
-  # The above would silently disable the SUID sandbox if the env value were
-  # an empty string. We don't want to allow that. http://crbug.com/245376
-  # TODO(jln): Remove this check once it's no longer possible to disable the
-  # sandbox that way.
-  if not chrome_sandbox_path:
-    chrome_sandbox_path = CHROME_SANDBOX_PATH
-  extra_env[CHROME_SANDBOX_ENV] = chrome_sandbox_path
-
-  return extra_env
 
 
 def trim_cmd(cmd):
@@ -196,7 +178,7 @@ def run_command_with_output(argv, stdoutfile, env=None, cwd=None):
   Returns:
     integer returncode of the subprocess.
   """
-  print('Running %r in %r (env: %r)' % (argv, cwd, env))
+  print('Running %r in %r (env: %r)' % (argv, cwd, env), file=sys.stderr)
   assert stdoutfile
   with io.open(stdoutfile, 'wb') as writer, \
       io.open(stdoutfile, 'rb', 1) as reader:
@@ -210,7 +192,8 @@ def run_command_with_output(argv, stdoutfile, env=None, cwd=None):
       time.sleep(0.1)
     # Read the remaining.
     sys.stdout.write(reader.read().decode('utf-8'))
-    print('Command %r returned exit code %d' % (argv, process.returncode))
+    print('Command %r returned exit code %d' % (argv, process.returncode),
+          file=sys.stderr)
     return process.returncode
 
 
@@ -224,12 +207,12 @@ def run_command(argv, env=None, cwd=None, log=True):
     integer returncode of the subprocess.
   """
   if log:
-    print('Running %r in %r (env: %r)' % (argv, cwd, env))
+    print('Running %r in %r (env: %r)' % (argv, cwd, env), file=sys.stderr)
   process = _popen(argv, env=env, cwd=cwd, stderr=subprocess.STDOUT)
   forward_signals([process])
   exit_code = wait_with_signals(process)
   if log:
-    print('Command returned exit code %d' % exit_code)
+    print('Command returned exit code %d' % exit_code, file=sys.stderr)
   return exit_code
 
 
@@ -288,19 +271,21 @@ def forward_signals(procs):
       if p.poll() is not None:
         continue
       # SIGBREAK is defined only for win32.
+      # pylint: disable=no-member
       if sys.platform == 'win32' and sig == signal.SIGBREAK:
         p.send_signal(signal.CTRL_BREAK_EVENT)
       else:
         print("Forwarding signal(%d) to process %d" % (sig, p.pid))
         p.send_signal(sig)
+      # pylint: enable=no-member
   if sys.platform == 'win32':
-    signal.signal(signal.SIGBREAK, _sig_handler)
+    signal.signal(signal.SIGBREAK, _sig_handler) # pylint: disable=no-member
   else:
     signal.signal(signal.SIGTERM, _sig_handler)
     signal.signal(signal.SIGINT, _sig_handler)
 
 
-def run_executable(cmd, env, stdoutfile=None):
+def run_executable(cmd, env, stdoutfile=None, cwd=None):
   """Runs an executable with:
     - CHROME_HEADLESS set to indicate that the test is running on a
       bot and shouldn't do anything interactive like show modal dialogs.
@@ -321,7 +306,6 @@ def run_executable(cmd, env, stdoutfile=None):
   # Used by base/base_paths_linux.cc as an override. Just make sure the default
   # logic is used.
   env.pop('CR_SOURCE_ROOT', None)
-  extra_env.update(get_sandbox_env(env))
 
   # Copy logic from  tools/build/scripts/slave/runtest.py.
   asan = '--asan=1' in cmd
@@ -348,11 +332,13 @@ def run_executable(cmd, env, stdoutfile=None):
   if '--coverage-continuous-mode=1' in cmd:
     extra_env.update(get_coverage_continuous_mode_env(env))
 
+  # pylint: disable=import-outside-toplevel
   if '--skip-set-lpac-acls=1' not in cmd and sys.platform == 'win32':
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
         'scripts'))
-    import common
+    from scripts import common
     common.set_lpac_acls(ROOT_DIR, is_test_script=True)
+  # pylint: enable=import-outside-toplevel
 
   cmd = trim_cmd(cmd)
 
@@ -377,12 +363,15 @@ def run_executable(cmd, env, stdoutfile=None):
   try:
     if stdoutfile:
       # Write to stdoutfile and poll to produce terminal output.
-      return run_command_with_output(cmd, env=env, stdoutfile=stdoutfile)
-    elif use_symbolization_script:
+      return run_command_with_output(cmd,
+                                     env=env,
+                                     stdoutfile=stdoutfile,
+                                     cwd=cwd)
+    if use_symbolization_script:
       # See above comment regarding offline symbolization.
       # Need to pipe to the symbolizer script.
       p1 = _popen(cmd, env=env, stdout=subprocess.PIPE,
-                  stderr=sys.stdout)
+                  cwd=cwd, stderr=sys.stdout)
       p2 = _popen(
           get_sanitizer_symbolize_command(executable_path=cmd[0]),
           env=env, stdin=p1.stdout)
@@ -393,8 +382,7 @@ def run_executable(cmd, env, stdoutfile=None):
       # Also feed the out-of-band JSON output to the symbolizer script.
       symbolize_snippets_in_json(cmd, env)
       return p1.returncode
-    else:
-      return run_command(cmd, env=env, log=False)
+    return run_command(cmd, env=env, cwd=cwd, log=False)
   except OSError:
     print('Failed to start %s' % cmd, file=sys.stderr)
     raise

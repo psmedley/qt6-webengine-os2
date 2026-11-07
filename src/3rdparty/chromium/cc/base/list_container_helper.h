@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr_exclusion.h"
 #include "cc/base/base_export.h"
 
 namespace cc {
@@ -38,13 +39,13 @@ class CC_BASE_EXPORT ListContainerHelper final {
   struct CC_BASE_EXPORT PositionInCharAllocator {
     // `ptr_to_container` is not a raw_ptr<...> for performance reasons (based
     // on analysis of sampling profiler data and tab_search:top100:2020).
-    CharAllocator* ptr_to_container;
+    RAW_PTR_EXCLUSION CharAllocator* ptr_to_container;
 
     size_t vector_index;
 
     // `item_iterator` is not a raw_ptr<...> for performance reasons (based on
     // analysis of sampling profiler data and tab_search:top100:2020).
-    char* item_iterator;
+    RAW_PTR_EXCLUSION char* item_iterator;
 
     PositionInCharAllocator(const PositionInCharAllocator& other);
     PositionInCharAllocator& operator=(const PositionInCharAllocator& other);

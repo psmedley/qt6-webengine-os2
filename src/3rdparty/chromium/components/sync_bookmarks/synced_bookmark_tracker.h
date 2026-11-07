@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -103,11 +103,6 @@ class SyncedBookmarkTracker {
   // this tracker.
   void UpdateServerVersion(const SyncedBookmarkTrackerEntity* entity,
                            int64_t server_version);
-
-  // Populates the metadata field representing the hashed favicon. This method
-  // is effectively used to backfill the proto field, which was introduced late.
-  void PopulateFaviconHashIfUnset(const SyncedBookmarkTrackerEntity* entity,
-                                  const std::string& favicon_png_bytes);
 
   // Marks an existing entry that a commit request might have been sent to the
   // server. |entity| must be owned by this tracker.
@@ -236,8 +231,9 @@ class SyncedBookmarkTracker {
     DUPLICATED_CLIENT_TAG_HASH = 10,
     TRACKED_MANAGED_NODE = 11,
     MISSING_CLIENT_TAG_HASH = 12,
+    MISSING_FAVICON_HASH = 13,
 
-    kMaxValue = MISSING_CLIENT_TAG_HASH
+    kMaxValue = MISSING_FAVICON_HASH
   };
 
   SyncedBookmarkTracker(

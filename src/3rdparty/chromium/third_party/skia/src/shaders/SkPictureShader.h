@@ -30,6 +30,7 @@ public:
 #if SK_SUPPORT_GPU
     std::unique_ptr<GrFragmentProcessor> asFragmentProcessor(const GrFPArgs&) const override;
 #endif
+    SkPictureShader(sk_sp<SkPicture>, SkTileMode, SkTileMode, SkFilterMode, const SkRect*);
 
 protected:
     SkPictureShader(SkReadBuffer&);
@@ -46,27 +47,11 @@ protected:
 private:
     SK_FLATTENABLE_HOOKS(SkPictureShader)
 
-    SkPictureShader(sk_sp<SkPicture>, SkTileMode, SkTileMode, SkFilterMode,
-                    const SkMatrix*, const SkRect*);
-
-    sk_sp<SkShader> rasterShader(const SkMatrix&, SkTCopyOnFirstWrite<SkMatrix>* localMatrix,
-                                 SkColorType dstColorType, SkColorSpace* dstColorSpace) const;
-
-    class PictureShaderContext : public Context {
-    public:
-        PictureShaderContext(
-            const SkPictureShader&, const ContextRec&, sk_sp<SkShader> bitmapShader, SkArenaAlloc*);
-
-        uint32_t getFlags() const override;
-
-        void shadeSpan(int x, int y, SkPMColor dstC[], int count) override;
-
-        sk_sp<SkShader>         fBitmapShader;
-        SkShaderBase::Context*  fBitmapShaderContext;
-        void*                   fBitmapShaderContextStorage;
-
-        using INHERITED = Context;
-    };
+    sk_sp<SkShader> rasterShader(const SkMatrix&,
+                                 SkMatrix* localMatrix,
+                                 SkColorType dstColorType,
+                                 SkColorSpace* dstColorSpace,
+                                 const SkSurfaceProps& props) const;
 
     sk_sp<SkPicture>    fPicture;
     SkRect              fTile;

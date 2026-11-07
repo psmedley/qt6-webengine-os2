@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,9 +50,10 @@ void GraphicsContextState::Copy(const GraphicsContextState& source) {
 
 const cc::PaintFlags& GraphicsContextState::StrokeFlags(
     const int stroked_path_length,
-    const int dash_thickness) const {
+    const int dash_thickness,
+    const bool closed_path) const {
   stroke_data_.SetupPaintDashPathEffect(&stroke_flags_, stroked_path_length,
-                                        dash_thickness);
+                                        dash_thickness, closed_path);
   return stroke_flags_;
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,7 +68,7 @@ void HostFrameSinkManager::RegisterFrameSinkId(
   DCHECK(client);
 
   FrameSinkData& data = frame_sink_data_map_[frame_sink_id];
-  DCHECK(!data.IsFrameSinkRegistered());
+  CHECK(!data.IsFrameSinkRegistered());
   DCHECK(!data.has_created_compositor_frame_sink);
   data.client = client;
   data.report_activation = report_activation;
@@ -87,7 +87,7 @@ void HostFrameSinkManager::InvalidateFrameSinkId(
   DCHECK(frame_sink_id.is_valid());
 
   FrameSinkData& data = frame_sink_data_map_[frame_sink_id];
-  DCHECK(data.IsFrameSinkRegistered());
+  CHECK(data.IsFrameSinkRegistered());
 
   const bool destroy_synchronously =
       data.has_created_compositor_frame_sink && data.wait_on_destruction;
@@ -230,13 +230,13 @@ bool HostFrameSinkManager::RegisterFrameSinkHierarchy(
     return false;
   }
 
+  FrameSinkData& parent_data = iter->second;
+  CHECK(!base::Contains(parent_data.children, child_frame_sink_id));
+  parent_data.children.push_back(child_frame_sink_id);
+
   // Register and store the parent.
   frame_sink_manager_->RegisterFrameSinkHierarchy(parent_frame_sink_id,
                                                   child_frame_sink_id);
-
-  FrameSinkData& parent_data = iter->second;
-  DCHECK(!base::Contains(parent_data.children, child_frame_sink_id));
-  parent_data.children.push_back(child_frame_sink_id);
 
   return true;
 }
@@ -246,8 +246,9 @@ void HostFrameSinkManager::UnregisterFrameSinkHierarchy(
     const FrameSinkId& child_frame_sink_id) {
   // Unregister and clear the stored parent.
   FrameSinkData& parent_data = frame_sink_data_map_[parent_frame_sink_id];
-  DCHECK(base::Contains(parent_data.children, child_frame_sink_id));
-  base::Erase(parent_data.children, child_frame_sink_id);
+  size_t num_erased = base::Erase(parent_data.children, child_frame_sink_id);
+  CHECK_EQ(num_erased, 1u);
+
   if (parent_data.IsEmpty())
     frame_sink_data_map_.erase(parent_frame_sink_id);
 
@@ -292,6 +293,15 @@ void HostFrameSinkManager::Throttle(const std::vector<FrameSinkId>& ids,
   frame_sink_manager_->Throttle(ids, interval);
 }
 
+void HostFrameSinkManager::StartThrottlingAllFrameSinks(
+    base::TimeDelta interval) {
+  frame_sink_manager_->StartThrottlingAllFrameSinks(interval);
+}
+
+void HostFrameSinkManager::StopThrottlingAllFrameSinks() {
+  frame_sink_manager_->StopThrottlingAllFrameSinks();
+}
+
 void HostFrameSinkManager::AddHitTestRegionObserver(
     HitTestRegionObserver* observer) {
   observers_.AddObserver(observer);
@@ -306,8 +316,11 @@ void HostFrameSinkManager::OnConnectionLost() {
   connection_was_lost_ = true;
 
   receiver_.reset();
-  frame_sink_manager_remote_.reset();
+  // frame_sink_manager_ points to |frame_sink_manager_remote_| if using mojo.
+  // Set frame_sink_manager_ to nullptr before
+  // frame_sink_manager_remote_.reset() to avoid dangling ptr.
   frame_sink_manager_ = nullptr;
+  frame_sink_manager_remote_.reset();
 
   // Any cached back buffers are invalid once the connection to the
   // FrameSinkManager is lost.

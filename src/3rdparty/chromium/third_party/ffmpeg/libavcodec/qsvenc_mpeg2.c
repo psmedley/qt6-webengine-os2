@@ -22,7 +22,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include <mfx/mfxvideo.h>
+#include <mfxvideo.h>
 
 #include "libavutil/common.h"
 #include "libavutil/opt.h"
@@ -30,7 +30,6 @@
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "qsv.h"
-#include "qsv_internal.h"
 #include "qsvenc.h"
 
 typedef struct QSVMpeg2EncContext {
@@ -64,6 +63,7 @@ static av_cold int qsv_enc_close(AVCodecContext *avctx)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 static const AVOption options[] = {
     QSV_COMMON_OPTS
+    QSV_OPTION_RDO
 
     { "profile", NULL, OFFSET(qsv.profile), AV_OPT_TYPE_INT, { .i64 = MFX_PROFILE_UNKNOWN }, 0, INT_MAX, VE, "profile" },
     { "unknown", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MFX_PROFILE_UNKNOWN        }, INT_MIN, INT_MAX,     VE, "profile" },
@@ -94,12 +94,12 @@ static const FFCodecDefault qsv_enc_defaults[] = {
 
 const FFCodec ff_mpeg2_qsv_encoder = {
     .p.name         = "mpeg2_qsv",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("MPEG-2 video (Intel Quick Sync Video acceleration)"),
+    CODEC_LONG_NAME("MPEG-2 video (Intel Quick Sync Video acceleration)"),
     .priv_data_size = sizeof(QSVMpeg2EncContext),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_MPEG2VIDEO,
     .init           = qsv_enc_init,
-    .encode2        = qsv_enc_frame,
+    FF_CODEC_ENCODE_CB(qsv_enc_frame),
     .close          = qsv_enc_close,
     .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_HYBRID,
     .p.pix_fmts     = (const enum AVPixelFormat[]){ AV_PIX_FMT_NV12,
@@ -107,7 +107,8 @@ const FFCodec ff_mpeg2_qsv_encoder = {
                                                     AV_PIX_FMT_NONE },
     .p.priv_class   = &class,
     .defaults       = qsv_enc_defaults,
-    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE |
+                      FF_CODEC_CAP_INIT_CLEANUP,
     .p.wrapper_name = "qsv",
     .hw_configs     = ff_qsv_enc_hw_configs,
 };

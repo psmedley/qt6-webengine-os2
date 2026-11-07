@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include <algorithm>
@@ -102,13 +102,12 @@ IN_PROC_BROWSER_TEST_F(DevToolsAndroidBridgeTest, DefaultValues) {
   service->ClearPref(prefs::kDevToolsDiscoverTCPTargetsEnabled);
   service->ClearPref(prefs::kDevToolsTCPDiscoveryConfig);
 
-  const base::Value* targets =
+  const base::Value::List& targets =
       service->GetList(prefs::kDevToolsTCPDiscoveryConfig);
-  EXPECT_NE(nullptr, targets);
-  EXPECT_EQ(2ul, targets->GetListDeprecated().size());
+  EXPECT_EQ(2ul, targets.size());
 
   std::set<std::string> actual;
-  for (const base::Value& item : targets->GetListDeprecated()) {
+  for (const base::Value& item : targets) {
     std::string value;
     if (item.is_string())
       value = item.GetString();

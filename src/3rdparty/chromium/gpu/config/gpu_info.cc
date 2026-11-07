@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,6 +37,7 @@ void EnumerateGPUDevice(const gpu::GPUInfo::GPUDevice& device,
   enumerator->AddString("driverVersion", device.driver_version);
   enumerator->AddInt("cudaComputeCapabilityMajor",
                      device.cuda_compute_capability_major);
+  enumerator->AddInt("gpuPreference", static_cast<int>(device.gpu_preference));
   enumerator->EndGPUDevice();
 }
 
@@ -129,32 +130,6 @@ void EnumerateOverlayInfo(const gpu::OverlayInfo& info,
 }
 #endif
 
-bool IsSoftwareRenderer(uint32_t vendor_id) {
-  switch (vendor_id) {
-    case 0x0000:  // Info collection failed to identify a GPU
-    case 0xffff:  // Chromium internal flag for software rendering
-    case 0x15ad:  // VMware
-    case 0x1414:  // Microsoft software renderer
-      return true;
-    default:
-      return false;
-  }
-}
-
-bool IsIntegratedGpu(const gpu::GPUInfo::GPUDevice& gpu) {
-  // TODO(crbug.com/1291675): handle M1 with eGPU situation.
-  switch (gpu.vendor_id) {
-    case 0x8086:  // Intel
-      return true;
-    default:
-      return false;
-  }
-}
-
-bool IsDiscreteGpu(const gpu::GPUInfo::GPUDevice& gpu) {
-  return !IsSoftwareRenderer(gpu.vendor_id) && !IsIntegratedGpu(gpu);
-}
-
 }  // namespace
 
 namespace gpu {
@@ -228,6 +203,18 @@ GPUInfo::GPUDevice& GPUInfo::GPUDevice::operator=(
 GPUInfo::GPUDevice& GPUInfo::GPUDevice::operator=(
     GPUInfo::GPUDevice&& other) noexcept = default;
 
+bool GPUInfo::GPUDevice::IsSoftwareRenderer() const {
+  switch (vendor_id) {
+    case 0x0000:  // Info collection failed to identify a GPU
+    case 0xffff:  // Chromium internal flag for software rendering
+    case 0x15ad:  // VMware
+    case 0x1414:  // Microsoft software renderer
+      return true;
+    default:
+      return false;
+  }
+}
+
 GPUInfo::GPUInfo()
     : optimus(false),
       amd_switchable(false),
@@ -273,69 +260,39 @@ bool GPUInfo::UsesSwiftShader() const {
 
 unsigned int GPUInfo::GpuCount() const {
   unsigned int gpu_count = 0;
-  if (!IsSoftwareRenderer(gpu.vendor_id))
+  if (!gpu.IsSoftwareRenderer())
     ++gpu_count;
   for (const auto& secondary_gpu : secondary_gpus) {
-    if (!IsSoftwareRenderer(secondary_gpu.vendor_id))
+    if (!secondary_gpu.IsSoftwareRenderer())
       ++gpu_count;
   }
   return gpu_count;
 }
 
-bool GPUInfo::GetIntegratedGpu(GPUDevice* output_integrated_gpu) const {
-  unsigned int integrated_gpu_count = 0;
-  unsigned int discrete_gpu_count = 0;
-  GPUDevice integrated_gpu;
-  if (IsIntegratedGpu(gpu)) {
-    ++integrated_gpu_count;
-    integrated_gpu = gpu;
-  } else if (IsDiscreteGpu(gpu)) {
-    ++discrete_gpu_count;
+const GPUInfo::GPUDevice* GPUInfo::GetGpuByPreference(
+    gl::GpuPreference preference) const {
+  DCHECK(preference == gl::GpuPreference::kHighPerformance ||
+         preference == gl::GpuPreference::kLowPower);
+  if (gpu.gpu_preference == preference)
+    return &gpu;
+  for (auto& device : secondary_gpus) {
+    if (device.gpu_preference == preference)
+      return &device;
   }
-  for (const auto& secondary_gpu : secondary_gpus) {
-    if (IsIntegratedGpu(secondary_gpu)) {
-      ++integrated_gpu_count;
-      if (integrated_gpu_count == 1)
-        integrated_gpu = secondary_gpu;
-    } else if (IsDiscreteGpu(secondary_gpu)) {
-      ++discrete_gpu_count;
-    }
-  }
-  if (integrated_gpu_count == 1 && discrete_gpu_count >= 1) {
-    if (output_integrated_gpu)
-      *output_integrated_gpu = integrated_gpu;
-    return true;
-  }
-  return false;
+  return nullptr;
 }
 
-bool GPUInfo::GetDiscreteGpu(GPUDevice* output_discrete_gpu) const {
-  unsigned int integrated_gpu_count = 0;
-  unsigned int discrete_gpu_count = 0;
-  GPUDevice discrete_gpu;
-  if (IsIntegratedGpu(gpu)) {
-    ++integrated_gpu_count;
-  } else if (IsDiscreteGpu(gpu)) {
-    ++discrete_gpu_count;
-    discrete_gpu = gpu;
+#if BUILDFLAG(IS_WIN)
+GPUInfo::GPUDevice* GPUInfo::FindGpuByLuid(DWORD low_part, LONG high_part) {
+  if (gpu.luid.LowPart == low_part && gpu.luid.HighPart == high_part)
+    return &gpu;
+  for (auto& device : secondary_gpus) {
+    if (device.luid.LowPart == low_part && device.luid.HighPart == high_part)
+      return &device;
   }
-  for (const auto& secondary_gpu : secondary_gpus) {
-    if (IsIntegratedGpu(secondary_gpu)) {
-      ++integrated_gpu_count;
-    } else if (IsDiscreteGpu(secondary_gpu)) {
-      ++discrete_gpu_count;
-      if (discrete_gpu_count == 1)
-        discrete_gpu = secondary_gpu;
-    }
-  }
-  if (integrated_gpu_count + discrete_gpu_count > 1 &&
-      discrete_gpu_count >= 1) {
-    if (output_discrete_gpu)
-      *output_discrete_gpu = discrete_gpu;
-    return true;
-  }
-  return false;
+  return nullptr;
 }
+#endif  // BUILDFLAG(IS_WIN)
 
 void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
   struct GPUInfoKnownFields {
@@ -363,6 +320,7 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
     bool in_process_gpu;
     bool passthrough_cmd_decoder;
     bool is_asan;
+    uint32_t target_cpu_bits;
     bool can_support_threaded_texture_mailbox;
 #if BUILDFLAG(IS_MAC)
     uint32_t macos_specific_texture_target;
@@ -372,6 +330,7 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
     uint32_t d3d12_feature_level;
     uint32_t vulkan_version;
     OverlayInfo overlay_info;
+    bool shared_image_d3d;
 #endif
 
     VideoDecodeAcceleratorSupportedProfiles
@@ -430,6 +389,7 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
   enumerator->AddBool("inProcessGpu", in_process_gpu);
   enumerator->AddBool("passthroughCmdDecoder", passthrough_cmd_decoder);
   enumerator->AddBool("isAsan", is_asan);
+  enumerator->AddInt("targetCpuBits", static_cast<int>(target_cpu_bits));
   enumerator->AddBool("canSupportThreadedTextureMailbox",
                       can_support_threaded_texture_mailbox);
 #if BUILDFLAG(IS_MAC)
@@ -445,6 +405,7 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
                         gpu::D3DFeatureLevelToString(d3d12_feature_level));
   enumerator->AddString("vulkanVersion",
                         gpu::VulkanVersionToString(vulkan_version));
+  enumerator->AddBool("supportsD3dSharedImages", shared_image_d3d);
 #endif
   for (const auto& profile : video_decode_accelerator_supported_profiles)
     EnumerateVideoDecodeAcceleratorSupportedProfile(profile, enumerator);

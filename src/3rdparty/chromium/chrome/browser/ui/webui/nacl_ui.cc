@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,10 +60,7 @@ content::WebUIDataSource* CreateNaClUIHTMLSource() {
       content::WebUIDataSource::Create(chrome::kChromeUINaClHost);
   source->OverrideContentSecurityPolicy(
       network::mojom::CSPDirectiveName::ScriptSrc,
-      "script-src chrome://resources 'self' 'unsafe-eval';");
-  source->OverrideContentSecurityPolicy(
-      network::mojom::CSPDirectiveName::TrustedTypes,
-      "trusted-types jstemplate;");
+      "script-src chrome://resources 'self';");
   source->UseStringsJs();
   source->AddResourcePath("about_nacl.css", IDR_ABOUT_NACL_CSS);
   source->AddResourcePath("about_nacl.js", IDR_ABOUT_NACL_JS);
@@ -93,7 +90,7 @@ class NaClDomHandler : public WebUIMessageHandler {
 
  private:
   // Callback for the "requestNaClInfo" message.
-  void HandleRequestNaClInfo(const base::ListValue* args);
+  void HandleRequestNaClInfo(const base::Value::List& args);
 
   // Callback for the NaCl plugin information.
   void OnGotPlugins(const std::vector<content::WebPluginInfo>& plugins);
@@ -108,7 +105,7 @@ class NaClDomHandler : public WebUIMessageHandler {
 
   // Helper for MaybeRespondToPage -- called after enough information
   // is gathered.
-  void PopulatePageInformation(base::DictionaryValue* naclInfo);
+  base::Value::Dict GetPageInformation();
 
   // Returns whether the specified plugin is enabled.
   bool isPluginEnabled(size_t plugin_index);
@@ -150,7 +147,7 @@ NaClDomHandler::NaClDomHandler()
 NaClDomHandler::~NaClDomHandler() = default;
 
 void NaClDomHandler::RegisterMessages() {
-  web_ui()->RegisterDeprecatedMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "requestNaClInfo",
       base::BindRepeating(&NaClDomHandler::HandleRequestNaClInfo,
                           base::Unretained(this)));
@@ -163,10 +160,10 @@ void NaClDomHandler::OnJavascriptDisallowed() {
 void AddPair(base::ListValue* list,
              const std::u16string& key,
              const std::u16string& value) {
-  std::unique_ptr<base::DictionaryValue> results(new base::DictionaryValue());
-  results->SetStringKey("key", key);
-  results->SetStringKey("value", value);
-  list->Append(std::move(results));
+  base::Value::Dict results;
+  results.Set("key", key);
+  results.Set("value", value);
+  list->GetList().Append(std::move(results));
 }
 
 // Generate an empty data-pair which acts as a line break.
@@ -293,10 +290,10 @@ void NaClDomHandler::AddNaClInfo(base::ListValue* list) {
   AddLineBreak(list);
 }
 
-void NaClDomHandler::HandleRequestNaClInfo(const base::ListValue* args) {
+void NaClDomHandler::HandleRequestNaClInfo(const base::Value::List& args) {
   CHECK(callback_id_.empty());
-  CHECK_EQ(1U, args->GetListDeprecated().size());
-  callback_id_ = args->GetListDeprecated()[0].GetString();
+  CHECK_EQ(1U, args.size());
+  callback_id_ = args[0].GetString();
 
   if (!has_plugin_info_) {
     PluginService::GetInstance()->GetPlugins(base::BindOnce(
@@ -317,8 +314,7 @@ void NaClDomHandler::OnGotPlugins(
   MaybeRespondToPage();
 }
 
-void NaClDomHandler::PopulatePageInformation(base::DictionaryValue* naclInfo) {
-  DCHECK(pnacl_path_validated_);
+base::Value::Dict NaClDomHandler::GetPageInformation() {
   // Store Key-Value pairs of about-information.
   base::ListValue list;
   // Display the operating system and chrome version information.
@@ -330,7 +326,9 @@ void NaClDomHandler::PopulatePageInformation(base::DictionaryValue* naclInfo) {
   // Display information relevant to NaCl (non-portable.
   AddNaClInfo(&list);
   // naclInfo will take ownership of list, and clean it up on destruction.
-  naclInfo->SetKey("naclInfo", std::move(list));
+  base::Value::Dict dict;
+  dict.Set("naclInfo", std::move(list));
+  return dict;
 }
 
 void NaClDomHandler::DidCheckPathAndVersion(const std::string* version,
@@ -386,9 +384,7 @@ void NaClDomHandler::MaybeRespondToPage() {
     return;
   }
 
-  base::DictionaryValue naclInfo;
-  PopulatePageInformation(&naclInfo);
-  ResolveJavascriptCallback(base::Value(callback_id_), naclInfo);
+  ResolveJavascriptCallback(base::Value(callback_id_), GetPageInformation());
   callback_id_.clear();
 }
 

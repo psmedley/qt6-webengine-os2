@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -441,7 +441,7 @@ TEST_P(DisplayChangeObserverTest, HDRDisplayColorSpaces) {
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitAndEnableFeature(features::kUseHDRTransferFunction);
 
-  const auto display_color_space = gfx::ColorSpace::CreateHDR10(100.0f);
+  const auto display_color_space = gfx::ColorSpace::CreateHDR10();
   const std::unique_ptr<DisplaySnapshot> display_snapshot =
       FakeDisplaySnapshot::Builder()
           .SetId(123)

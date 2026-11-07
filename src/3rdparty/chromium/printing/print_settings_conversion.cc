@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,8 @@
 #include "printing/print_job_constants.h"
 #include "printing/print_settings.h"
 #include "printing/units.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace printing {
 
@@ -73,6 +75,43 @@ void SetRectToJobSettings(const std::string& json_path,
   dict.Set("width", rect.width());
   dict.Set("height", rect.height());
   job_settings.Set(json_path, std::move(dict));
+}
+
+void SetPrintableAreaIfValid(PrintSettings& settings,
+                             const gfx::Size& size_microns,
+                             const base::Value::Dict& media_size) {
+  absl::optional<int> left_microns =
+      media_size.FindInt(kSettingsImageableAreaLeftMicrons);
+  absl::optional<int> bottom_microns =
+      media_size.FindInt(kSettingsImageableAreaBottomMicrons);
+  absl::optional<int> right_microns =
+      media_size.FindInt(kSettingsImageableAreaRightMicrons);
+  absl::optional<int> top_microns =
+      media_size.FindInt(kSettingsImageableAreaTopMicrons);
+  if (!bottom_microns.has_value() || !left_microns.has_value() ||
+      !right_microns.has_value() || !top_microns.has_value()) {
+    return;
+  }
+
+  // Scale the page size and printable area to device units.
+  float x_scale =
+      static_cast<float>(settings.dpi_horizontal()) / kMicronsPerInch;
+  float y_scale = static_cast<float>(settings.dpi_vertical()) / kMicronsPerInch;
+  gfx::Size page_size = gfx::ScaleToRoundedSize(size_microns, x_scale, y_scale);
+  // Flip the y-axis since the imageable area origin is at the bottom-left,
+  // while the gfx::Rect origin is at the top-left.
+  gfx::Rect printable_area = gfx::ScaleToRoundedRect(
+      {left_microns.value(), size_microns.height() - top_microns.value(),
+       right_microns.value() - left_microns.value(),
+       top_microns.value() - bottom_microns.value()},
+      x_scale, y_scale);
+  // Sanity check that the printable area makes sense.
+  if (printable_area.IsEmpty() ||
+      !gfx::Rect(page_size).Contains(printable_area)) {
+    return;
+  }
+  settings.SetPrinterPrintableArea(page_size, printable_area,
+                                   /*landscape_needs_flip=*/true);
 }
 
 }  // namespace
@@ -132,6 +171,47 @@ std::unique_ptr<PrintSettings> PrintSettingsFromJobSettings(
   settings->set_should_print_backgrounds(backgrounds.value());
   settings->set_selection_only(selection_only.value());
 
+  absl::optional<bool> collate = job_settings.FindBool(kSettingCollate);
+  absl::optional<int> copies = job_settings.FindInt(kSettingCopies);
+  absl::optional<int> color = job_settings.FindInt(kSettingColor);
+  absl::optional<int> duplex_mode = job_settings.FindInt(kSettingDuplexMode);
+  absl::optional<bool> landscape = job_settings.FindBool(kSettingLandscape);
+  const std::string* device_name = job_settings.FindString(kSettingDeviceName);
+  absl::optional<int> scale_factor = job_settings.FindInt(kSettingScaleFactor);
+  absl::optional<bool> rasterize_pdf =
+      job_settings.FindBool(kSettingRasterizePdf);
+  absl::optional<int> pages_per_sheet =
+      job_settings.FindInt(kSettingPagesPerSheet);
+  if (!collate.has_value() || !copies.has_value() || !color.has_value() ||
+      !duplex_mode.has_value() || !landscape.has_value() || !device_name ||
+      !scale_factor.has_value() || !rasterize_pdf.has_value() ||
+      !pages_per_sheet.has_value()) {
+    return nullptr;
+  }
+  settings->set_collate(collate.value());
+  settings->set_copies(copies.value());
+  settings->SetOrientation(landscape.value());
+  settings->set_device_name(base::UTF8ToUTF16(*device_name));
+  settings->set_duplex_mode(
+      static_cast<mojom::DuplexMode>(duplex_mode.value()));
+  settings->set_color(static_cast<mojom::ColorModel>(color.value()));
+  settings->set_scale_factor(static_cast<double>(scale_factor.value()) / 100.0);
+  settings->set_rasterize_pdf(rasterize_pdf.value());
+  settings->set_pages_per_sheet(pages_per_sheet.value());
+
+  absl::optional<int> dpi_horizontal =
+      job_settings.FindInt(kSettingDpiHorizontal);
+  absl::optional<int> dpi_vertical = job_settings.FindInt(kSettingDpiVertical);
+  if (!dpi_horizontal.has_value() || !dpi_vertical.has_value())
+    return nullptr;
+
+  settings->set_dpi_xy(dpi_horizontal.value(), dpi_vertical.value());
+
+  absl::optional<int> rasterize_pdf_dpi =
+      job_settings.FindInt(kSettingRasterizePdfDpi);
+  if (rasterize_pdf_dpi.has_value())
+    settings->set_rasterize_pdf_dpi(rasterize_pdf_dpi.value());
+
   PrintSettings::RequestedMedia requested_media;
   const base::Value::Dict* media_size_value =
       job_settings.FindDict(kSettingMediaSize);
@@ -143,6 +223,8 @@ std::unique_ptr<PrintSettings> PrintSettingsFromJobSettings(
     if (width_microns.has_value() && height_microns.has_value()) {
       requested_media.size_microns =
           gfx::Size(width_microns.value(), height_microns.value());
+      SetPrintableAreaIfValid(*settings, requested_media.size_microns,
+                              *media_size_value);
     }
 
     const std::string* vendor_id =
@@ -168,47 +250,6 @@ std::unique_ptr<PrintSettings> PrintSettingsFromJobSettings(
 
   settings->set_ranges(GetPageRangesFromJobSettings(job_settings));
 
-  absl::optional<bool> collate = job_settings.FindBool(kSettingCollate);
-  absl::optional<int> copies = job_settings.FindInt(kSettingCopies);
-  absl::optional<int> color = job_settings.FindInt(kSettingColor);
-  absl::optional<int> duplex_mode = job_settings.FindInt(kSettingDuplexMode);
-  absl::optional<bool> landscape = job_settings.FindBool(kSettingLandscape);
-  absl::optional<int> scale_factor = job_settings.FindInt(kSettingScaleFactor);
-  absl::optional<bool> rasterize_pdf =
-      job_settings.FindBool(kSettingRasterizePdf);
-  absl::optional<int> pages_per_sheet =
-      job_settings.FindInt(kSettingPagesPerSheet);
-
-  if (!collate.has_value() || !copies.has_value() || !color.has_value() ||
-      !duplex_mode.has_value() || !landscape.has_value() ||
-      !scale_factor.has_value() || !rasterize_pdf.has_value() ||
-      !pages_per_sheet.has_value()) {
-    return nullptr;
-  }
-
-  absl::optional<int> dpi_horizontal =
-      job_settings.FindInt(kSettingDpiHorizontal);
-  absl::optional<int> dpi_vertical = job_settings.FindInt(kSettingDpiVertical);
-  if (!dpi_horizontal.has_value() || !dpi_vertical.has_value())
-    return nullptr;
-  settings->set_dpi_xy(dpi_horizontal.value(), dpi_vertical.value());
-
-  absl::optional<int> rasterize_pdf_dpi =
-      job_settings.FindInt(kSettingRasterizePdfDpi);
-  if (rasterize_pdf_dpi.has_value())
-    settings->set_rasterize_pdf_dpi(rasterize_pdf_dpi.value());
-
-  settings->set_collate(collate.value());
-  settings->set_copies(copies.value());
-  settings->SetOrientation(landscape.value());
-  settings->set_device_name(
-      base::UTF8ToUTF16(*job_settings.FindString(kSettingDeviceName)));
-  settings->set_duplex_mode(
-      static_cast<mojom::DuplexMode>(duplex_mode.value()));
-  settings->set_color(static_cast<mojom::ColorModel>(color.value()));
-  settings->set_scale_factor(static_cast<double>(scale_factor.value()) / 100.0);
-  settings->set_rasterize_pdf(rasterize_pdf.value());
-  settings->set_pages_per_sheet(pages_per_sheet.value());
   absl::optional<bool> is_modifiable =
       job_settings.FindBool(kSettingPreviewModifiable);
   if (is_modifiable.has_value()) {

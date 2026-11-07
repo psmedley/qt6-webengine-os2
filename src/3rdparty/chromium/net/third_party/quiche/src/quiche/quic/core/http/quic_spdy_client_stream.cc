@@ -16,7 +16,7 @@
 #include "quiche/common/quiche_text_utils.h"
 #include "quiche/spdy/core/spdy_protocol.h"
 
-using spdy::SpdyHeaderBlock;
+using spdy::Http2HeaderBlock;
 
 namespace quic {
 
@@ -43,6 +43,49 @@ QuicSpdyClientStream::QuicSpdyClientStream(PendingStream* pending,
 
 QuicSpdyClientStream::~QuicSpdyClientStream() = default;
 
+bool QuicSpdyClientStream::CopyAndValidateHeaders(
+    const QuicHeaderList& header_list, int64_t& content_length,
+    spdy::Http2HeaderBlock& headers) {
+  return SpdyUtils::CopyAndValidateHeaders(header_list, &content_length,
+                                           &headers);
+}
+
+bool QuicSpdyClientStream::ParseAndValidateStatusCode() {
+  if (!ParseHeaderStatusCode(response_headers_, &response_code_)) {
+    QUIC_DLOG(ERROR) << "Received invalid response code: "
+                     << response_headers_[":status"].as_string()
+                     << " on stream " << id();
+    Reset(QUIC_BAD_APPLICATION_PAYLOAD);
+    return false;
+  }
+
+  if (response_code_ == 101) {
+    // 101 "Switching Protocols" is forbidden in HTTP/3 as per the
+    // "HTTP Upgrade" section of draft-ietf-quic-http.
+    QUIC_DLOG(ERROR) << "Received forbidden 101 response code"
+                     << " on stream " << id();
+    Reset(QUIC_BAD_APPLICATION_PAYLOAD);
+    return false;
+  }
+
+  if (response_code_ >= 100 && response_code_ < 200) {
+    // These are Informational 1xx headers, not the actual response headers.
+    QUIC_DLOG(INFO) << "Received informational response code: "
+                    << response_headers_[":status"].as_string() << " on stream "
+                    << id();
+    set_headers_decompressed(false);
+    if (response_code_ == 100 && !has_preliminary_headers_) {
+      // This is 100 Continue, save it to enable "Expect: 100-continue".
+      has_preliminary_headers_ = true;
+      preliminary_headers_ = std::move(response_headers_);
+    } else {
+      response_headers_.clear();
+    }
+  }
+
+  return true;
+}
+
 void QuicSpdyClientStream::OnInitialHeadersComplete(
     bool fin, size_t frame_len, const QuicHeaderList& header_list) {
   QuicSpdyStream::OnInitialHeadersComplete(fin, frame_len, header_list);
@@ -55,8 +98,8 @@ void QuicSpdyClientStream::OnInitialHeadersComplete(
     return;
   }
 
-  if (!SpdyUtils::CopyAndValidateHeaders(header_list, &content_length_,
-                                         &response_headers_)) {
+  if (!CopyAndValidateHeaders(header_list, content_length_,
+                              response_headers_)) {
     QUIC_DLOG(ERROR) << "Failed to parse header list: "
                      << header_list.DebugString() << " on stream " << id();
     Reset(QUIC_BAD_APPLICATION_PAYLOAD);
@@ -77,36 +120,8 @@ void QuicSpdyClientStream::OnInitialHeadersComplete(
     }
   }
 
-  if (!ParseHeaderStatusCode(response_headers_, &response_code_)) {
-    QUIC_DLOG(ERROR) << "Received invalid response code: "
-                     << response_headers_[":status"].as_string()
-                     << " on stream " << id();
-    Reset(QUIC_BAD_APPLICATION_PAYLOAD);
+  if (!ParseAndValidateStatusCode()) {
     return;
-  }
-
-  if (response_code_ == 101) {
-    // 101 "Switching Protocols" is forbidden in HTTP/3 as per the
-    // "HTTP Upgrade" section of draft-ietf-quic-http.
-    QUIC_DLOG(ERROR) << "Received forbidden 101 response code"
-                     << " on stream " << id();
-    Reset(QUIC_BAD_APPLICATION_PAYLOAD);
-    return;
-  }
-
-  if (response_code_ >= 100 && response_code_ < 200) {
-    // These are Informational 1xx headers, not the actual response headers.
-    QUIC_DLOG(INFO) << "Received informational response code: "
-                    << response_headers_[":status"].as_string() << " on stream "
-                    << id();
-    set_headers_decompressed(false);
-    if (response_code_ == 100 && !has_preliminary_headers_) {
-      // This is 100 Continue, save it to enable "Expect: 100-continue".
-      has_preliminary_headers_ = true;
-      preliminary_headers_ = std::move(response_headers_);
-    } else {
-      response_headers_.clear();
-    }
   }
 
   ConsumeHeaderList();
@@ -126,7 +141,7 @@ void QuicSpdyClientStream::OnPromiseHeaderList(
     const QuicHeaderList& header_list) {
   header_bytes_read_ += frame_len;
   int64_t content_length = -1;
-  SpdyHeaderBlock promise_headers;
+  Http2HeaderBlock promise_headers;
   if (!SpdyUtils::CopyAndValidateHeaders(header_list, &content_length,
                                          &promise_headers)) {
     QUIC_DLOG(ERROR) << "Failed to parse promise headers: "
@@ -172,7 +187,7 @@ void QuicSpdyClientStream::OnBodyAvailable() {
   }
 }
 
-size_t QuicSpdyClientStream::SendRequest(SpdyHeaderBlock headers,
+size_t QuicSpdyClientStream::SendRequest(Http2HeaderBlock headers,
                                          absl::string_view body, bool fin) {
   QuicConnection::ScopedPacketFlusher flusher(session_->connection());
   bool send_fin_with_headers = fin && body.empty();

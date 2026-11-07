@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,7 +53,9 @@ class MouseEventBuilder {
   MouseEventBuilder& AddSample(uint32_t id,
                                std::array<float, 2> position,
                                std::vector<uint8_t> pressed_buttons,
-                               std::array<int64_t, 2> scroll);
+                               std::array<int64_t, 2> scroll,
+                               std::array<int64_t, 2> scroll_in_physical_pixel,
+                               bool is_precision_scroll);
   MouseEventBuilder& AddViewParameters(
       std::array<std::array<float, 2>, 2> view,
       std::array<std::array<float, 2>, 2> viewport,

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,15 @@
     Exposed=(Window,Worker),
     ActiveScriptWrappable,
     SecureContext,
-    DirectSocketEnabled
+    RuntimeEnabled=DirectSockets,
+    IsolatedApplication
 ] interface TCPSocket {
   [CallWith=ScriptState, RaisesException]
   constructor(DOMString remoteAddress, unsigned short remotePort, optional TCPSocketOptions options = {});
 
-  [CallWith=ScriptState] readonly attribute Promise<TCPSocketConnection> connection;
+  [CallWith=ScriptState] readonly attribute Promise<TCPSocketOpenInfo> opened;
   [CallWith=ScriptState] readonly attribute Promise<void> closed;
 
   [CallWith=ScriptState, RaisesException, Measure]
-  Promise<void> close(optional SocketCloseOptions options = {});
+  Promise<void> close();
 };

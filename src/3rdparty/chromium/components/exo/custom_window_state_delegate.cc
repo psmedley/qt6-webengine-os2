@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,6 +44,11 @@ CustomWindowStateDelegate::OnDragStarted(int component) {
       ShellSurfacePresentationTimeRecorder::CreateHistogramReporter(
           "Ash.InteractiveWindowResize.Lacros.TimeToPresent",
           "Ash.InteractiveWindowResize.Lacros.TimeToPresent.MaxLatency"));
+}
+
+void CustomWindowStateDelegate::OnDragFinished(bool cancel,
+                                               const gfx::PointF& location) {
+  shell_surface_->EndDrag();
 }
 
 }  // namespace exo

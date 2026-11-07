@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -32,9 +32,9 @@ component("chromeos") {
     deps += [
       "//ash/constants",
       "//base/third_party/dynamic_annotations",
+      "//chromeos/ash/components/network",
       "//chromeos/dbus/power",
       "//chromeos/dbus/power:power_manager_proto",
-      "//chromeos/network:network",
       "//components/device_event_log",
       "//mojo/public/cpp/bindings",
       "//services/device/public/mojom",

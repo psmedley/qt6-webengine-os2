@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -227,9 +227,9 @@ class IdlCompiler(object):
             propagate(('ContextEnabled', 'add_context_enabled_feature'))
             propagate(('CrossOriginIsolated', 'set_only_in_coi_contexts'),
                       default_value=True)
-            propagate(
-                ('DirectSocketEnabled', 'set_only_in_direct_socket_contexts'),
-                default_value=True)
+            propagate(('IsolatedApplication',
+                       'set_only_in_isolated_application_contexts'),
+                      default_value=True)
             propagate(('SecureContext', 'set_only_in_secure_contexts'),
                       default_value=True)
 
@@ -494,12 +494,12 @@ class IdlCompiler(object):
         self._ir_map.move_to_new_phase()
 
         def make_groups(group_ir_class, operations):
-            sort_key = lambda x: x.identifier
+            sort_key = lambda x: (x.is_static, x.identifier)
             return [
                 group_ir_class(list(operations_in_group))
-                for identifier, operations_in_group in itertools.groupby(
+                for key, operations_in_group in itertools.groupby(
                     sorted(operations, key=sort_key), key=sort_key)
-                if identifier
+                if key[1]  # This is the operation identifier.
             ]
 
         for old_ir in old_irs:
@@ -527,7 +527,7 @@ class IdlCompiler(object):
 
     def _propagate_extattrs_to_overload_group(self):
         ANY_OF = ('CrossOrigin', 'CrossOriginIsolated', 'Custom',
-                  'DirectSocketEnabled', 'LegacyLenientThis',
+                  'IsolatedApplication', 'LegacyLenientThis',
                   'LegacyUnforgeable', 'NoAllocDirectCall', 'NotEnumerable',
                   'PerWorldBindings', 'SecureContext', 'Unscopable')
 
@@ -610,12 +610,13 @@ class IdlCompiler(object):
                 else:
                     group.exposure.set_only_in_coi_contexts(True)
 
-                # [DirectSocketEnabled]
-                if any(not exposure.only_in_direct_socket_contexts
+                # [IsolatedApplication]
+                if any(not exposure.only_in_isolated_application_contexts
                        for exposure in exposures):
                     pass  # Exposed by default.
                 else:
-                    group.exposure.set_only_in_direct_socket_contexts(True)
+                    group.exposure.set_only_in_isolated_application_contexts(
+                        True)
 
                 # [SecureContext]
                 if any(exposure.only_in_secure_contexts is False
@@ -681,7 +682,11 @@ class IdlCompiler(object):
             self._ir_map.add(new_ir)
 
             assert not new_ir.exposed_constructs
-            global_names = new_ir.extended_attributes.values_of('Global')
+            # Not only [Global] but also [TargetOfExposed] will expose IDL
+            # constructs with [Exposed].
+            global_names = (
+                new_ir.extended_attributes.values_of('Global') +
+                new_ir.extended_attributes.values_of('TargetOfExposed'))
             if not global_names:
                 continue
             constructs = set()

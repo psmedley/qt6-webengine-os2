@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,18 +46,16 @@ TableColumn& TableColumn::operator=(const TableColumn& other) = default;
 // Used for sorting.
 static icu::Collator* g_collator = nullptr;
 
-ui::ImageModel TableModel::GetIcon(int row) {
+ui::ImageModel TableModel::GetIcon(size_t row) {
   return ui::ImageModel();
 }
 
-std::u16string TableModel::GetTooltip(int row) {
+std::u16string TableModel::GetTooltip(size_t row) {
   return std::u16string();
 }
 
-int TableModel::CompareValues(int row1, int row2, int column_id) {
-  DCHECK_GE(row1, 0);
+int TableModel::CompareValues(size_t row1, size_t row2, int column_id) {
   DCHECK_LT(row1, RowCount());
-  DCHECK_GE(row2, 0);
   DCHECK_LT(row2, RowCount());
 
   std::u16string value1 = GetText(row1, column_id);

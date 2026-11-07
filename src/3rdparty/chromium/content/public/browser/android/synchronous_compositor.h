@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,6 +98,12 @@ class CONTENT_EXPORT SynchronousCompositor {
   virtual void ReturnResources(
       uint32_t layer_tree_frame_sink_id,
       std::vector<viz::ReturnedResource> resources) = 0;
+
+  // Notifies the client when a directive for DocumentTransition, submitted in
+  // a previous CompositorFrame, has finished executing.
+  virtual void OnCompositorFrameTransitionDirectiveProcessed(
+      uint32_t layer_tree_frame_sink_id,
+      uint32_t sequence_id) = 0;
 
   virtual void DidPresentCompositorFrames(
       viz::FrameTimingDetailsMap timing_details,

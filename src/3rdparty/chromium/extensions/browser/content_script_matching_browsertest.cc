@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -181,7 +181,7 @@ class ContentScriptMatchingBrowserTest : public ShellApiTest,
                       std::unique_ptr<content::WebContents> new_contents,
                       const GURL& target_url,
                       WindowOpenDisposition disposition,
-                      const gfx::Rect& initial_rect,
+                      const blink::mojom::WindowFeatures& window_features,
                       bool user_gesture,
                       bool* was_blocked) override {
     DCHECK_EQ(tab1_.get(), source);
@@ -208,7 +208,7 @@ class ContentScriptMatchingBrowserTest : public ShellApiTest,
 
   content::RenderFrameHost* tab1_fooFrame() {
     EXPECT_TRUE(tab1_);
-    return tab1_->GetMainFrame();
+    return tab1_->GetPrimaryMainFrame();
   }
 
   content::RenderFrameHost* tab1_fooBlankFrame() {
@@ -234,7 +234,7 @@ class ContentScriptMatchingBrowserTest : public ShellApiTest,
 
   content::RenderFrameHost* tab2_barBlankFrame1() {
     EXPECT_TRUE(tab2_);
-    return tab2_->GetMainFrame();
+    return tab2_->GetPrimaryMainFrame();
   }
 
   content::RenderFrameHost* tab2_barBlankFrame2() {

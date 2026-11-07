@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,7 @@
 #include "net/base/net_export.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/proxy_server.h"
+#include "net/dns/public/host_resolver_results.h"
 #include "net/log/net_log_source.h"
 #include "net/proxy_resolution/proxy_config.h"
 #include "net/socket/connect_job.h"
@@ -52,7 +53,7 @@ class NET_EXPORT SpdySessionPool
     : public NetworkChangeNotifier::IPAddressObserver,
       public SSLClientContext::Observer {
  public:
-  typedef base::TimeTicks (*TimeFunc)(void);
+  typedef base::TimeTicks (*TimeFunc)();
 
   // Struct to hold randomly generated frame parameters to be used for sending
   // frames on the wire to "grease" frame type.  Frame type has to be one of
@@ -204,6 +205,9 @@ class NET_EXPORT SpdySessionPool
       bool is_websocket,
       const NetLogWithSource& net_log);
 
+  // Returns true if there is an available session for |key|.
+  bool HasAvailableSession(const SpdySessionKey& key, bool is_websocket) const;
+
   // Just like FindAvailableSession.
   //
   // Additionally, if it returns nullptr, populates |spdy_session_request| with
@@ -245,7 +249,8 @@ class NET_EXPORT SpdySessionPool
   OnHostResolutionCallbackResult OnHostResolutionComplete(
       const SpdySessionKey& key,
       bool is_websocket,
-      const AddressList& addresses);
+      const std::vector<HostResolverEndpointResult>& endpoint_results,
+      const std::set<std::string>& aliases);
 
   // Remove all mappings and aliases for the given session, which must
   // still be available. Except for in tests, this must be called by
@@ -439,7 +444,7 @@ class NET_EXPORT SpdySessionPool
   const quic::ParsedQuicVersionVector quic_supported_versions_;
 
   // Defaults to true. May be controlled via SpdySessionPoolPeer for tests.
-  bool enable_sending_initial_data_;
+  bool enable_sending_initial_data_ = true;
   bool enable_ping_based_connection_checking_;
 
   const bool is_http2_enabled_;
@@ -490,7 +495,7 @@ class NET_EXPORT SpdySessionPool
   SpdySessionRequestMap spdy_session_request_map_;
 
   TimeFunc time_func_;
-  raw_ptr<ServerPushDelegate> push_delegate_;
+  raw_ptr<ServerPushDelegate> push_delegate_ = nullptr;
 
   raw_ptr<NetworkQualityEstimator> network_quality_estimator_;
 

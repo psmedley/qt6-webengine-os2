@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,16 +10,15 @@
 #include "base/path_service.h"
 #include "net/test/test_data_directory.h"
 
-namespace quiche {
-namespace test {
+namespace quiche::test {
 
 std::string QuicheGetCommonSourcePathImpl() {
   base::FilePath net_path = net::GetTestNetDirectory();
-  return net_path.AppendASCII("third_party/quiche/common").MaybeAsASCII();
+  return net_path.AppendASCII("third_party/quiche/src/quiche/common")
+      .MaybeAsASCII();
 }
 
-}  // namespace test
-}  // namespace quiche
+}  // namespace quiche::test
 
 std::string QuicheGetTestMemoryCachePathImpl() {
   base::FilePath path;

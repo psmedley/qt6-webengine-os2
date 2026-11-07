@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -103,7 +103,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest,
   EXPECT_EQ("debugger.getTargets", last_params().name);
   EXPECT_EQ(extension->url(), last_params().source_url);
   EXPECT_TRUE(last_params().has_callback);
-  EXPECT_EQ(last_params().arguments, *DeprecatedListValueFromString("[ ]"));
+  EXPECT_EQ(last_params().arguments, ListValueFromString("[ ]"));
 }
 
 TEST_F(NativeExtensionBindingsSystemUnittest,

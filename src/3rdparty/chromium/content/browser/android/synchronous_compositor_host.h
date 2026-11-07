@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,6 +67,9 @@ class CONTENT_EXPORT SynchronousCompositorHost
   bool DemandDrawSw(SkCanvas* canvas, bool software_canvas) override;
   void ReturnResources(uint32_t layer_tree_frame_sink_id,
                        std::vector<viz::ReturnedResource> resources) override;
+  void OnCompositorFrameTransitionDirectiveProcessed(
+      uint32_t layer_tree_frame_sink_id,
+      uint32_t sequence_id) override;
   void DidPresentCompositorFrames(viz::FrameTimingDetailsMap timing_details,
                                   uint32_t frame_token) override;
   void SetMemoryPolicy(size_t bytes_limit) override;
@@ -142,7 +145,6 @@ class CONTENT_EXPORT SynchronousCompositorHost
   // handle blocking calls.
   bool IsReadyForSynchronousCall();
   void UpdateRootLayerStateOnClient();
-  void UpdatePresentedFrameToken(uint32_t frame_token);
 
   void SendBeginFramePaused();
   void SendBeginFrame(viz::BeginFrameArgs args);
@@ -204,6 +206,9 @@ class CONTENT_EXPORT SynchronousCompositorHost
   // Indicates whether and for what reason a request for begin frames has been
   // issued. Used to control action dispatch at the next |OnBeginFrame()| call.
   uint32_t outstanding_begin_frame_requests_ = 0;
+
+  uint32_t num_invalidates_since_last_draw_ = 0u;
+  uint32_t num_begin_frames_to_skip_ = 0u;
 
   // The begin frame source being observed.  Null if none.
   raw_ptr<viz::BeginFrameSource> begin_frame_source_ = nullptr;

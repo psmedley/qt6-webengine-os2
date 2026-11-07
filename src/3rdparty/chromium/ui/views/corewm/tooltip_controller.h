@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "ui/aura/window_observer.h"
 #include "ui/events/event_handler.h"
 #include "ui/gfx/geometry/point.h"
+#include "ui/views/corewm/tooltip.h"
 #include "ui/views/views_export.h"
 #include "ui/wm/public/activation_change_observer.h"
 #include "ui/wm/public/tooltip_client.h"
@@ -26,8 +27,7 @@ class Window;
 namespace wm {
 class ActivationClient;
 }
-namespace views {
-namespace corewm {
+namespace views::corewm {
 
 class Tooltip;
 class TooltipStateManager;
@@ -35,11 +35,6 @@ class TooltipStateManager;
 namespace test {
 class TooltipControllerTestHelper;
 }  // namespace test
-
-enum class TooltipTrigger {
-  kCursor,
-  kKeyboard,
-};
 
 // TooltipController listens for events that can have an impact on the
 // tooltip state.
@@ -150,7 +145,8 @@ class VIEWS_EXPORT TooltipController
   // The tooltip should stay hidden after a mouse press event on the view until
   // the cursor moves to another view.
   std::u16string tooltip_text_at_mouse_press_;
-  raw_ptr<aura::Window> tooltip_window_at_mouse_press_ = nullptr;
+  raw_ptr<aura::Window, DanglingUntriaged> tooltip_window_at_mouse_press_ =
+      nullptr;
 
   // Location of the last events in |tooltip_window_|'s coordinates.
   gfx::Point last_mouse_loc_;
@@ -180,7 +176,6 @@ class VIEWS_EXPORT TooltipController
   std::unique_ptr<TooltipStateManager> state_manager_;
 };
 
-}  // namespace corewm
-}  // namespace views
+}  // namespace views::corewm
 
 #endif  // UI_VIEWS_COREWM_TOOLTIP_CONTROLLER_H_

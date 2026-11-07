@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,9 @@ const char kEnterpriseMDMManagementWindows[] =
 // Integer pref that stores the Mac enterprise MDM management authority.
 const char kEnterpriseMDMManagementMac[] =
     "management.platform.enterprise_mdm_mac";
+// Boolean pref that indicates whether integration with macOS Screen Time should
+// be enabled.
+const char kScreenTimeEnabled[] = "policy.screen_time";
 #endif
 
 // 64-bit serialization of the time last policy usage statistics were collected
@@ -81,6 +84,11 @@ const char kIntensiveWakeUpThrottlingEnabled[] =
 const char kSetTimeoutWithout1MsClampEnabled[] =
     "policy.set_timeout_without_1ms_clamp";
 
+// Boolean policy preference for force enabling or disabling the
+// MaxUnthrottledTimeoutNestingLevel web feature.
+const char kUnthrottledNestedTimeoutEnabled[] =
+    "policy.unthrottled_nested_timeout";
+
 #if BUILDFLAG(IS_ANDROID)
 // Boolean policy preference to disable the BackForwardCache feature.
 const char kBackForwardCacheEnabled[] = "policy.back_forward_cache_enabled";
@@ -99,9 +107,6 @@ const char kUrlParamFilterEnabled[] = "policy.url_param_filter_enabled";
 const char kIsolatedAppsDeveloperModeAllowed[] =
     "policy.isolated_apps_developer_mode_allowed";
 
-// Boolean policy to force WebSQL to be enabled.
-const char kWebSQLAccess[] = "policy.web_sql_access";
-
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
 // Last time that a check for cloud policy management was done. This time is
 // recorded on Android and iOS so that retries aren't attempted on every
@@ -109,6 +114,16 @@ const char kWebSQLAccess[] = "policy.web_sql_access";
 // days later.
 const char kLastPolicyCheckTime[] = "policy.last_policy_check_time";
 #endif
+
+#if BUILDFLAG(IS_IOS)
+const char kUserPolicyNotificationWasShown[] =
+    "policy.user_policy_notification_was_shown";
+#endif
+
+// A boolean indicating whether the deprecated API Event.path is enabled. It
+// should eventually be disabled and removed.
+// https://chromestatus.com/feature/5726124632965120
+const char kEventPathEnabled[] = "policy.event_path_enabled";
 
 }  // namespace policy_prefs
 }  // namespace policy

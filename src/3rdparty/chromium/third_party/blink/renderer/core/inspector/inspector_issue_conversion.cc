@@ -1,10 +1,11 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/inspector/inspector_issue_conversion.h"
 
 #include "third_party/blink/renderer/core/inspector/inspector_issue.h"
+#include "third_party/blink/renderer/core/inspector/protocol/audits.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -25,7 +26,7 @@ std::unique_ptr<protocol::Audits::AffectedRequest> BuildAffectedRequest(
   auto protocol_request = protocol::Audits::AffectedRequest::create()
                               .setRequestId(request->request_id)
                               .build();
-  if (!request->url.IsEmpty()) {
+  if (!request->url.empty()) {
     protocol_request->setUrl(request->url);
   }
   return protocol_request;
@@ -84,6 +85,8 @@ protocol::String BuildCookieExclusionReason(
       return protocol::Audits::CookieExclusionReasonEnum::ExcludeSameSiteLax;
     case blink::mojom::blink::CookieExclusionReason::kExcludeSameSiteStrict:
       return protocol::Audits::CookieExclusionReasonEnum::ExcludeSameSiteStrict;
+    case blink::mojom::blink::CookieExclusionReason::kExcludeDomainNonASCII:
+      return protocol::Audits::CookieExclusionReasonEnum::ExcludeDomainNonASCII;
   }
 }
 
@@ -136,6 +139,8 @@ protocol::String BuildCookieWarningReason(
         kWarnAttributeValueExceedsMaxSize:
       return protocol::Audits::CookieWarningReasonEnum::
           WarnAttributeValueExceedsMaxSize;
+    case blink::mojom::blink::CookieWarningReason::kWarnDomainNonASCII:
+      return protocol::Audits::CookieWarningReasonEnum::WarnDomainNonASCII;
   }
 }
 
@@ -320,7 +325,7 @@ std::unique_ptr<protocol::Audits::SourceCodeLocation> BuildAffectedLocation(
           .setColumnNumber(affected_location->column)
           .setLineNumber(affected_location->line)
           .build();
-  if (!affected_location->script_id.IsEmpty())
+  if (!affected_location->script_id.empty())
     protocol_affected_location->setScriptId(affected_location->script_id);
   return protocol_affected_location;
 }

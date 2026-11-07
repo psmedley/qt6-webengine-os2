@@ -63,10 +63,10 @@ struct default_digits_impl<T,false,false> // Floating point
 {
   EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR
   static int run() {
-    using std::log;
+    using std::log2;
     using std::ceil;
     typedef typename NumTraits<T>::Real Real;
-    return int(ceil(-log(NumTraits<Real>::epsilon())/log(static_cast<Real>(2))));
+    return int(ceil(-log2(NumTraits<Real>::epsilon())));
   }
 };
 
@@ -164,11 +164,7 @@ template<typename T> struct GenericNumTraits
   };
 
   typedef T Real;
-  typedef typename internal::conditional<
-                     IsInteger,
-                     typename internal::conditional<sizeof(T)<=2, float, double>::type,
-                     T
-                   >::type NonInteger;
+  typedef std::conditional_t<IsInteger, std::conditional_t<sizeof(T)<=2, float, double>, T> NonInteger;
   typedef T Nested;
   typedef T Literal;
 

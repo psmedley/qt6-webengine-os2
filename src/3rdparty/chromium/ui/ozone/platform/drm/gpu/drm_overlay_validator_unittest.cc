@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -236,7 +236,8 @@ void DrmOverlayValidatorTest::SetupControllers() {
   controllers_to_enable.emplace_back(
       1 /*display_id*/, drm_, kCrtcIdBase, kConnectorIdBase, gfx::Point(),
       std::make_unique<drmModeModeInfo>(kDefaultMode));
-  screen_manager_->ConfigureDisplayControllers(controllers_to_enable);
+  screen_manager_->ConfigureDisplayControllers(
+      controllers_to_enable, display::kTestModeset | display::kCommitModeset);
 
   drm_device_manager_ = std::make_unique<ui::DrmDeviceManager>(nullptr);
 
@@ -628,7 +629,7 @@ TEST_F(DrmOverlayValidatorTest, FourCandidates_OneCommit) {
   EXPECT_EQ(drm_->get_commit_count() - setup_commits, 1);
 }
 
-TEST_F(DrmOverlayValidatorTest, FourCandidatesTwoPlanes_MoreThanOneCommit) {
+TEST_F(DrmOverlayValidatorTest, FourCandidatesTwoPlanes_OneCommit) {
   // Only two planes.
   CrtcState crtc_state = {.planes = {{.formats = {DRM_FORMAT_XRGB8888}},
                                      {.formats = {DRM_FORMAT_XRGB8888}}}};
@@ -644,14 +645,15 @@ TEST_F(DrmOverlayValidatorTest, FourCandidatesTwoPlanes_MoreThanOneCommit) {
   std::vector<ui::OverlayStatus> returns = overlay_validator_->TestPageFlip(
       overlay_params_, ui::DrmOverlayPlaneList());
 
-  // All planes promoted.
+  // Two planes promoted.
   ASSERT_EQ(4u, returns.size());
   EXPECT_EQ(returns[0], ui::OVERLAY_STATUS_ABLE);
   EXPECT_EQ(returns[1], ui::OVERLAY_STATUS_ABLE);
   EXPECT_EQ(returns[2], ui::OVERLAY_STATUS_NOT);
   EXPECT_EQ(returns[3], ui::OVERLAY_STATUS_NOT);
-  // First attempted with all 4 planes, then 3, then 2.
-  EXPECT_EQ(drm_->get_commit_count() - setup_commits, 3);
+  // We should only see one commit because we won't talk to DRM if we can't
+  // allocate planes.
+  EXPECT_EQ(drm_->get_commit_count() - setup_commits, 1);
 }
 
 TEST_F(DrmOverlayValidatorTest, TwoOfSixIgnored_OneCommit) {

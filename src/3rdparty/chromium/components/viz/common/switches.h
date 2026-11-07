@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,6 @@ namespace switches {
 VIZ_COMMON_EXPORT extern const char kDeJellyScreenWidth[];
 VIZ_COMMON_EXPORT extern const char kDeadlineToSynchronizeSurfaces[];
 VIZ_COMMON_EXPORT extern const char kDisableFrameRateLimit[];
-VIZ_COMMON_EXPORT extern const char kDocumentTransitionSlowdownFactor[];
 VIZ_COMMON_EXPORT extern const char kDoubleBufferCompositing[];
 VIZ_COMMON_EXPORT extern const char kEnableDeJelly[];
 VIZ_COMMON_EXPORT extern const char kEnableHardwareOverlays[];
@@ -33,7 +32,6 @@ VIZ_COMMON_EXPORT extern const char kTintCompositedContentModulate[];
 VIZ_COMMON_EXPORT extern const char kShowDCLayerDebugBorders[];
 
 VIZ_COMMON_EXPORT absl::optional<uint32_t> GetDeadlineToSynchronizeSurfaces();
-VIZ_COMMON_EXPORT int GetDocumentTransitionSlowDownFactor();
 
 }  // namespace switches
 

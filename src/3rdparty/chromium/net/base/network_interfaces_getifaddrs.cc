@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -138,7 +138,7 @@ bool IfaddrsToNetworkInterfaceList(int policy,
                                    IPAttributesGetter* ip_attributes_getter,
                                    NetworkInterfaceList* networks) {
   // Enumerate the addresses assigned to network interfaces which are up.
-  for (const ifaddrs* interface = interfaces; interface != NULL;
+  for (const ifaddrs* interface = interfaces; interface != nullptr;
        interface = interface->ifa_next) {
     // Skip loopback interfaces, and ones which are down.
     if (!(IFF_RUNNING & interface->ifa_flags))
@@ -235,7 +235,7 @@ bool GetNetworkListUsingGetifaddrs(NetworkInterfaceList* networks,
 bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
   constexpr bool use_alternative_getifaddrs = false;
 #endif
-  if (networks == NULL)
+  if (networks == nullptr)
     return false;
 
   // getifaddrs() may require IO operations.

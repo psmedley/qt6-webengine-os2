@@ -50,7 +50,6 @@ action("vulkan_clean_old_validation_layer_objects") {
 config("vulkan_internal_config") {
   defines = [
     "VULKAN_NON_CMAKE_BUILD",
-    "API_NAME=\"Vulkan\"",
     "VK_ENABLE_BETA_EXTENSIONS",
   ]
 
@@ -118,6 +117,7 @@ core_validation_sources = [
   "layers/core_error_location.h",
   "layers/descriptor_sets.cpp",
   "layers/descriptor_sets.h",
+  "layers/descriptor_validation.cpp",
   "layers/drawdispatch.cpp",
   "layers/generated/corechecks_optick_instrumentation.cpp",
   "layers/generated/corechecks_optick_instrumentation.h",
@@ -126,14 +126,16 @@ core_validation_sources = [
   "layers/generated/spirv_grammar_helper.h",
   "layers/generated/command_validation.cpp",
   "layers/generated/command_validation.h",
-  "layers/generated/gpu_pre_draw_shader.h",
+  "layers/generated/gpu_pre_dispatch_comp.h",
+  "layers/generated/gpu_pre_draw_vert.h",
+  "layers/generated/gpu_as_inspection_comp.h",
   "layers/generated/synchronization_validation_types.cpp",
   "layers/generated/synchronization_validation_types.h",
   "layers/sync_utils.cpp",
   "layers/sync_utils.h",
   "layers/sync_vuid_maps.cpp",
   "layers/sync_vuid_maps.h",
-  "layers/gpu_pre_draw_constants.h",
+  "layers/gpu_shaders/gpu_shaders_constants.h",
   "layers/gpu_utils.cpp",
   "layers/gpu_utils.h",
   "layers/gpu_validation.cpp",
@@ -254,6 +256,14 @@ if (!is_android) {
   }
 }
 
+config("vulkan_memory_allocator_config") {
+  if (is_clang) {
+    cflags_cc = [
+      "-Wno-nullability-completeness",
+    ]
+  }
+}
+
 source_set("vulkan_layer_utils") {
   include_dirs = [
     "layers",
@@ -284,12 +294,12 @@ source_set("vulkan_layer_utils") {
     "layers/vk_layer_logging.h",
     "layers/vk_layer_utils.cpp",
     "layers/vk_layer_utils.h",
-    "layers/vk_loader_platform.h",
     "layers/vk_mem_alloc.h",
     "layers/xxhash.c",
     "layers/xxhash.h",
   ]
-  public_configs = [ ":vulkan_internal_config" ]
+  defines = [ "XXH_NO_LONG_LONG" ]
+  public_configs = [ ":vulkan_internal_config", ":vulkan_memory_allocator_config" ]
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
   public_deps = [ "$vulkan_headers_dir:vulkan_headers" ]

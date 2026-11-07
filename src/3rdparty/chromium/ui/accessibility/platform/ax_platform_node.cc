@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -94,7 +94,6 @@ void AXPlatformNode::RemoveAXModeObserver(AXModeObserver* observer) {
 
 // static
 void AXPlatformNode::NotifyAddAXModeFlags(AXMode mode_flags) {
-  // Note: this is only called on Windows, and in tests.
   AXMode new_ax_mode(ax_mode_);
   new_ax_mode |= mode_flags;
 
@@ -108,13 +107,7 @@ void AXPlatformNode::NotifyAddAXModeFlags(AXMode mode_flags) {
 
 // static
 void AXPlatformNode::SetAXMode(AXMode new_mode) {
-  // Note: this is only called on Windows.
   ax_mode_ = new_mode;
-}
-
-// static
-void AXPlatformNode::ResetAxModeForTesting() {
-  ax_mode_ = 0;
 }
 
 // static

@@ -1,9 +1,10 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Definitions of builders in the chromium.clang builder group."""
 
-load("//lib/builders.star", "os", "reclient", "sheriff_rotations", "xcode")
+load("//lib/args.star", "args")
+load("//lib/builders.star", "builders", "os", "reclient", "sheriff_rotations", "xcode")
 load("//lib/branches.star", "branches")
 load("//lib/ci.star", "ci")
 load("//lib/consoles.star", "consoles")
@@ -24,6 +25,9 @@ ci.defaults.set(
     },
     service_account = ci.DEFAULT_SERVICE_ACCOUNT,
     sheriff_rotations = sheriff_rotations.CHROMIUM_CLANG,
+
+    # TODO(crbug.com/1362440): remove this.
+    omit_python2 = False,
 )
 
 consoles.console_view(
@@ -75,7 +79,7 @@ def clang_mac_builder(*, name, cores = 24, **kwargs):
             # The Chromium build doesn't need system Xcode, but the ToT clang
             # bots also build clang and llvm and that build does need system
             # Xcode.
-            "xcode_build_version": "12d4e",
+            "xcode_build_version": "13a233",
         },
         **kwargs
     )
@@ -139,6 +143,7 @@ ci.builder(
         category = "ToT Android",
         short_name = "rel",
     ),
+    sheriff_rotations = args.ignore_default(None),
 )
 
 ci.builder(
@@ -223,14 +228,14 @@ ci.builder(
         consoles.console_view_entry(
             branch_selector = branches.MAIN,
             console_view = "sheriff.fuchsia",
-            category = "misc",
-            short_name = "clang-x64",
+            category = "fyi|clang",
+            short_name = "x64",
         ),
     ],
 )
 
 ci.builder(
-    name = "ToTFuchsiaOfficial",
+    name = "ToTFuchsiaOfficial arm64",
     console_view_entry = [
         consoles.console_view_entry(
             category = "ToT Fuchsia",
@@ -239,8 +244,8 @@ ci.builder(
         consoles.console_view_entry(
             branch_selector = branches.MAIN,
             console_view = "sheriff.fuchsia",
-            category = "misc",
-            short_name = "clang-off",
+            category = "fyi|clang",
+            short_name = "arm64-off",
         ),
     ],
 )
@@ -301,6 +306,7 @@ ci.builder(
         short_name = "rel",
     ),
     os = os.WINDOWS_ANY,
+    free_space = builders.free_space.high,
 )
 
 ci.builder(
@@ -338,6 +344,7 @@ ci.builder(
         short_name = "dbg",
     ),
     os = os.WINDOWS_ANY,
+    free_space = builders.free_space.high,
 )
 
 ci.builder(
@@ -347,6 +354,7 @@ ci.builder(
         short_name = "dll",
     ),
     os = os.WINDOWS_ANY,
+    free_space = builders.free_space.high,
 )
 
 ci.builder(
@@ -394,9 +402,9 @@ ci.builder(
         short_name = "sim",
     ),
     cores = None,
-    os = os.MAC_11,
+    os = os.MAC_12,
     ssd = True,
-    xcode = xcode.x13main,
+    xcode = xcode.x14main,
 )
 
 ci.builder(
@@ -407,9 +415,9 @@ ci.builder(
         short_name = "dev",
     ),
     cores = None,
-    os = os.MAC_11,
+    os = os.MAC_12,
     ssd = True,
-    xcode = xcode.x13main,
+    xcode = xcode.x14main,
 )
 
 clang_mac_builder(

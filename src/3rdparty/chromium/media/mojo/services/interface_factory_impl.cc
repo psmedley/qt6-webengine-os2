@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -86,11 +86,9 @@ void InterfaceFactoryImpl::CreateVideoDecoder(
         dst_video_decoder) {
   DVLOG(2) << __func__;
 #if BUILDFLAG(ENABLE_MOJO_VIDEO_DECODER)
-  // TODO(pmolinalopez): finish plumbing |dst_video_decoder| through
-  // MojoVideoDecoderService so that we can use it both for out-of-process video
-  // decoding and LaCrOS video decoding. See https://crrev.com/c/3094628.
   video_decoder_receivers_.Add(std::make_unique<MojoVideoDecoderService>(
-                                   mojo_media_client_, &cdm_service_context_),
+                                   mojo_media_client_, &cdm_service_context_,
+                                   std::move(dst_video_decoder)),
                                std::move(receiver));
 #endif  // BUILDFLAG(ENABLE_MOJO_VIDEO_DECODER)
 }
@@ -239,10 +237,11 @@ bool InterfaceFactoryImpl::IsEmpty() {
     return false;
 #endif  // BUILDFLAG(ENABLE_MOJO_AUDIO_ENCODER)
 
-#if BUILDFLAG(ENABLE_MOJO_RENDERER)
+#if BUILDFLAG(ENABLE_MOJO_RENDERER) || BUILDFLAG(ENABLE_CAST_RENDERER) || \
+    BUILDFLAG(IS_WIN)
   if (!renderer_receivers_.empty())
     return false;
-#endif  // BUILDFLAG(ENABLE_MOJO_RENDERER)
+#endif
 
 #if BUILDFLAG(ENABLE_MOJO_CDM)
   if (!cdm_receivers_.empty())
@@ -274,9 +273,10 @@ void InterfaceFactoryImpl::SetReceiverDisconnectHandler() {
   audio_encoder_receivers_.set_disconnect_handler(disconnect_cb);
 #endif  // BUILDFLAG(ENABLE_MOJO_AUDIO_ENCODER)
 
-#if BUILDFLAG(ENABLE_MOJO_RENDERER)
+#if BUILDFLAG(ENABLE_MOJO_RENDERER) || BUILDFLAG(ENABLE_CAST_RENDERER) || \
+    BUILDFLAG(IS_WIN)
   renderer_receivers_.set_disconnect_handler(disconnect_cb);
-#endif  // BUILDFLAG(ENABLE_MOJO_RENDERER)
+#endif
 
 #if BUILDFLAG(ENABLE_MOJO_CDM)
   cdm_receivers_.set_disconnect_handler(disconnect_cb);

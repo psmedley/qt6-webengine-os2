@@ -1,23 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/files/file_path.h"
 
-#include "build/build_config.h"
-
-// file_path.h is a widely included header and its size has significant impact
-// on build time. Try not to raise this limit unless necessary. See
-// https://chromium.googlesource.com/chromium/src/+/HEAD/docs/wmax_tokens.md
-#ifndef NACL_TC_REV
-#pragma clang max_tokens_here 340000
-#endif
-
 #include <string.h>
+
 #include <algorithm>
 
 #include "base/check_op.h"
 #include "base/files/safe_base_name.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/pickle.h"
 #include "base/ranges/algorithm.h"
 #include "base/strings/strcat.h"
@@ -26,7 +19,6 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/base_tracing.h"
-#include "build/build_config.h"
 
 #if BUILDFLAG(IS_APPLE)
 #include "base/mac/scoped_cftyperef.h"
@@ -47,9 +39,9 @@ using StringPieceType = FilePath::StringPieceType;
 
 namespace {
 
-const char* const kCommonDoubleExtensionSuffixes[] = {"gz", "xz", "bz2",
-                                                      "z",  "bz", "lzma"};
-const char* const kCommonDoubleExtensions[] = { "user.js" };
+const char* const kCommonDoubleExtensionSuffixes[] = {
+    "bz", "bz2", "gz", "lz", "lzma", "lzo", "xz", "z", "zst"};
+const char* const kCommonDoubleExtensions[] = {"user.js"};
 
 const FilePath::CharType kStringTerminator = FILE_PATH_LITERAL('\0');
 
@@ -152,13 +144,13 @@ StringType::size_type ExtensionSeparatorPosition(const StringType& path) {
 
   for (auto* i : kCommonDoubleExtensions) {
     StringType extension(path, penultimate_dot + 1);
-    if (LowerCaseEqualsASCII(extension, i))
+    if (EqualsCaseInsensitiveASCII(extension, i))
       return penultimate_dot;
   }
 
   StringType extension(path, last_dot + 1);
   for (auto* i : kCommonDoubleExtensionSuffixes) {
-    if (LowerCaseEqualsASCII(extension, i)) {
+    if (EqualsCaseInsensitiveASCII(extension, i)) {
       if ((last_dot - penultimate_dot) <= 5U &&
           (last_dot - penultimate_dot) > 1U) {
         return penultimate_dot;
@@ -783,7 +775,7 @@ int FilePath::CompareIgnoreCase(StringPieceType string1,
 #elif BUILDFLAG(IS_APPLE)
 // Mac OS X specific implementation of file string comparisons.
 
-// cf. http://developer.apple.com/mac/library/technotes/tn/tn1150.html#UnicodeSubtleties
+// cf. https://developer.apple.com/library/archive/technotes/tn/tn1150.html#UnicodeSubtleties
 //
 // "When using CreateTextEncoding to create a text encoding, you should set
 // the TextEncodingBase to kTextEncodingUnicodeV2_0, set the
@@ -809,11 +801,12 @@ int FilePath::CompareIgnoreCase(StringPieceType string1,
 // Ignored characters are mapped to zero.
 //
 // cf. downloadable file linked in
-// http://developer.apple.com/mac/library/technotes/tn/tn1150.html#StringComparisonAlgorithm
+// https://developer.apple.com/library/archive/technotes/tn/tn1150.html#Downloads
 
 namespace {
 
-const UInt16 lower_case_table[] = {
+// clang-format off
+const UInt16 lower_case_table[11 * 256] = {
   // High-byte indices ( == 0 iff no case mapping and no ignorables )
 
   /* 0 */ 0x0100, 0x0200, 0x0000, 0x0300, 0x0400, 0x0500, 0x0000, 0x0000,
@@ -1199,26 +1192,32 @@ const UInt16 lower_case_table[] = {
   /* F */ 0xFFF0, 0xFFF1, 0xFFF2, 0xFFF3, 0xFFF4, 0xFFF5, 0xFFF6, 0xFFF7,
           0xFFF8, 0xFFF9, 0xFFFA, 0xFFFB, 0xFFFC, 0xFFFD, 0xFFFE, 0xFFFF,
 };
+// clang-format on
 
-// Returns the next non-ignorable codepoint within string starting from the
-// position indicated by index, or zero if there are no more.
-// The passed-in index is automatically advanced as the characters in the input
-// HFS-decomposed UTF-8 strings are read.
-inline int HFSReadNextNonIgnorableCodepoint(const char* string,
-                                            int length,
-                                            int* index) {
-  int codepoint = 0;
+// Returns the next non-ignorable codepoint within `string` starting from the
+// position indicated by `index`, or zero if there are no more.
+// The passed-in `index` is automatically advanced as the characters in the
+// input HFS-decomposed UTF-8 strings are read.
+inline base_icu::UChar32 HFSReadNextNonIgnorableCodepoint(const char* string,
+                                                          size_t length,
+                                                          size_t* index) {
+  base_icu::UChar32 codepoint = 0;
   while (*index < length && codepoint == 0) {
     // CBU8_NEXT returns a value < 0 in error cases. For purposes of string
     // comparison, we just use that value and flag it with DCHECK.
-    CBU8_NEXT(string, *index, length, codepoint);
+    CBU8_NEXT(reinterpret_cast<const uint8_t*>(string), *index, length,
+              codepoint);
     DCHECK_GT(codepoint, 0);
-    if (codepoint > 0) {
+
+    // Note: Here, there are no lower case conversion implemented in the
+    // Supplementary Multilingual Plane (codepoint > 0xFFFF).
+
+    if (codepoint > 0 && codepoint <= 0xFFFF) {
       // Check if there is a subtable for this upper byte.
       int lookup_offset = lower_case_table[codepoint >> 8];
       if (lookup_offset != 0)
         codepoint = lower_case_table[lookup_offset + (codepoint & 0x00FF)];
-      // Note: codepoint1 may be again 0 at this point if the character was
+      // Note: `codepoint` may be again 0 at this point if the character was
       // an ignorable.
     }
   }
@@ -1232,18 +1231,16 @@ inline int HFSReadNextNonIgnorableCodepoint(const char* string,
 // The input strings must be in the special HFS decomposed form.
 int FilePath::HFSFastUnicodeCompare(StringPieceType string1,
                                     StringPieceType string2) {
-  int length1 = string1.length();
-  int length2 = string2.length();
-  int index1 = 0;
-  int index2 = 0;
+  size_t length1 = string1.length();
+  size_t length2 = string2.length();
+  size_t index1 = 0;
+  size_t index2 = 0;
 
   for (;;) {
-    int codepoint1 = HFSReadNextNonIgnorableCodepoint(string1.data(),
-                                                      length1,
-                                                      &index1);
-    int codepoint2 = HFSReadNextNonIgnorableCodepoint(string2.data(),
-                                                      length2,
-                                                      &index2);
+    base_icu::UChar32 codepoint1 =
+        HFSReadNextNonIgnorableCodepoint(string1.data(), length1, &index1);
+    base_icu::UChar32 codepoint2 =
+        HFSReadNextNonIgnorableCodepoint(string2.data(), length2, &index2);
     if (codepoint1 != codepoint2)
       return (codepoint1 < codepoint2) ? -1 : 1;
     if (codepoint1 == 0) {
@@ -1256,14 +1253,10 @@ int FilePath::HFSFastUnicodeCompare(StringPieceType string1,
 
 StringType FilePath::GetHFSDecomposedForm(StringPieceType string) {
   StringType result;
-  ScopedCFTypeRef<CFStringRef> cfstring(
-      CFStringCreateWithBytesNoCopy(
-          NULL,
-          reinterpret_cast<const UInt8*>(string.data()),
-          string.length(),
-          kCFStringEncodingUTF8,
-          false,
-          kCFAllocatorNull));
+  ScopedCFTypeRef<CFStringRef> cfstring(CFStringCreateWithBytesNoCopy(
+      NULL, reinterpret_cast<const UInt8*>(string.data()),
+      checked_cast<CFIndex>(string.length()), kCFStringEncodingUTF8, false,
+      kCFAllocatorNull));
   if (cfstring) {
     // Query the maximum length needed to store the result. In most cases this
     // will overestimate the required space. The return value also already
@@ -1273,8 +1266,8 @@ StringType FilePath::GetHFSDecomposedForm(StringPieceType string) {
     // Reserve enough space for CFStringGetFileSystemRepresentation to write
     // into. Also set the length to the maximum so that we can shrink it later.
     // (Increasing rather than decreasing it would clobber the string contents!)
-    result.reserve(length);
-    result.resize(length - 1);
+    result.reserve(static_cast<size_t>(length));
+    result.resize(static_cast<size_t>(length) - 1);
     Boolean success = CFStringGetFileSystemRepresentation(cfstring,
                                                           &result[0],
                                                           length);
@@ -1303,22 +1296,14 @@ int FilePath::CompareIgnoreCase(StringPieceType string1,
 
   // GetHFSDecomposedForm() returns an empty string in an error case.
   if (hfs1.empty() || hfs2.empty()) {
-    ScopedCFTypeRef<CFStringRef> cfstring1(
-        CFStringCreateWithBytesNoCopy(
-            NULL,
-            reinterpret_cast<const UInt8*>(string1.data()),
-            string1.length(),
-            kCFStringEncodingUTF8,
-            false,
-            kCFAllocatorNull));
-    ScopedCFTypeRef<CFStringRef> cfstring2(
-        CFStringCreateWithBytesNoCopy(
-            NULL,
-            reinterpret_cast<const UInt8*>(string2.data()),
-            string2.length(),
-            kCFStringEncodingUTF8,
-            false,
-            kCFAllocatorNull));
+    ScopedCFTypeRef<CFStringRef> cfstring1(CFStringCreateWithBytesNoCopy(
+        NULL, reinterpret_cast<const UInt8*>(string1.data()),
+        checked_cast<CFIndex>(string1.length()), kCFStringEncodingUTF8, false,
+        kCFAllocatorNull));
+    ScopedCFTypeRef<CFStringRef> cfstring2(CFStringCreateWithBytesNoCopy(
+        NULL, reinterpret_cast<const UInt8*>(string2.data()),
+        checked_cast<CFIndex>(string2.length()), kCFStringEncodingUTF8, false,
+        kCFAllocatorNull));
     // If neither GetHFSDecomposedForm nor CFStringCreateWithBytesNoCopy
     // succeed, fall back to strcmp. This can occur when the input string is
     // invalid UTF-8.
@@ -1332,9 +1317,8 @@ int FilePath::CompareIgnoreCase(StringPieceType string1,
       return 0;
     }
 
-    return CFStringCompare(cfstring1,
-                           cfstring2,
-                           kCFCompareCaseInsensitive);
+    return static_cast<int>(
+        CFStringCompare(cfstring1, cfstring2, kCFCompareCaseInsensitive));
   }
 
   return HFSFastUnicodeCompare(hfs1, hfs2);

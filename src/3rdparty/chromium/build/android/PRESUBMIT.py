@@ -1,4 +1,4 @@
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -12,6 +12,12 @@ USE_PYTHON3 = True
 
 
 def CommonChecks(input_api, output_api):
+  # These tools don't run on Windows so these tests don't work and give many
+  # verbose and cryptic failure messages. Linting the code is also skipped on
+  # Windows because it will fail due to os differences.
+  if input_api.sys.platform == 'win32':
+    return []
+
   build_android_dir = input_api.PresubmitLocalPath()
 
   def J(*dirs):
@@ -109,8 +115,8 @@ def CommonChecks(input_api, output_api):
               J('pylib', 'utils', 'device_dependencies_test.py'),
               J('pylib', 'utils', 'dexdump_test.py'),
               J('pylib', 'utils', 'gold_utils_test.py'),
-              J('pylib', 'utils', 'proguard_test.py'),
               J('pylib', 'utils', 'test_filter_test.py'),
+              J('gyp', 'dex_test.py'),
               J('gyp', 'util', 'build_utils_test.py'),
               J('gyp', 'util', 'manifest_utils_test.py'),
               J('gyp', 'util', 'md5_check_test.py'),

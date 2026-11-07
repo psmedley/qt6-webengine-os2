@@ -136,7 +136,7 @@ void FilePickerController::accepted(const QVariant &files)
 {
     QStringList stringList;
 
-    if (files.canConvert(QMetaType::QStringList)) {
+    if (files.canConvert(QMetaType{QMetaType::QStringList})) {
         stringList = files.toStringList();
     } else if (files.canConvert<QList<QUrl> >()) {
         const QList<QUrl> urls = files.value<QList<QUrl>>();
@@ -179,11 +179,14 @@ void FilePickerController::filesSelectedInChooser(const QStringList &filesList)
     if (d_ptr->fileDialogListener) {
         QStringList files(filesList);
         base::FilePath baseDir;
-        if (d_ptr->mode == UploadFolder && !filesList.isEmpty()
-            && QFileInfo(filesList.first()).isDir()) {
-            // Enumerate the directory
-            files = listRecursively(QDir(filesList.first()));
-            baseDir = toFilePath(filesList.first());
+        if (d_ptr->mode == UploadFolder && !filesList.isEmpty()) {
+            if (QFileInfo(filesList.first()).isDir()) {
+                // Enumerate the directory
+                files = listRecursively(QDir(filesList.first()));
+                baseDir = toFilePath(filesList.first());
+            } else {
+                baseDir = toFilePath(filesList.first()).DirName();
+            }
         }
 
         std::vector<blink::mojom::FileChooserFileInfoPtr> chooser_files;

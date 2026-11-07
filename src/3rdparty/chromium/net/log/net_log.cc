@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,14 @@
 #include "base/containers/contains.h"
 #include "base/no_destructor.h"
 #include "base/notreached.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "net/log/net_log_values.h"
 
 namespace net {
 
-NetLog::ThreadSafeObserver::ThreadSafeObserver()
-    : capture_mode_(NetLogCaptureMode::kDefault), net_log_(nullptr) {}
+NetLog::ThreadSafeObserver::ThreadSafeObserver() = default;
 
 NetLog::ThreadSafeObserver::~ThreadSafeObserver() {
   // Make sure we aren't watching a NetLog on destruction.  Because the NetLog
@@ -105,7 +105,7 @@ void NetLog::RemoveObserver(NetLog::ThreadSafeObserver* observer) {
 
   DCHECK_EQ(this, observer->net_log_);
 
-  auto it = std::find(observers_.begin(), observers_.end(), observer);
+  auto it = base::ranges::find(observers_, observer);
   DCHECK(it != observers_.end());
   observers_.erase(it);
 
@@ -133,8 +133,7 @@ void NetLog::RemoveCaptureModeObserver(
   DCHECK_EQ(this, observer->net_log_);
   DCHECK(HasCaptureModeObserver(observer));
 
-  auto it = std::find(capture_mode_observers_.begin(),
-                      capture_mode_observers_.end(), observer);
+  auto it = base::ranges::find(capture_mode_observers_, observer);
   DCHECK(it != capture_mode_observers_.end());
   capture_mode_observers_.erase(it);
 
@@ -182,11 +181,11 @@ std::string NetLog::TimeToString(const base::Time& time) {
 
 // static
 base::Value NetLog::GetEventTypesAsValue() {
-  base::Value dict(base::Value::Type::DICTIONARY);
+  base::Value::Dict dict;
   for (int i = 0; i < static_cast<int>(NetLogEventType::COUNT); ++i) {
-    dict.SetIntKey(NetLogEventTypeToString(static_cast<NetLogEventType>(i)), i);
+    dict.Set(NetLogEventTypeToString(static_cast<NetLogEventType>(i)), i);
   }
-  return dict;
+  return base::Value(std::move(dict));
 }
 
 // static
@@ -205,11 +204,11 @@ const char* NetLog::SourceTypeToString(NetLogSourceType source) {
 
 // static
 base::Value NetLog::GetSourceTypesAsValue() {
-  base::Value dict(base::Value::Type::DICTIONARY);
+  base::Value::Dict dict;
   for (int i = 0; i < static_cast<int>(NetLogSourceType::COUNT); ++i) {
-    dict.SetIntKey(SourceTypeToString(static_cast<NetLogSourceType>(i)), i);
+    dict.Set(SourceTypeToString(static_cast<NetLogSourceType>(i)), i);
   }
-  return dict;
+  return base::Value(std::move(dict));
 }
 
 // static

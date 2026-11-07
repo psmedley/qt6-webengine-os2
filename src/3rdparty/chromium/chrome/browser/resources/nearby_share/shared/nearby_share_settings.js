@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@ import '/mojo/nearby_share_settings.mojom-lite.js';
 
 /** @type {?nearbyShare.mojom.NearbyShareSettingsInterface} */
 let nearbyShareSettings = null;
+
 /** @type {boolean} */
 let isTesting = false;
 

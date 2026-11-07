@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -222,12 +222,22 @@ SupportedResolutionRangeMap GetSupportedD3D11VideoDecoderResolutions(
       continue;
     }
 
-#if BUILDFLAG(ENABLE_PLATFORM_HEVC_DECODING)
+#if BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)
     if (!workarounds.disable_accelerated_hevc_decode &&
-        base::FeatureList::IsEnabled(kD3D11HEVCDecoding)) {
+        base::FeatureList::IsEnabled(kPlatformHEVCDecoderSupport)) {
       if (profile_id == D3D11_DECODER_PROFILE_HEVC_VLD_MAIN) {
         supported_resolutions[HEVCPROFILE_MAIN] = GetResolutionsForGUID(
             video_device.Get(), profile_id, kModernResolutions);
+        continue;
+      }
+      // For range extensions only test main10_422 with P010, and apply
+      // the same resolution range to main420 & main10_YUV420. Ideally we
+      // should be also testing against NV12 & Y210 for YUV422, and Y410 for
+      // YUV444 8/10/12 bit.
+      if (profile_id == DXVA_ModeHEVC_VLD_Main422_10_Intel) {
+        supported_resolutions[HEVCPROFILE_REXT] =
+            GetResolutionsForGUID(video_device.Get(), profile_id,
+                                  kModernResolutions, DXGI_FORMAT_P010);
         continue;
       }
       if (profile_id == D3D11_DECODER_PROFILE_HEVC_VLD_MAIN10) {
@@ -237,7 +247,7 @@ SupportedResolutionRangeMap GetSupportedD3D11VideoDecoderResolutions(
         continue;
       }
     }
-#endif  // BUILDFLAG(ENABLE_PLATFORM_HEVC_DECODING)
+#endif  // BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)
   }
 
   return supported_resolutions;

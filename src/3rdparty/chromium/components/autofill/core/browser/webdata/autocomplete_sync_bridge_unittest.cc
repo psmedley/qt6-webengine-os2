@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,8 +33,8 @@
 #include "components/sync/protocol/autofill_specifics.pb.h"
 #include "components/sync/protocol/entity_metadata.pb.h"
 #include "components/sync/protocol/model_type_state.pb.h"
-#include "components/sync/test/model/mock_model_type_change_processor.h"
-#include "components/sync/test/model/test_matchers.h"
+#include "components/sync/test/mock_model_type_change_processor.h"
+#include "components/sync/test/test_matchers.h"
 #include "components/webdata/common/web_database.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -189,7 +189,8 @@ class AutocompleteSyncBridgeTest : public testing::Test {
     for (const AutofillSpecifics& specifics : remote_data) {
       initial_updates.push_back(SpecificsToUpdateResponse(specifics));
     }
-    real_processor_->OnUpdateReceived(state, std::move(initial_updates));
+    real_processor_->OnUpdateReceived(state, std::move(initial_updates),
+                                      /*gc_directive=*/absl::nullopt);
   }
 
   void SaveSpecificsToTable(

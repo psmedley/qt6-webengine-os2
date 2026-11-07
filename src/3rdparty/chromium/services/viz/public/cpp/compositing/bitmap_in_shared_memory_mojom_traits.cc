@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,6 +75,10 @@ bool StructTraits<viz::mojom::BitmapInSharedMemoryDataView, SkBitmap>::Read(
       std::make_unique<base::WritableSharedMemoryMapping>(region_opt->Map());
   if (!mapping_ptr->IsValid())
     return false;
+
+  if (mapping_ptr->size() < image_info.computeByteSize(data.row_bytes())) {
+    return false;
+  }
 
   if (!sk_bitmap->installPixels(image_info, mapping_ptr->memory(),
                                 data.row_bytes(), &DeleteSharedMemoryMapping,

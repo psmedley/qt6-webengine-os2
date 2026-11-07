@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,10 +42,42 @@ class ProtocolUtilsTest : public testing::Test {
         ClientContextProto::UNKNOWN);
     client_context_proto_.set_country("US");
     client_context_proto_.set_locale("en-US");
+    client_context_proto_.set_platform_type(
+        ClientContextProto::PLATFORM_TYPE_ANDROID);
   }
   ~ProtocolUtilsTest() override {}
 
   ClientContextProto client_context_proto_;
+
+ protected:
+  std::unique_ptr<GetTriggerScriptsResponseProto>
+  getTriggerScriptResponseProto() {
+    auto proto = std::make_unique<GetTriggerScriptsResponseProto>();
+    proto->add_additional_allowed_domains("example.com");
+    proto->add_additional_allowed_domains("other-example.com");
+
+    proto->set_trigger_condition_check_interval_ms(2000);
+    proto->set_trigger_condition_timeout_ms(500000);
+
+    auto* param_1 = proto->add_script_parameters();
+    param_1->set_name("param_1");
+    param_1->set_value("value_1");
+    auto* param_2 = proto->add_script_parameters();
+    param_2->set_name("param_2");
+    param_2->set_value("value_2");
+
+    TriggerScriptProto trigger_script_1;
+    *trigger_script_1.mutable_trigger_condition()->mutable_selector() =
+        ToSelectorProto("fake_element_1");
+    trigger_script_1.mutable_user_interface()->set_ui_timeout_ms(4000);
+    trigger_script_1.mutable_user_interface()->set_scroll_to_hide(false);
+    TriggerScriptProto trigger_script_2;
+
+    *proto->add_trigger_scripts() = trigger_script_1;
+    *proto->add_trigger_scripts() = trigger_script_2;
+
+    return proto;
+  }
 };
 
 TEST_F(ProtocolUtilsTest, ScriptMissingPath) {
@@ -128,6 +160,7 @@ TEST_F(ProtocolUtilsTest, CreateNextScriptActionsRequest) {
   processed_actions.emplace_back(ProcessedActionProto());
 
   RoundtripNetworkStats network_stats;
+  network_stats.set_num_roundtrips(1);
   network_stats.set_roundtrip_encoded_body_size_bytes(12345);
   network_stats.set_roundtrip_decoded_body_size_bytes(23456);
   auto* action_stats = network_stats.add_action_stats();
@@ -174,6 +207,34 @@ TEST_F(ProtocolUtilsTest, CreateCapabilitiesByHashRequest) {
   client_context.set_country(client_context_proto_.country());
   client_context.mutable_chrome()->set_chrome_version(
       client_context_proto_.chrome().chrome_version());
+  client_context.set_platform_type(ClientContextProto::PLATFORM_TYPE_ANDROID);
+  EXPECT_EQ(client_context, request.client_context());
+
+  EXPECT_EQ(request.hash_prefix_length(), 16U);
+  EXPECT_THAT(request.hash_prefix(), ElementsAre(13ULL, 17ULL));
+  EXPECT_THAT(
+      request.script_parameters(),
+      UnorderedElementsAreArray(base::flat_map<std::string, std::string>{
+          {"INTENT", "DUMMY_INTENT"}}));
+}
+
+TEST_F(ProtocolUtilsTest, CreateTriggerScriptsByHashRequest) {
+  ScriptParameters parameters = {
+      {{"key_a", "value_a"}, {"INTENT", "DUMMY_INTENT"}}};
+  GetTriggerScriptsByHashPrefixRequestProto request;
+  EXPECT_TRUE(
+      request.ParseFromString(ProtocolUtils::CreateTriggerScriptsByHashRequest(
+          16U, {13ULL, 17ULL}, client_context_proto_, parameters)));
+
+  LOG(INFO) << "ProtocolUtilsTest: request = " << request.ShortDebugString()
+            << "\n";
+  // Note: We can only send the following approved fields on the client_context:
+  ClientContextProto client_context;
+  client_context.set_locale(client_context_proto_.locale());
+  client_context.set_country(client_context_proto_.country());
+  client_context.mutable_chrome()->set_chrome_version(
+      client_context_proto_.chrome().chrome_version());
+  client_context.set_platform_type(ClientContextProto::PLATFORM_TYPE_ANDROID);
   EXPECT_EQ(client_context, request.client_context());
 
   EXPECT_EQ(request.hash_prefix_length(), 16U);
@@ -230,11 +291,14 @@ TEST_F(ProtocolUtilsTest, ParseActionsParseError) {
   bool unused;
   std::vector<std::unique_ptr<Action>> unused_actions;
   std::vector<std::unique_ptr<Script>> unused_scripts;
+  std::string unused_js_flow_library;
+  std::string unused_report_token;
   EXPECT_FALSE(ProtocolUtils::ParseActions(
       /* delegate= */ nullptr, /* response= */ "invalid", /* run_id= */ nullptr,
-      /* global_payload= */ nullptr,
-      /* script_payload= */ nullptr, &unused_actions, &unused_scripts,
-      /* should_update_scripts= */ &unused));
+      /* return_global_payload= */ nullptr,
+      /* return_script_payload= */ nullptr, &unused_actions, &unused_scripts,
+      /* should_update_scripts= */ &unused, &unused_js_flow_library,
+      &unused_report_token));
 }
 
 TEST_F(ProtocolUtilsTest, ParseActionParseError) {
@@ -246,6 +310,7 @@ TEST_F(ProtocolUtilsTest, ParseActionsValid) {
   proto.set_run_id(1);
   proto.set_global_payload("global_payload");
   proto.set_script_payload("script_payload");
+  proto.set_report_token("token");
   proto.add_actions()->mutable_tell();
   proto.add_actions()->mutable_stop();
 
@@ -258,13 +323,17 @@ TEST_F(ProtocolUtilsTest, ParseActionsValid) {
   bool should_update_scripts = true;
   std::vector<std::unique_ptr<Action>> actions;
   std::vector<std::unique_ptr<Script>> scripts;
+  std::string unused_js_flow_library;
+  std::string report_token;
 
   EXPECT_TRUE(ProtocolUtils::ParseActions(
       nullptr, proto_str, &run_id, &global_payload, &script_payload, &actions,
-      &scripts, &should_update_scripts));
+      &scripts, &should_update_scripts, &unused_js_flow_library,
+      &report_token));
   EXPECT_EQ(1u, run_id);
   EXPECT_EQ("global_payload", global_payload);
   EXPECT_EQ("script_payload", script_payload);
+  EXPECT_EQ("token", report_token);
   EXPECT_THAT(actions, SizeIs(2));
   EXPECT_FALSE(should_update_scripts);
   EXPECT_TRUE(scripts.empty());
@@ -288,11 +357,13 @@ TEST_F(ProtocolUtilsTest, ParseActionsEmptyUpdateScriptList) {
   bool should_update_scripts = false;
   std::vector<std::unique_ptr<Script>> scripts;
   std::vector<std::unique_ptr<Action>> unused_actions;
+  std::string unused_js_flow_library;
+  std::string unused_report_token;
 
   EXPECT_TRUE(ProtocolUtils::ParseActions(
       nullptr, proto_str, /* run_id= */ nullptr, /* global_payload= */ nullptr,
       /* script_payload */ nullptr, &unused_actions, &scripts,
-      &should_update_scripts));
+      &should_update_scripts, &unused_js_flow_library, &unused_report_token));
   EXPECT_TRUE(should_update_scripts);
   EXPECT_TRUE(scripts.empty());
 }
@@ -313,11 +384,14 @@ TEST_F(ProtocolUtilsTest, ParseActionsUpdateScriptListFullFeatured) {
   bool should_update_scripts = false;
   std::vector<std::unique_ptr<Script>> scripts;
   std::vector<std::unique_ptr<Action>> unused_actions;
+  std::string unused_js_flow_library;
+  std::string unused_report_token;
 
   EXPECT_TRUE(ProtocolUtils::ParseActions(
-      nullptr, proto_str, /* run_id= */ nullptr, /* global_payload= */ nullptr,
-      /* script_payload= */ nullptr, &unused_actions, &scripts,
-      &should_update_scripts));
+      nullptr, proto_str, /* run_id= */ nullptr,
+      /* return_global_payload= */ nullptr,
+      /* return_script_payload= */ nullptr, &unused_actions, &scripts,
+      &should_update_scripts, &unused_js_flow_library, &unused_report_token));
   EXPECT_TRUE(should_update_scripts);
   EXPECT_THAT(scripts, SizeIs(1));
   EXPECT_THAT("a", Eq(scripts[0]->handle.path));
@@ -403,6 +477,40 @@ TEST_F(ProtocolUtilsTest, ParseTriggerScriptsValid) {
                       /* only_non_sensitive_allowlisted = */ false),
               ElementsAre(std::make_pair("param_1", "value_1"),
                           std::make_pair("param_2", "value_2")));
+}
+
+TEST_F(ProtocolUtilsTest, ParseTriggerScriptsByHashPrefixValid) {
+  GetTriggerScriptsByHashPrefixResponseProto proto;
+  // Add first GetTriggerScriptsResponseProto
+  auto* matchInfoProto1 = proto.add_match_info();
+  std::unique_ptr<GetTriggerScriptsResponseProto> triggerScriptResponse =
+      getTriggerScriptResponseProto();
+  matchInfoProto1->set_domain("https://adidas.com");
+  matchInfoProto1->mutable_trigger_scripts_response()->add_trigger_scripts();
+
+  // Add second GetTriggerScriptsResponseProto
+  auto* matchInfoProto2 = proto.add_match_info();
+  std::unique_ptr<GetTriggerScriptsResponseProto> triggerScriptResponse2 =
+      getTriggerScriptResponseProto();
+  matchInfoProto2->set_domain("https://nike.com");
+  matchInfoProto2->mutable_trigger_scripts_response()->add_trigger_scripts();
+
+  std::string proto_str;
+  proto.SerializeToString(&proto_str);
+
+  std::vector<std::pair<std::string, std::string>> domainScripts;
+  EXPECT_TRUE(ProtocolUtils::ParseTriggerScriptsByHashPrefix(proto_str,
+                                                             &domainScripts));
+  EXPECT_THAT(domainScripts, SizeIs(2));
+  EXPECT_EQ(domainScripts[0].first, "https://adidas.com");
+  EXPECT_EQ(domainScripts[1].first, "https://nike.com");
+}
+
+TEST_F(ProtocolUtilsTest, ParseTriggerScriptsByHashPrefixInvalid) {
+  std::vector<std::pair<std::string, std::string>> domainScripts;
+  EXPECT_FALSE(ProtocolUtils::ParseTriggerScriptsByHashPrefix("invalid",
+                                                              &domainScripts));
+  EXPECT_TRUE(domainScripts.empty());
 }
 
 TEST_F(ProtocolUtilsTest, TurnOffResizeVisualViewport) {
@@ -604,28 +712,39 @@ TEST_F(ProtocolUtilsTest, CreateGetUserDataRequest) {
   GetUserDataRequestProto request;
   EXPECT_TRUE(request.ParseFromString(ProtocolUtils::CreateGetUserDataRequest(
       /* run_id= */ 1, /* request_name= */ true, /* request_email= */ true,
-      /* request_phone= */ true, /* request_shipping= */ true,
+      /* request_phone= */ true, /* request_shipping= */ false,
+      /* preexisting_address_ids= */ std::vector<std::string>(),
       /* request_payment_methods= */ false,
       /* supported_card_networks= */ std::vector<std::string>(),
+      /* preexisting_payment_instrument_ids= */ std::vector<std::string>(),
       /* client_token= */ std::string())));
   EXPECT_EQ(request.run_id(), 1u);
   EXPECT_TRUE(request.request_name());
   EXPECT_TRUE(request.request_email());
   EXPECT_TRUE(request.request_phone());
-  EXPECT_TRUE(request.request_addresses());
+  EXPECT_FALSE(request.has_request_shipping_addresses());
   EXPECT_FALSE(request.has_request_payment_methods());
 
   EXPECT_TRUE(request.ParseFromString(ProtocolUtils::CreateGetUserDataRequest(
       /* run_id= */ 1, /* request_name= */ true, /* request_email= */ true,
       /* request_phone= */ true, /* request_shipping= */ true,
+      /* preexisting_address_ids= */
+      std::vector<std::string>({"address-1", "address-2"}),
       /* request_payment_methods= */ true,
       /* supported_card_networks= */
       std::vector<std::string>({"VISA", "MASTERCARD"}),
+      /* preexisting_payment_instrument_ids= */
+      std::vector<std::string>({"instrument-1", "instrument-2"}),
       /* client_token= */ "token")));
+  EXPECT_TRUE(request.has_request_shipping_addresses());
+  EXPECT_THAT(request.request_shipping_addresses().preexisting_ids(),
+              ElementsAre("address-1", "address-2"));
   EXPECT_TRUE(request.has_request_payment_methods());
   EXPECT_EQ(request.request_payment_methods().client_token(), "token");
   EXPECT_THAT(request.request_payment_methods().supported_card_networks(),
               ElementsAre("VISA", "MASTERCARD"));
+  EXPECT_THAT(request.request_payment_methods().preexisting_ids(),
+              ElementsAre("instrument-1", "instrument-2"));
 }
 
 TEST_F(ProtocolUtilsTest, ComputeNetworkStats) {
@@ -649,6 +768,7 @@ TEST_F(ProtocolUtilsTest, ComputeNetworkStats) {
   response_info.encoded_body_length = 20;
 
   RoundtripNetworkStats expected_stats;
+  expected_stats.set_num_roundtrips(1);
   expected_stats.set_roundtrip_encoded_body_size_bytes(20);
   expected_stats.set_roundtrip_decoded_body_size_bytes(28);
   auto* action_stats = expected_stats.add_action_stats();
@@ -662,6 +782,15 @@ TEST_F(ProtocolUtilsTest, ComputeNetworkStats) {
                 /* response = */ "This string is 28 bytes long", response_info,
                 actions),
             expected_stats);
+}
+
+TEST_F(ProtocolUtilsTest, CreateReportProgressRequest) {
+  ReportProgressRequestProto request;
+  EXPECT_TRUE(request.ParseFromString(
+      ProtocolUtils::CreateReportProgressRequest("token", "payload")));
+
+  EXPECT_EQ("token", request.token());
+  EXPECT_EQ("payload", request.payload());
 }
 
 }  // namespace autofill_assistant

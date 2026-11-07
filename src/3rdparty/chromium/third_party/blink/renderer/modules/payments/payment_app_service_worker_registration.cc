@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,8 +16,15 @@ namespace {
 bool AllowedToUsePaymentFeatures(ScriptState* script_state) {
   if (!script_state->ContextIsValid())
     return false;
-  return ExecutionContext::From(script_state)
-      ->GetSecurityContext()
+
+  // Check if the context is in fenced frame or not and return false here
+  // because we can't restrict the payment handler API access by permission
+  // policy when it's called from service worker context.
+  ExecutionContext* execution_context = ExecutionContext::From(script_state);
+  if (execution_context->IsInFencedFrame())
+    return false;
+
+  return execution_context->GetSecurityContext()
       .GetPermissionsPolicy()
       ->IsFeatureEnabled(mojom::blink::PermissionsPolicyFeature::kPayment);
 }

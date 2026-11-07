@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -377,9 +377,9 @@ MediaNotificationViewModernImpl::MediaNotificationViewModernImpl(
       auto labels_container = std::make_unique<views::View>();
 
       labels_container->SetPreferredSize(
-          {kLabelsContainerBaseSize.width() -
-               kNotificationControlsInsets.width(),
-           kLabelsContainerBaseSize.height()});
+          gfx::Size(kLabelsContainerBaseSize.width() -
+                        kNotificationControlsInsets.width(),
+                    kLabelsContainerBaseSize.height()));
 
       auto* labels_container_layout_manager =
           labels_container->SetLayoutManager(std::make_unique<views::BoxLayout>(
@@ -500,7 +500,7 @@ void MediaNotificationViewModernImpl::GetAccessibleNodeData(
           IDS_MEDIA_MESSAGE_CENTER_MEDIA_NOTIFICATION_ACCESSIBLE_NAME));
 
   if (!accessible_name_.empty())
-    node_data->SetName(accessible_name_);
+    node_data->SetNameChecked(accessible_name_);
 }
 
 void MediaNotificationViewModernImpl::UpdateWithMediaSessionInfo(
@@ -536,6 +536,7 @@ void MediaNotificationViewModernImpl::UpdateWithMediaSessionInfo(
 void MediaNotificationViewModernImpl::UpdateWithMediaMetadata(
     const media_session::MediaMetadata& metadata) {
   title_label_->SetText(metadata.title);
+  subtitle_label_SetElideBehavior(gfx::ELIDE_HEAD);
   subtitle_label_->SetText(metadata.source_title);
 
   accessible_name_ = GetAccessibleNameFromMetadata(metadata);

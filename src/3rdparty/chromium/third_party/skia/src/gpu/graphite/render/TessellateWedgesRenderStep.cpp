@@ -7,10 +7,12 @@
 
 #include "src/gpu/graphite/render/TessellateWedgesRenderStep.h"
 
-#include "src/gpu/graphite/DrawGeometry.h"
-#include "src/gpu/graphite/DrawWriter.h"
+#include "src/core/SkPipelineData.h"
 
-#include "src/gpu/tessellate/AffineMatrix.h"
+#include "src/gpu/graphite/DrawParams.h"
+#include "src/gpu/graphite/DrawWriter.h"
+#include "src/gpu/graphite/render/DynamicInstancesPatchAllocator.h"
+
 #include "src/gpu/tessellate/FixedCountBufferUtils.h"
 #include "src/gpu/tessellate/MidpointContourParser.h"
 #include "src/gpu/tessellate/PatchWriter.h"
@@ -19,42 +21,20 @@ namespace skgpu::graphite {
 
 namespace {
 
-// TODO: This is very similar to DrawWriterAllocator in TessellateCurveRenderStep except that the
-// index count is calculated differently. These will be merged once skbug.com/13056 is resolved.
-struct DrawWriterAllocator {
-    DrawWriterAllocator(size_t stride, // required for PatchAllocator
-                        DrawWriter& writer,
-                        BindBufferInfo fixedVertexBuffer,
-                        BindBufferInfo fixedIndexBuffer,
-                        unsigned int reserveCount)
-            : fInstances(writer, fixedVertexBuffer, fixedIndexBuffer) {
-        SkASSERT(writer.instanceStride() == stride);
-        // TODO: Is it worth re-reserving large chunks after this preallocation is used up? Or will
-        // appending 1 at a time be fine since it's coming from a large vertex buffer alloc anyway?
-        fInstances.reserve(reserveCount);
-    }
-
-    VertexWriter append() {
-        // TODO (skbug.com/13056): Actually compute optimal minimum required index count based on
-        // PatchWriter's tracked segment count^4.
-        // Wedges use one extra triangle to connect to the fan point compared to the curve version.
-        static constexpr unsigned int kMaxIndexCount =
-                3 * (1 + NumCurveTrianglesAtResolveLevel(kMaxFixedResolveLevel));
-        return fInstances.append(kMaxIndexCount, 1);
-    }
-
-    DrawWriter::DynamicInstances fInstances;
-};
+using namespace skgpu::tess;
 
 // Only kFanPoint, no stroke params, since this is for filled wedges.
 // No explicit curve type, since we assume infinity is supported on GPUs using graphite
 // No color or wide color attribs, since it might always be part of the PaintParams
 // or we'll add a color-only fast path to RenderStep later.
 static constexpr PatchAttribs kAttribs = PatchAttribs::kFanPoint |
-                                         PatchAttribs::kPaintDepth;
-using Writer = PatchWriter<DrawWriterAllocator,
+                                         PatchAttribs::kPaintDepth |
+                                         PatchAttribs::kSsboIndex;
+
+using Writer = PatchWriter<DynamicInstancesPatchAllocator<FixedCountWedges>,
                            Required<PatchAttribs::kFanPoint>,
-                           Required<PatchAttribs::kPaintDepth>>;
+                           Required<PatchAttribs::kPaintDepth>,
+                           Required<PatchAttribs::kSsboIndex>>;
 
 }  // namespace
 
@@ -65,7 +45,7 @@ TessellateWedgesRenderStep::TessellateWedgesRenderStep(std::string_view variantN
                      Flags::kRequiresMSAA |
                      (depthStencilSettings.fDepthWriteEnabled ? Flags::kPerformsShading
                                                               : Flags::kNone),
-                     /*uniforms=*/{},
+                     /*uniforms=*/{{"localToDevice", SkSLType::kFloat4x4}},
                      PrimitiveType::kTriangles,
                      depthStencilSettings,
                      /*vertexAttrs=*/  {{"resolveLevel_and_idx",
@@ -74,83 +54,36 @@ TessellateWedgesRenderStep::TessellateWedgesRenderStep(std::string_view variantN
                                         {"p23", VertexAttribType::kFloat4, SkSLType::kFloat4},
                                         {"fanPointAttrib", VertexAttribType::kFloat2,
                                                            SkSLType::kFloat2},
-                                        {"depth", VertexAttribType::kFloat, SkSLType::kFloat}}) {
+                                        {"depth", VertexAttribType::kFloat, SkSLType::kFloat},
+                                        {"ssboIndex", VertexAttribType::kInt, SkSLType::kInt}}) {
     SkASSERT(this->instanceStride() == PatchStride(kAttribs));
 }
 
 TessellateWedgesRenderStep::~TessellateWedgesRenderStep() {}
 
 const char* TessellateWedgesRenderStep::vertexSkSL() const {
-    // TODO: Share SkSL with GrPathTessellationShader_MiddleOut
-    // TODO: This SkSL depends on wangs_formula::as_sksl(), which is currently manually added in
-    // MtlGraphicsPipeline but could be handled nicer.
     return R"(
-        float resolveLevel = resolveLevel_and_idx.x;
-        float idxInResolveLevel = resolveLevel_and_idx.y;
-        float2 localcoord;
-
-        // A negative resolve level means this is the fan point.
-        // TODO: This "if" handling a negative resolve level and reading 'fanPointAttrib' is the
-        // only difference between this SkSL and TessellateCurvesRenderStep's SkSL.
-        if (resolveLevel < 0) {
-            localcoord = fanPointAttrib;
-        } else if (isinf(p23.z)) {
-            // This patch is an exact triangle.
-            localcoord = (resolveLevel != 0)      ? p01.zw
-                       : (idxInResolveLevel != 0) ? p23.xy
-                                                  : p01.xy;
+        float2 localCoord;
+        if (resolveLevel_and_idx.x < 0) {
+            // A negative resolve level means this is the fan point.
+            localCoord = fanPointAttrib;
         } else {
-            float2 p0=p01.xy, p1=p01.zw, p2=p23.xy, p3=p23.zw;
-            float w = -1;  // w < 0 tells us to treat the instance as an integral cubic.
-            float maxResolveLevel;
-            if (isinf(p23.w)) {
-                // Conics are 3 points, with the weight in p3.
-                w = p3.x;
-                maxResolveLevel = wangs_formula_conic_log2(4, p0, p1, p2, w);
-                p1 *= w;  // Unproject p1.
-                p3 = p2;  // Duplicate the endpoint for shared code that also runs on cubics.
-            } else {
-                // The patch is an integral cubic.
-                maxResolveLevel = wangs_formula_cubic_log2(4, p0, p1, p2, p3, float2x2(1.0));
-            }
-            if (resolveLevel > maxResolveLevel) {
-                // This vertex is at a higher resolve level than we need. Demote to a lower
-                // resolveLevel, which will produce a degenerate triangle.
-                idxInResolveLevel = floor(ldexp(idxInResolveLevel,
-                                                int(maxResolveLevel - resolveLevel)));
-                resolveLevel = maxResolveLevel;
-            }
-            // Promote our location to a discrete position in the maximum fixed resolve level.
-            // This is extra paranoia to ensure we get the exact same fp32 coordinates for
-            // colocated points from different resolve levels (e.g., the vertices T=3/4 and
-            // T=6/8 should be exactly colocated).
-            float fixedVertexID = floor(.5 + ldexp(idxInResolveLevel, int(5 - resolveLevel)));
-            if (0 < fixedVertexID && fixedVertexID < 32) {
-                float T = fixedVertexID * (1 / 32.0);
-
-                // Evaluate at T. Use De Casteljau's for its accuracy and stability.
-                float2 ab = mix(p0, p1, T);
-                float2 bc = mix(p1, p2, T);
-                float2 cd = mix(p2, p3, T);
-                float2 abc = mix(ab, bc, T);
-                float2 bcd = mix(bc, cd, T);
-                float2 abcd = mix(abc, bcd, T);
-
-                // Evaluate the conic weight at T.
-                float u = mix(1.0, w, T);
-                float v = w + 1 - u;  // == mix(w, 1, T)
-                float uv = mix(u, v, T);
-
-                localcoord = (w < 0) ? /*cubic*/ abcd : /*conic*/ abc/uv;
-            } else {
-                localcoord = (fixedVertexID == 0) ? p0.xy : p3.xy;
-            }
+            // TODO: Approximate perspective scaling to match how PatchWriter is configured
+            // (or provide explicit tessellation level in instance data instead of replicating work)
+            float2x2 vectorXform = float2x2(localToDevice[0].xy, localToDevice[1].xy);
+            localCoord = tessellate_filled_curve(
+                vectorXform, resolveLevel_and_idx.x, resolveLevel_and_idx.y, p01, p23);
         }
-        float4 devPosition = float4(localcoord.xy, depth, 1.0);)";
+        float4 devPosition = localToDevice * float4(localCoord, 0.0, 1.0);
+        devPosition.z = depth;
+        stepLocalCoords = localCoord;
+    )";
 }
 
-void TessellateWedgesRenderStep::writeVertices(DrawWriter* dw, const DrawGeometry& geom) const {
-    SkPath path = geom.shape().asPath(); // TODO: Iterate the Shape directly
+void TessellateWedgesRenderStep::writeVertices(DrawWriter* dw,
+                                               const DrawParams& params,
+                                               int ssboIndex) const {
+    SkPath path = params.geometry().shape().asPath(); // TODO: Iterate the Shape directly
 
     BindBufferInfo fixedVertexBuffer = dw->bufferManager()->getStaticBuffer(
             BufferType::kVertex,
@@ -162,20 +95,17 @@ void TessellateWedgesRenderStep::writeVertices(DrawWriter* dw, const DrawGeometr
             FixedCountWedges::IndexBufferSize);
 
     int patchReserveCount = FixedCountWedges::PreallocCount(path.countVerbs());
-    Writer writer{kAttribs, kMaxParametricSegments,
-                  *dw, fixedVertexBuffer, fixedIndexBuffer, patchReserveCount};
-    writer.updatePaintDepthAttrib(geom.order().depthAsFloat());
+    Writer writer{kAttribs, *dw, fixedVertexBuffer, fixedIndexBuffer, patchReserveCount};
+    writer.updatePaintDepthAttrib(params.order().depthAsFloat());
+    writer.updateSsboIndexAttrib(ssboIndex);
 
-    // TODO: Is it better to pre-transform on the CPU and only have a matrix uniform to compute
-    // local coords, or is it better to always transform on the GPU (less CPU usage, more
-    // uniform data to upload, dependent on push constants or storage buffers for good batching)
-
-    // Currently no additional transform is applied by the GPU.
-    wangs_formula::VectorXform shaderXform(SkMatrix::I());
-    // TODO: This doesn't handle perspective yet, and ideally wouldn't go through SkMatrix.
-    // It may not be relevant, though, if transforms are applied on the GPU and we only need to
-    // determine an approximate 2x2 for 'shaderXform' and Wang's formula evaluation.
-    AffineMatrix m(geom.transform().matrix().asM33());
+    // The vector xform approximates how the control points are transformed by the shader to
+    // more accurately compute how many *parametric* segments are needed.
+    // TODO: This doesn't account for perspective division yet, which will require updating the
+    // approximate transform based on each verb's control points' bounding box.
+    SkASSERT(params.transform().type() < Transform::Type::kProjection);
+    writer.setShaderTransform(wangs_formula::VectorXform{params.transform().matrix()},
+                              params.transform().maxScaleFactor());
 
     // TODO: Essentially the same as PathWedgeTessellator::write_patches but with a different
     // PatchWriter template.
@@ -183,66 +113,49 @@ void TessellateWedgesRenderStep::writeVertices(DrawWriter* dw, const DrawGeometr
     // the midpoint of the current contour.
     MidpointContourParser parser{path};
     while (parser.parseNextContour()) {
-        writer.updateFanPointAttrib(m.mapPoint(parser.currentMidpoint()));
-        float2 lastPoint = {0, 0};
-        float2 startPoint = {0, 0};
+        writer.updateFanPointAttrib(parser.currentMidpoint());
+        SkPoint lastPoint = {0, 0};
+        SkPoint startPoint = {0, 0};
         for (auto [verb, pts, w] : parser.currentContour()) {
             switch (verb) {
-                case SkPathVerb::kMove: {
-                    startPoint = lastPoint = m.map1Point(pts);
+                case SkPathVerb::kMove:
+                    startPoint = lastPoint = pts[0];
                     break;
-                }
-
-                case SkPathVerb::kLine: {
+                case SkPathVerb::kLine:
                     // Unlike curve tessellation, wedges have to handle lines as part of the patch,
                     // effectively forming a single triangle with the fan point.
-                    auto [p0, p1] = m.map2Points(pts);
-                    writer.writeLine(p0, p1);
-                    lastPoint = p1;
+                    writer.writeLine(pts[0], pts[1]);
+                    lastPoint = pts[1];
                     break;
-                }
-
-                case SkPathVerb::kQuad: {
-                    auto [p0, p1] = m.map2Points(pts);
-                    auto p2 = m.map1Point(pts+2);
-
-                    writer.writeQuadratic(p0, p1, p2, shaderXform);
-                    lastPoint = p2;
+                case SkPathVerb::kQuad:
+                    writer.writeQuadratic(pts);
+                    lastPoint = pts[2];
                     break;
-                }
-
-                case SkPathVerb::kConic: {
-                    auto [p0, p1] = m.map2Points(pts);
-                    auto p2 = m.map1Point(pts+2);
-
-                    writer.writeConic(p0, p1, p2, *w, shaderXform);
-                    lastPoint = p2;
+                case SkPathVerb::kConic:
+                    writer.writeConic(pts, *w);
+                    lastPoint = pts[2];
                     break;
-                }
-
-                case SkPathVerb::kCubic: {
-                    auto [p0, p1] = m.map2Points(pts);
-                    auto [p2, p3] = m.map2Points(pts+2);
-
-                    writer.writeCubic(p0, p1, p2, p3, shaderXform);
-                    lastPoint = p3;
+                case SkPathVerb::kCubic:
+                    writer.writeCubic(pts);
+                    lastPoint = pts[3];
                     break;
-                }
-
                 default: break;
             }
         }
 
         // Explicitly close the contour with another line segment, which also differs from curve
         // tessellation since that approach's triangle step automatically closes the contour.
-        if (any(lastPoint != startPoint)) {
+        if (lastPoint != startPoint) {
             writer.writeLine(lastPoint, startPoint);
         }
     }
 }
 
-void TessellateWedgesRenderStep::writeUniforms(const DrawGeometry&, SkPipelineDataGatherer*) const {
-    // Control points are pre-transformed to device space on the CPU, so no uniforms needed.
+void TessellateWedgesRenderStep::writeUniformsAndTextures(const DrawParams& params,
+                                                          SkPipelineDataGatherer* gatherer) const {
+    SkDEBUGCODE(UniformExpectationsValidator uev(gatherer, this->uniforms());)
+
+    gatherer->write(params.transform().matrix());
 }
 
 }  // namespace skgpu::graphite

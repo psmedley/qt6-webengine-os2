@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -26,14 +26,7 @@ import node_modules
 _BASE_EXCLUDES = []
 for excluded_file in [
     'resources/polymer/v1_0/web-animations-js/web-animations-next-lite.min.js',
-    'resources/css/roboto.css',
-    'resources/css/text_defaults.css',
-    'resources/css/text_defaults_md.css',
-    'resources/mojo/mojo/public/js/mojo_bindings_lite.html',
-    'resources/mojo/mojo/public/mojom/base/time.mojom.html',
     'resources/mojo/mojo/public/mojom/base/time.mojom-lite.js',
-    'resources/mojo/chromeos/services/network_config/public/mojom/network_types.mojom.html',
-    'resources/mojo/services/network/public/mojom/ip_address.mojom.html',
     'resources/polymer/v3_0/polymer/polymer_bundled.min.js',
     'resources/js/load_time_data.m.js',
 ]:
@@ -194,8 +187,6 @@ def _bundle_v3(tmp_out_dir, in_path, out_path, manifest_out_path, args,
           'Unexpected <if expr> found in bundled output. Check that all ' + \
           'input files using such expressions are preprocessed.'
 
-  return bundled_paths
-
 
 def _optimize(in_folder, args):
   in_path = os.path.normpath(os.path.join(_CWD, in_folder)).replace('\\', '/')
@@ -209,18 +200,17 @@ def _optimize(in_folder, args):
       'strings.m.js',
   ]
   excludes.extend(args.exclude or [])
+
+  for exclude in excludes:
+    extension = os.path.splitext(exclude)[1]
+    assert extension == '.js', f'Unexpected |excludes| entry: {exclude}.' + \
+        ' Only .js files can appear in |excludes|.'
+
   external_paths = args.external_paths or []
 
   try:
-    pcb_out_paths = [os.path.join(tmp_out_dir, f) for f in args.js_out_files]
-    bundled_paths = _bundle_v3(tmp_out_dir, in_path, out_path,
-                               manifest_out_path, args, excludes,
-                               external_paths)
-
-    # Run polymer-css-build.
-    node.RunNode([node_modules.PathToPolymerCssBuild()] +
-                 ['--polymer-version', '2'] + ['--no-inline-includes', '-f'] +
-                 bundled_paths + ['-o'] + pcb_out_paths)
+    _bundle_v3(tmp_out_dir, in_path, out_path, manifest_out_path, args,
+               excludes, external_paths)
 
     # Pass the JS files through Terser and write the output to its final
     # destination.

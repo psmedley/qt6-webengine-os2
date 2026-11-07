@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,6 +77,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "ui/android/screen_android.h"
+#endif
+
+#if BUILDFLAG(IS_MAC)
+#include "content/browser/renderer_host/test_render_widget_host_view_mac_factory.h"
+#include "ui/display/test/test_screen.h"
 #endif
 
 #if defined(USE_AURA) || BUILDFLAG(IS_MAC)
@@ -223,7 +228,8 @@ class TestView : public TestRenderWidgetHostView {
   }
   void GestureEventAck(
       const WebGestureEvent& event,
-      blink::mojom::InputEventResultState ack_result) override {
+      blink::mojom::InputEventResultState ack_result,
+      blink::mojom::ScrollResultDataPtr scroll_result_data) override {
     gesture_event_type_ = event.GetType();
     ack_result_ = ack_result;
   }
@@ -266,7 +272,8 @@ class MockRenderViewHostDelegateView : public RenderViewHostDelegateView {
   void StartDragging(const DropData& drop_data,
                      blink::DragOperationsMask allowed_ops,
                      const gfx::ImageSkia& image,
-                     const gfx::Vector2d& image_offset,
+                     const gfx::Vector2d& cursor_offset,
+                     const gfx::Rect& drag_obj_rect,
                      const blink::mojom::DragEventSourceInfo& event_info,
                      RenderWidgetHostImpl* source_rwh) override {
     ++start_dragging_count_;
@@ -554,6 +561,10 @@ class RenderWidgetHostTest : public testing::Test {
     // calls display::Screen::SetScreenInstance().
     ui::SetScreenAndroid(false /* use_display_wide_color_gamut */);
 #endif
+#if BUILDFLAG(IS_MAC)
+    screen_ = std::make_unique<display::test::TestScreen>();
+    display::Screen::SetScreenInstance(screen_.get());
+#endif
 #if defined(USE_AURA)
     screen_.reset(aura::TestScreen::Create(gfx::Size()));
     display::Screen::SetScreenInstance(screen_.get());
@@ -615,11 +626,11 @@ class RenderWidgetHostTest : public testing::Test {
     browser_context_.reset();
 
 #if defined(USE_AURA)
-    display::Screen::SetScreenInstance(nullptr);
-    screen_.reset();
+    ImageTransportFactory::Terminate();
 #endif
 #if defined(USE_AURA) || BUILDFLAG(IS_MAC)
-    ImageTransportFactory::Terminate();
+    display::Screen::SetScreenInstance(nullptr);
+    screen_.reset();
 #endif
 #if BUILDFLAG(IS_ANDROID)
     display::Screen::SetScreenInstance(nullptr);
@@ -786,7 +797,7 @@ class RenderWidgetHostTest : public testing::Test {
   const WebInputEvent* GetInputEventFromMessage(const IPC::Message& message) {
     base::PickleIterator iter(message);
     const char* data;
-    int data_length;
+    size_t data_length;
     if (!iter.ReadData(&data, &data_length))
       return nullptr;
     return reinterpret_cast<const WebInputEvent*>(data);
@@ -1319,17 +1330,22 @@ TEST_F(RenderWidgetHostTest, ReceiveFrameTokenFromDeletedRenderWidget) {
   host_->DidProcessFrame(1, base::TimeTicks::Now());
 }
 
-// Unable to include render_widget_host_view_mac.h and compile.
-#if !BUILDFLAG(IS_MAC)
 // Tests setting background transparency.
 TEST_F(RenderWidgetHostTest, Background) {
   RenderWidgetHostViewBase* view;
 #if defined(USE_AURA)
   view = new RenderWidgetHostViewAura(host_.get());
-  // TODO(derat): Call this on all platforms: http://crbug.com/102450.
-  view->InitAsChild(nullptr);
 #elif BUILDFLAG(IS_ANDROID)
   view = new RenderWidgetHostViewAndroid(host_.get(), nullptr);
+#elif BUILDFLAG(IS_MAC)
+  view = CreateRenderWidgetHostViewMacForTesting(host_.get());
+#else
+#error "This test isn't implemented for this platform."
+#endif
+
+#if !BUILDFLAG(IS_ANDROID)
+  // TODO(derat): Call this on all platforms: http://crbug.com/102450.
+  view->InitAsChild(nullptr);
 #endif
   host_->SetView(view);
 
@@ -1349,12 +1365,19 @@ TEST_F(RenderWidgetHostTest, Background) {
     EXPECT_EQ(unsigned{SK_ColorBLUE}, *view->GetBackgroundColor());
   }
   {
-    // The owner delegate will be called to pass it over IPC to the RenderView.
+    // The owner delegate will be called to pass it over IPC to the
+    // `blink::WebView`.
     EXPECT_CALL(mock_owner_delegate_, SetBackgroundOpaque(false));
     view->SetBackgroundColor(SK_ColorTRANSPARENT);
+#if BUILDFLAG(IS_MAC)
+    // Mac replaces transparent background colors with white. See the comment in
+    // RenderWidgetHostViewMac::GetBackgroundColor. (https://crbug.com/735407)
+    EXPECT_EQ(unsigned{SK_ColorWHITE}, *view->GetBackgroundColor());
+#else
     // The browser side will represent the background color as transparent
     // immediately.
     EXPECT_EQ(unsigned{SK_ColorTRANSPARENT}, *view->GetBackgroundColor());
+#endif
   }
   {
     // Setting back an opaque color informs the view.
@@ -1366,7 +1389,6 @@ TEST_F(RenderWidgetHostTest, Background) {
   host_->SetView(nullptr);
   view->Destroy();
 }
-#endif
 
 // Test that the RenderWidgetHost tells the renderer when it is hidden and
 // shown, and can accept a racey update from the renderer after hiding.
@@ -2102,7 +2124,7 @@ TEST_F(RenderWidgetHostTest, RendererExitedNoDrag) {
       DropDataToDragData(
           drop_data, file_system_manager, process_->GetID(),
           ChromeBlobStorageContext::GetFor(process_->GetBrowserContext())),
-      drag_operation, SkBitmap(), gfx::Vector2d(),
+      drag_operation, SkBitmap(), gfx::Vector2d(), gfx::Rect(),
       blink::mojom::DragEventSourceInfo::New());
   EXPECT_EQ(delegate_->mock_delegate_view()->start_dragging_count(), 1);
 
@@ -2113,7 +2135,7 @@ TEST_F(RenderWidgetHostTest, RendererExitedNoDrag) {
       DropDataToDragData(
           drop_data, file_system_manager, process_->GetID(),
           ChromeBlobStorageContext::GetFor(process_->GetBrowserContext())),
-      drag_operation, SkBitmap(), gfx::Vector2d(),
+      drag_operation, SkBitmap(), gfx::Vector2d(), gfx::Rect(),
       blink::mojom::DragEventSourceInfo::New());
   EXPECT_EQ(delegate_->mock_delegate_view()->start_dragging_count(), 1);
 }
@@ -2133,7 +2155,7 @@ class RenderWidgetHostInitialSizeTest : public RenderWidgetHostTest {
 
 TEST_F(RenderWidgetHostInitialSizeTest, InitialSize) {
   // Having an initial size set means that the size information had been sent
-  // with the reqiest to new up the RenderView and so subsequent
+  // with the request to new up the `blink::WebView` and so subsequent
   // SynchronizeVisualProperties calls should not result in new IPC (unless the
   // size has actually changed).
   EXPECT_FALSE(host_->SynchronizeVisualProperties());

@@ -13,6 +13,8 @@
 # limitations under the License.
 licenses(["notice"])
 
+package(default_visibility = ["//third_party/nearby:__subpackages__"])
+
 cc_library(
     name = "presence",
     srcs = [
@@ -20,12 +22,12 @@ cc_library(
     ],
     hdrs = [
         "presence_client.h",
-    ],
-    visibility = [
-        "//third_party/nearby:__subpackages__",
+        "presence_service.h",
     ],
     deps = [
         ":types",
+        "//presence/implementation:internal",  # build_cleaner: keep
+        "@com_google_absl//absl/functional:any_invocable",
     ],
 )
 
@@ -35,30 +37,32 @@ cc_library(
         "device_motion.cc",
         "discovery_filter.cc",
         "presence_action.cc",
-        "presence_client.cc",
         "presence_device.cc",
-        "presence_identity.cc",
         "presence_zone.cc",
+        "scan_request_builder.cc",
     ],
     hdrs = [
         "broadcast_options.h",
+        "broadcast_request.h",
+        "data_element.h",
+        "data_types.h",
         "device_motion.h",
         "discovery_filter.h",
         "discovery_options.h",
         "listeners.h",
+        "power_mode.h",
         "presence_action.h",
-        "presence_client.h",
         "presence_device.h",
-        "presence_identity.h",
         "presence_zone.h",
+        "scan_request.h",
+        "scan_request_builder.h",
         "status.h",
-    ],
-    visibility = [
-        "//third_party/nearby/presence:__subpackages__",
     ],
     deps = [
         "//internal/platform:base",
+        "//internal/proto:credential_cc_proto",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:variant",
         "@com_google_glog//:glog",
     ],
@@ -76,11 +80,31 @@ cc_test(
         "presence_device_test.cc",
         "presence_identity_test.cc",
         "presence_zone_test.cc",
+        "scan_request_builder_test.cc",
         "status_test.cc",
     ],
     shard_count = 6,
     deps = [
         ":types",
+        "//internal/proto:credential_cc_proto",
+        "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/types:variant",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "credential_test",
+    size = "small",
+    srcs = [
+        "credential_test.cc",
+        "presence_identity_test.cc",
+    ],
+    shard_count = 6,
+    deps = [
+        "//internal/platform:uuid",
+        "//internal/platform/implementation/g3",  # build_cleaner: keep
+        "//internal/proto:credential_cc_proto",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_googletest//:gtest_main",
     ],
@@ -91,10 +115,13 @@ cc_test(
     size = "small",
     srcs = [
         "presence_client_test.cc",
+        "presence_service_test.cc",
     ],
     shard_count = 6,
     deps = [
         ":presence",
+        ":types",
+        "//internal/platform/implementation/g3",  # build_cleaner: keep
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_googletest//:gtest_main",
     ],

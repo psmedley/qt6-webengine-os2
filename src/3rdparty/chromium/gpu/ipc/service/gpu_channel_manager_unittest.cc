@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -66,8 +66,7 @@ class TestTraceEventFilter : public base::trace_event::TraceEventFilter {
 
       g_trace_event = std::make_unique<base::trace_event::TraceEvent>(
           trace_event.thread_id(), trace_event.timestamp(),
-          trace_event.thread_timestamp(),
-          trace_event.thread_instruction_count(), trace_event.phase(),
+          trace_event.thread_timestamp(), trace_event.phase(),
           trace_event.category_group_enabled(), trace_event.name(),
           trace_event.scope(), trace_event.id(), trace_event.bind_id(),
           args.get(), trace_event.flags());
@@ -182,8 +181,7 @@ TEST_F(GpuChannelManagerTest, EstablishChannel) {
 
   ASSERT_TRUE(channel_manager());
   GpuChannel* channel = channel_manager()->EstablishChannel(
-      base::UnguessableToken::Create(), kClientId, kClientTracingId, false,
-      true);
+      base::UnguessableToken::Create(), kClientId, kClientTracingId, false);
   EXPECT_TRUE(channel);
   EXPECT_EQ(channel_manager()->LookupChannel(kClientId), channel);
 }

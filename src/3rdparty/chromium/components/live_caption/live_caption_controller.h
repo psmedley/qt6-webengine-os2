@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 #include "components/live_caption/views/caption_bubble.h"
 #include "components/soda/constants.h"
 #include "components/soda/soda_installer.h"
-#include "media/mojo/mojom/speech_recognition_service.mojom.h"
+#include "media/mojo/mojom/speech_recognition.mojom.h"
 #include "ui/native_theme/caption_style.h"
 #include "ui/native_theme/native_theme_observer.h"
 
@@ -21,10 +21,6 @@ class PrefChangeRegistrar;
 
 namespace content {
 class BrowserContext;
-}
-
-namespace ui {
-class NativeTheme;
 }
 
 namespace user_prefs {
@@ -90,15 +86,16 @@ class LiveCaptionController : public KeyedService,
   friend class LiveCaptionControllerFactory;
   friend class LiveCaptionControllerTest;
   friend class LiveCaptionSpeechRecognitionHostTest;
+  friend class LiveCaptionUnavailabilityNotifierTest;
 
   // SodaInstaller::Observer:
   void OnSodaInstalled(speech::LanguageCode language_code) override;
   void OnSodaProgress(speech::LanguageCode language_code,
                       int progress) override {}
-  void OnSodaError(speech::LanguageCode language_code) override;
+  void OnSodaInstallError(speech::LanguageCode language_code,
+                          speech::SodaInstaller::ErrorCode error_code) override;
 
   // ui::NativeThemeObserver:
-  void OnNativeThemeUpdated(ui::NativeTheme* observed_theme) override {}
   void OnCaptionStyleUpdated() override;
 
   void OnLiveCaptionEnabledChanged();

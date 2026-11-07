@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,7 +42,6 @@ struct CONTENT_EXPORT NavigationRequestInfo {
           blob_url_loader_factory,
       const base::UnguessableToken& devtools_navigation_token,
       const base::UnguessableToken& devtools_frame_token,
-      bool obey_origin_policy,
       net::HttpRequestHeaders cors_exempt_headers,
       network::mojom::ClientSecurityStatePtr client_security_state,
       const absl::optional<std::vector<net::SourceStream::SourceType>>&
@@ -68,7 +67,7 @@ struct CONTENT_EXPORT NavigationRequestInfo {
   // Contains information used to prevent sharing information from a navigation
   // request across first party contexts. In particular, tracks the
   // SiteForCookies, which controls what site's SameSite cookies may be set,
-  // NetworkIsolationKey, which is used to restrict sharing of network
+  // NetworkAnonymizationKey, which is used to restrict sharing of network
   // resources, and how to update them across redirects, which is different for
   // main frames and subresources.
   const net::IsolationInfo isolation_info;
@@ -110,11 +109,6 @@ struct CONTENT_EXPORT NavigationRequestInfo {
   const base::UnguessableToken devtools_navigation_token;
 
   const base::UnguessableToken devtools_frame_token;
-
-  // If set, the network service will attempt to retrieve the appropriate origin
-  // policy, if necessary, and attach it to the ResourceResponseHead.
-  // Spec: https://wicg.github.io/origin-policy/
-  const bool obey_origin_policy;
 
   const net::HttpRequestHeaders cors_exempt_headers;
 

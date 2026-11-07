@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "base/metrics/field_trial_params.h"
 #include "third_party/blink/public/common/input/web_touch_event.h"
 #include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
+#include "third_party/blink/public/mojom/input/input_handler.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/event_path.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
@@ -25,6 +26,7 @@
 #include "third_party/blink/renderer/core/input/touch_action_util.h"
 #include "third_party/blink/renderer/core/layout/hit_test_canvas_result.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
+#include "third_party/blink/renderer/core/loader/anchor_element_interaction_tracker.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/pointer_lock_controller.h"
@@ -188,6 +190,14 @@ WebInputEventResult PointerEventManager::DispatchPointerEvent(
   std::unique_ptr<EventTiming> event_timing;
   if (frame_ && frame_->DomWindow())
     event_timing = EventTiming::Create(frame_->DomWindow(), *pointer_event);
+
+  if (event_type == event_type_names::kPointerdown) {
+    AnchorElementInteractionTracker* tracker =
+        frame_->GetDocument()->GetAnchorElementInteractionTracker();
+    if (tracker) {
+      tracker->OnPointerDown(*target, *pointer_event);
+    }
+  }
 
   if (should_filter &&
       !HasPointerEventListener(frame_->GetEventHandlerRegistry()))
@@ -359,7 +369,8 @@ void PointerEventManager::AdjustTouchPointerEvent(
          WebPointerProperties::PointerType::kTouch);
 
   LayoutSize hit_rect_size = GetHitTestRectForAdjustment(
-      *frame_, LayoutSize(pointer_event.width, pointer_event.height));
+      *frame_, LayoutSize(LayoutUnit(pointer_event.width),
+                          LayoutUnit(pointer_event.height)));
 
   if (hit_rect_size.IsEmpty())
     return;
@@ -538,8 +549,7 @@ WebInputEventResult PointerEventManager::HandlePointerEvent(
     const Vector<WebPointerEvent>& coalesced_events,
     const Vector<WebPointerEvent>& predicted_events) {
   if (event.GetType() == WebInputEvent::Type::kPointerRawUpdate) {
-    if (!RuntimeEnabledFeatures::PointerRawUpdateEnabled() ||
-        !frame_->GetEventHandlerRegistry().HasEventHandlers(
+    if (!frame_->GetEventHandlerRegistry().HasEventHandlers(
             EventHandlerRegistry::kPointerRawUpdateEvent))
       return WebInputEventResult::kHandledSystem;
 
@@ -658,8 +668,39 @@ WebInputEventResult PointerEventManager::HandlePointerEvent(
         mojom::blink::UserActivationNotificationType::kInteraction);
   }
 
+  Node* pointerdown_node = nullptr;
+  if (event.GetType() == WebInputEvent::Type::kPointerDown) {
+    pointerdown_node =
+        touch_event_manager_->GetTouchPointerNode(event, pointer_event_target);
+  }
+
+  TouchAction touch_action = TouchAction::kAuto;
+
+  if (pointerdown_node) {
+    touch_action = touch_action_util::EffectiveTouchActionAtPointerDown(
+        event, pointerdown_node);
+    if (RuntimeEnabledFeatures::TouchActionEffectiveAtPointerDownEnabled()) {
+      touch_event_manager_->UpdateTouchAttributeMapsForPointerDown(
+          event, pointerdown_node, touch_action);
+    }
+  }
+
   WebInputEventResult result = DispatchTouchPointerEvent(
       event, coalesced_events, predicted_events, pointer_event_target);
+
+  if (pointerdown_node) {
+    TouchAction new_touch_action =
+        touch_action_util::EffectiveTouchActionAtPointerDown(event,
+                                                             pointerdown_node);
+    if (!RuntimeEnabledFeatures::TouchActionEffectiveAtPointerDownEnabled()) {
+      touch_event_manager_->UpdateTouchAttributeMapsForPointerDown(
+          event, pointerdown_node, new_touch_action);
+    }
+    if (new_touch_action != touch_action) {
+      UseCounter::Count(frame_->GetDocument(),
+                        WebFeature::kTouchActionChangedAtPointerDown);
+    }
+  }
 
   touch_event_manager_->HandleTouchPoint(event, coalesced_events,
                                          pointer_event_target);
@@ -757,6 +798,38 @@ WebInputEventResult PointerEventManager::DirectDispatchMousePointerEvent(
   return WebInputEventResult::kHandledSuppressed;
 }
 
+void PointerEventManager::SendEffectivePanActionAtPointer(
+    const WebPointerEvent& event,
+    const Node* node_at_pointer) {
+  if (IsAnyTouchActive())
+    return;
+
+  TouchAction effective_touch_action = TouchAction::kAuto;
+  if (node_at_pointer) {
+    effective_touch_action = touch_action_util::EffectiveTouchActionAtPointer(
+        event, node_at_pointer);
+  }
+
+  mojom::blink::PanAction effective_pan_action;
+  if ((effective_touch_action & TouchAction::kPan) == TouchAction::kNone) {
+    // Stylus writing or move cursor are applicable only when touch action
+    // allows panning in at least one direction.
+    effective_pan_action = mojom::blink::PanAction::kNone;
+  } else if ((effective_touch_action & TouchAction::kInternalNotWritable) !=
+             TouchAction::kInternalNotWritable) {
+    // kInternalNotWritable bit is re-enabled, if tool type is not stylus.
+    // Hence, if this bit is not set, stylus writing is possible.
+    effective_pan_action = mojom::blink::PanAction::kStylusWritable;
+  } else if ((effective_touch_action & TouchAction::kInternalPanXScrolls) !=
+             TouchAction::kInternalPanXScrolls) {
+    effective_pan_action = mojom::blink::PanAction::kMoveCursorOrScroll;
+  } else {
+    effective_pan_action = mojom::blink::PanAction::kScroll;
+  }
+
+  frame_->GetChromeClient().SetPanAction(frame_, effective_pan_action);
+}
+
 WebInputEventResult PointerEventManager::SendMousePointerEvent(
     Element* target,
     const WebInputEvent::Type event_type,
@@ -820,7 +893,6 @@ WebInputEventResult PointerEventManager::SendMousePointerEvent(
   if ((event_type == WebInputEvent::Type::kPointerDown ||
        event_type == WebInputEvent::Type::kPointerUp) &&
       pointer_event->type() == event_type_names::kPointermove &&
-      RuntimeEnabledFeatures::PointerRawUpdateEnabled() &&
       frame_->GetEventHandlerRegistry().HasEventHandlers(
           EventHandlerRegistry::kPointerRawUpdateEvent)) {
     // This is a chorded button move event. We need to also send a
@@ -869,9 +941,11 @@ WebInputEventResult PointerEventManager::SendMousePointerEvent(
     }
     if (!skip_click_dispatch && mouse_target &&
         event_type == WebInputEvent::Type::kPointerUp) {
+      Element* captured_click_target = GetEffectiveTargetForPointerEvent(
+          nullptr, pointer_event->pointerId());
       mouse_event_manager_->DispatchMouseClickIfNeeded(
-          mouse_target, mouse_event, pointer_event->pointerId(),
-          pointer_event->pointerType());
+          mouse_target, captured_click_target, mouse_event,
+          pointer_event->pointerId(), pointer_event->pointerType());
     }
   }
 
@@ -1034,11 +1108,6 @@ bool PointerEventManager::SetPointerCapture(PointerId pointer_id,
   if (explicit_capture) {
     UseCounter::Count(frame_->GetDocument(),
                       WebFeature::kPointerEventSetCapture);
-    if (pointer_id == PointerEventFactory::kMouseId &&
-        target != mouse_event_manager_->MouseDownElement()) {
-      UseCounter::Count(frame_->GetDocument(),
-                        WebFeature::kExplicitPointerCaptureClickTargetDiff);
-    }
   }
   if (pointer_event_factory_.IsActiveButtonsState(pointer_id)) {
     if (pointer_id != dispatching_pointer_id_) {
@@ -1114,7 +1183,7 @@ bool PointerEventManager::PrimaryPointerdownCanceled(
   // It's safe to assume that uniqueTouchEventIds won't wrap back to 0 from
   // 2^32-1 (>4.2 billion): even with a generous 100 unique ids per touch
   // sequence & one sequence per 10 second, it takes 13+ years to wrap back.
-  while (!touch_ids_for_canceled_pointerdowns_.IsEmpty()) {
+  while (!touch_ids_for_canceled_pointerdowns_.empty()) {
     uint32_t first_id = touch_ids_for_canceled_pointerdowns_.front();
     if (first_id > unique_touch_event_id)
       return false;
@@ -1154,6 +1223,10 @@ void PointerEventManager::SetGestureManager(GestureManager* gesture_manager) {
 int PointerEventManager::GetPointerEventId(
     const WebPointerProperties& web_pointer_properties) const {
   return pointer_event_factory_.GetPointerEventId(web_pointer_properties);
+}
+
+Element* PointerEventManager::CurrentTouchDownElement() {
+  return touch_event_manager_->CurrentTouchDownElement();
 }
 
 }  // namespace blink

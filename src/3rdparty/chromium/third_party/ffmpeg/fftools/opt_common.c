@@ -51,6 +51,9 @@
 #include "libavdevice/avdevice.h"
 #include "libavdevice/version.h"
 
+#include "libavfilter/avfilter.h"
+#include "libavfilter/version.h"
+
 #include "libswscale/swscale.h"
 #include "libswscale/version.h"
 
@@ -332,9 +335,12 @@ static void print_codec(const AVCodec *c)
         printf("    Supported hardware devices: ");
         for (int i = 0;; i++) {
             const AVCodecHWConfig *config = avcodec_get_hw_config(c, i);
+            const char *name;
             if (!config)
                 break;
-            printf("%s ", av_hwdevice_get_type_name(config->device_type));
+            name = av_hwdevice_get_type_name(config->device_type);
+            if (name)
+                printf("%s ", name);
         }
         printf("\n");
     }
@@ -636,10 +642,8 @@ static unsigned get_codecs_sorted(const AVCodecDescriptor ***rcodecs)
 
     while ((desc = avcodec_descriptor_next(desc)))
         nb_codecs++;
-    if (!(codecs = av_calloc(nb_codecs, sizeof(*codecs)))) {
-        av_log(NULL, AV_LOG_ERROR, "Out of memory\n");
-        exit_program(1);
-    }
+    if (!(codecs = av_calloc(nb_codecs, sizeof(*codecs))))
+        report_and_exit(AVERROR(ENOMEM));
     desc = NULL;
     while ((desc = avcodec_descriptor_next(desc)))
         codecs[i++] = desc;
@@ -672,6 +676,8 @@ int show_codecs(void *optctx, const char *opt, const char *arg)
            " ..V... = Video codec\n"
            " ..A... = Audio codec\n"
            " ..S... = Subtitle codec\n"
+           " ..D... = Data codec\n"
+           " ..T... = Attachment codec\n"
            " ...I.. = Intra frame-only codec\n"
            " ....L. = Lossy compression\n"
            " .....S = Lossless compression\n"

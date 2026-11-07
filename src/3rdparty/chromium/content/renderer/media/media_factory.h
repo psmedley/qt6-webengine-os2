@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "build/buildflag.h"
 #include "build/chromecast_buildflags.h"
 #include "components/viz/common/surfaces/surface_id.h"
+#include "media/base/media_player_logging_id.h"
 #include "media/base/renderer_factory_selector.h"
 #include "media/base/routing_token_callback.h"
 #include "media/media_buildflags.h"
@@ -26,7 +27,7 @@
 
 #if BUILDFLAG(ENABLE_MEDIA_REMOTING)
 // Needed by remoting sender.
-#include "media/mojo/mojom/remoting.mojom.h"
+#include "media/mojo/mojom/remoting.mojom.h"  // nogncheck
 #endif  // BUILDFLAG(ENABLE_MEDIA_REMOTING)
 
 namespace blink {
@@ -42,9 +43,13 @@ class WebMediaPlayerClient;
 class WebMediaPlayerEncryptedMediaClient;
 }  // namespace blink
 
+namespace cast_streaming {
+class ResourceProvider;
+}  // namespace cast_streaming
+
 namespace cc {
 class LayerTreeSettings;
-}
+}  // namespace cc
 
 namespace media {
 class CdmFactory;
@@ -100,7 +105,8 @@ class MediaFactory {
       viz::FrameSinkId parent_frame_sink_id,
       const cc::LayerTreeSettings& settings,
       scoped_refptr<base::SingleThreadTaskRunner>
-          main_thread_compositor_task_runner);
+          main_thread_compositor_task_runner,
+      scoped_refptr<base::TaskRunner> compositor_worker_task_runner);
 
   // Provides an EncryptedMediaClient to connect blink's EME layer to media's
   // implementation of requestMediaKeySystemAccess. Will always return the same
@@ -108,10 +114,15 @@ class MediaFactory {
   blink::WebEncryptedMediaClient* EncryptedMediaClient();
 
   // Returns `DecoderFactory`, which can be used to created decoders in WebRTC.
+  // Can be dereferenced only on the media thread.
   base::WeakPtr<media::DecoderFactory> GetDecoderFactory();
 
  private:
+  // Initializes `decoder_factory_` if it hasn't been initialized yet.
+  void EnsureDecoderFactory();
+
   std::unique_ptr<media::RendererFactorySelector> CreateRendererFactorySelector(
+      media::MediaPlayerLoggingID player_id,
       media::MediaLog* media_log,
       blink::WebURL url,
       const RenderFrameMediaPlaybackOptions& renderer_media_playback_options,
@@ -127,7 +138,8 @@ class MediaFactory {
       viz::FrameSinkId parent_frame_sink_id,
       const cc::LayerTreeSettings& settings,
       scoped_refptr<base::SingleThreadTaskRunner>
-          main_thread_compositor_task_runner);
+          main_thread_compositor_task_runner,
+      scoped_refptr<base::TaskRunner> compositor_worker_task_runner);
 
   // Returns the media delegate for WebMediaPlayer usage.  If
   // |media_player_delegate_| is NULL, one is created.
@@ -179,6 +191,9 @@ class MediaFactory {
   // process. Always use the GetRemoterFactory() accessor instead of this.
   mojo::Remote<media::mojom::RemoterFactory> remoter_factory_;
 #endif
+
+  std::unique_ptr<cast_streaming::ResourceProvider>
+      cast_streaming_resource_provider_;
 };
 
 }  // namespace content

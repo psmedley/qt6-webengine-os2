@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@
 #include "device/gamepad/gamepad_service.h"
 #include "services/device/device_service_test_base.h"
 #include "services/device/hid/hid_manager_impl.h"
-#include "services/device/hid/mock_hid_service.h"
+#include "services/device/public/cpp/test/mock_hid_service.h"
 #include "services/device/public/mojom/hid.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 

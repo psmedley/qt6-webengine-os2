@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,16 +19,6 @@
 namespace ui {
 namespace {
 
-#if BUILDFLAG(IS_WIN)
-const base::FilePath::CharType kDefaultEglSoname[] =
-    FILE_PATH_LITERAL("libEGL.dll");
-const base::FilePath::CharType kDefaultGlesSoname[] =
-    FILE_PATH_LITERAL("libGLESv2.dll");
-const base::FilePath::CharType kAngleEglSoname[] =
-    FILE_PATH_LITERAL("libEGL.dll");
-const base::FilePath::CharType kAngleGlesSoname[] =
-    FILE_PATH_LITERAL("libGLESv2.dll");
-#else
 #if BUILDFLAG(IS_FUCHSIA)
 const base::FilePath::CharType kDefaultEglSoname[] =
     FILE_PATH_LITERAL("libEGL.so");
@@ -44,7 +34,6 @@ const base::FilePath::CharType kAngleEglSoname[] =
     FILE_PATH_LITERAL("libEGL.so");
 const base::FilePath::CharType kAngleGlesSoname[] =
     FILE_PATH_LITERAL("libGLESv2.so");
-#endif  // BUILDFLAG(IS_WIN)
 
 bool LoadEGLGLES2Bindings(const base::FilePath& egl_library_path,
                           const base::FilePath& gles_library_path) {

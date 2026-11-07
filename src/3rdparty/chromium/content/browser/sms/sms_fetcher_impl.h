@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,12 +42,12 @@ class CONTENT_EXPORT SmsFetcherImpl : public content::SmsFetcher,
   // Called by devices that do not have telephony capabilities and exclusively
   // listen for SMSes received on other devices.
   void Subscribe(const OriginList& origin_list,
-                 Subscriber* subscriber) override;
+                 Subscriber& subscriber) override;
   // Called by |WebOTPService| to fetch SMSes retrieved by the SmsProvider from
   // the requested device.
   void Subscribe(const OriginList& origin_list,
-                 Subscriber* subscriber,
-                 RenderFrameHost* rfh) override;
+                 Subscriber& subscriber,
+                 RenderFrameHost& rfh) override;
   void Unsubscribe(const OriginList& origin_list,
                    Subscriber* subscriber) override;
 

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/check.h"
 #include "base/guid.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_piece.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/sync/protocol/bookmark_specifics.pb.h"
@@ -126,7 +127,7 @@ class LazySyncIdToGuidMapInUpdates {
     }
   }
 
-  const syncer::UpdateResponseDataList* const updates_;
+  const raw_ptr<const syncer::UpdateResponseDataList> updates_;
   bool initialized_ = false;
   std::
       unordered_map<base::StringPiece, base::StringPiece, base::StringPieceHash>

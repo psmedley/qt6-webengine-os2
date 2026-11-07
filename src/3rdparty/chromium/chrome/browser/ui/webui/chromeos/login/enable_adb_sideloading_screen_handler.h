@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,6 @@
 
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
-
-namespace ash {
-class EnableAdbSideloadingScreen;
-}
 
 namespace chromeos {
 
@@ -30,9 +26,6 @@ class EnableAdbSideloadingScreenView
   virtual ~EnableAdbSideloadingScreenView() = default;
 
   virtual void Show() = 0;
-  virtual void Hide() = 0;
-  virtual void Bind(ash::EnableAdbSideloadingScreen* screen) = 0;
-  virtual void Unbind() = 0;
   virtual void SetScreenState(UIState value) = 0;
 };
 
@@ -53,19 +46,11 @@ class EnableAdbSideloadingScreenHandler : public EnableAdbSideloadingScreenView,
 
   // EnableAdbSideloadingScreenView implementation:
   void Show() override;
-  void Hide() override;
-  void Bind(ash::EnableAdbSideloadingScreen* delegate) override;
-  void Unbind() override;
   void SetScreenState(UIState value) override;
 
   // BaseScreenHandler implementation:
   void DeclareLocalizedValues(
       ::login::LocalizedValuesBuilder* builder) override;
-  void InitializeDeprecated() override;
-
- private:
-  // Keeps whether screen should be shown right after initialization.
-  bool show_on_init_ = false;
 };
 
 }  // namespace chromeos

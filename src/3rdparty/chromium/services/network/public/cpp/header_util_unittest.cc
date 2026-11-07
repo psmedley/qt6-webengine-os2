@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,6 +67,7 @@ TEST(HeaderUtilTest, AreRequestHeadersSafe) {
       {"Cookie2", "tastiness=5", false},
       {"Keep-Alive", "timeout=5, max=1000", false},
       {net::HttpRequestHeaders::kTransferEncoding, "gzip", false},
+      {"Set-Cookie", "foo=bar", false},
 
       {net::HttpRequestHeaders::kConnection, "Upgrade", false},
       {net::HttpRequestHeaders::kConnection, "Close", true},

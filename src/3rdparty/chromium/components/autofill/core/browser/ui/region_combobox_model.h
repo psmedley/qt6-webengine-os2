@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,9 +51,9 @@ class RegionComboboxModel : public ui::ComboboxModel {
   }
 
   // ui::ComboboxModel implementation:
-  int GetItemCount() const override;
-  std::u16string GetItemAt(int index) const override;
-  bool IsItemSeparatorAt(int index) const override;
+  size_t GetItemCount() const override;
+  std::u16string GetItemAt(size_t index) const override;
+  bool IsItemSeparatorAt(size_t index) const override;
 
  private:
   // Callback for the RegionDataLoader.

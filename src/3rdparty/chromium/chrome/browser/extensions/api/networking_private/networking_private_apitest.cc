@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -162,49 +162,53 @@ class TestNetworkingPrivateDelegate : public NetworkingPrivateDelegate {
     VoidResult(std::move(success_callback), std::move(failure_callback));
   }
 
-  // Synchronous methods
-  base::Value GetEnabledNetworkTypes() override {
+  void GetEnabledNetworkTypes(EnabledNetworkTypesCallback callback) override {
     base::Value result(base::Value::Type::LIST);
     if (!fail_) {
       result.Append(::onc::network_config::kEthernet);
     }
-    return result;
+    std::move(callback).Run(base::Value::ToUniquePtrValue(std::move(result)));
   }
 
-  std::unique_ptr<DeviceStateList> GetDeviceStateList() override {
+  void GetDeviceStateList(DeviceStateListCallback callback) override {
     std::unique_ptr<DeviceStateList> result;
-    if (fail_)
-      return result;
-    result = std::make_unique<DeviceStateList>();
-    std::unique_ptr<api::networking_private::DeviceStateProperties> properties(
-        new api::networking_private::DeviceStateProperties);
-    properties->type = api::networking_private::NETWORK_TYPE_ETHERNET;
-    properties->state = api::networking_private::DEVICE_STATE_TYPE_ENABLED;
-    result->push_back(std::move(properties));
-    return result;
+    if (!fail_) {
+      result = std::make_unique<DeviceStateList>();
+      std::unique_ptr<api::networking_private::DeviceStateProperties>
+          properties(new api::networking_private::DeviceStateProperties);
+      properties->type = api::networking_private::NETWORK_TYPE_ETHERNET;
+      properties->state = api::networking_private::DEVICE_STATE_TYPE_ENABLED;
+      result->push_back(std::move(properties));
+    }
+    std::move(callback).Run(std::move(result));
   }
 
-  base::Value GetGlobalPolicy() override {
-    return base::Value(base::Value::Type::DICTIONARY);
+  void GetGlobalPolicy(GetGlobalPolicyCallback callback) override {
+    std::move(callback).Run(base::Value::ToUniquePtrValue(
+        base::Value(base::Value::Type::DICTIONARY)));
   }
 
-  base::Value GetCertificateLists() override {
-    return base::Value(base::Value::Type::DICTIONARY);
+  void GetCertificateLists(GetCertificateListsCallback callback) override {
+    std::move(callback).Run(base::Value::ToUniquePtrValue(
+        base::Value(base::Value::Type::DICTIONARY)));
   }
 
-  bool EnableNetworkType(const std::string& type) override {
+  // Synchronous methods
+  void EnableNetworkType(const std::string& type,
+                         BoolCallback callback) override {
     enabled_[type] = true;
-    return !fail_;
+    std::move(callback).Run(!fail_);
   }
 
-  bool DisableNetworkType(const std::string& type) override {
+  void DisableNetworkType(const std::string& type,
+                          BoolCallback callback) override {
     disabled_[type] = true;
-    return !fail_;
+    std::move(callback).Run(!fail_);
   }
 
-  bool RequestScan(const std::string& type) override {
+  void RequestScan(const std::string& type, BoolCallback callback) override {
     scan_requested_.push_back(type);
-    return !fail_;
+    std::move(callback).Run(!fail_);
   }
 
   void set_fail(bool fail) { fail_ = fail; }
@@ -313,9 +317,9 @@ class NetworkingPrivateApiTest : public ExtensionApiTest {
 
  protected:
   bool RunNetworkingSubtest(const std::string& subtest) {
-    const std::string page_url = "main.html?" + subtest;
+    const std::string extension_url = "main.html?" + subtest;
     return RunExtensionTest("networking_private",
-                            {.page_url = page_url.c_str()},
+                            {.extension_url = extension_url.c_str()},
                             {.load_as_component = true});
   }
 

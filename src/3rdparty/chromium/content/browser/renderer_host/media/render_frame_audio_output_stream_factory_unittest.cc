@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,8 +54,7 @@ class RenderFrameAudioOutputStreamFactoryTest
                        &log_factory_),
         audio_system_(media::AudioSystemImpl::CreateInstance()),
         media_stream_manager_(
-            std::make_unique<MediaStreamManager>(audio_system_.get(),
-                                                 GetUIThreadTaskRunner({}))) {}
+            std::make_unique<MediaStreamManager>(audio_system_.get())) {}
 
   ~RenderFrameAudioOutputStreamFactoryTest() override {}
 

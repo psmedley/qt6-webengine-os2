@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -108,6 +108,7 @@ class DevToolsAgent::IOAgent : public mojom::blink::DevToolsAgent {
       mojo::PendingReceiver<mojom::blink::DevToolsSession> io_session,
       mojom::blink::DevToolsSessionStatePtr reattach_session_state,
       bool client_expects_binary_responses,
+      bool client_is_trusted,
       const WTF::String& session_id) override {
     DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
     DCHECK(receiver_.is_bound());
@@ -115,7 +116,7 @@ class DevToolsAgent::IOAgent : public mojom::blink::DevToolsAgent {
         &::blink::DevToolsAgent::AttachDevToolsSessionImpl, agent_,
         std::move(host), std::move(main_session), std::move(io_session),
         std::move(reattach_session_state), client_expects_binary_responses,
-        session_id));
+        client_is_trusted, session_id));
   }
 
   void InspectElement(const gfx::Point& point) override {
@@ -196,8 +197,8 @@ void DevToolsAgent::BindReceiverForWorker(
   DCHECK(!associated_receiver_.is_bound());
 
   host_remote_.Bind(std::move(host_remote), std::move(task_runner));
-  host_remote_.set_disconnect_handler(
-      WTF::Bind(&DevToolsAgent::CleanupConnection, WrapWeakPersistent(this)));
+  host_remote_.set_disconnect_handler(WTF::BindOnce(
+      &DevToolsAgent::CleanupConnection, WrapWeakPersistent(this)));
 
   io_agent_ =
       new IOAgent(io_task_runner_, inspector_task_runner_,
@@ -211,8 +212,8 @@ void DevToolsAgent::BindReceiver(
   DCHECK(!associated_receiver_.is_bound());
   associated_receiver_.Bind(std::move(receiver), task_runner);
   associated_host_remote_.Bind(std::move(host_remote), task_runner);
-  associated_host_remote_.set_disconnect_handler(
-      WTF::Bind(&DevToolsAgent::CleanupConnection, WrapWeakPersistent(this)));
+  associated_host_remote_.set_disconnect_handler(WTF::BindOnce(
+      &DevToolsAgent::CleanupConnection, WrapWeakPersistent(this)));
 }
 
 void DevToolsAgent::AttachDevToolsSessionImpl(
@@ -222,13 +223,14 @@ void DevToolsAgent::AttachDevToolsSessionImpl(
     mojo::PendingReceiver<mojom::blink::DevToolsSession> io_session_receiver,
     mojom::blink::DevToolsSessionStatePtr reattach_session_state,
     bool client_expects_binary_responses,
+    bool client_is_trusted,
     const WTF::String& session_id) {
   TRACE_EVENT0("devtools", "Agent::AttachDevToolsSessionImpl");
   client_->DebuggerTaskStarted();
   DevToolsSession* session = MakeGarbageCollected<DevToolsSession>(
       this, std::move(host), std::move(session_receiver),
       std::move(io_session_receiver), std::move(reattach_session_state),
-      client_expects_binary_responses, session_id,
+      client_expects_binary_responses, client_is_trusted, session_id,
       inspector_task_runner_->isolate_task_runner());
   sessions_.insert(session);
   client_->DebuggerTaskFinished();
@@ -241,18 +243,19 @@ void DevToolsAgent::AttachDevToolsSession(
     mojo::PendingReceiver<mojom::blink::DevToolsSession> io_session_receiver,
     mojom::blink::DevToolsSessionStatePtr reattach_session_state,
     bool client_expects_binary_responses,
+    bool client_is_trusted,
     const WTF::String& session_id) {
   TRACE_EVENT0("devtools", "Agent::AttachDevToolsSession");
   if (associated_receiver_.is_bound()) {
-    AttachDevToolsSessionImpl(std::move(host), std::move(session_receiver),
-                              std::move(io_session_receiver),
-                              std::move(reattach_session_state),
-                              client_expects_binary_responses, session_id);
+    AttachDevToolsSessionImpl(
+        std::move(host), std::move(session_receiver),
+        std::move(io_session_receiver), std::move(reattach_session_state),
+        client_expects_binary_responses, client_is_trusted, session_id);
   } else {
     io_agent_->AttachDevToolsSession(
         std::move(host), std::move(session_receiver),
         std::move(io_session_receiver), std::move(reattach_session_state),
-        client_expects_binary_responses, session_id);
+        client_expects_binary_responses, client_is_trusted, session_id);
   }
 }
 

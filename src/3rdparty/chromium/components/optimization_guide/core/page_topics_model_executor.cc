@@ -1,12 +1,16 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/optimization_guide/core/page_topics_model_executor.h"
 
+#include <ctype.h>
+
 #include "base/barrier_closure.h"
+#include "base/containers/contains.h"
 #include "base/files/file_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "components/optimization_guide/core/optimization_guide_model_provider.h"
 #include "components/optimization_guide/proto/models.pb.h"
 #include "components/optimization_guide/proto/page_topics_model_metadata.pb.h"
@@ -21,6 +25,10 @@ namespace {
 // Semantically, the none category is attached to data for which we can say
 // with certainty that no single label in the taxonomy is appropriate.
 const int32_t kNoneCategoryId = -2;
+
+// The |kMeaninglessPrefixV2MinVersion| needed to support meaningless prefix v2.
+// This should be compared with the version provided the model metadata.
+const int32_t kMeaninglessPrefixV2MinVersion = 2;
 
 const base::FilePath::CharType kOverrideListBasePath[] =
     FILE_PATH_LITERAL("override_list.pb.gz");
@@ -89,6 +97,45 @@ LoadOverrideListFromFile(const base::FilePath& path) {
   return override_list;
 }
 
+// Returns the length of the leading meaningless prefix of a host name as
+// defined for the Topics Model.
+//
+// The full list of meaningless prefixes are:
+//   ^(www[0-9]*|web|ftp|wap|home)$
+//   ^(m|mobile|amp|w)$
+int MeaninglessPrefixLength(const std::string& host) {
+  size_t len = host.size();
+
+  int dots = std::count(host.begin(), host.end(), '.');
+  if (dots < 2) {
+    return 0;
+  }
+
+  if (len > 4 && base::StartsWith(host, "www")) {
+    // Check that all characters after "www" and up to first "." are
+    // digits.
+    for (size_t i = 3; i < len; ++i) {
+      if (host[i] == '.') {
+        return i + 1;
+      }
+      if (!isdigit(host[i])) {
+        return 0;
+      }
+    }
+  } else {
+    static const auto* kMeaninglessPrefixesLenMap = new std::set<std::string>(
+        {"web", "ftp", "wap", "home", "m", "w", "amp", "mobile"});
+
+    size_t prefix_len = host.find('.');
+    std::string prefix = host.substr(0, prefix_len);
+    const auto& it = kMeaninglessPrefixesLenMap->find(prefix);
+    if (it != kMeaninglessPrefixesLenMap->end() && len > it->size() + 1) {
+      return it->size() + 1;
+    }
+  }
+  return 0;
+}
+
 }  // namespace
 
 PageTopicsModelExecutor::PageTopicsModelExecutor(
@@ -125,24 +172,55 @@ void PageTopicsModelExecutor::ExecuteJob(
       std::move(on_job_complete_callback), std::move(job));
 }
 
+std::string PageTopicsModelExecutor::PreprocessHost(
+    const std::string& host) const {
+  std::string output = base::ToLowerASCII(host);
+
+  // Meaningless prefix v2 is only supported/required for
+  // |kMeaninglessPrefixV2MinVersion| and on.
+  if (version_ >= kMeaninglessPrefixV2MinVersion) {
+    int idx = MeaninglessPrefixLength(output);
+    if (idx > 0) {
+      output = output.substr(idx);
+    }
+  } else {
+    // Strip the 'www.' if it exists.
+    if (base::StartsWith(output, "www.")) {
+      output = output.substr(4);
+    }
+  }
+
+  static const char kCharsToReplaceWithSpace[] = {'-', '_', '.', '+'};
+  for (char c : kCharsToReplaceWithSpace) {
+    std::replace(output.begin(), output.end(), c, ' ');
+  }
+
+  return output;
+}
+
 void PageTopicsModelExecutor::ExecuteOnSingleInput(
     AnnotationType annotation_type,
-    const std::string& input,
+    const std::string& raw_input,
     base::OnceCallback<void(const BatchAnnotationResult&)> callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(annotation_type, AnnotationType::kPageTopics);
 
+  // |processed_input| is needed by the override list and the model, but we pass
+  // the |raw_input| to where the BatchAnnotationResult is created so that the
+  // original input is passed back to the caller.
+  std::string processed_input = PreprocessHost(raw_input);
+
   if (override_list_) {
     DCHECK(override_list_file_path_);
-    auto iter = override_list_->find(input);
+    auto iter = override_list_->find(processed_input);
 
     base::UmaHistogramBoolean(
         "OptimizationGuide.PageTopicsOverrideList.UsedOverride",
         iter != override_list_->end());
 
     if (iter != override_list_->end()) {
-      std::move(callback).Run(
-          BatchAnnotationResult::CreatePageTopicsResult(input, iter->second));
+      std::move(callback).Run(BatchAnnotationResult::CreatePageTopicsResult(
+          raw_input, iter->second));
       return;
     }
   }
@@ -151,8 +229,8 @@ void PageTopicsModelExecutor::ExecuteOnSingleInput(
       base::BindOnce(&PageTopicsModelExecutor::
                          PostprocessCategoriesToBatchAnnotationResult,
                      weak_ptr_factory_.GetWeakPtr(), std::move(callback),
-                     annotation_type, input),
-      input);
+                     annotation_type, raw_input),
+      processed_input);
 }
 
 void PageTopicsModelExecutor::OnOverrideListLoadAttemptDone(
@@ -177,7 +255,7 @@ void PageTopicsModelExecutor::OnOverrideListLoadAttemptDone(
 void PageTopicsModelExecutor::PostprocessCategoriesToBatchAnnotationResult(
     base::OnceCallback<void(const BatchAnnotationResult&)> callback,
     AnnotationType annotation_type,
-    const std::string& input,
+    const std::string& raw_input,
     const absl::optional<std::vector<tflite::task::core::Category>>& output) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(annotation_type, AnnotationType::kPageTopics);
@@ -187,7 +265,7 @@ void PageTopicsModelExecutor::PostprocessCategoriesToBatchAnnotationResult(
     categories = ExtractCategoriesFromModelOutput(*output);
   }
   std::move(callback).Run(
-      BatchAnnotationResult::CreatePageTopicsResult(input, categories));
+      BatchAnnotationResult::CreatePageTopicsResult(raw_input, categories));
 }
 
 absl::optional<std::vector<WeightedIdentifier>>
@@ -336,6 +414,12 @@ void PageTopicsModelExecutor::OnModelUpdated(
   // New model, new override list.
   override_list_file_path_ = absl::nullopt;
   override_list_ = absl::nullopt;
+
+  absl::optional<proto::PageTopicsModelMetadata> model_metadata =
+      ParsedSupportedFeaturesForLoadedModel<proto::PageTopicsModelMetadata>();
+  if (model_metadata) {
+    version_ = model_metadata->version();
+  }
 
   for (const base::FilePath& path : model_info.GetAdditionalFiles()) {
     DCHECK(path.IsAbsolute());

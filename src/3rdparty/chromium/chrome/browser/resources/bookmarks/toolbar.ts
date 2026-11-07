@@ -1,11 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
+import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
 import 'chrome://resources/cr_elements/cr_toolbar/cr_toolbar_selection_overlay.js';
-import 'chrome://resources/cr_elements/icons.m.js';
-import './shared_style.js';
+import 'chrome://resources/cr_elements/icons.html.js';
+import './shared_style.css.js';
 import './strings.m.js';
 import 'chrome://resources/cr_elements/cr_toolbar/cr_toolbar.js';
 import 'chrome://resources/cr_elements/cr_toolbar/cr_toolbar_search_field.js';
@@ -89,7 +89,7 @@ export class BookmarksToolbarElement extends BookmarksToolbarElementBase {
       detail: {
         targetElement: e.target,
         source: MenuSource.TOOLBAR,
-      }
+      },
     }));
   }
 

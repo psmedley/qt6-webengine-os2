@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,6 @@
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/multiprocess_func_list.h"
 #include "testing/platform_test.h"
@@ -1132,7 +1131,7 @@ TEST_F(FileUtilTest, CopyDirectoryPermissions) {
   ASSERT_TRUE(GetPosixFilePermissions(file_name_to, &mode));
 #if BUILDFLAG(IS_APPLE)
   expected_mode = 0755;
-#elif BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#elif BUILDFLAG(IS_CHROMEOS)
   expected_mode = 0644;
 #else
   expected_mode = 0600;
@@ -1142,7 +1141,7 @@ TEST_F(FileUtilTest, CopyDirectoryPermissions) {
   ASSERT_TRUE(GetPosixFilePermissions(file2_name_to, &mode));
 #if BUILDFLAG(IS_APPLE)
   expected_mode = 0755;
-#elif BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#elif BUILDFLAG(IS_CHROMEOS)
   expected_mode = 0644;
 #else
   expected_mode = 0600;
@@ -1152,7 +1151,7 @@ TEST_F(FileUtilTest, CopyDirectoryPermissions) {
   ASSERT_TRUE(GetPosixFilePermissions(file3_name_to, &mode));
 #if BUILDFLAG(IS_APPLE)
   expected_mode = 0600;
-#elif BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#elif BUILDFLAG(IS_CHROMEOS)
   expected_mode = 0644;
 #else
   expected_mode = 0600;
@@ -1302,7 +1301,7 @@ TEST_F(FileUtilTest, CopyFileExecutablePermission) {
   int expected_mode;
 #if BUILDFLAG(IS_APPLE)
   expected_mode = 0755;
-#elif BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#elif BUILDFLAG(IS_CHROMEOS)
   expected_mode = 0644;
 #else
   expected_mode = 0600;
@@ -1320,7 +1319,7 @@ TEST_F(FileUtilTest, CopyFileExecutablePermission) {
   ASSERT_TRUE(GetPosixFilePermissions(dst, &mode));
 #if BUILDFLAG(IS_APPLE)
   expected_mode = 0755;
-#elif BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#elif BUILDFLAG(IS_CHROMEOS)
   expected_mode = 0644;
 #else
   expected_mode = 0600;
@@ -1338,7 +1337,7 @@ TEST_F(FileUtilTest, CopyFileExecutablePermission) {
   ASSERT_TRUE(GetPosixFilePermissions(dst, &mode));
 #if BUILDFLAG(IS_APPLE)
   expected_mode = 0600;
-#elif BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#elif BUILDFLAG(IS_CHROMEOS)
   expected_mode = 0644;
 #else
   expected_mode = 0600;
@@ -3111,6 +3110,33 @@ TEST_F(FileUtilTest, ReadFile) {
                      static_cast<int>(exact_buffer.size())));
 }
 
+TEST_F(FileUtilTest, ReadFileToBytes) {
+  const std::vector<uint8_t> kTestData = {'0', '1', '2', '3'};
+
+  FilePath file_path =
+      temp_dir_.GetPath().Append(FILE_PATH_LITERAL("ReadFileToStringTest"));
+  FilePath file_path_dangerous =
+      temp_dir_.GetPath()
+          .Append(FILE_PATH_LITERAL(".."))
+          .Append(temp_dir_.GetPath().BaseName())
+          .Append(FILE_PATH_LITERAL("ReadFileToStringTest"));
+
+  // Create test file.
+  ASSERT_TRUE(WriteFile(file_path, kTestData));
+
+  absl::optional<std::vector<uint8_t>> bytes = ReadFileToBytes(file_path);
+  ASSERT_TRUE(bytes.has_value());
+  EXPECT_EQ(kTestData, bytes);
+
+  // Write empty file.
+  ASSERT_TRUE(WriteFile(file_path, ""));
+  bytes = ReadFileToBytes(file_path);
+  ASSERT_TRUE(bytes.has_value());
+  EXPECT_TRUE(bytes->empty());
+
+  ASSERT_FALSE(ReadFileToBytes(file_path_dangerous));
+}
+
 TEST_F(FileUtilTest, ReadFileToString) {
   const char kTestData[] = "0123";
   std::string data;
@@ -4143,16 +4169,15 @@ TEST_F(FileUtilTest, PreReadFile_ExistingFile_NoSize) {
   FilePath text_file = temp_dir_.GetPath().Append(FPL("text_file"));
   CreateTextFile(text_file, bogus_content);
 
-  EXPECT_TRUE(PreReadFile(text_file, /*is_executable=*/false).succeeded());
+  EXPECT_TRUE(PreReadFile(text_file, /*is_executable=*/false));
 }
 
 TEST_F(FileUtilTest, PreReadFile_ExistingFile_ExactSize) {
   FilePath text_file = temp_dir_.GetPath().Append(FPL("text_file"));
   CreateTextFile(text_file, bogus_content);
 
-  EXPECT_TRUE(
-      PreReadFile(text_file, /*is_executable=*/false, std::size(bogus_content))
-          .succeeded());
+  EXPECT_TRUE(PreReadFile(text_file, /*is_executable=*/false,
+                          std::size(bogus_content)));
 }
 
 TEST_F(FileUtilTest, PreReadFile_ExistingFile_OverSized) {
@@ -4160,8 +4185,7 @@ TEST_F(FileUtilTest, PreReadFile_ExistingFile_OverSized) {
   CreateTextFile(text_file, bogus_content);
 
   EXPECT_TRUE(PreReadFile(text_file, /*is_executable=*/false,
-                          std::size(bogus_content) * 2)
-                  .succeeded());
+                          std::size(bogus_content) * 2));
 }
 
 TEST_F(FileUtilTest, PreReadFile_ExistingFile_UnderSized) {
@@ -4169,16 +4193,14 @@ TEST_F(FileUtilTest, PreReadFile_ExistingFile_UnderSized) {
   CreateTextFile(text_file, bogus_content);
 
   EXPECT_TRUE(PreReadFile(text_file, /*is_executable=*/false,
-                          std::size(bogus_content) / 2)
-                  .succeeded());
+                          std::size(bogus_content) / 2));
 }
 
 TEST_F(FileUtilTest, PreReadFile_ExistingFile_ZeroSize) {
   FilePath text_file = temp_dir_.GetPath().Append(FPL("text_file"));
   CreateTextFile(text_file, bogus_content);
 
-  EXPECT_TRUE(PreReadFile(text_file, /*is_executable=*/false, /*max_bytes=*/0)
-                  .succeeded());
+  EXPECT_TRUE(PreReadFile(text_file, /*is_executable=*/false, /*max_bytes=*/0));
 }
 
 TEST_F(FileUtilTest, PreReadFile_ExistingEmptyFile_NoSize) {
@@ -4193,14 +4215,25 @@ TEST_F(FileUtilTest, PreReadFile_ExistingEmptyFile_NoSize) {
 TEST_F(FileUtilTest, PreReadFile_ExistingEmptyFile_ZeroSize) {
   FilePath text_file = temp_dir_.GetPath().Append(FPL("text_file"));
   CreateTextFile(text_file, L"");
-  EXPECT_TRUE(PreReadFile(text_file, /*is_executable=*/false, /*max_bytes=*/0)
-                  .succeeded());
+  EXPECT_TRUE(PreReadFile(text_file, /*is_executable=*/false, /*max_bytes=*/0));
 }
 
 TEST_F(FileUtilTest, PreReadFile_InexistentFile) {
   FilePath inexistent_file = temp_dir_.GetPath().Append(FPL("inexistent_file"));
-  EXPECT_FALSE(
-      PreReadFile(inexistent_file, /*is_executable=*/false).succeeded());
+  EXPECT_FALSE(PreReadFile(inexistent_file, /*is_executable=*/false));
+}
+
+TEST_F(FileUtilTest, PreReadFile_Executable) {
+  FilePath exe_data_dir;
+  ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &exe_data_dir));
+  exe_data_dir = exe_data_dir.Append(FPL("pe_image_reader"));
+  ASSERT_TRUE(PathExists(exe_data_dir));
+
+  // Load a sample executable and confirm that it was successfully prefetched.
+  // `test_exe` is a Windows binary, which is fine in this case because only the
+  // Windows implementation treats binaries differently from other files.
+  const FilePath test_exe = exe_data_dir.Append(FPL("signed.exe"));
+  EXPECT_TRUE(PreReadFile(test_exe, /*is_executable=*/true));
 }
 
 // Test that temp files obtained racily are all unique (no interference between

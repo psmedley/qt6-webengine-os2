@@ -99,31 +99,35 @@ public:
     // the same origin and swizzle as the src view.
     static GrSurfaceProxyView Copy(GrRecordingContext* context,
                                    GrSurfaceProxyView src,
-                                   GrMipmapped mipMapped,
+                                   GrMipmapped mipmapped,
                                    SkIRect srcRect,
                                    SkBackingFit fit,
-                                   SkBudgeted budgeted) {
+                                   SkBudgeted budgeted,
+                                   std::string_view label) {
         auto copy = GrSurfaceProxy::Copy(context,
                                          src.refProxy(),
                                          src.origin(),
-                                         mipMapped,
+                                         mipmapped,
                                          srcRect,
                                          fit,
-                                         budgeted);
+                                         budgeted,
+                                         label);
         return {std::move(copy), src.origin(), src.swizzle()};
     }
 
     static GrSurfaceProxyView Copy(GrRecordingContext* rContext,
                                    GrSurfaceProxyView src,
-                                   GrMipmapped mipMapped,
+                                   GrMipmapped mipmapped,
                                    SkBackingFit fit,
-                                   SkBudgeted budgeted) {
+                                   SkBudgeted budgeted,
+                                   std::string_view label) {
         auto copy = GrSurfaceProxy::Copy(rContext,
                                          src.refProxy(),
                                          src.origin(),
-                                         mipMapped,
+                                         mipmapped,
                                          fit,
-                                         budgeted);
+                                         budgeted,
+                                         label);
         return {std::move(copy), src.origin(), src.swizzle()};
     }
 
@@ -133,10 +137,16 @@ public:
         return std::move(fProxy);
     }
 
+    using sk_is_trivially_relocatable = std::true_type;
+
 private:
     sk_sp<GrSurfaceProxy> fProxy;
     GrSurfaceOrigin fOrigin = kTopLeft_GrSurfaceOrigin;
     skgpu::Swizzle fSwizzle;
+
+    static_assert(::sk_is_trivially_relocatable<decltype(fProxy)>::value);
+    static_assert(::sk_is_trivially_relocatable<decltype(fOrigin)>::value);
+    static_assert(::sk_is_trivially_relocatable<decltype(fSwizzle)>::value);
 };
 
 #endif

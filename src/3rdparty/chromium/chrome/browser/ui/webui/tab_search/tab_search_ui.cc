@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,6 +57,8 @@ TabSearchUI::TabSearchUI(content::WebUI* web_ui)
       {"mediaRecording", IDS_TAB_AX_LABEL_MEDIA_RECORDING_FORMAT},
       {"audioMuting", IDS_TAB_AX_LABEL_AUDIO_MUTING_FORMAT},
       {"audioPlaying", IDS_TAB_AX_LABEL_AUDIO_PLAYING_FORMAT},
+      {"expandRecentlyClosed", IDS_TAB_SEARCH_EXPAND_RECENTLY_CLOSED},
+      {"collapseRecentlyClosed", IDS_TAB_SEARCH_COLLAPSE_RECENTLY_CLOSED},
 
   };
   source->AddLocalizedStrings(kStrings);
@@ -65,12 +67,11 @@ TabSearchUI::TabSearchUI(content::WebUI* web_ui)
   // Add the configuration parameters for fuzzy search.
   source->AddBoolean("useFuzzySearch", base::FeatureList::IsEnabled(
                                            features::kTabSearchFuzzySearch));
+
   source->AddBoolean(
-      "alsoShowMediaTabsinOpenTabsSection",
-      GetFieldTrialParamByFeatureAsBool(
-          features::kTabSearchMediaTabs,
-          features::kTabSearchAlsoShowMediaTabsinOpenTabsSectionParameterName,
-          false));
+      "useMetricsReporter",
+      base::FeatureList::IsEnabled(features::kTabSearchUseMetricsReporter));
+
   source->AddBoolean("searchIgnoreLocation",
                      features::kTabSearchSearchIgnoreLocation.Get());
   source->AddInteger("searchDistance",
@@ -124,6 +125,11 @@ void TabSearchUI::BindInterface(
   page_factory_receiver_.Bind(std::move(receiver));
 }
 
+void TabSearchUI::BindInterface(
+    mojo::PendingReceiver<metrics_reporter::mojom::PageMetricsHost> receiver) {
+  metrics_reporter_.BindInterface(std::move(receiver));
+}
+
 void TabSearchUI::CreatePageHandler(
     mojo::PendingRemote<tab_search::mojom::Page> page,
     mojo::PendingReceiver<tab_search::mojom::PageHandler> receiver) {
@@ -144,5 +150,5 @@ void TabSearchUI::CreatePageHandler(
   // TODO(tluk): Investigate whether we can avoid recreating this multiple times
   // per instance of the TabSearchUI.
   page_handler_ = std::make_unique<TabSearchPageHandler>(
-      std::move(receiver), std::move(page), web_ui(), this);
+      std::move(receiver), std::move(page), web_ui(), this, &metrics_reporter_);
 }

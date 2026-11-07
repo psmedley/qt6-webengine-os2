@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,6 +45,7 @@
 #include "crypto/sha2.h"
 #include "services/network/public/cpp/features.h"
 #include "storage/browser/blob/blob_storage_context.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 
 namespace content {
 
@@ -282,8 +283,7 @@ void BlockingGarbageCollect(
   }
 
   file_access_runner->PostTask(
-      FROM_HERE, base::BindOnce(base::GetDeletePathRecursivelyCallback(),
-                                trash_directory));
+      FROM_HERE, base::GetDeletePathRecursivelyCallback(trash_directory));
 }
 
 }  // namespace
@@ -394,8 +394,8 @@ void StoragePartitionImplMap::AsyncObliterate(
     active_partition->ClearData(
         // All except shader cache.
         ~StoragePartition::REMOVE_DATA_MASK_SHADER_CACHE,
-        StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL, GURL(), base::Time(),
-        base::Time::Max(), subtask_done_callback);
+        StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL, blink::StorageKey(),
+        base::Time(), base::Time::Max(), subtask_done_callback);
   }
 
   // Start a best-effort delete of the on-disk storage excluding paths that are
@@ -442,6 +442,17 @@ void StoragePartitionImplMap::ForEach(
        it != partitions_.end();
        ++it) {
     callback.Run(it->second.get());
+  }
+}
+
+void StoragePartitionImplMap::DisposeInMemory(StoragePartition* partition) {
+  for (PartitionMap::const_iterator it = partitions_.begin();
+       it != partitions_.end(); ++it) {
+    if (it->second.get() == partition) {
+      DCHECK(it->first.in_memory());
+      partitions_.erase(it);
+      return;
+    }
   }
 }
 

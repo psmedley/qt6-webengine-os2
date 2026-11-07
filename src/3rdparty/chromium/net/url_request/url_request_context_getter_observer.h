@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@ class URLRequestContextGetter;
 // URLRequestContextGetter is shutting down.
 class NET_EXPORT URLRequestContextGetterObserver {
  public:
-  URLRequestContextGetterObserver() {}
+  URLRequestContextGetterObserver() = default;
 
   URLRequestContextGetterObserver(const URLRequestContextGetterObserver&) =
       delete;
@@ -28,7 +28,7 @@ class NET_EXPORT URLRequestContextGetterObserver {
   virtual void OnContextShuttingDown() = 0;
 
  protected:
-  virtual ~URLRequestContextGetterObserver() {}
+  virtual ~URLRequestContextGetterObserver() = default;
 };
 
 }  // namespace net

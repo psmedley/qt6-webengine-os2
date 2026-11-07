@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "base/token.h"
 #include "base/version.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
@@ -23,12 +22,9 @@
 namespace content {
 
 #if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(USE_CHROMEOS_PROTECTED_MEDIA)
-// TODO(crbug.com/1231162): Remove the string identifier once we've migrated off
-// of the PluginPrivateFileSystem.
 // CdmType for Chrome OS.
-const CONTENT_EXPORT media::CdmType kChromeOsCdmType{
-    base::Token{0xa6ecd3fc63b3ded2ull, 0x9306d3270227ce5full},
-    "application_chromeos-cdm-factory-daemon"};
+const CONTENT_EXPORT media::CdmType kChromeOsCdmType{0xa6ecd3fc63b3ded2ull,
+                                                     0x9306d3270227ce5full};
 #endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(USE_CHROMEOS_PROTECTED_MEDIA)
 
 // Represents a Content Decryption Module implementation and its capabilities.

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/time/time.h"
 #include "components/browsing_topics/browsing_topics_calculator.h"
 #include "components/browsing_topics/browsing_topics_service.h"
+#include "components/browsing_topics/mojom/browsing_topics_internals.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/browsing_topics/browsing_topics.mojom.h"
@@ -33,13 +34,19 @@ class TesterBrowsingTopicsCalculator : public BrowsingTopicsCalculator {
       history::HistoryService* history_service,
       content::BrowsingTopicsSiteDataManager* site_data_manager,
       optimization_guide::PageContentAnnotationsService* annotations_service,
+      const base::circular_deque<EpochTopics>& epochs,
       CalculateCompletedCallback callback,
       base::queue<uint64_t> rand_uint64_queue);
 
   // Initialize a mock `BrowsingTopicsCalculator` (with mock result and delay).
-  TesterBrowsingTopicsCalculator(CalculateCompletedCallback callback,
-                                 EpochTopics mock_result,
-                                 base::TimeDelta mock_result_delay);
+  TesterBrowsingTopicsCalculator(
+      privacy_sandbox::PrivacySandboxSettings* privacy_sandbox_settings,
+      history::HistoryService* history_service,
+      content::BrowsingTopicsSiteDataManager* site_data_manager,
+      optimization_guide::PageContentAnnotationsService* annotations_service,
+      CalculateCompletedCallback callback,
+      EpochTopics mock_result,
+      base::TimeDelta mock_result_delay);
 
   ~TesterBrowsingTopicsCalculator() override;
 
@@ -66,7 +73,7 @@ class TesterBrowsingTopicsCalculator : public BrowsingTopicsCalculator {
   base::queue<uint64_t> rand_uint64_queue_;
 
   bool use_mock_result_ = false;
-  EpochTopics mock_result_;
+  EpochTopics mock_result_{base::Time()};
   base::TimeDelta mock_result_delay_;
   CalculateCompletedCallback finish_callback_;
 
@@ -80,7 +87,11 @@ class MockBrowsingTopicsService : public BrowsingTopicsService {
 
   MOCK_METHOD(std::vector<blink::mojom::EpochTopicPtr>,
               GetBrowsingTopicsForJsApi,
-              (const url::Origin&, content::RenderFrameHost*),
+              (const url::Origin&, content::RenderFrameHost*, bool),
+              (override));
+  MOCK_METHOD(void,
+              GetBrowsingTopicsStateForWebUi,
+              (bool, mojom::PageHandler::GetBrowsingTopicsStateCallback),
               (override));
   MOCK_METHOD(std::vector<privacy_sandbox::CanonicalTopic>,
               GetTopicsForSiteForDisplay,

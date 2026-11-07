@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,10 @@
 #include "base/notreached.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/thread_pool.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/webrtc/api/task_queue/queued_task.h"
 #include "third_party/webrtc/api/task_queue/task_queue_base.h"
 
 namespace blink {
@@ -46,12 +46,17 @@ class FakeTaskQueue : public webrtc::TaskQueueBase {
 
   void Delete() override { NOTREACHED(); }
 
-  void PostDelayedTask(std::unique_ptr<webrtc::QueuedTask> task,
-                       uint32_t milliseconds) override {
+  void PostDelayedTask(absl::AnyInvocable<void() &&> task,
+                       webrtc::TimeDelta delay) override {
     NOTREACHED();
   }
 
-  void PostTask(std::unique_ptr<webrtc::QueuedTask> task) override {
+  void PostDelayedHighPrecisionTask(absl::AnyInvocable<void() &&> task,
+                                    webrtc::TimeDelta delay) override {
+    NOTREACHED();
+  }
+
+  void PostTask(absl::AnyInvocable<void() &&> task) override {
     last_task_ = std::move(task);
     if (!retain_tasks_)
       PostLastTask();
@@ -59,21 +64,32 @@ class FakeTaskQueue : public webrtc::TaskQueueBase {
 
   void PostLastTask() {
     if (last_task_) {
-      runner_->PostTask(FROM_HERE,
-                        base::BindOnce(
-                            [](FakeTaskQueue* thiz,
-                               std::unique_ptr<webrtc::QueuedTask> task) {
-                              if (!task->Run())
-                                task.release();
-                            },
-                            base::Unretained(this), std::move(last_task_)));
+      PostOnRunner(
+          FROM_HERE,
+          base::BindOnce(
+              [](FakeTaskQueue* thiz, absl::AnyInvocable<void() &&> task) {
+                webrtc::TaskQueueBase::CurrentTaskQueueSetter setter(thiz);
+                std::move(task)();
+              },
+              base::Unretained(this), std::move(last_task_)));
     }
+  }
+
+  void PostOnRunner(base::Location from_here, base::OnceClosure cb) {
+    runner_->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            [](FakeTaskQueue* thiz, base::OnceClosure cb) {
+              webrtc::TaskQueueBase::CurrentTaskQueueSetter setter(thiz);
+              std::move(cb).Run();
+            },
+            base::Unretained(this), std::move(cb)));
   }
 
  private:
   const bool retain_tasks_;
   scoped_refptr<base::SequencedTaskRunner> runner_;
-  std::unique_ptr<webrtc::QueuedTask> last_task_;
+  absl::AnyInvocable<void() &&> last_task_;
 };
 
 class FakeTickListener : public webrtc::Metronome::TickListener {
@@ -330,7 +346,10 @@ TEST_F(MetronomeSourceTest, WebRtcMetronomeAdapterAddsHandler) {
   auto metronome_adapter = metronome_source_->CreateWebRtcMetronome();
 
   EXPECT_FALSE(metronome_source_->HasListenersForTesting());
-  metronome_adapter->AddListener(&tick_listener);
+  fake_queue.PostOnRunner(FROM_HERE, base::BindLambdaForTesting([&] {
+                            metronome_adapter->AddListener(&tick_listener);
+                          }));
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(metronome_source_->HasListenersForTesting());
 
   // Next tick should trigger callback.
@@ -342,7 +361,9 @@ TEST_F(MetronomeSourceTest, WebRtcMetronomeAdapterAddsHandler) {
   EXPECT_EQ(11, callback_count);
 
   // Removing should not fire callback.
-  metronome_adapter->RemoveListener(&tick_listener);
+  fake_queue.PostOnRunner(FROM_HERE, base::BindLambdaForTesting([&] {
+                            metronome_adapter->RemoveListener(&tick_listener);
+                          }));
   task_environment_.FastForwardBy(MetronomeSource::Tick());
   EXPECT_EQ(11, callback_count);
 
@@ -361,7 +382,9 @@ TEST_F(MetronomeSourceTest,
       &fake_queue);
   auto metronome_adapter = metronome_source_->CreateWebRtcMetronome();
 
-  metronome_adapter->AddListener(&tick_listener);
+  fake_queue.PostOnRunner(FROM_HERE, base::BindLambdaForTesting([&] {
+                            metronome_adapter->AddListener(&tick_listener);
+                          }));
   task_environment_.FastForwardBy(MetronomeSource::Tick());
   EXPECT_EQ(0, callback_count);
   // Now task should have been posted to fake queue. Running it should increase
@@ -377,7 +400,9 @@ TEST_F(MetronomeSourceTest,
   task_environment_.FastForwardBy(MetronomeSource::Tick());
   EXPECT_EQ(1, callback_count);
 
-  metronome_adapter->RemoveListener(&tick_listener);
+  fake_queue.PostOnRunner(FROM_HERE, base::BindLambdaForTesting([&] {
+                            metronome_adapter->RemoveListener(&tick_listener);
+                          }));
   fake_queue.PostLastTask();
   task_environment_.RunUntilIdle();
   EXPECT_EQ(1, callback_count);

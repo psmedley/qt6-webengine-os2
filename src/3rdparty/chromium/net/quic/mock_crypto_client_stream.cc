@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,8 +71,6 @@ MockCryptoClientStream::MockCryptoClientStream(
                              /*has_application_state = */ true),
       QuicCryptoHandshaker(this, session),
       handshake_mode_(handshake_mode),
-      encryption_established_(false),
-      handshake_confirmed_(false),
       crypto_negotiated_params_(new QuicCryptoNegotiatedParameters),
       use_mock_crypter_(use_mock_crypter),
       server_id_(server_id),
@@ -83,7 +81,7 @@ MockCryptoClientStream::MockCryptoClientStream(
   crypto_negotiated_params_->cipher_suite = 1;
 }
 
-MockCryptoClientStream::~MockCryptoClientStream() {}
+MockCryptoClientStream::~MockCryptoClientStream() = default;
 
 void MockCryptoClientStream::OnHandshakeMessage(
     const CryptoHandshakeMessage& message) {

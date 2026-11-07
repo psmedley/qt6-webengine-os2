@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -119,6 +119,24 @@ TEST_F(VariationsIdsProviderTest, ForceVariationIds_Invalid) {
             provider.ForceVariationIds({"12", "50"}, "tabc456"));
   provider.InitVariationIDsCacheIfNeeded();
   EXPECT_TRUE(provider.GetClientDataHeaders(/*is_signed_in=*/false).is_null());
+
+  // Duplicate experiment ids.
+  EXPECT_EQ(VariationsIdsProvider::ForceIdsResult::INVALID_VECTOR_ENTRY,
+            provider.ForceVariationIds({"1", "2", "t1"}, ""));
+  provider.InitVariationIDsCacheIfNeeded();
+  EXPECT_TRUE(provider.GetClientDataHeaders(/*is_signed_in=*/false).is_null());
+
+  // Duplicate command-line ids.
+  EXPECT_EQ(VariationsIdsProvider::ForceIdsResult::INVALID_SWITCH_ENTRY,
+            provider.ForceVariationIds({}, "t10,11,10"));
+  provider.InitVariationIDsCacheIfNeeded();
+  EXPECT_TRUE(provider.GetClientDataHeaders(/*is_signed_in=*/false).is_null());
+
+  // Duplicate experiment and command-line ids.
+  EXPECT_EQ(VariationsIdsProvider::ForceIdsResult::INVALID_SWITCH_ENTRY,
+            provider.ForceVariationIds({"20", "t21"}, "21"));
+  provider.InitVariationIDsCacheIfNeeded();
+  EXPECT_TRUE(provider.GetClientDataHeaders(/*is_signed_in=*/false).is_null());
 }
 
 TEST_F(VariationsIdsProviderTest, ForceDisableVariationIds_ValidCommandLine) {
@@ -194,12 +212,7 @@ TEST_P(VariationsIdsProviderTestWithRestrictedVisibility,
 
   // 3320983 is the offset value of kLowEntropySourceVariationIdRangeMin + 5.
   EXPECT_TRUE(base::Contains(variation_ids_first_party, 3320983));
-
-  // The value will be omitted from third-party contexts under
-  // kRestrictGoogleWebVisibility.
-  bool value_omitted =
-      base::FeatureList::IsEnabled(internal::kRestrictGoogleWebVisibility);
-  EXPECT_EQ(value_omitted, !base::Contains(variation_ids_any_context, 3320983));
+  EXPECT_TRUE(base::Contains(variation_ids_any_context, 3320983));
 }
 
 TEST_P(VariationsIdsProviderTestWithRestrictedVisibility,

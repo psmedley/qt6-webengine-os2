@@ -31,6 +31,8 @@
 #include "third_party/blink/renderer/platform/mediastream/media_constraints.h"
 
 #include <math.h>
+
+#include "base/containers/contains.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -118,7 +120,7 @@ MediaConstraintsPrivate::MediaConstraintsPrivate(
 bool MediaConstraintsPrivate::IsUnconstrained() const {
   // TODO(hta): When generating advanced constraints, make sure no empty
   // elements can be added to the m_advanced vector.
-  return basic_.IsUnconstrained() && advanced_.IsEmpty();
+  return basic_.IsUnconstrained() && advanced_.empty();
 }
 
 const MediaTrackConstraintSetPlatform& MediaConstraintsPrivate::Basic() const {
@@ -135,7 +137,7 @@ const String MediaConstraintsPrivate::ToString() const {
   if (!IsUnconstrained()) {
     builder.Append('{');
     builder.Append(Basic().ToString());
-    if (!Advanced().IsEmpty()) {
+    if (!Advanced().empty()) {
       if (builder.length() > 1)
         builder.Append(", ");
       builder.Append("advanced: [");
@@ -250,7 +252,7 @@ StringConstraint::StringConstraint(const char* name)
     : BaseConstraint(name), exact_(), ideal_() {}
 
 bool StringConstraint::Matches(String value) const {
-  if (exact_.IsEmpty()) {
+  if (exact_.empty()) {
     return true;
   }
   for (const auto& choice : exact_) {
@@ -262,7 +264,7 @@ bool StringConstraint::Matches(String value) const {
 }
 
 bool StringConstraint::IsUnconstrained() const {
-  return exact_.IsEmpty() && ideal_.IsEmpty();
+  return exact_.empty() && ideal_.empty();
 }
 
 const Vector<String>& StringConstraint::Exact() const {
@@ -276,7 +278,7 @@ const Vector<String>& StringConstraint::Ideal() const {
 String StringConstraint::ToString() const {
   StringBuilder builder;
   builder.Append('{');
-  if (!ideal_.IsEmpty()) {
+  if (!ideal_.empty()) {
     builder.Append("ideal: [");
     bool first = true;
     for (const auto& iter : ideal_) {
@@ -289,7 +291,7 @@ String StringConstraint::ToString() const {
     }
     builder.Append(']');
   }
-  if (!exact_.IsEmpty()) {
+  if (!exact_.empty()) {
     if (builder.length() > 1)
       builder.Append(", ");
     builder.Append("exact: [");
@@ -354,6 +356,7 @@ MediaTrackConstraintSetPlatform::MediaTrackConstraintSetPlatform()
       tilt("tilt"),
       zoom("zoom"),
       group_id("groupId"),
+      display_surface("displaySurface"),
       media_stream_source("mediaStreamSource"),
       render_to_associated_sink("chromeRenderToAssociatedSink"),
       goog_echo_cancellation("googEchoCancellation"),
@@ -365,45 +368,42 @@ MediaTrackConstraintSetPlatform::MediaTrackConstraintSetPlatform()
       goog_experimental_noise_suppression("googExperimentalNoiseSuppression"),
       goog_audio_mirroring("googAudioMirroring"),
       goog_da_echo_cancellation("googDAEchoCancellation"),
-      goog_noise_reduction("googNoiseReduction"),
-      offer_to_receive_audio("offerToReceiveAudio"),
-      offer_to_receive_video("offerToReceiveVideo"),
-      voice_activity_detection("voiceActivityDetection"),
-      ice_restart("iceRestart"),
-#if BUILDFLAG(IS_FUCHSIA)
-      // TODO(crbug.com/804275): Delete when Fuchsia no longer depends on it.
-      enable_dtls_srtp("enableDtlsSrtp"),
-#endif
-      enable_rtp_data_channels("enableRtpDataChannels"),
-      enable_i_pv6("enableIPv6"),
-      goog_enable_video_suspend_below_min_bitrate(
-          "googEnableVideoSuspendBelowMinBitrate"),
-      goog_screencast_min_bitrate("googScreencastMinBitrate"),
-      goog_cpu_overuse_detection("googCpuOveruseDetection") {
-}
+      goog_noise_reduction("googNoiseReduction") {}
 
 Vector<const BaseConstraint*> MediaTrackConstraintSetPlatform::AllConstraints()
     const {
-  return {
-    &width, &height, &aspect_ratio, &frame_rate, &facing_mode, &resize_mode,
-        &volume, &sample_rate, &sample_size, &echo_cancellation,
-        &echo_cancellation_type, &latency, &channel_count, &device_id,
-        &group_id, &media_stream_source, &disable_local_echo, &pan, &tilt,
-        &zoom, &render_to_associated_sink, &goog_echo_cancellation,
-        &goog_experimental_echo_cancellation, &goog_auto_gain_control,
-        &goog_experimental_auto_gain_control, &goog_noise_suppression,
-        &goog_highpass_filter, &goog_experimental_noise_suppression,
-        &goog_audio_mirroring, &goog_da_echo_cancellation,
-        &goog_noise_reduction, &offer_to_receive_audio, &offer_to_receive_video,
-        &voice_activity_detection, &ice_restart,
-#if BUILDFLAG(IS_FUCHSIA)
-        // TODO(crbug.com/804275): Delete when Fuchsia no longer depends on it.
-        &enable_dtls_srtp,
-#endif
-        &enable_rtp_data_channels, &enable_i_pv6,
-        &goog_enable_video_suspend_below_min_bitrate,
-        &goog_screencast_min_bitrate, &goog_cpu_overuse_detection
-  };
+  return {&width,
+          &height,
+          &aspect_ratio,
+          &frame_rate,
+          &facing_mode,
+          &resize_mode,
+          &volume,
+          &sample_rate,
+          &sample_size,
+          &echo_cancellation,
+          &echo_cancellation_type,
+          &latency,
+          &channel_count,
+          &device_id,
+          &group_id,
+          &display_surface,
+          &media_stream_source,
+          &disable_local_echo,
+          &pan,
+          &tilt,
+          &zoom,
+          &render_to_associated_sink,
+          &goog_echo_cancellation,
+          &goog_experimental_echo_cancellation,
+          &goog_auto_gain_control,
+          &goog_experimental_auto_gain_control,
+          &goog_noise_suppression,
+          &goog_highpass_filter,
+          &goog_experimental_noise_suppression,
+          &goog_audio_mirroring,
+          &goog_da_echo_cancellation,
+          &goog_noise_reduction};
 }
 
 bool MediaTrackConstraintSetPlatform::IsUnconstrained() const {
@@ -419,8 +419,7 @@ bool MediaTrackConstraintSetPlatform::HasMandatoryOutsideSet(
     String& found_name) const {
   for (auto* const constraint : AllConstraints()) {
     if (constraint->HasMandatory()) {
-      if (std::find(good_names.begin(), good_names.end(),
-                    constraint->GetName()) == good_names.end()) {
+      if (!base::Contains(good_names, constraint->GetName())) {
         found_name = constraint->GetName();
         return true;
       }

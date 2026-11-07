@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -261,7 +261,7 @@ pub trait MojomInterfaceSend<R: MojomMessage>: MojomInterface {
             return Err(MojomSendError::OldVersion(self.version(), R::min_version()));
         }
         let (buffer, handles) = self.create_request(req_id, payload);
-        match self.pipe().write(&buffer, handles, mpflags!(Write::None)) {
+        match self.pipe().write(&buffer, handles) {
             MojoResult::Okay => Ok(()),
             err => Err(MojomSendError::FailedWrite(err)),
         }
@@ -293,7 +293,7 @@ pub trait MojomInterfaceRecv: MojomInterface {
 
     /// Tries to read a message from a pipe and decodes it.
     fn recv_response(&self) -> Result<(u64, Self::Container), MojomRecvError> {
-        match self.pipe().read(mpflags!(Read::None)) {
+        match self.pipe().read() {
             Ok((buffer, handles)) => match Self::Container::decode_message(buffer, handles) {
                 Ok((req_id, val)) => Ok((req_id, val)),
                 Err(err) => Err(MojomRecvError::FailedValidation(err)),

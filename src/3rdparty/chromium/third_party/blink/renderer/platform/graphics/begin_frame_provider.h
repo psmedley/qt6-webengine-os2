@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,8 @@ struct BeginFrameProviderParams;
 class PLATFORM_EXPORT BeginFrameProviderClient : public GarbageCollectedMixin {
  public:
   virtual void BeginFrame(const viz::BeginFrameArgs&) = 0;
+  virtual scoped_refptr<base::SingleThreadTaskRunner>
+  GetCompositorTaskRunner() = 0;
   virtual ~BeginFrameProviderClient() = default;
 };
 

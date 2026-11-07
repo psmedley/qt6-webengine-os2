@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,18 @@
  * @fileoverview 'managed-dialog' is a dialog that is displayed when a user
  * interact with some UI features which are managed by the user's organization.
  */
-import '../../cr_elements/cr_button/cr_button.m.js';
-import '../../cr_elements/cr_dialog/cr_dialog.m.js';
-import '../../cr_elements/icons.m.js';
-import '../../cr_elements/shared_vars_css.m.js';
+import '../../cr_elements/cr_button/cr_button.js';
+import '../../cr_elements/cr_dialog/cr_dialog.js';
+import '../../cr_elements/icons.html.js';
+import '../../cr_elements/cr_shared_vars.css.js';
 import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
 
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {CrDialogElement} from '../../cr_elements/cr_dialog/cr_dialog.m.js';
-import {I18nMixin} from '../../js/i18n_mixin.js';
+import {CrDialogElement} from '../../cr_elements/cr_dialog/cr_dialog.js';
+import {I18nMixin} from '../../cr_elements/i18n_mixin.js';
+
+import {getTemplate} from './managed_dialog.html.js';
 
 export interface ManagedDialogElement {
   $: {
@@ -31,7 +33,7 @@ export class ManagedDialogElement extends ManagedDialogElementBase {
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   static get properties() {

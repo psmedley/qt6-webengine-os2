@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -32,12 +33,15 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
+#include "base/time/time.h"
+#include "base/timer/elapsed_timer.h"
 #include "base/trace_event/trace_event.h"
 #include "base/win/iat_patch_function.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/sid.h"
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
+#include "ppapi/buildflags/buildflags.h"
 #include "printing/buildflags/buildflags.h"
 #include "sandbox/features.h"
 #include "sandbox/policy/features.h"
@@ -151,8 +155,9 @@ const wchar_t* const kTroublesomeDlls[] = {
 };
 
 // This is for finch. See also crbug.com/464430 for details.
-const base::Feature kEnableCsrssLockdownFeature{
-    "EnableCsrssLockdown", base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kEnableCsrssLockdownFeature,
+             "EnableCsrssLockdown",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 #if !defined(NACL_WIN64)
 // Adds the policy rules for the path and path\ with the semantic |access|.
@@ -161,8 +166,9 @@ const base::Feature kEnableCsrssLockdownFeature{
 bool AddDirectory(int path,
                   const wchar_t* sub_dir,
                   bool children,
-                  TargetPolicy::Semantics access,
-                  TargetPolicy* policy) {
+                  Semantics access,
+                  TargetConfig* config) {
+  DCHECK(!config->IsConfigured());
   base::FilePath directory;
   if (!base::PathService::Get(path, &directory))
     return false;
@@ -171,8 +177,8 @@ bool AddDirectory(int path,
     directory = base::MakeAbsoluteFilePath(directory.Append(sub_dir));
 
   ResultCode result;
-  result = policy->AddRule(TargetPolicy::SUBSYS_FILES, access,
-                           directory.value().c_str());
+  result =
+      config->AddRule(SubSystem::kFiles, access, directory.value().c_str());
   if (result != SBOX_ALL_OK)
     return false;
 
@@ -181,8 +187,7 @@ bool AddDirectory(int path,
     directory_str += L"*";
   // Otherwise, add the version of the path that ends with a separator.
 
-  result = policy->AddRule(TargetPolicy::SUBSYS_FILES, access,
-                           directory_str.c_str());
+  result = config->AddRule(SubSystem::kFiles, access, directory_str.c_str());
   if (result != SBOX_ALL_OK)
     return false;
 
@@ -229,11 +234,12 @@ std::vector<std::wstring> GetShortNameVariants(const std::wstring& name) {
 // is also loaded in this process.
 void BlocklistAddOneDll(const wchar_t* module_name,
                         bool check_in_browser,
-                        TargetPolicy* policy) {
+                        TargetConfig* config) {
+  DCHECK(!config->IsConfigured());
   if (check_in_browser) {
     HMODULE module = ::GetModuleHandleW(module_name);
     if (module) {
-      policy->AddDllToUnload(module_name);
+      config->AddDllToUnload(module_name);
       DVLOG(1) << "dll to unload found: " << module_name;
     } else {
       for (const auto& alt_name : GetShortNameVariants(module_name)) {
@@ -242,26 +248,18 @@ void BlocklistAddOneDll(const wchar_t* module_name,
         // want to make sure it is the right one.
         if (module && IsExpandedModuleName(module, module_name)) {
           // Found a match. We add both forms to the policy.
-          policy->AddDllToUnload(alt_name.c_str());
-          policy->AddDllToUnload(module_name);
+          config->AddDllToUnload(alt_name.c_str());
+          config->AddDllToUnload(module_name);
           return;
         }
       }
     }
   } else {
-    policy->AddDllToUnload(module_name);
+    config->AddDllToUnload(module_name);
     for (const auto& alt_name : GetShortNameVariants(module_name)) {
-      policy->AddDllToUnload(alt_name.c_str());
+      config->AddDllToUnload(alt_name.c_str());
     }
   }
-}
-
-// Adds policy rules for unloaded the known dlls that cause chrome to crash.
-// Eviction of injected DLLs is done by the sandbox so that the injected module
-// does not get a chance to execute any code.
-void AddGenericDllEvictionPolicy(TargetPolicy* policy) {
-  for (int ix = 0; ix != std::size(kTroublesomeDlls); ++ix)
-    BlocklistAddOneDll(kTroublesomeDlls[ix], true, policy);
 }
 
 DWORD GetSessionId() {
@@ -321,24 +319,24 @@ bool ShouldSetJobLevel(bool allow_no_sandbox_job) {
   return false;
 }
 
-// Adds the generic policy rules to a sandbox TargetPolicy.
-ResultCode AddGenericPolicy(sandbox::TargetPolicy* policy) {
+// Adds the generic config rules to a sandbox TargetConfig.
+ResultCode AddGenericConfig(sandbox::TargetConfig* config) {
+  DCHECK(!config->IsConfigured());
   ResultCode result;
 
   // Add the policy for the client side of a pipe. It is just a file
   // in the \pipe\ namespace. We restrict it to pipes that start with
   // "chrome." so the sandboxed process cannot connect to system services.
-  result =
-      policy->AddRule(TargetPolicy::SUBSYS_FILES, TargetPolicy::FILES_ALLOW_ANY,
-                      L"\\??\\pipe\\chrome.*");
+  result = config->AddRule(SubSystem::kFiles, Semantics::kFilesAllowAny,
+                           L"\\??\\pipe\\chrome.*");
   if (result != SBOX_ALL_OK)
     return result;
 
   // Allow the server side of sync sockets, which are pipes that have
   // the "chrome.sync" namespace and a randomly generated suffix.
-  result = policy->AddRule(TargetPolicy::SUBSYS_NAMED_PIPES,
-                           TargetPolicy::NAMEDPIPES_ALLOW_ANY,
-                           L"\\\\.\\pipe\\chrome.sync.*");
+  result =
+      config->AddRule(SubSystem::kNamedPipes, Semantics::kNamedPipesAllowAny,
+                      L"\\\\.\\pipe\\chrome.sync.*");
   if (result != SBOX_ALL_OK)
     return result;
 
@@ -348,8 +346,7 @@ ResultCode AddGenericPolicy(sandbox::TargetPolicy* policy) {
   if (!base::PathService::Get(base::FILE_EXE, &exe))
     return SBOX_ERROR_GENERIC;
   base::FilePath pdb_path = exe.DirName().Append(L"*.pdb");
-  result = policy->AddRule(TargetPolicy::SUBSYS_FILES,
-                           TargetPolicy::FILES_ALLOW_READONLY,
+  result = config->AddRule(SubSystem::kFiles, Semantics::kFilesAllowReadonly,
                            pdb_path.value().c_str());
   if (result != SBOX_ALL_OK)
     return result;
@@ -369,15 +366,19 @@ ResultCode AddGenericPolicy(sandbox::TargetPolicy* policy) {
     CHECK(coverage_dir.size() == coverage_dir_size);
     base::FilePath sancov_path =
         base::FilePath(coverage_dir).Append(L"*.sancov");
-    result = policy->AddRule(TargetPolicy::SUBSYS_FILES,
-                             TargetPolicy::FILES_ALLOW_ANY,
+    result = config->AddRule(SubSystem::kFiles, Semantics::kFilesAllowAny,
                              sancov_path.value().c_str());
     if (result != SBOX_ALL_OK)
       return result;
   }
 #endif
 
-  AddGenericDllEvictionPolicy(policy);
+  // Adds policy rules for unloading the known dlls that cause Chrome to crash.
+  // Eviction of injected DLLs is done by the sandbox so that the injected
+  // module does not get a chance to execute any code.
+  for (int ix = 0; ix != std::size(kTroublesomeDlls); ++ix)
+    BlocklistAddOneDll(kTroublesomeDlls[ix], true, config);
+
   return SBOX_ALL_OK;
 }
 
@@ -387,44 +388,33 @@ void LogLaunchWarning(ResultCode last_warning, DWORD last_error) {
   base::UmaHistogramSparse("Process.Sandbox.Launch.Warning", last_error);
 }
 
-ResultCode AddDefaultPolicyForSandboxedProcess(TargetPolicy* policy) {
-  ResultCode result = sandbox::SBOX_ALL_OK;
+ResultCode AddDefaultConfigForSandboxedProcess(TargetConfig* config) {
+  // Prevents the renderers from manipulating low-integrity processes.
+  config->SetDelayedIntegrityLevel(INTEGRITY_LEVEL_UNTRUSTED);
+  ResultCode result = config->SetIntegrityLevel(INTEGRITY_LEVEL_LOW);
+  if (result != SBOX_ALL_OK)
+    return result;
+
+  // The initial token has to be restricted if the main token is restricted.
+  result = config->SetTokenLevel(USER_RESTRICTED_SAME_ACCESS, USER_LOCKDOWN);
+  if (result != SBOX_ALL_OK)
+    return result;
+
+  config->SetLockdownDefaultDacl();
 
   // Win8+ adds a device DeviceApi that we don't need.
   if (base::win::GetVersion() >= base::win::Version::WIN8)
-    result = policy->AddKernelObjectToClose(L"File", L"\\Device\\DeviceApi");
+    result = config->AddKernelObjectToClose(L"File", L"\\Device\\DeviceApi");
   if (result != SBOX_ALL_OK)
     return result;
-
-  // On 2003/Vista+ the initial token has to be restricted if the main
-  // token is restricted.
-  result = policy->SetTokenLevel(USER_RESTRICTED_SAME_ACCESS, USER_LOCKDOWN);
-  if (result != SBOX_ALL_OK)
-    return result;
-  // Prevents the renderers from manipulating low-integrity processes.
-  result = policy->SetDelayedIntegrityLevel(INTEGRITY_LEVEL_UNTRUSTED);
-  if (result != SBOX_ALL_OK)
-    return result;
-  result = policy->SetIntegrityLevel(INTEGRITY_LEVEL_LOW);
-  if (result != SBOX_ALL_OK)
-    return result;
-  policy->SetLockdownDefaultDacl();
 
 #ifdef TOOLKIT_QT
   // Disable alternate window station due to QTBUG-83300
-  result = policy->SetAlternateDesktop(false);
+  config->SetDesktop(Desktop::kAlternateDesktop);
 #else
-  result = policy->SetAlternateDesktop(true);
+  config->SetDesktop(Desktop::kAlternateWinstation);
 #endif
-  if (result != SBOX_ALL_OK) {
-    // We ignore the result of setting the alternate desktop, however log
-    // a launch warning.
-    LogLaunchWarning(result, ::GetLastError());
-    DLOG(WARNING) << "Failed to apply desktop security to the renderer";
-    result = SBOX_ALL_OK;
-  }
-
-  return result;
+  return SBOX_ALL_OK;
 }
 
 // This code is test only, and attempts to catch unsafe uses of
@@ -538,24 +528,20 @@ bool IsAppContainerEnabled() {
   return base::FeatureList::IsEnabled(features::kRendererAppContainer);
 }
 
-ResultCode SetJobMemoryLimit(const base::CommandLine& cmd_line,
-                             TargetPolicy* policy) {
-  DCHECK_NE(policy->GetJobLevel(), JobLevel::kNone);
+void SetJobMemoryLimit(Sandbox sandbox_type, TargetConfig* config) {
+  DCHECK_NE(config->GetJobLevel(), JobLevel::kNone);
 
 #ifdef _WIN64
   size_t memory_limit = static_cast<size_t>(kDataSizeLimit);
 
-  // Note that this command line flag hasn't been fetched by all
-  // callers of SetJobLevel, only those in this file.
-  Sandbox sandbox_type = SandboxTypeFromCommandLine(cmd_line);
   if (sandbox_type == Sandbox::kGpu || sandbox_type == Sandbox::kRenderer) {
-    int64_t GB = 1024 * 1024 * 1024;
+    constexpr uint64_t GB = 1024 * 1024 * 1024;
     // Allow the GPU/RENDERER process's sandbox to access more physical memory
     // if it's available on the system.
     //
     // Renderer processes are allowed to access 16 GB; the GPU process, up
     // to 64 GB.
-    int64_t physical_memory = base::SysInfo::AmountOfPhysicalMemory();
+    uint64_t physical_memory = base::SysInfo::AmountOfPhysicalMemory();
     if (sandbox_type == Sandbox::kGpu && physical_memory > 64 * GB) {
       memory_limit = 64 * GB;
     } else if (sandbox_type == Sandbox::kGpu && physical_memory > 32 * GB) {
@@ -566,9 +552,9 @@ ResultCode SetJobMemoryLimit(const base::CommandLine& cmd_line,
       memory_limit = 8 * GB;
     }
   }
-  return policy->SetJobMemoryLimit(memory_limit);
+  config->SetJobMemoryLimit(memory_limit);
 #else
-  return SBOX_ALL_OK;
+  return;
 #endif
 }
 
@@ -612,9 +598,9 @@ std::wstring GetAppContainerProfileName(const std::string& appcontainer_id,
 ResultCode SetupAppContainerProfile(AppContainer* container,
                                     const base::CommandLine& command_line,
                                     Sandbox sandbox_type) {
-  if (sandbox_type != Sandbox::kMediaFoundationCdm &&
-      sandbox_type != Sandbox::kGpu &&
+  if (sandbox_type != Sandbox::kGpu &&
       sandbox_type != Sandbox::kXrCompositing &&
+      sandbox_type != Sandbox::kMediaFoundationCdm &&
       sandbox_type != Sandbox::kNetwork &&
       sandbox_type != Sandbox::kWindowsSystemProxyResolver) {
     return SBOX_ERROR_UNSUPPORTED;
@@ -663,9 +649,25 @@ ResultCode SetupAppContainerProfile(AppContainer* container,
         !container->AddCapability(L"lpacInstrumentation") ||
         !container->AddCapability(L"lpacCryptoServices") ||
         !container->AddCapability(L"lpacEnterprisePolicyChangeNotifications") ||
-        !container->AddCapability(L"mediaFoundationCdmFiles")) {
+        !container->AddCapability(kMediaFoundationCdmFiles) ||
+        !container->AddCapability(kMediaFoundationCdmData)) {
       DLOG(ERROR) << "AppContainer::AddCapability() - "
                   << "Sandbox::kMediaFoundationCdm lpac capabilities failed";
+      return sandbox::SBOX_ERROR_CREATE_APPCONTAINER_CAPABILITY;
+    }
+  }
+
+  if (sandbox_type == Sandbox::kNetwork) {
+    if (!container->AddCapability(
+            base::win::WellKnownCapability::kPrivateNetworkClientServer) ||
+        !container->AddCapability(
+            base::win::WellKnownCapability::kInternetClient) ||
+        !container->AddCapability(
+            base::win::WellKnownCapability::kEnterpriseAuthentication) ||
+        !container->AddCapability(L"lpacIdentityServices") ||
+        !container->AddCapability(L"lpacCryptoServices")) {
+      DLOG(ERROR) << "AppContainer::AddCapability() - "
+                  << "Sandbox::kNetwork lpac capabilities failed";
       return sandbox::SBOX_ERROR_CREATE_APPCONTAINER_CAPABILITY;
     }
   }
@@ -714,33 +716,138 @@ ResultCode SetupAppContainerProfile(AppContainer* container,
     }
   }
 
-  // Enable LPAC for GPU process, but not for XRCompositor service.
-  if (sandbox_type == Sandbox::kGpu &&
-      base::FeatureList::IsEnabled(features::kGpuLPAC)) {
+  // Enable LPAC for the following processes. Notably not for the kXrCompositing
+  // service.
+  if ((sandbox_type == Sandbox::kGpu &&
+       base::FeatureList::IsEnabled(features::kGpuLPAC)) ||
+      sandbox_type == Sandbox::kMediaFoundationCdm ||
+      sandbox_type == Sandbox::kNetwork ||
+      sandbox_type == Sandbox::kWindowsSystemProxyResolver) {
     container->SetEnableLowPrivilegeAppContainer(true);
   }
 
-  // Enable LPAC for Network service.
-  if (sandbox_type == Sandbox::kNetwork) {
-    container->AddCapability(
-        base::win::WellKnownCapability::kPrivateNetworkClientServer);
-    container->AddCapability(base::win::WellKnownCapability::kInternetClient);
-    container->AddCapability(
-        base::win::WellKnownCapability::kEnterpriseAuthentication);
-    container->AddCapability(L"lpacIdentityServices");
-    container->AddCapability(L"lpacCryptoServices");
-    container->SetEnableLowPrivilegeAppContainer(true);
+  return SBOX_ALL_OK;
+}
+
+ResultCode GenerateConfigForSandboxedProcess(const base::CommandLine& cmd_line,
+                                             const std::string& process_type,
+                                             SandboxDelegate* delegate,
+                                             TargetConfig* config) {
+  DCHECK(!config->IsConfigured());
+  // Allow no sandbox job if the --allow-no-sandbox-job switch is present.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAllowNoSandboxJob)) {
+    config->SetAllowNoSandboxJob();
+  }
+
+  // Pre-startup mitigations.
+  MitigationFlags mitigations =
+      MITIGATION_HEAP_TERMINATE | MITIGATION_BOTTOM_UP_ASLR | MITIGATION_DEP |
+      MITIGATION_DEP_NO_ATL_THUNK | MITIGATION_EXTENSION_POINT_DISABLE |
+      MITIGATION_SEHOP | MITIGATION_NONSYSTEM_FONT_DISABLE |
+      MITIGATION_IMAGE_LOAD_NO_REMOTE | MITIGATION_IMAGE_LOAD_NO_LOW_LABEL |
+      MITIGATION_RESTRICT_INDIRECT_BRANCH_PREDICTION;
+
+  if (base::FeatureList::IsEnabled(features::kWinSboxDisableKtmComponent))
+    mitigations |= MITIGATION_KTM_COMPONENT;
+
+  // CET is enabled with the CETCOMPAT bit on chrome.exe so must be
+  // disabled for processes we know are not compatible.
+  if (!delegate->CetCompatible())
+    mitigations |= MITIGATION_CET_DISABLED;
+
+  ResultCode result = config->SetProcessMitigations(mitigations);
+  if (result != SBOX_ALL_OK)
+    return result;
+
+  Sandbox sandbox_type = delegate->GetSandboxType();
+  // Post-startup mitigations.
+  mitigations = MITIGATION_DLL_SEARCH_ORDER;
+  if (!cmd_line.HasSwitch(switches::kAllowThirdPartyModules) &&
+      sandbox_type != Sandbox::kSpeechRecognition &&
+      sandbox_type != Sandbox::kMediaFoundationCdm) {
+    mitigations |= MITIGATION_FORCE_MS_SIGNED_BINS;
+  }
+
+  if (sandbox_type == Sandbox::kNetwork || sandbox_type == Sandbox::kAudio ||
+      sandbox_type == Sandbox::kIconReader) {
+    mitigations |= MITIGATION_DYNAMIC_CODE_DISABLE;
+  }
+
+  result = config->SetDelayedProcessMitigations(mitigations);
+  if (result != SBOX_ALL_OK)
+    return result;
+
+  if (process_type == switches::kRendererProcess) {
+    result = SandboxWin::AddWin32kLockdownPolicy(config);
+    if (result != SBOX_ALL_OK)
+      return result;
+  }
+
+  if (!delegate->DisableDefaultPolicy()) {
+    result = AddDefaultConfigForSandboxedProcess(config);
+    if (result != SBOX_ALL_OK)
+      return result;
+  }
+
+  result =
+      SandboxWin::SetJobLevel(sandbox_type, JobLevel::kLockdown, 0, config);
+  if (result != SBOX_ALL_OK)
+    return result;
+
+  if (process_type == switches::kGpuProcess &&
+      base::FeatureList::IsEnabled(
+          {"GpuLockdownDefaultDacl", base::FEATURE_ENABLED_BY_DEFAULT})) {
+    config->SetLockdownDefaultDacl();
+    config->AddRestrictingRandomSid();
+  }
+
+#if !defined(NACL_WIN64)
+  if (process_type == switches::kRendererProcess ||
+      process_type == switches::kPpapiPluginProcess ||
+      sandbox_type == Sandbox::kPrintCompositor) {
+    AddDirectory(base::DIR_WINDOWS_FONTS, NULL, true,
+                 Semantics::kFilesAllowReadonly, config);
+  }
+#endif
+
+  result = AddGenericConfig(config);
+  if (result != SBOX_ALL_OK) {
+    NOTREACHED();
+    return result;
+  }
+
+  std::string appcontainer_id;
+  if (SandboxWin::IsAppContainerEnabledForSandbox(cmd_line, sandbox_type) &&
+      delegate->GetAppContainerId(&appcontainer_id)) {
+    result = SandboxWin::AddAppContainerProfileToConfig(
+        cmd_line, sandbox_type, appcontainer_id, config);
+    DCHECK_EQ(result, SBOX_ALL_OK);
+    if (result != SBOX_ALL_OK)
+      return result;
+  }
+
+  // Allow the renderer, gpu and utility processes to access the log file.
+  if (process_type == switches::kRendererProcess ||
+      process_type == switches::kGpuProcess ||
+      process_type == switches::kUtilityProcess) {
+    if (logging::IsLoggingToFileEnabled()) {
+      DCHECK(base::FilePath(logging::GetLogFileFullPath()).IsAbsolute());
+      result = config->AddRule(SubSystem::kFiles, Semantics::kFilesAllowAny,
+                               logging::GetLogFileFullPath().c_str());
+      if (result != SBOX_ALL_OK)
+        return result;
+    }
   }
 
   if (sandbox_type == Sandbox::kMediaFoundationCdm) {
-    container->AddCapability(kMediaFoundationCdmData);
-    container->SetEnableLowPrivilegeAppContainer(true);
+    // Set a policy that would normally allow for process creation. This allows
+    // the mf cdm process to launch the protected media pipeline process
+    // (mfpmp.exe) without process interception.
+    result = config->SetJobLevel(JobLevel::kInteractive, 0);
+    if (result != SBOX_ALL_OK)
+      return result;
   }
-
-  if (sandbox_type == Sandbox::kWindowsSystemProxyResolver) {
-    container->SetEnableLowPrivilegeAppContainer(true);
-  }
-
   return SBOX_ALL_OK;
 }
 
@@ -810,85 +917,91 @@ bool IsUnsandboxedProcess(
 }  // namespace
 
 // static
-ResultCode SandboxWin::SetJobLevel(const base::CommandLine& cmd_line,
+ResultCode SandboxWin::SetJobLevel(Sandbox sandbox_type,
                                    JobLevel job_level,
                                    uint32_t ui_exceptions,
-                                   TargetPolicy* policy) {
-  if (!ShouldSetJobLevel(policy->GetAllowNoSandboxJob()))
-    return policy->SetJobLevel(JobLevel::kNone, 0);
+                                   TargetConfig* config) {
+  DCHECK(!config->IsConfigured());
+  if (!ShouldSetJobLevel(config->GetAllowNoSandboxJob()))
+    return config->SetJobLevel(JobLevel::kNone, 0);
 
-  ResultCode ret = policy->SetJobLevel(job_level, ui_exceptions);
+  ResultCode ret = config->SetJobLevel(job_level, ui_exceptions);
   if (ret != SBOX_ALL_OK)
     return ret;
 
-  return SetJobMemoryLimit(cmd_line, policy);
+  SetJobMemoryLimit(sandbox_type, config);
+  return SBOX_ALL_OK;
 }
 
 // TODO(jschuh): Need get these restrictions applied to NaCl and Pepper.
 // Just have to figure out what needs to be warmed up first.
 // static
-ResultCode SandboxWin::AddBaseHandleClosePolicy(TargetPolicy* policy) {
+ResultCode SandboxWin::AddBaseHandleClosePolicy(TargetConfig* config) {
+  DCHECK(!config->IsConfigured());
+
   if (base::FeatureList::IsEnabled(kEnableCsrssLockdownFeature)) {
     // Close all ALPC ports.
-    ResultCode ret = policy->SetDisconnectCsrss();
-    if (ret != SBOX_ALL_OK) {
+    ResultCode ret = config->SetDisconnectCsrss();
+    if (ret != SBOX_ALL_OK)
       return ret;
-    }
   }
 
   // TODO(cpu): Add back the BaseNamedObjects policy.
   std::wstring object_path = PrependWindowsSessionPath(
       L"\\BaseNamedObjects\\windows_shell_global_counters");
-  return policy->AddKernelObjectToClose(L"Section", object_path.data());
+  return config->AddKernelObjectToClose(L"Section", object_path.data());
 }
 
 // static
-ResultCode SandboxWin::AddAppContainerPolicy(TargetPolicy* policy,
+ResultCode SandboxWin::AddAppContainerPolicy(TargetConfig* config,
                                              const wchar_t* sid) {
+  DCHECK(!config->IsConfigured());
   if (IsAppContainerEnabled())
-    return policy->SetLowBox(sid);
+    return config->SetLowBox(sid);
   return SBOX_ALL_OK;
 }
 
 // static
-ResultCode SandboxWin::AddWin32kLockdownPolicy(TargetPolicy* policy) {
+ResultCode SandboxWin::AddWin32kLockdownPolicy(TargetConfig* config) {
+  DCHECK(!config->IsConfigured());
 #if !defined(NACL_WIN64)
   // Win32k Lockdown is supported on Windows 8+.
   if (base::win::GetVersion() < base::win::Version::WIN8)
     return SBOX_ALL_OK;
 
-  MitigationFlags flags = policy->GetProcessMitigations();
+  MitigationFlags flags = config->GetProcessMitigations();
   // Check not enabling twice. Should not happen.
   DCHECK_EQ(0U, flags & MITIGATION_WIN32K_DISABLE);
 
   flags |= MITIGATION_WIN32K_DISABLE;
-  ResultCode result = policy->SetProcessMitigations(flags);
+  ResultCode result = config->SetProcessMitigations(flags);
   if (result != SBOX_ALL_OK)
     return result;
 
-  return policy->AddRule(TargetPolicy::SUBSYS_WIN32K_LOCKDOWN,
-                         TargetPolicy::FAKE_USER_GDI_INIT, nullptr);
-#else
+  return config->AddRule(SubSystem::kWin32kLockdown, Semantics::kFakeGdiInit,
+                         nullptr);
+#else  // !defined(NACL_WIN64)
   return SBOX_ALL_OK;
 #endif
 }
 
 // static
-ResultCode SandboxWin::AddAppContainerProfileToPolicy(
+ResultCode SandboxWin::AddAppContainerProfileToConfig(
     const base::CommandLine& command_line,
     Sandbox sandbox_type,
     const std::string& appcontainer_id,
-    TargetPolicy* policy) {
+    TargetConfig* config) {
+  DCHECK(!config->IsConfigured());
   if (base::win::GetVersion() < base::win::Version::WIN10_RS1)
     return SBOX_ALL_OK;
   std::wstring profile_name =
       GetAppContainerProfileName(appcontainer_id, sandbox_type);
   ResultCode result =
-      policy->AddAppContainerProfile(profile_name.c_str(), true);
+      config->AddAppContainerProfile(profile_name.c_str(), true);
   if (result != SBOX_ALL_OK)
     return result;
 
-  scoped_refptr<AppContainer> container = policy->GetAppContainer();
+  scoped_refptr<AppContainer> container = config->GetAppContainer();
   result =
       SetupAppContainerProfile(container.get(), command_line, sandbox_type);
   if (result != SBOX_ALL_OK)
@@ -996,125 +1109,13 @@ ResultCode SandboxWin::GeneratePolicyForSandboxedProcess(
     return ResultCode::SBOX_ERROR_UNSANDBOXED_PROCESS;
   }
 
-  // Allow no sandbox job if the --allow-no-sandbox-job switch is present.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAllowNoSandboxJob)) {
-    policy->SetAllowNoSandboxJob();
-  }
-
   // Add any handles to be inherited to the policy.
   for (HANDLE handle : handles_to_inherit)
     policy->AddHandleToShare(handle);
 
-  // Pre-startup mitigations.
-  MitigationFlags mitigations =
-      MITIGATION_HEAP_TERMINATE |
-      MITIGATION_BOTTOM_UP_ASLR |
-      MITIGATION_DEP |
-      MITIGATION_DEP_NO_ATL_THUNK |
-      MITIGATION_EXTENSION_POINT_DISABLE |
-      MITIGATION_SEHOP |
-      MITIGATION_NONSYSTEM_FONT_DISABLE |
-      MITIGATION_IMAGE_LOAD_NO_REMOTE |
-      MITIGATION_IMAGE_LOAD_NO_LOW_LABEL |
-      MITIGATION_RESTRICT_INDIRECT_BRANCH_PREDICTION;
-
-  if (base::FeatureList::IsEnabled(features::kWinSboxDisableKtmComponent))
-    mitigations |= MITIGATION_KTM_COMPONENT;
-
-  // CET is enabled with the CETCOMPAT bit on chrome.exe so must be
-  // disabled for processes we know are not compatible.
-  if (!delegate->CetCompatible())
-    mitigations |= MITIGATION_CET_DISABLED;
-
-  ResultCode result = policy->SetProcessMitigations(mitigations);
-  if (result != SBOX_ALL_OK)
-    return result;
-
-  if (process_type == switches::kRendererProcess) {
-    result = AddWin32kLockdownPolicy(policy);
-    if (result != SBOX_ALL_OK)
-      return result;
-  }
-
-  // Post-startup mitigations.
-  mitigations = MITIGATION_DLL_SEARCH_ORDER;
-  if (!cmd_line.HasSwitch(switches::kAllowThirdPartyModules) &&
-      sandbox_type != Sandbox::kSpeechRecognition &&
-      sandbox_type != Sandbox::kMediaFoundationCdm) {
-    mitigations |= MITIGATION_FORCE_MS_SIGNED_BINS;
-  }
-
-  if (sandbox_type == Sandbox::kNetwork || sandbox_type == Sandbox::kAudio ||
-      sandbox_type == Sandbox::kIconReader) {
-    mitigations |= MITIGATION_DYNAMIC_CODE_DISABLE;
-  }
-
-  result = policy->SetDelayedProcessMitigations(mitigations);
-  if (result != SBOX_ALL_OK)
-    return result;
-
-  result = SetJobLevel(cmd_line, JobLevel::kLockdown, 0, policy);
-  if (result != SBOX_ALL_OK)
-    return result;
-
-  if (!delegate->DisableDefaultPolicy()) {
-    result = AddDefaultPolicyForSandboxedProcess(policy);
-    if (result != SBOX_ALL_OK)
-      return result;
-  }
-
-  if (process_type == switches::kGpuProcess &&
-      base::FeatureList::IsEnabled(
-          {"GpuLockdownDefaultDacl", base::FEATURE_ENABLED_BY_DEFAULT})) {
-    policy->SetLockdownDefaultDacl();
-    policy->AddRestrictingRandomSid();
-  }
-
-#if !defined(NACL_WIN64)
-  if (process_type == switches::kRendererProcess ||
-      process_type == switches::kPpapiPluginProcess ||
-      sandbox_type == Sandbox::kPrintCompositor) {
-    AddDirectory(base::DIR_WINDOWS_FONTS, NULL, true,
-                 TargetPolicy::FILES_ALLOW_READONLY, policy);
-  }
-#endif
-
-  result = AddGenericPolicy(policy);
-  if (result != SBOX_ALL_OK) {
-    NOTREACHED();
-    return result;
-  }
-
-  std::string appcontainer_id;
-  if (IsAppContainerEnabledForSandbox(cmd_line, sandbox_type) &&
-      delegate->GetAppContainerId(&appcontainer_id)) {
-    result = AddAppContainerProfileToPolicy(cmd_line, sandbox_type,
-                                            appcontainer_id, policy);
-    DCHECK_EQ(result, SBOX_ALL_OK);
-    if (result != SBOX_ALL_OK)
-      return result;
-  }
-
-  // Allow the renderer, gpu and utility processes to access the log file.
-  if (process_type == switches::kRendererProcess ||
-      process_type == switches::kGpuProcess ||
-      process_type == switches::kUtilityProcess) {
-    if (logging::IsLoggingToFileEnabled()) {
-      DCHECK(base::FilePath(logging::GetLogFileFullPath()).IsAbsolute());
-      result = policy->AddRule(TargetPolicy::SUBSYS_FILES,
-                               TargetPolicy::FILES_ALLOW_ANY,
-                               logging::GetLogFileFullPath().c_str());
-      if (result != SBOX_ALL_OK)
-        return result;
-    }
-  }
-
-  if (sandbox_type == Sandbox::kMediaFoundationCdm) {
-    // Set a policy that would normally allow for process creation. This allows
-    // the mf cdm process to launch the protected media pipeline process
-    // (mfpmp.exe) without process interception.
-    result = policy->SetJobLevel(JobLevel::kInteractive, 0);
+  if (!policy->GetConfig()->IsConfigured()) {
+    ResultCode result = GenerateConfigForSandboxedProcess(
+        cmd_line, process_type, delegate, policy->GetConfig());
     if (result != SBOX_ALL_OK)
       return result;
   }
@@ -1129,7 +1130,7 @@ ResultCode SandboxWin::GeneratePolicyForSandboxedProcess(
   if (!delegate->PreSpawnTarget(policy))
     return SBOX_ERROR_DELEGATE_PRE_SPAWN;
 
-  return result;
+  return SBOX_ALL_OK;
 }
 
 // static
@@ -1139,16 +1140,26 @@ ResultCode SandboxWin::StartSandboxedProcess(
     const base::HandlesToInheritVector& handles_to_inherit,
     SandboxDelegate* delegate,
     base::Process* process) {
-  auto policy = g_broker_services->CreatePolicy();
-  ResultCode result = GeneratePolicyForSandboxedProcess(
-      cmd_line, process_type, handles_to_inherit, delegate, policy.get());
+  const base::ElapsedTimer timer;
 
-  if (ResultCode::SBOX_ERROR_UNSANDBOXED_PROCESS == result) {
+  // Avoid making a policy if we won't use it.
+  if (IsUnsandboxedProcess(delegate->GetSandboxType(), cmd_line,
+                           *base::CommandLine::ForCurrentProcess())) {
     return LaunchWithoutSandbox(cmd_line, handles_to_inherit, delegate,
                                 process);
   }
+
+  std::string tag;
+  if (base::FeatureList::IsEnabled(features::kSharedSandboxPolicies))
+    tag = delegate->GetSandboxTag();
+
+  auto policy = g_broker_services->CreatePolicy(tag);
+  auto time_policy_created = timer.Elapsed();
+  ResultCode result = GeneratePolicyForSandboxedProcess(
+      cmd_line, process_type, handles_to_inherit, delegate, policy.get());
   if (SBOX_ALL_OK != result)
     return result;
+  auto time_policy_generated = timer.Elapsed();
 
   TRACE_EVENT_BEGIN0("startup", "StartProcessWithAccess::LAUNCHPROCESS");
 
@@ -1159,6 +1170,7 @@ ResultCode SandboxWin::StartSandboxedProcess(
       cmd_line.GetProgram().value().c_str(),
       cmd_line.GetCommandLineString().c_str(), std::move(policy), &last_warning,
       &last_error, &temp_process_info);
+  auto time_process_spawned = timer.Elapsed();
 
   base::win::ScopedProcessInformation target(temp_process_info);
 
@@ -1185,6 +1197,33 @@ ResultCode SandboxWin::StartSandboxedProcess(
 
   delegate->PostSpawnTarget(target.process_handle());
   CHECK(ResumeThread(target.thread_handle()) != static_cast<DWORD>(-1));
+  auto time_process_resumed = timer.Elapsed();
+
+  // Record timing histogram on sandboxed & launched success.
+  // We're interested in the happy fast case so have a low maximum.
+  if (SBOX_ALL_OK == result) {
+    const auto kLowBound = base::Microseconds(5);
+    const auto kHighBound = base::Microseconds(100000);
+    const int kBuckets = 50;
+    base::UmaHistogramCustomMicrosecondsTimes(
+        "Process.Sandbox.StartSandboxedWin.CreatePolicyDuration",
+        time_policy_created, kLowBound, kHighBound, kBuckets);
+    base::UmaHistogramCustomMicrosecondsTimes(
+        "Process.Sandbox.StartSandboxedWin.GeneratePolicyDuration",
+        time_policy_generated - time_policy_created, kLowBound, kHighBound,
+        kBuckets);
+    base::UmaHistogramCustomMicrosecondsTimes(
+        "Process.Sandbox.StartSandboxedWin.SpawnTargetDuration",
+        time_process_spawned - time_policy_generated, kLowBound, kHighBound,
+        kBuckets);
+    base::UmaHistogramCustomMicrosecondsTimes(
+        "Process.Sandbox.StartSandboxedWin.PostSpawnTargetDuration",
+        time_process_resumed - time_process_spawned, kLowBound, kHighBound,
+        kBuckets);
+    base::UmaHistogramCustomMicrosecondsTimes(
+        "Process.Sandbox.StartSandboxedWin.TotalDuration", time_process_resumed,
+        kLowBound, kHighBound, kBuckets);
+  }
 
   *process = base::Process(target.TakeProcessHandle());
   return SBOX_ALL_OK;
@@ -1202,8 +1241,8 @@ ResultCode SandboxWin::GetPolicyDiagnostics(
 
 void BlocklistAddOneDllForTesting(const wchar_t* module_name,
                                   bool check_in_browser,
-                                  TargetPolicy* policy) {
-  BlocklistAddOneDll(module_name, check_in_browser, policy);
+                                  TargetConfig* config) {
+  BlocklistAddOneDll(module_name, check_in_browser, config);
 }
 
 // static
@@ -1221,8 +1260,10 @@ std::string SandboxWin::GetSandboxTypeInEnglish(Sandbox sandbox_type) {
       return "Utility";
     case Sandbox::kGpu:
       return "GPU";
+#if BUILDFLAG(ENABLE_PPAPI)
     case Sandbox::kPpapi:
       return "PPAPI";
+#endif
     case Sandbox::kNetwork:
       return "Network";
     case Sandbox::kCdm:
@@ -1250,6 +1291,16 @@ std::string SandboxWin::GetSandboxTypeInEnglish(Sandbox sandbox_type) {
     case Sandbox::kWindowsSystemProxyResolver:
       return "Windows System Proxy Resolver";
   }
+}
+
+// static
+std::string SandboxWin::GetSandboxTagForDelegate(
+    base::StringPiece prefix,
+    sandbox::mojom::Sandbox sandbox_type) {
+  // sandbox.mojom.Sandbox has an operator << we can use for non-human values.
+  std::ostringstream stream;
+  stream << prefix << "!" << sandbox_type;
+  return stream.str();
 }
 
 }  // namespace policy

@@ -64,7 +64,7 @@ static const unsigned kMaxSuggestions = 1000;
 static const unsigned kMaxSuggestionLabelLength = 1000;
 
 static bool IsValidColorString(const String& value) {
-  if (value.IsEmpty())
+  if (value.empty())
     return false;
   if (value[0] != '#')
     return false;
@@ -77,7 +77,8 @@ static bool IsValidColorString(const String& value) {
 }
 
 ColorInputType::ColorInputType(HTMLInputElement& element)
-    : InputType(element), KeyboardClickableInputTypeView(element) {}
+    : InputType(Type::kColor, element),
+      KeyboardClickableInputTypeView(element) {}
 
 ColorInputType::~ColorInputType() = default;
 
@@ -116,7 +117,7 @@ String ColorInputType::SanitizeValue(const String& proposed_value) const {
 
 Color ColorInputType::ValueAsColor() const {
   Color color;
-  bool success = color.SetFromString(GetElement().value());
+  bool success = color.SetFromString(GetElement().Value());
   DCHECK(success);
   return color;
 }
@@ -170,6 +171,12 @@ void ColorInputType::HandleDOMActivateEvent(Event& event) {
   event.SetDefaultHandled();
 }
 
+ControlPart ColorInputType::AutoAppearance() const {
+  return GetElement().FastHasAttribute(html_names::kListAttr)
+             ? kMenulistPart
+             : kSquareButtonPart;
+}
+
 void ColorInputType::OpenPopupView() {
   ChromeClient* chrome_client = GetChromeClient();
   Document& document = GetElement().GetDocument();
@@ -217,7 +224,8 @@ void ColorInputType::DidChooseColor(const Color& color) {
       color == ValueAsColor())
     return;
   EventQueueScope scope;
-  GetElement().SetValueFromRenderer(color.Serialized());
+  // TODO(crbug.com/1333988): Serialize as CSSColor
+  GetElement().SetValueFromRenderer(color.SerializeAsCanvasColor());
   GetElement().UpdateView();
 }
 
@@ -236,7 +244,7 @@ void ColorInputType::UpdateView() {
     return;
 
   color_swatch->SetInlineStyleProperty(CSSPropertyID::kBackgroundColor,
-                                       GetElement().value());
+                                       GetElement().Value());
 }
 
 HTMLElement* ColorInputType::ShadowColorSwatch() const {
@@ -252,8 +260,8 @@ Element& ColorInputType::OwnerElement() const {
   return GetElement();
 }
 
-gfx::Rect ColorInputType::ElementRectRelativeToViewport() const {
-  return GetElement().GetDocument().View()->FrameToViewport(
+gfx::Rect ColorInputType::ElementRectRelativeToLocalRoot() const {
+  return GetElement().GetDocument().View()->ConvertToRootFrame(
       GetElement().PixelSnappedBoundingBox());
 }
 
@@ -271,7 +279,7 @@ Vector<mojom::blink::ColorSuggestionPtr> ColorInputType::Suggestions() const {
   if (data_list) {
     HTMLDataListOptionsCollection* options = data_list->options();
     for (unsigned i = 0; HTMLOptionElement* option = options->Item(i); i++) {
-      if (option->IsDisabledFormControl() || option->value().IsEmpty())
+      if (option->IsDisabledFormControl() || option->value().empty())
         continue;
       if (!GetElement().IsValidValue(option->value()))
         continue;

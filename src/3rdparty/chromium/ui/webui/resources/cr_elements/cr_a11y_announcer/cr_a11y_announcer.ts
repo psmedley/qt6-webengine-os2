@@ -1,9 +1,11 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {assert} from 'chrome://resources/js/assert.m.js';
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {assert} from 'chrome://resources/js/assert.js';
+import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {getTemplate} from './cr_a11y_announcer.html.js';
 
 /**
  * The CrA11yAnnouncerElement is a visually hidden element that reads out
@@ -54,7 +56,7 @@ export class CrA11yAnnouncerElement extends PolymerElement {
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   private currentTimeout_: number|null = null;

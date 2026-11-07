@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -152,15 +152,9 @@ SoftwareImageDecodeCacheUtils::GenerateCacheEntryFromCandidate(
   SkPixmap target_pixmap(target_info, target_pixels->data(),
                          target_info.minRowBytes());
   PaintFlags::FilterQuality filter_quality = PaintFlags::FilterQuality::kMedium;
-  if (decoded_pixmap.colorType() == kRGBA_F16_SkColorType &&
-      !ImageDecodeCacheUtils::CanResizeF16Image(filter_quality)) {
-    result = ImageDecodeCacheUtils::ScaleToHalfFloatPixmapUsingN32Intermediate(
-        decoded_pixmap, &target_pixmap, filter_quality);
-  } else {
-    result = decoded_pixmap.scalePixels(
-        target_pixmap,
-        PaintFlags::FilterQualityToSkSamplingOptions(filter_quality));
-  }
+  result = decoded_pixmap.scalePixels(
+      target_pixmap,
+      PaintFlags::FilterQualityToSkSamplingOptions(filter_quality));
   DCHECK(result) << key.ToString();
 
   return std::make_unique<CacheEntry>(
@@ -196,7 +190,8 @@ SoftwareImageDecodeCacheUtils::CacheKey::FromDrawImage(const DrawImage& image,
   // If the target size is empty, then we'll be skipping the decode anyway, so
   // the filter quality doesn't matter. Early out instead.
   if (target_size.IsEmpty()) {
-    return CacheKey(frame_key, stable_id, kSubrectAndScale, false, src_rect,
+    return CacheKey(frame_key, stable_id, kSubrectAndScale, false,
+                    image.paint_image().may_be_lcp_candidate(), src_rect,
                     target_size, image.target_color_params());
   }
 
@@ -250,7 +245,8 @@ SoftwareImageDecodeCacheUtils::CacheKey::FromDrawImage(const DrawImage& image,
     }
   }
 
-  return CacheKey(frame_key, stable_id, type, is_nearest_neighbor, src_rect,
+  return CacheKey(frame_key, stable_id, type, is_nearest_neighbor,
+                  image.paint_image().may_be_lcp_candidate(), src_rect,
                   target_size, image.target_color_params());
 }
 
@@ -259,6 +255,7 @@ SoftwareImageDecodeCacheUtils::CacheKey::CacheKey(
     PaintImage::Id stable_id,
     ProcessingType type,
     bool is_nearest_neighbor,
+    bool may_be_lcp_candidate,
     const gfx::Rect& src_rect,
     const gfx::Size& target_size,
     const TargetColorParams& target_color_params)
@@ -266,6 +263,7 @@ SoftwareImageDecodeCacheUtils::CacheKey::CacheKey(
       stable_id_(stable_id),
       type_(type),
       is_nearest_neighbor_(is_nearest_neighbor),
+      may_be_lcp_candidate_(may_be_lcp_candidate),
       src_rect_(src_rect),
       target_size_(target_size),
       target_color_params_(target_color_params) {

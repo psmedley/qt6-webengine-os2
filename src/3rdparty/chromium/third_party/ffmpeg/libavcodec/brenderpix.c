@@ -26,7 +26,7 @@
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 
 #define HEADER1_CHUNK    0x03
 #define HEADER2_CHUNK    0x3D
@@ -130,11 +130,9 @@ static int pix_decode_header(PixHeader *out, GetByteContext *pgb)
     return 0;
 }
 
-static int pix_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
-                            AVPacket *avpkt)
+static int pix_decode_frame(AVCodecContext *avctx, AVFrame *frame,
+                            int *got_frame, AVPacket *avpkt)
 {
-    AVFrame *frame = data;
-
     int ret, i;
     GetByteContext gb;
 
@@ -288,9 +286,9 @@ static int pix_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
 
 const FFCodec ff_brender_pix_decoder = {
     .p.name         = "brender_pix",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("BRender PIX image"),
+    CODEC_LONG_NAME("BRender PIX image"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_BRENDER_PIX,
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .decode       = pix_decode_frame,
+    FF_CODEC_DECODE_CB(pix_decode_frame),
 };

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,9 @@
 #include <linux-dmabuf-unstable-v1-client-protocol.h>
 
 #include "base/logging.h"
+#include "base/ranges/algorithm.h"
 #include "ui/gfx/linux/drm_util_linux.h"
+#include "ui/ozone/platform/wayland/host/wayland_buffer_factory.h"
 #include "ui/ozone/platform/wayland/host/wayland_connection.h"
 
 namespace ui {
@@ -27,9 +29,10 @@ void WaylandZwpLinuxDmabuf::Instantiate(WaylandConnection* connection,
                                         uint32_t name,
                                         const std::string& interface,
                                         uint32_t version) {
-  DCHECK_EQ(interface, kInterfaceName);
-
-  if (connection->zwp_dmabuf() ||
+  CHECK_EQ(interface, kInterfaceName) << "Expected \"" << kInterfaceName
+                                      << "\" but got \"" << interface << "\"";
+  auto* buffer_factory = connection->wayland_buffer_factory();
+  if (buffer_factory->wayland_zwp_dmabuf_ ||
       !wl::CanBind(interface, version, kMinVersion, kMaxVersion)) {
     return;
   }
@@ -40,7 +43,7 @@ void WaylandZwpLinuxDmabuf::Instantiate(WaylandConnection* connection,
     LOG(ERROR) << "Failed to bind zwp_linux_dmabuf_v1";
     return;
   }
-  connection->zwp_dmabuf_ = std::make_unique<WaylandZwpLinuxDmabuf>(
+  buffer_factory->wayland_zwp_dmabuf_ = std::make_unique<WaylandZwpLinuxDmabuf>(
       zwp_linux_dmabuf.release(), connection);
 }
 
@@ -87,8 +90,7 @@ void WaylandZwpLinuxDmabuf::CreateBuffer(const base::ScopedFD& fd,
 
   // It's possible to avoid waiting until the buffer is created and have it
   // immediately. This method is only available since the protocol version 2.
-  if (wl::get_version_of_object(zwp_linux_dmabuf_.get()) >=
-      ZWP_LINUX_BUFFER_PARAMS_V1_CREATE_IMMED_SINCE_VERSION) {
+  if (CanCreateBufferImmed()) {
     wl::Object<wl_buffer> buffer(zwp_linux_buffer_params_v1_create_immed(
         params.get(), size.width(), size.height(), format, 0));
     std::move(callback).Run(std::move(buffer));
@@ -102,7 +104,12 @@ void WaylandZwpLinuxDmabuf::CreateBuffer(const base::ScopedFD& fd,
     // created buffer and notify the client about it via the |callback|.
     pending_params_.emplace(std::move(params), std::move(callback));
   }
-  connection_->ScheduleFlush();
+  connection_->Flush();
+}
+
+bool WaylandZwpLinuxDmabuf::CanCreateBufferImmed() const {
+  return wl::get_version_of_object(zwp_linux_dmabuf_.get()) >=
+         ZWP_LINUX_BUFFER_PARAMS_V1_CREATE_IMMED_SINCE_VERSION;
 }
 
 void WaylandZwpLinuxDmabuf::AddSupportedFourCCFormatAndModifier(
@@ -134,16 +141,16 @@ void WaylandZwpLinuxDmabuf::AddSupportedFourCCFormatAndModifier(
 void WaylandZwpLinuxDmabuf::NotifyRequestCreateBufferDone(
     struct zwp_linux_buffer_params_v1* params,
     struct wl_buffer* new_buffer) {
-  auto it = std::find_if(
-      pending_params_.begin(), pending_params_.end(),
-      [params](const auto& item) { return item.first.get() == params; });
+  auto it = base::ranges::find(pending_params_, params, [](const auto& item) {
+    return item.first.get();
+  });
   DCHECK(it != pending_params_.end());
 
   std::move(it->second).Run(wl::Object<struct wl_buffer>(new_buffer));
 
   pending_params_.erase(it);
 
-  connection_->ScheduleFlush();
+  connection_->Flush();
 }
 
 // static

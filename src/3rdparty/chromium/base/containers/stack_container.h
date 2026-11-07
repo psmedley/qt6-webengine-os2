@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "build/build_config.h"
 
 namespace base {
@@ -35,8 +36,8 @@ namespace base {
 template<typename T, size_t stack_capacity>
 class StackAllocator : public std::allocator<T> {
  public:
-  typedef typename std::allocator<T>::pointer pointer;
-  typedef typename std::allocator<T>::size_type size_type;
+  typedef typename std::allocator_traits<std::allocator<T>>::pointer pointer;
+  typedef typename std::allocator_traits<std::allocator<T>>::size_type size_type;
 
   // Backing store for the allocator. The container owner is responsible for
   // maintaining this for as long as any containers using this allocator are
@@ -122,7 +123,7 @@ class StackAllocator : public std::allocator<T> {
 
  private:
   // `source_` is not a raw_ptr<T> for performance reasons: on-stack pointee.
-  Source* source_;
+  RAW_PTR_EXCLUSION Source* source_;
 };
 
 // A wrapper around STL containers that maintains a stack-sized buffer that the

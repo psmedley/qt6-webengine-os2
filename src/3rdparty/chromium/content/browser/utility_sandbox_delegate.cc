@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/check.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "components/services/screen_ai/buildflags/buildflags.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "content/public/common/zygote/zygote_buildflags.h"
 #include "ppapi/buildflags/buildflags.h"
@@ -19,7 +20,7 @@
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chromeos/assistant/buildflags.h"
+#include "chromeos/ash/components/assistant/buildflags.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace content {
@@ -59,7 +60,7 @@ UtilitySandboxedProcessLauncherDelegate::
       sandbox_type_ == sandbox::mojom::Sandbox::kPrintBackend ||
 #endif
       sandbox_type_ == sandbox::mojom::Sandbox::kPrintCompositor ||
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PPAPI)
       sandbox_type_ == sandbox::mojom::Sandbox::kPpapi ||
 #endif
 #if BUILDFLAG(IS_FUCHSIA)
@@ -75,7 +76,7 @@ UtilitySandboxedProcessLauncherDelegate::
       sandbox_type_ == sandbox::mojom::Sandbox::kLibassistant ||
 #endif  // BUILDFLAG(ENABLE_CROS_LIBASSISTANT)
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
       sandbox_type_ == sandbox::mojom::Sandbox::kScreenAI ||
 #endif
       sandbox_type_ == sandbox::mojom::Sandbox::kAudio ||
@@ -122,7 +123,7 @@ ZygoteHandle UtilitySandboxedProcessLauncherDelegate::GetZygote() {
 #if BUILDFLAG(ENABLE_OOP_PRINTING)
       sandbox_type_ == sandbox::mojom::Sandbox::kPrintBackend ||
 #endif
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
       sandbox_type_ == sandbox::mojom::Sandbox::kScreenAI ||
 #endif
       sandbox_type_ == sandbox::mojom::Sandbox::kSpeechRecognition) {

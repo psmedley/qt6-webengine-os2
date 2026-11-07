@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,6 @@
 #include "ipc/ipc_logging.h"
 #include "ipc/message_filter.h"
 #include "mojo/public/cpp/bindings/lib/message_quota_checker.h"
-#include "ppapi/buildflags/buildflags.h"
 #include "services/resource_coordinator/public/mojom/memory_instrumentation/constants.mojom.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 
@@ -97,10 +96,8 @@ base::FilePath ChildProcessHost::GetChildPath(int flags) {
       child_base_name += kMacHelperSuffix_renderer;
     } else if (flags == CHILD_GPU) {
       child_base_name += kMacHelperSuffix_gpu;
-#if BUILDFLAG(ENABLE_PLUGINS)
     } else if (flags == CHILD_PLUGIN) {
       child_base_name += kMacHelperSuffix_plugin;
-#endif  // ENABLE_PLUGINS
     } else if (flags > CHILD_EMBEDDER_FIRST) {
       return GetContentClient()->GetChildProcessPath(flags, child_path);
     } else {
@@ -168,6 +165,18 @@ void ChildProcessHostImpl::BindReceiver(mojo::GenericPendingReceiver receiver) {
   child_process_->BindReceiver(std::move(receiver));
 }
 
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+void ChildProcessHostImpl::ReinitializeLogging(
+    uint32_t logging_dest,
+    base::ScopedFD log_file_descriptor) {
+  auto logging_settings = mojom::LoggingSettings::New();
+  logging_settings->logging_dest = logging_dest;
+  logging_settings->log_file_descriptor =
+      mojo::PlatformHandle(std::move(log_file_descriptor));
+  child_process()->ReinitializeLogging(std::move(logging_settings));
+}
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
 base::Process& ChildProcessHostImpl::GetPeerProcess() {
   if (!peer_process_.IsValid()) {
     const base::Process& process = delegate_->GetProcess();
@@ -182,7 +191,8 @@ base::Process& ChildProcessHostImpl::GetPeerProcess() {
   return peer_process_;
 }
 
-#if BUILDFLAG(IS_CHROMECAST)
+// TODO(crbug.com/1328879): Remove this method when fixing the bug.
+#if BUILDFLAG(IS_CASTOS) || BUILDFLAG(IS_CAST_ANDROID)
 void ChildProcessHostImpl::RunServiceDeprecated(
     const std::string& service_name,
     mojo::ScopedMessagePipeHandle service_pipe) {
@@ -333,7 +343,7 @@ bool ChildProcessHostImpl::OnMessageReceived(const IPC::Message& msg) {
   }
 
   if (!handled) {
-      handled = delegate_->OnMessageReceived(msg);
+    handled = delegate_->OnMessageReceived(msg);
   }
 
 #if BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)

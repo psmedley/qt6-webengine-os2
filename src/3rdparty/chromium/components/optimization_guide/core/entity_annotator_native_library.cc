@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@
 #endif
 
 // IMPORTANT: All functions in this file that call dlsym()'ed
-// functions should be annotated with DISABLE_CFI_ICALL.
+// functions should be annotated with DISABLE_CFI_DLSYM.
 
 namespace optimization_guide {
 
@@ -126,7 +126,7 @@ EntityAnnotatorNativeLibrary::Create(bool should_provide_filter_path) {
   return nullptr;
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 void EntityAnnotatorNativeLibrary::LoadFunctions() {
   get_max_supported_feature_flag_func_ =
       reinterpret_cast<GetMaxSupportedFeatureFlagFunc>(
@@ -235,9 +235,29 @@ void EntityAnnotatorNativeLibrary::LoadFunctions() {
               native_library_,
               "OptimizationGuideEntityMetadataGetHumanReadableCategoryScoreAtIn"
               "dex"));
+  entity_metadata_get_human_readable_aliases_count_func_ =
+      reinterpret_cast<EntityMetadataGetHumanReadableAliasesCountFunc>(
+          base::GetFunctionPointerFromNativeLibrary(
+              native_library_,
+              "OptimizationGuideEntityMetadataGetHumanReadableAliasesCount"));
+  entity_metadata_get_human_readable_alias_at_index_func_ =
+      reinterpret_cast<EntityMetadataGetHumanReadableAliasAtIndexFunc>(
+          base::GetFunctionPointerFromNativeLibrary(
+              native_library_,
+              "OptimizationGuideEntityMetadataGetHumanReadableAliasAtIndex"));
+  entity_metadata_get_collections_count_func_ =
+      reinterpret_cast<EntityMetadataGetCollectionsCountFunc>(
+          base::GetFunctionPointerFromNativeLibrary(
+              native_library_,
+              "OptimizationGuideEntityMetadataGetCollectionsCount"));
+  entity_metadata_get_collection_at_index_func_ =
+      reinterpret_cast<EntityMetadataGetCollectionAtIndexFunc>(
+          base::GetFunctionPointerFromNativeLibrary(
+              native_library_,
+              "OptimizationGuideEntityMetadataGetCollectionAtIndex"));
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 bool EntityAnnotatorNativeLibrary::IsValid() const {
   return get_max_supported_feature_flag_func_ && create_from_options_func_ &&
          get_creation_error_func_ && delete_func_ &&
@@ -255,10 +275,14 @@ bool EntityAnnotatorNativeLibrary::IsValid() const {
          entity_metadata_get_human_readable_name_func_ &&
          entity_metadata_get_human_readable_categories_count_func_ &&
          entity_metadata_get_human_readable_category_name_at_index_func_ &&
-         entity_metadata_get_human_readable_category_score_at_index_func_;
+         entity_metadata_get_human_readable_category_score_at_index_func_ &&
+         entity_metadata_get_human_readable_aliases_count_func_ &&
+         entity_metadata_get_human_readable_alias_at_index_func_ &&
+         entity_metadata_get_collections_count_func_ &&
+         entity_metadata_get_collection_at_index_func_;
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 int32_t EntityAnnotatorNativeLibrary::GetMaxSupportedFeatureFlag() {
   DCHECK(IsValid());
   if (!IsValid()) {
@@ -268,7 +292,7 @@ int32_t EntityAnnotatorNativeLibrary::GetMaxSupportedFeatureFlag() {
   return get_max_supported_feature_flag_func_();
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 void* EntityAnnotatorNativeLibrary::CreateEntityAnnotator(
     const ModelInfo& model_info) {
   ScopedEntityAnnotatorCreationStatusRecorder recorder;
@@ -294,14 +318,15 @@ void* EntityAnnotatorNativeLibrary::CreateEntityAnnotator(
     recorder.set_status(EntityAnnotatorCreationStatus::kInitializationFailure);
     DeleteEntityAnnotator(entity_annotator);
     entity_annotator = nullptr;
+  } else {
+    recorder.set_status(EntityAnnotatorCreationStatus::kSuccess);
   }
 
   options_delete_func_(options);
-  recorder.set_status(EntityAnnotatorCreationStatus::kSuccess);
   return entity_annotator;
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 bool EntityAnnotatorNativeLibrary::PopulateEntityAnnotatorOptionsFromModelInfo(
     void* options,
     const ModelInfo& model_info,
@@ -404,7 +429,7 @@ bool EntityAnnotatorNativeLibrary::PopulateEntityAnnotatorOptionsFromModelInfo(
   return true;
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 void EntityAnnotatorNativeLibrary::DeleteEntityAnnotator(
     void* entity_annotator) {
   DCHECK(IsValid());
@@ -415,7 +440,7 @@ void EntityAnnotatorNativeLibrary::DeleteEntityAnnotator(
   delete_func_(reinterpret_cast<void*>(entity_annotator));
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 absl::optional<std::vector<ScoredEntityMetadata>>
 EntityAnnotatorNativeLibrary::AnnotateText(void* annotator,
                                            const std::string& text) {
@@ -446,7 +471,7 @@ EntityAnnotatorNativeLibrary::AnnotateText(void* annotator,
   return scored_md;
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 absl::optional<EntityMetadata>
 EntityAnnotatorNativeLibrary::GetEntityMetadataForEntityId(
     void* annotator,
@@ -472,7 +497,7 @@ EntityAnnotatorNativeLibrary::GetEntityMetadataForEntityId(
   return md;
 }
 
-DISABLE_CFI_ICALL
+DISABLE_CFI_DLSYM
 EntityMetadata EntityAnnotatorNativeLibrary::
     GetEntityMetadataFromOptimizationGuideEntityMetadata(
         const void* og_entity_metadata) {
@@ -493,6 +518,23 @@ EntityMetadata EntityAnnotatorNativeLibrary::
         entity_metadata_get_human_readable_category_score_at_index_func_(
             og_entity_metadata, i);
     entity_metadata.human_readable_categories[category_name] = category_score;
+  }
+
+  int32_t human_readable_aliases_count =
+      entity_metadata_get_human_readable_aliases_count_func_(
+          og_entity_metadata);
+  for (int32_t i = 0; i < human_readable_aliases_count; i++) {
+    entity_metadata.human_readable_aliases.push_back(
+        entity_metadata_get_human_readable_alias_at_index_func_(
+            og_entity_metadata, i));
+  }
+
+  int32_t collections_count =
+      entity_metadata_get_collections_count_func_(og_entity_metadata);
+  for (int32_t i = 0; i < collections_count; i++) {
+    std::string collection =
+        entity_metadata_get_collection_at_index_func_(og_entity_metadata, i);
+    entity_metadata.collections.push_back(collection);
   }
   return entity_metadata;
 }

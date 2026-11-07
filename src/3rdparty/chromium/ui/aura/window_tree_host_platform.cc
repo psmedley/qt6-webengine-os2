@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,7 +52,7 @@ WindowTreeHostPlatform::WindowTreeHostPlatform(
     ui::PlatformWindowInitProperties properties,
     std::unique_ptr<Window> window)
     : WindowTreeHost(std::move(window)) {
-  bounds_in_pixels_ = properties.bounds;
+  size_in_pixels_ = properties.bounds.size();
   CreateCompositor(false, false, properties.enable_compositing_based_throttling,
                    properties.compositor_memory_limit_mb);
   CreateAndSetPlatformWindow(std::move(properties));
@@ -65,10 +65,10 @@ WindowTreeHostPlatform::WindowTreeHostPlatform(std::unique_ptr<Window> window)
 
 void WindowTreeHostPlatform::CreateAndSetPlatformWindow(
     ui::PlatformWindowInitProperties properties) {
-  // Cache initial bounds used to create |platform_window_| so that it does not
+  // Cache initial size used to create |platform_window_| so that it does not
   // end up propagating unneeded bounds change event when it is first notified
   // through OnBoundsChanged, which may lead to unneeded re-layouts, etc.
-  bounds_in_pixels_ = properties.bounds;
+  size_in_pixels_ = properties.bounds.size();
 #if defined(USE_OZONE)
   platform_window_ = ui::OzonePlatform::GetInstance()->CreatePlatformWindow(
       this, std::move(properties));
@@ -110,15 +110,11 @@ void WindowTreeHostPlatform::HideImpl() {
 }
 
 gfx::Rect WindowTreeHostPlatform::GetBoundsInPixels() const {
-  return platform_window_->GetBounds();
+  return platform_window_->GetBoundsInPixels();
 }
 
 void WindowTreeHostPlatform::SetBoundsInPixels(const gfx::Rect& bounds) {
-  platform_window_->SetBounds(bounds);
-}
-
-gfx::Point WindowTreeHostPlatform::GetLocationOnScreenInPixels() const {
-  return platform_window_->GetBounds().origin();
+  platform_window_->SetBoundsInPixels(bounds);
 }
 
 void WindowTreeHostPlatform::SetCapture() {
@@ -127,6 +123,10 @@ void WindowTreeHostPlatform::SetCapture() {
 
 void WindowTreeHostPlatform::ReleaseCapture() {
   platform_window_->ReleaseCapture();
+}
+
+gfx::Point WindowTreeHostPlatform::GetLocationOnScreenInPixels() const {
+  return platform_window_->GetBoundsInPixels().origin();
 }
 
 bool WindowTreeHostPlatform::CaptureSystemKeyEventsImpl(
@@ -186,6 +186,12 @@ void WindowTreeHostPlatform::LockMouse(Window* window) {
   WindowTreeHost::LockMouse(window);
 }
 
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+std::string WindowTreeHostPlatform::GetUniqueId() const {
+  return platform_window()->GetWindowUniqueId();
+}
+#endif
+
 void WindowTreeHostPlatform::OnBoundsChanged(const BoundsChange& change) {
   // It's possible this function may be called recursively. Only notify
   // observers on initial entry. This way observers can safely assume that
@@ -197,18 +203,18 @@ void WindowTreeHostPlatform::OnBoundsChanged(const BoundsChange& change) {
   }
   float current_scale = compositor()->device_scale_factor();
   float new_scale = ui::GetScaleFactorForNativeView(window());
-  gfx::Rect old_bounds = bounds_in_pixels_;
   auto weak_ref = GetWeakPtr();
-  bounds_in_pixels_ = change.bounds;
-  if (bounds_in_pixels_.origin() != old_bounds.origin()) {
-    OnHostMovedInPixels(bounds_in_pixels_.origin());
+  auto new_size = GetBoundsInPixels().size();
+  bool size_changed = size_in_pixels_ != new_size;
+  size_in_pixels_ = new_size;
+  if (change.origin_changed) {
+    OnHostMovedInPixels();
     // Changing the bounds may destroy this.
     if (!weak_ref)
       return;
   }
-  if (bounds_in_pixels_.size() != old_bounds.size() ||
-      current_scale != new_scale) {
-    OnHostResizedInPixels(bounds_in_pixels_.size());
+  if (size_changed || current_scale != new_scale) {
+    OnHostResizedInPixels(new_size);
     // Changing the size may destroy this.
     if (!weak_ref)
       return;

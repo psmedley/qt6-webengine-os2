@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@ union LoginScreenStorageRetrieveResult {
 };
 
 // Copy of LoginScreenStorageMetadata from login_screen_storage.proto.
-[Stable, Extensible]
+[Stable]
 struct LoginScreenStorageMetadata {
   // Whether the saved key/value pair should be deleted on session exit.
   bool clear_on_session_exit@0;

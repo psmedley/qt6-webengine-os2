@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,13 +98,6 @@ class COMPONENTS_DOWNLOAD_EXPORT AutoResumptionHandler
   void ResumeDownloadImmediately();
   bool ShouldResumeNow(download::DownloadItem* download) const;
   bool IsAutoResumableDownload(download::DownloadItem* item) const;
-
-  // Returns whether the user has scheduled the download to happen later.
-  static bool ShouldDownloadLater(DownloadItem* item, base::Time now);
-
-  // Reschedule the download later background task. May cancel the task when no
-  // need to run a future task.
-  void RescheduleDownloadLaterTask(const std::vector<DownloadItem*> downloads);
 
   // Listens to network events to stop/resume downloads accordingly.
   std::unique_ptr<download::NetworkStatusListener> network_listener_;

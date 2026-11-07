@@ -1,18 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "base/time/time.h"
 
 #include <stdint.h>
 #include <sys/time.h>
 #include <time.h>
-
-#include "base/time/time.h"
-#include "build/build_config.h"
-#if BUILDFLAG(IS_ANDROID) && !defined(__LP64__)
-#include <time64.h>
-#endif
 #include <unistd.h>
-
 #include <limits>
 
 #include "base/no_destructor.h"
@@ -21,6 +16,9 @@
 #include "build/build_config.h"
 #include "build/chromecast_buildflags.h"
 
+#if BUILDFLAG(IS_ANDROID) && !defined(__LP64__)
+#include <time64.h>
+#endif
 #if BUILDFLAG(IS_NACL)
 #include "base/os_compat_nacl.h"
 #endif
@@ -130,10 +128,10 @@ void Time::Explode(bool is_local, Exploded* exploded) const {
   if (sizeof(SysTime) < 8) {
 // TODO(b/167763382) Find an alternate solution for Chromecast devices, since
 // adding the icui18n dep significantly increases the binary size.
-#if !BUILDFLAG(IS_CHROMECAST)
+#if !BUILDFLAG(IS_CASTOS) && !BUILDFLAG(IS_CAST_ANDROID)
     ExplodeUsingIcu(millis_since_unix_epoch, is_local, exploded);
     return;
-#endif  // !BUILDFLAG(IS_CHROMECAST)
+#endif  // !BUILDFLAG(IS_CASTOS) && !BUILDFLAG(IS_CAST_ANDROID)
   }
 
   // Split the |millis_since_unix_epoch| into separate seconds and millisecond
@@ -158,7 +156,7 @@ void Time::Explode(bool is_local, Exploded* exploded) const {
   exploded->hour = timestruct.tm_hour;
   exploded->minute = timestruct.tm_min;
   exploded->second = timestruct.tm_sec;
-  exploded->millisecond = millisecond;
+  exploded->millisecond = static_cast<int>(millisecond);
 }
 
 // static
@@ -187,7 +185,7 @@ bool Time::FromExploded(bool is_local, const Exploded& exploded, Time* time) {
   timestruct.tm_zone = nullptr;  // not a POSIX field, so mktime/timegm ignore
 #endif
 
-  SysTime seconds;
+  int64_t seconds;
 
   // Certain exploded dates do not really exist due to daylight saving times,
   // and this causes mktime() to return implementation-defined values when

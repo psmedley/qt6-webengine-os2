@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -34,6 +34,34 @@ buildflag_header("buildflags") {
     "MBI_MODE_PER_RENDER_PROCESS_HOST=$_mbi_mode_per_render_process_host",
     "MBI_MODE_PER_SITE_INSTANCE=$_mbi_mode_per_site_instance",
   ]
+}
+
+if (is_linux || is_chromeos) {
+  source_set("sandbox_support_linux") {
+    public = [
+      "zygote/zygote_commands_linux.h",
+      "zygote/zygote_communication_linux.h",
+    ]
+
+    sources = [
+      "zygote/sandbox_support_linux.cc",
+      "zygote/send_zygote_child_ping_linux.cc",
+      "zygote/zygote_communication_linux.cc",
+    ]
+
+    deps = [
+      "//base",
+      "//base:i18n",
+      "//content/public/common:content_descriptors",
+      "//content/public/common:result_codes",
+      "//content/public/common:sandbox_support_linux",
+      "//content/public/common:switches",
+      "//sandbox/policy",
+      "//third_party/icu",
+    ]
+
+    configs += [ "//content:content_implementation" ]
+  }
 }
 
 jumbo_source_set("common") {
@@ -78,6 +106,8 @@ jumbo_source_set("common") {
     "cursors/webcursor_ozone.cc",
     "debug_utils.cc",
     "debug_utils.h",
+    "features.cc",
+    "features.h",
     "fetch/fetch_api_request_proto.cc",
     "fetch/fetch_api_request_proto.h",
     "fetch/fetch_request_type_converters.cc",
@@ -85,7 +115,6 @@ jumbo_source_set("common") {
     "font_list.cc",
     "font_list.h",
     "font_list_fontconfig.cc",
-    "frame_owner_element_type_mojom_traits.cc",
     "gin_java_bridge_messages.h",
     "in_process_child_thread_params.cc",
     "in_process_child_thread_params.h",
@@ -97,7 +126,6 @@ jumbo_source_set("common") {
     "input/input_event_ack_state.cc",
     "input/input_event_stream_validator.cc",
     "input/input_event_stream_validator.h",
-    "input/input_injector_mojom_traits.cc",
     "input/synthetic_gesture_params.cc",
     "input/synthetic_gesture_params.h",
     "input/synthetic_pinch_gesture_params.cc",
@@ -124,12 +152,8 @@ jumbo_source_set("common") {
     "origin_util.cc",
     "partition_alloc_support.cc",
     "partition_alloc_support.h",
-    "pepper_file_util.cc",
-    "pepper_file_util.h",
-    "pepper_plugin_list.cc",
-    "pepper_plugin_list.h",
-    "pepper_renderer_instance_data.cc",
-    "pepper_renderer_instance_data.h",
+    "private_aggregation_features.cc",
+    "private_aggregation_features.h",
     "process_type.cc",
     "process_visibility_tracker.cc",
     "process_visibility_tracker.h",
@@ -141,7 +165,6 @@ jumbo_source_set("common") {
     "shared_file_util.h",
     "skia_utils.cc",
     "skia_utils.h",
-    "state_transitions.h",
     "thread_pool_util.cc",
     "thread_pool_util.h",
     "trace_utils.h",
@@ -166,6 +189,7 @@ jumbo_source_set("common") {
     ":mojo_bindings",
     "//cc",
     "//cc/ipc",
+    "//content/public/common:switches",
     "//gpu/command_buffer/common",
     "//ipc",
     "//sandbox/policy",
@@ -192,7 +216,6 @@ jumbo_source_set("common") {
     "//components/tracing:startup_tracing",
     "//content:content_resources",
     "//content:dev_ui_content_resources",
-    "//content/app/resources",
     "//content/common/fetch:fetch_api_request_proto",
     "//content/public/common:interfaces",
     "//content/public/common/zygote:buildflags",
@@ -265,8 +288,6 @@ jumbo_source_set("common") {
 
   if (is_android) {
     sources += [
-      "android/cpu_affinity_setter.cc",
-      "android/cpu_affinity_setter.h",
       "android/cpu_time_metrics.cc",
       "android/cpu_time_metrics.h",
       "android/cpu_time_metrics_internal.cc",
@@ -301,6 +322,8 @@ jumbo_source_set("common") {
       "mac/attributed_string_type_converters.mm",
       "mac/font_loader.h",
       "mac/font_loader.mm",
+      "mac/task_port_policy.cc",
+      "mac/task_port_policy.h",
     ]
     deps += [
       ":mac_helpers",
@@ -346,20 +369,14 @@ jumbo_source_set("common") {
   }
 
   if (use_aura) {
-    deps += [ "//ui/aura/cursor" ]
+    deps += [ "//ui/wm" ]
   } else {
     sources -= [ "cursors/webcursor_aura.cc" ]
   }
 
   if (is_linux || is_chromeos) {
-    sources += [
-      "zygote/sandbox_support_linux.cc",
-      "zygote/send_zygote_child_ping_linux.cc",
-      "zygote/zygote_commands_linux.h",
-      "zygote/zygote_communication_linux.cc",
-      "zygote/zygote_communication_linux.h",
-    ]
     deps += [
+      ":sandbox_support_linux",
       ":set_process_title_linux",
     ]
   }
@@ -371,25 +388,24 @@ jumbo_source_set("common") {
     ]
   }
 
-  if (is_mac || is_win || is_android || is_fuchsia || use_qt) {
+  if (is_mac || is_win || is_android || is_fuchsia || is_qtwebengine) {
     sources -= [ "font_list_fontconfig.cc" ]
   } else {
     deps += [ "//third_party/fontconfig" ]
   }
 
-  if (enable_plugins) {
-    deps += [
-      "//ppapi/proxy:ipc",
-      "//ppapi/shared_impl",
-    ]
-  } else {
-    sources -= [
+  if (enable_ppapi) {
+    sources += [
       "pepper_file_util.cc",
       "pepper_file_util.h",
       "pepper_plugin_list.cc",
       "pepper_plugin_list.h",
       "pepper_renderer_instance_data.cc",
       "pepper_renderer_instance_data.h",
+    ]
+    deps += [
+      "//ppapi/proxy:ipc",
+      "//ppapi/shared_impl",
     ]
   }
 
@@ -415,6 +431,17 @@ jumbo_source_set("common") {
   }
 }
 
+# This is used by content/shell as well, which we don't want to depend on the
+# entire content/common.
+component("main_frame_counter") {
+  defines = [ "IS_MAIN_FRAME_COUNTER_IMPL" ]
+  sources = [
+    "main_frame_counter.cc",
+    "main_frame_counter.h",
+  ]
+  deps = [ "//base:base" ]
+}
+
 if (is_linux || is_chromeos) {
   source_set("set_process_title_linux") {
     public = [ "set_process_title_linux.h" ]
@@ -425,7 +452,10 @@ if (is_linux || is_chromeos) {
 
 # See comment at the top of //content/BUILD.gn for how this works.
 group("for_content_tests") {
-  visibility = [ "//content/test/*" ]
+  visibility = [
+    "//content/services/auction_worklet:tests",
+    "//content/test/*",
+  ]
   if (!is_component_build) {
     public_deps = [ ":common" ]
   }
@@ -435,15 +465,11 @@ mojom("mojo_bindings") {
   # This interface is internal to content.
   visibility = [ "//content/*" ]
 
-  # indexed_db.mojom used a native typemap that was not available in Java.
-  # indexed_db.mojom was removed in an earlier commit.  This should be removed
-  # at some point.
-  cpp_only = true
-
   disable_variants = true
 
   sources = [
     "agent_scheduling_group.mojom",
+    "aggregatable_report.mojom",
     "associated_interfaces.mojom",
     "child_process.mojom",
     "dom_automation_controller.mojom",
@@ -456,11 +482,12 @@ mojom("mojo_bindings") {
     "media/media_log_records.mojom",
     "native_types.mojom",
     "navigation_client.mojom",
-    "render_accessibility.mojom",
+    "private_aggregation_host.mojom",
     "render_message_filter.mojom",
     "renderer.mojom",
     "renderer_host.mojom",
     "renderer_variations_configuration.mojom",
+    "shared_storage_worklet_service.mojom",
     "web_ui.mojom",
   ]
 
@@ -469,7 +496,7 @@ mojom("mojo_bindings") {
     enabled_features += [ "ipc_logging" ]
   }
   if (is_linux || is_chromeos) {
-    enabled_features += [ "supports_thread_priorities" ]
+    enabled_features += [ "supports_thread_types" ]
   }
   if (use_clang_profiling_inside_sandbox) {
     enabled_features += [ "clang_profiling_inside_sandbox" ]
@@ -573,6 +600,11 @@ mojom("mojo_bindings") {
         "//services/network/public/cpp/p2p_param_traits.h",
       ]
 
+      traits_sources = [
+        "//content/common/frame_owner_element_type_mojom_traits.cc",
+        "//content/common/input/input_injector_mojom_traits.cc",
+      ]
+
       traits_public_deps = [
         # NOTE: These dependencies are here to satisfy gn check because
         # common_param_traits_macros.h include their headers.
@@ -618,9 +650,9 @@ mojom("mojo_bindings") {
 
   public_deps = [
     "//cc/mojom",
+    "//components/services/storage/shared_storage/public/mojom",
     "//components/variations:variations_mojom",
     "//content/public/common:interfaces",
-    "//content/services/shared_storage_worklet/public/mojom:mojom",
     "//ipc:mojom",
     "//ipc:mojom_constants",
     "//media/capture/mojom:video_capture",

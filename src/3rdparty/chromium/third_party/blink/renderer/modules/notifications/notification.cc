@@ -39,7 +39,6 @@
 #include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value_factory.h"
-#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_notification_action.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_notification_options.h"
@@ -58,6 +57,7 @@
 #include "third_party/blink/renderer/modules/notifications/timestamp_trigger.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/document_resource_coordinator.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -85,7 +85,7 @@ Notification* Notification::Create(ExecutionContext* context,
     return nullptr;
   }
 
-  if (!options->actions().IsEmpty()) {
+  if (!options->actions().empty()) {
     exception_state.ThrowTypeError(
         "Actions are only supported for persistent notifications shown using "
         "ServiceWorkerRegistration.showNotification().");
@@ -130,7 +130,7 @@ Notification* Notification::Create(ExecutionContext* context,
 
   // TODO(https://crbug.com/595685): Make |token| a constructor parameter
   // once persistent notifications have been mojofied too.
-  if (notification->tag().IsNull() || notification->tag().IsEmpty()) {
+  if (notification->tag().IsNull() || notification->tag().empty()) {
     auto unguessable_token = base::UnguessableToken::Create();
     notification->SetToken(unguessable_token.ToString().c_str());
   } else {
@@ -199,7 +199,7 @@ void Notification::PrepareShow(TimerBase*) {
   }
 
   loader_ = MakeGarbageCollected<NotificationResourcesLoader>(
-      WTF::Bind(&Notification::DidLoadResources, WrapWeakPersistent(this)));
+      WTF::BindOnce(&Notification::DidLoadResources, WrapWeakPersistent(this)));
   loader_->Start(GetExecutionContext(), *data_);
 }
 
@@ -418,6 +418,15 @@ String Notification::permission(ExecutionContext* context) {
   if (!context->IsSecureContext())
     return PermissionString(mojom::blink::PermissionStatus::DENIED);
 
+  // If the current global object's browsing context is a prerendering browsing
+  // context, then return "default".
+  // https://wicg.github.io/nav-speculation/prerendering.html#patch-notifications
+  if (auto* window = DynamicTo<LocalDOMWindow>(context)) {
+    if (Document* document = window->document(); document->IsPrerendering()) {
+      return PermissionString(mojom::blink::PermissionStatus::ASK);
+    }
+  }
+
   mojom::blink::PermissionStatus status =
       NotificationManager::From(context)->GetPermissionStatus();
 
@@ -429,7 +438,7 @@ String Notification::permission(ExecutionContext* context) {
   if (status == mojom::blink::PermissionStatus::ASK) {
     auto* window = DynamicTo<LocalDOMWindow>(context);
     LocalFrame* frame = window ? window->GetFrame() : nullptr;
-    if (!frame || frame->IsCrossOriginToMainFrame())
+    if (!frame || frame->IsCrossOriginToOutermostMainFrame())
       status = mojom::blink::PermissionStatus::DENIED;
   }
 
@@ -455,7 +464,7 @@ ScriptPromise Notification::requestPermission(
 
     // Sites cannot request notification permission from cross-origin iframes,
     // but they can use notifications if permission had already been granted.
-    if (window->GetFrame()->IsCrossOriginToMainFrame()) {
+    if (window->GetFrame()->IsCrossOriginToOutermostMainFrame()) {
       Deprecation::CountDeprecation(
           context, WebFeature::kNotificationPermissionRequestedIframe);
     }

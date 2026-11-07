@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/privacy_sandbox/privacy_sandbox_features.h"
 #include "components/privacy_sandbox/privacy_sandbox_prefs.h"
+#include "content/public/common/content_features.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cookies/site_for_cookies.h"
 #include "url/gurl.h"
@@ -84,6 +85,11 @@ PrivacySandboxSettings::PrivacySandboxSettings(
       prefs::kPrivacySandboxApisEnabledV2,
       base::BindRepeating(&PrivacySandboxSettings::OnPrivacySandboxPrefChanged,
                           base::Unretained(this)));
+  pref_change_registrar_.Add(
+      prefs::kPrivacySandboxFirstPartySetsEnabled,
+      base::BindRepeating(
+          &PrivacySandboxSettings::OnFirstPartySetsEnabledPrefChanged,
+          base::Unretained(this)));
 }
 
 PrivacySandboxSettings::~PrivacySandboxSettings() = default;
@@ -109,21 +115,15 @@ bool PrivacySandboxSettings::IsTopicsAllowedForContext(
     const absl::optional<url::Origin>& top_frame_origin) const {
   // If the Topics API is disabled completely, it is not available in any
   // context.
-  if (!IsTopicsAllowed())
-    return false;
-
-  ContentSettingsForOneType cookie_settings;
-  cookie_settings_->GetCookieSettings(&cookie_settings);
-
-  return IsPrivacySandboxEnabledForContext(url, top_frame_origin,
-                                           cookie_settings);
+  return IsTopicsAllowed() &&
+         IsPrivacySandboxEnabledForContext(url, top_frame_origin);
 }
 
 bool PrivacySandboxSettings::IsTopicAllowed(const CanonicalTopic& topic) {
-  auto* blocked_topics =
+  const auto& blocked_topics =
       pref_service_->GetList(prefs::kPrivacySandboxBlockedTopics);
 
-  for (const auto& item : blocked_topics->GetList()) {
+  for (const auto& item : blocked_topics) {
     auto blocked_topic =
         CanonicalTopic::FromValue(*item.GetDict().Find(kBlockedTopicsTopicKey));
     if (!blocked_topic)
@@ -137,8 +137,8 @@ bool PrivacySandboxSettings::IsTopicAllowed(const CanonicalTopic& topic) {
 
 void PrivacySandboxSettings::SetTopicAllowed(const CanonicalTopic& topic,
                                              bool allowed) {
-  ListPrefUpdate scoped_pref_update(pref_service_,
-                                    prefs::kPrivacySandboxBlockedTopics);
+  ScopedListPrefUpdate scoped_pref_update(pref_service_,
+                                          prefs::kPrivacySandboxBlockedTopics);
 
   // Presence in the preference list indicates that a topic is blocked, as
   // there is no concept of explicitly allowed topics. Thus, allowing a topic
@@ -147,7 +147,7 @@ void PrivacySandboxSettings::SetTopicAllowed(const CanonicalTopic& topic,
   // are undesireable, removing any existing reference first is desireable.
   // Thus, regardless of |allowed|, removing any existing reference is the
   // first step.
-  scoped_pref_update->GetList().EraseIf([&](const base::Value& value) {
+  scoped_pref_update->EraseIf([&](const base::Value& value) {
     auto* blocked_topic_value = value.GetDict().Find(kBlockedTopicsTopicKey);
     auto converted_topic = CanonicalTopic::FromValue(*blocked_topic_value);
     return converted_topic && *converted_topic == topic;
@@ -164,16 +164,16 @@ void PrivacySandboxSettings::SetTopicAllowed(const CanonicalTopic& topic,
 
 void PrivacySandboxSettings::ClearTopicSettings(base::Time start_time,
                                                 base::Time end_time) {
-  ListPrefUpdate scoped_pref_update(pref_service_,
-                                    prefs::kPrivacySandboxBlockedTopics);
+  ScopedListPrefUpdate scoped_pref_update(pref_service_,
+                                          prefs::kPrivacySandboxBlockedTopics);
 
   // Shortcut for maximum time range deletion.
   if (start_time == base::Time() && end_time == base::Time::Max()) {
-    scoped_pref_update->GetList().clear();
+    scoped_pref_update->clear();
     return;
   }
 
-  scoped_pref_update->GetList().EraseIf([&](const base::Value& value) {
+  scoped_pref_update->EraseIf([&](const base::Value& value) {
     auto blocked_time =
         base::ValueToTime(value.GetDict().Find(kBlockedTopicsBlockTimeKey));
     return start_time <= blocked_time && blocked_time <= end_time;
@@ -185,43 +185,32 @@ base::Time PrivacySandboxSettings::TopicsDataAccessibleSince() const {
       prefs::kPrivacySandboxTopicsDataAccessibleSince);
 }
 
-bool PrivacySandboxSettings::IsConversionMeasurementAllowed(
+bool PrivacySandboxSettings::IsAttributionReportingAllowed(
     const url::Origin& top_frame_origin,
     const url::Origin& reporting_origin) const {
-  ContentSettingsForOneType cookie_settings;
-  cookie_settings_->GetCookieSettings(&cookie_settings);
-
   return IsPrivacySandboxEnabledForContext(reporting_origin.GetURL(),
-                                           top_frame_origin, cookie_settings);
+                                           top_frame_origin);
 }
 
-bool PrivacySandboxSettings::ShouldSendConversionReport(
-    const url::Origin& impression_origin,
-    const url::Origin& conversion_origin,
+bool PrivacySandboxSettings::MaySendAttributionReport(
+    const url::Origin& source_origin,
+    const url::Origin& destination_origin,
     const url::Origin& reporting_origin) const {
-  // Re-using the |cookie_settings| allows this function to be faster
-  // than simply calling IsConversionMeasurementAllowed() twice
-  ContentSettingsForOneType cookie_settings;
-  cookie_settings_->GetCookieSettings(&cookie_settings);
-
-  // The |reporting_origin| needs to have been accessible in both impression
-  // and conversion contexts. These are both checked when they occur, but
-  // user settings may have changed between then and when the conversion report
+  // The |reporting_origin| needs to have been accessible in both source
+  // and trigger contexts. These are both checked when they occur, but
+  // user settings may have changed between then and when the attribution report
   // is sent.
-  return IsPrivacySandboxEnabledForContext(
-             reporting_origin.GetURL(), impression_origin, cookie_settings) &&
+  return IsPrivacySandboxEnabledForContext(reporting_origin.GetURL(),
+                                           source_origin) &&
          IsPrivacySandboxEnabledForContext(reporting_origin.GetURL(),
-                                           conversion_origin, cookie_settings);
+                                           destination_origin);
 }
 
 void PrivacySandboxSettings::SetFledgeJoiningAllowed(
     const std::string& top_frame_etld_plus1,
     bool allowed) {
-  DictionaryPrefUpdate scoped_pref_update(
+  ScopedDictPrefUpdate scoped_pref_update(
       pref_service_, prefs::kPrivacySandboxFledgeJoinBlocked);
-  auto* pref_data = scoped_pref_update.Get();
-  DCHECK(pref_data);
-  DCHECK(pref_data->is_dict());
 
   // Ensure that the provided etld_plus1 actually is an etld+1.
   auto effective_top_frame_etld_plus1 =
@@ -251,34 +240,32 @@ void PrivacySandboxSettings::SetFledgeJoiningAllowed(
   if (allowed) {
     // Existence of the key implies blocking, so simply removing the key is
     // sufficient. If the key wasn't already present, the following is a no-op.
-    pref_data->RemoveKey(effective_top_frame_etld_plus1);
+    scoped_pref_update->Remove(effective_top_frame_etld_plus1);
   } else {
     // Overriding the creation date for keys which already exist is acceptable.
     // Time range based deletions are typically started from the current time,
     // and so this will be more aggressively removed. This decreases the chance
     // a potentially sensitive website remains in preferences.
-    pref_data->SetKey(effective_top_frame_etld_plus1,
-                      base::TimeToValue(base::Time::Now()));
+    scoped_pref_update->Set(effective_top_frame_etld_plus1,
+                            base::TimeToValue(base::Time::Now()));
   }
 }
 
 void PrivacySandboxSettings::ClearFledgeJoiningAllowedSettings(
     base::Time start_time,
     base::Time end_time) {
-  DictionaryPrefUpdate scoped_pref_update(
+  ScopedDictPrefUpdate scoped_pref_update(
       pref_service_, prefs::kPrivacySandboxFledgeJoinBlocked);
-  auto* pref_data = scoped_pref_update.Get();
-  DCHECK(pref_data);
-  DCHECK(pref_data->is_dict());
+  auto& pref_data = scoped_pref_update.Get();
 
   // Shortcut for maximum time range deletion
   if (start_time == base::Time() && end_time == base::Time::Max()) {
-    pref_data->DictClear();
+    pref_data.clear();
     return;
   }
 
   std::vector<std::string> keys_to_remove;
-  for (auto entry : pref_data->DictItems()) {
+  for (auto entry : pref_data) {
     absl::optional<base::Time> created_time = base::ValueToTime(entry.second);
     if (created_time.has_value() && start_time <= created_time &&
         created_time <= end_time) {
@@ -287,17 +274,15 @@ void PrivacySandboxSettings::ClearFledgeJoiningAllowedSettings(
   }
 
   for (const auto& key : keys_to_remove)
-    pref_data->RemoveKey(key);
+    pref_data.Remove(key);
 }
 
 bool PrivacySandboxSettings::IsFledgeJoiningAllowed(
     const url::Origin& top_frame_origin) const {
-  DictionaryPrefUpdate scoped_pref_update(
+  ScopedDictPrefUpdate scoped_pref_update(
       pref_service_, prefs::kPrivacySandboxFledgeJoinBlocked);
-  auto* pref_data = scoped_pref_update.Get();
-  DCHECK(pref_data);
-  DCHECK(pref_data->is_dict());
-  for (auto entry : pref_data->DictItems()) {
+  auto& pref_data = scoped_pref_update.Get();
+  for (auto entry : pref_data) {
     if (base::ranges::any_of(FledgeBlockToContentSettingsPatterns(entry.first),
                              [&](const auto& pattern) {
                                return pattern.Matches(
@@ -312,10 +297,8 @@ bool PrivacySandboxSettings::IsFledgeJoiningAllowed(
 bool PrivacySandboxSettings::IsFledgeAllowed(
     const url::Origin& top_frame_origin,
     const url::Origin& auction_party) {
-  ContentSettingsForOneType cookie_settings;
-  cookie_settings_->GetCookieSettings(&cookie_settings);
   return IsPrivacySandboxEnabledForContext(auction_party.GetURL(),
-                                           top_frame_origin, cookie_settings);
+                                           top_frame_origin);
 }
 
 std::vector<GURL> PrivacySandboxSettings::FilterFledgeAllowedParties(
@@ -326,25 +309,35 @@ std::vector<GURL> PrivacySandboxSettings::FilterFledgeAllowedParties(
   if (!IsPrivacySandboxEnabled())
     return {};
 
-  ContentSettingsForOneType cookie_settings;
-  cookie_settings_->GetCookieSettings(&cookie_settings);
   std::vector<GURL> allowed_parties;
   for (const auto& party : auction_parties) {
-    if (IsPrivacySandboxEnabledForContext(party, top_frame_origin,
-                                          cookie_settings)) {
+    if (IsPrivacySandboxEnabledForContext(party, top_frame_origin)) {
       allowed_parties.push_back(party);
     }
   }
   return allowed_parties;
 }
 
+bool PrivacySandboxSettings::IsSharedStorageAllowed(
+    const url::Origin& top_frame_origin,
+    const url::Origin& accessing_origin) const {
+  // Ensures that Shared Storage is only allowed if both Privacy Sandbox is
+  // enabled and full cookie access is enabled for this context.
+  return IsPrivacySandboxEnabledForContext(accessing_origin.GetURL(),
+                                           top_frame_origin);
+}
+
+bool PrivacySandboxSettings::IsPrivateAggregationAllowed(
+    const url::Origin& top_frame_origin,
+    const url::Origin& reporting_origin) const {
+  return IsPrivacySandboxEnabledForContext(reporting_origin.GetURL(),
+                                           top_frame_origin);
+}
+
 bool PrivacySandboxSettings::IsPrivacySandboxEnabled() const {
-  // If the delegate is restricting access, or indicates confirmation has not
-  // occurred, the Privacy Sandbox is disabled.
-  if (delegate_->IsPrivacySandboxRestricted() ||
-      !delegate_->IsPrivacySandboxConfirmed()) {
+  // If the delegate is restricting access the Privacy Sandbox is disabled.
+  if (delegate_->IsPrivacySandboxRestricted())
     return false;
-  }
 
   // For Measurement and Relevance APIs, we explicitly do not require the
   // underlying pref to be enabled if there is a local flag enabling the APIs to
@@ -410,6 +403,16 @@ void PrivacySandboxSettings::OnPrivacySandboxPrefChanged() {
     observer.OnTrustTokenBlockingChanged(!IsTrustTokensAllowed());
 }
 
+void PrivacySandboxSettings::OnFirstPartySetsEnabledPrefChanged() {
+  if (!base::FeatureList::IsEnabled(features::kFirstPartySets))
+    return;
+
+  for (auto& observer : observers_) {
+    observer.OnFirstPartySetsEnabledChanged(
+        pref_service_->GetBoolean(prefs::kPrivacySandboxFirstPartySetsEnabled));
+  }
+}
+
 void PrivacySandboxSettings::AddObserver(Observer* observer) {
   observers_.AddObserver(observer);
 }
@@ -427,15 +430,15 @@ PrivacySandboxSettings::PrivacySandboxSettings() = default;
 
 bool PrivacySandboxSettings::IsPrivacySandboxEnabledForContext(
     const GURL& url,
-    const absl::optional<url::Origin>& top_frame_origin,
-    const ContentSettingsForOneType& cookie_settings) const {
+    const absl::optional<url::Origin>& top_frame_origin) const {
   if (!IsPrivacySandboxEnabled())
     return false;
 
   // Third party cookies must also be available for this context. An empty site
   // for cookies is provided so the context is always treated as a third party.
-  return cookie_settings_->IsFullCookieAccessAllowed(url, net::SiteForCookies(),
-                                                     top_frame_origin);
+  return cookie_settings_->IsFullCookieAccessAllowed(
+      url, net::SiteForCookies(), top_frame_origin,
+      content_settings::CookieSettings::QueryReason::kPrivacySandbox);
 }
 
 void PrivacySandboxSettings::SetTopicsDataAccessibleFromNow() const {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/guid.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/supports_user_data.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/task_runner.h"
@@ -54,16 +53,12 @@ void RemoveOldBlobStorageDirectories(FilePath blob_storage_parent,
   }
   base::FileEnumerator enumerator(blob_storage_parent, false /* recursive */,
                                   base::FileEnumerator::DIRECTORIES);
-  bool success = true;
-  bool cleanup_needed = false;
+
   for (FilePath name = enumerator.Next(); !name.empty();
        name = enumerator.Next()) {
-    cleanup_needed = true;
     if (current_run_dir.empty() || name != current_run_dir)
-      success &= base::DeletePathRecursively(name);
+      base::DeletePathRecursively(name);
   }
-  if (cleanup_needed)
-    UMA_HISTOGRAM_BOOLEAN("Storage.Blob.CleanupSuccess", success);
 }
 
 class BlobHandleImpl : public BlobHandle {
@@ -77,10 +72,17 @@ class BlobHandleImpl : public BlobHandle {
 
   mojo::PendingRemote<blink::mojom::Blob> PassBlob() override {
     mojo::PendingRemote<blink::mojom::Blob> result;
-    storage::BlobImpl::Create(
-        std::make_unique<storage::BlobDataHandle>(*handle_),
-        result.InitWithNewPipeAndPassReceiver());
+    GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE,
+        base::BindOnce(base::IgnoreResult(&storage::BlobImpl::Create),
+                       std::make_unique<storage::BlobDataHandle>(*handle_),
+                       result.InitWithNewPipeAndPassReceiver()));
     return result;
+  }
+
+  blink::mojom::SerializedBlobPtr Serialize() override {
+    return blink::mojom::SerializedBlob::New(
+        handle_->uuid(), handle_->content_type(), handle_->size(), PassBlob());
   }
 
  private:

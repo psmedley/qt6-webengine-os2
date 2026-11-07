@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,14 +40,18 @@ std::string FormatDateTimeProto(const DateTimeProto& date_time) {
   auto date_proto = date_time.date();
   auto time_proto = date_time.time();
 
+  // Technically we are setting the wrong |day_of_week|, but it's ignored in
+  // practice and the formatted string will have the correct day for the
+  // date. Setting an invalid value here (e.g. -1) causes issues on Windows.
   base::Time::Exploded exploded_time = {static_cast<int>(date_proto.year()),
                                         date_proto.month(),
-                                        /* day_of_week = */ -1,
+                                        /* day_of_week = */ 0,
                                         date_proto.day(),
                                         time_proto.hour(),
                                         time_proto.minute(),
                                         time_proto.second(),
-                                        0};
+                                        /* millisecond = */ 0};
+
   base::Time time;
 
   if (base::Time::FromLocalExploded(exploded_time, &time)) {
@@ -236,8 +240,8 @@ base::Value Details::GetDebugContext() const {
 }
 
 bool Details::UpdateFromParameters(const ScriptParameters& script_parameters) {
-  absl::optional<bool> show_initial = script_parameters.GetDetailsShowInitial();
-  if (show_initial.has_value() && !*show_initial) {
+  if (script_parameters.HasDetailsShowInitial() &&
+      !script_parameters.GetDetailsShowInitial()) {
     return false;
   }
 

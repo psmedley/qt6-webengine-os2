@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "third_party/blink/public/mojom/subapps/sub_apps_service.mojom-blink.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -18,6 +19,7 @@ class ExceptionState;
 class Navigator;
 class ScriptPromise;
 class ScriptState;
+class SubAppsAddOptions;
 
 class SubApps : public ScriptWrappable, public Supplement<Navigator> {
   DEFINE_WRAPPERTYPEINFO();
@@ -34,7 +36,10 @@ class SubApps : public ScriptWrappable, public Supplement<Navigator> {
   void Trace(Visitor*) const override;
 
   // SubApps API.
-  ScriptPromise add(ScriptState*, const String& install_url, ExceptionState&);
+  ScriptPromise add(
+      ScriptState*,
+      const HeapVector<std::pair<String, Member<SubAppsAddOptions>>>& sub_apps,
+      ExceptionState&);
   ScriptPromise list(ScriptState*, ExceptionState&);
   ScriptPromise remove(ScriptState*,
                        const String& unhashed_app_id,

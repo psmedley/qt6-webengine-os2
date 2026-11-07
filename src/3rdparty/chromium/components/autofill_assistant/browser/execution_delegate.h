@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 
 #include "components/autofill_assistant/browser/client_settings.h"
 #include "components/autofill_assistant/browser/event_handler.h"
+#include "components/autofill_assistant/browser/public/rectf.h"
 #include "components/autofill_assistant/browser/public/runtime_manager_impl.h"
-#include "components/autofill_assistant/browser/rectf.h"
 #include "components/autofill_assistant/browser/state.h"
 #include "components/autofill_assistant/browser/user_data.h"
 #include "components/autofill_assistant/browser/viewport_mode.h"

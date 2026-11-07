@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,6 +68,9 @@ class MenuScrollViewContainer : public View {
 
   class MenuScrollView;
 
+  // The background view.
+  raw_ptr<View> background_view_ = nullptr;
+
   // The scroll buttons.
   raw_ptr<View> scroll_up_button_;
   raw_ptr<View> scroll_down_button_;
@@ -83,6 +86,9 @@ class MenuScrollViewContainer : public View {
 
   // Corner radius of the background.
   int corner_radius_ = 0;
+
+  // Whether the menu uses ash system UI layout.
+  const bool use_ash_system_ui_layout_;
 };
 
 }  // namespace views

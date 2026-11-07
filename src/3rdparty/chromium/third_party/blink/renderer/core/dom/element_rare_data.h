@@ -32,6 +32,7 @@
 #include "third_party/blink/renderer/core/css/inline_css_style_declaration.h"
 #include "third_party/blink/renderer/core/display_lock/display_lock_context.h"
 #include "third_party/blink/renderer/core/dom/attr.h"
+#include "third_party/blink/renderer/core/dom/css_toggle_map.h"
 #include "third_party/blink/renderer/core/dom/dataset_dom_string_map.h"
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
 #include "third_party/blink/renderer/core/dom/focusgroup_flags.h"
@@ -58,10 +59,118 @@ class HTMLElement;
 class ResizeObservation;
 class ResizeObserver;
 
-// This class contains rare data which is significantly more rare than the data
-// in ElementRareData. They are split up to improve memory usage.
-class ElementSuperRareData : public GarbageCollected<ElementSuperRareData> {
+class ElementRareData final : public NodeRareData {
  public:
+  explicit ElementRareData(NodeRenderingData*);
+  ~ElementRareData();
+
+  void SetPseudoElement(
+      PseudoId,
+      PseudoElement*,
+      const AtomicString& document_transition_tag = g_null_atom);
+  PseudoElement* GetPseudoElement(
+      PseudoId,
+      const AtomicString& document_transition_tag = g_null_atom) const;
+  PseudoElementData::PseudoElementVector GetPseudoElements() const;
+
+  void SetTabIndexExplicitly() {
+    SetElementFlag(ElementFlags::kTabIndexWasSetExplicitly, true);
+  }
+
+  void ClearTabIndexExplicitly() {
+    ClearElementFlag(ElementFlags::kTabIndexWasSetExplicitly);
+  }
+
+  CSSStyleDeclaration& EnsureInlineCSSStyleDeclaration(Element* owner_element);
+
+  ShadowRoot* GetShadowRoot() const { return shadow_root_.Get(); }
+  void SetShadowRoot(ShadowRoot& shadow_root) {
+    DCHECK(!shadow_root_);
+    shadow_root_ = &shadow_root;
+  }
+
+  NamedNodeMap* AttributeMap() const { return attribute_map_.Get(); }
+  void SetAttributeMap(NamedNodeMap* attribute_map) {
+    attribute_map_ = attribute_map;
+  }
+
+  DOMTokenList* GetClassList() const { return class_list_.Get(); }
+  void SetClassList(DOMTokenList* class_list) { class_list_ = class_list; }
+
+  DatasetDOMStringMap* Dataset() const { return dataset_.Get(); }
+  void SetDataset(DatasetDOMStringMap* dataset) { dataset_ = dataset; }
+
+  ScrollOffset SavedLayerScrollOffset() const {
+    return saved_layer_scroll_offset_;
+  }
+  void SetSavedLayerScrollOffset(ScrollOffset offset) {
+    saved_layer_scroll_offset_ = offset;
+  }
+
+  ElementAnimations* GetElementAnimations() {
+    return element_animations_.Get();
+  }
+  void SetElementAnimations(ElementAnimations* element_animations) {
+    element_animations_ = element_animations;
+  }
+
+  bool HasPseudoElements() const;
+  void ClearPseudoElements();
+
+  void SetDidAttachInternals() { did_attach_internals_ = true; }
+  bool DidAttachInternals() const { return did_attach_internals_; }
+
+  void SetStyleShouldForceLegacyLayout(bool force) {
+    style_should_force_legacy_layout_ = force;
+  }
+  bool StyleShouldForceLegacyLayout() const {
+    return style_should_force_legacy_layout_;
+  }
+  void SetShouldForceLegacyLayoutForChild(bool force) {
+    should_force_legacy_layout_for_child_ = force;
+  }
+  bool ShouldForceLegacyLayoutForChild() const {
+    return should_force_legacy_layout_for_child_;
+  }
+  bool HasUndoStack() const { return has_undo_stack_; }
+  void SetHasUndoStack(bool value) { has_undo_stack_ = value; }
+  bool ScrollbarPseudoElementStylesDependOnFontMetrics() const {
+    return scrollbar_pseudo_element_styles_depend_on_font_metrics_;
+  }
+  void SetScrollbarPseudoElementStylesDependOnFontMetrics(bool value) {
+    scrollbar_pseudo_element_styles_depend_on_font_metrics_ = value;
+  }
+
+  AttrNodeList& EnsureAttrNodeList();
+  AttrNodeList* GetAttrNodeList() { return attr_node_list_.Get(); }
+  void RemoveAttrNodeList() { attr_node_list_.Clear(); }
+  void AddAttr(Attr* attr) { EnsureAttrNodeList().push_back(attr); }
+
+  ElementIntersectionObserverData* IntersectionObserverData() const {
+    return intersection_observer_data_.Get();
+  }
+  ElementIntersectionObserverData& EnsureIntersectionObserverData() {
+    if (!intersection_observer_data_) {
+      intersection_observer_data_ =
+          MakeGarbageCollected<ElementIntersectionObserverData>();
+    }
+    return *intersection_observer_data_;
+  }
+
+  ContainerQueryEvaluator* GetContainerQueryEvaluator() const {
+    ContainerQueryData* container_query_data = GetContainerQueryData();
+    if (!container_query_data)
+      return nullptr;
+    return container_query_data->GetContainerQueryEvaluator();
+  }
+  void SetContainerQueryEvaluator(ContainerQueryEvaluator* evaluator) {
+    ContainerQueryData* container_query_data = GetContainerQueryData();
+    if (container_query_data)
+      container_query_data->SetContainerQueryEvaluator(evaluator);
+    else if (evaluator)
+      EnsureContainerQueryData().SetContainerQueryEvaluator(evaluator);
+  }
+
   const AtomicString& GetNonce() const { return nonce_; }
   void SetNonce(const AtomicString& nonce) { nonce_ = nonce; }
 
@@ -98,6 +207,7 @@ class ElementSuperRareData : public GarbageCollected<ElementSuperRareData> {
     }
     return accessible_node_;
   }
+  void ClearAccessibleNode() { accessible_node_.Clear(); }
 
   DisplayLockContext* EnsureDisplayLockContext(Element* element) {
     if (!display_lock_context_) {
@@ -118,6 +228,7 @@ class ElementSuperRareData : public GarbageCollected<ElementSuperRareData> {
   ContainerQueryData* GetContainerQueryData() const {
     return container_query_data_;
   }
+  void ClearContainerQueryData() { container_query_data_ = nullptr; }
 
   // Returns the crop-ID if one was set, or nullptr otherwise.
   const RegionCaptureCropId* GetRegionCaptureCropId() const {
@@ -162,9 +273,19 @@ class ElementSuperRareData : public GarbageCollected<ElementSuperRareData> {
   PopupData& EnsurePopupData();
   void RemovePopupData();
 
-  FocusgroupFlags GetFocusgroupFlags() const { return focusgroup_flags_; }
+  CSSToggleMap* GetToggleMap() const { return toggle_map_.Get(); }
+  CSSToggleMap& EnsureToggleMap(Element* owner_element);
 
+  FocusgroupFlags GetFocusgroupFlags() const { return focusgroup_flags_; }
   void SetFocusgroupFlags(FocusgroupFlags flags) { focusgroup_flags_ = flags; }
+  void ClearFocusgroupFlags() { focusgroup_flags_ = FocusgroupFlags::kNone; }
+
+  bool AffectedBySubjectHas() const {
+    return has_invalidation_flags_.affected_by_subject_has;
+  }
+  void SetAffectedBySubjectHas() {
+    has_invalidation_flags_.affected_by_subject_has = true;
+  }
   bool AffectedByNonSubjectHas() const {
     return has_invalidation_flags_.affected_by_non_subject_has;
   }
@@ -179,11 +300,14 @@ class ElementSuperRareData : public GarbageCollected<ElementSuperRareData> {
     has_invalidation_flags_.ancestors_or_ancestor_siblings_affected_by_has =
         true;
   }
-  bool SiblingsAffectedByHas() const {
+  unsigned GetSiblingsAffectedByHasFlags() const {
     return has_invalidation_flags_.siblings_affected_by_has;
   }
-  void SetSiblingsAffectedByHas() {
-    has_invalidation_flags_.siblings_affected_by_has = true;
+  bool HasSiblingsAffectedByHasFlags(unsigned flags) const {
+    return has_invalidation_flags_.siblings_affected_by_has & flags;
+  }
+  void SetSiblingsAffectedByHasFlags(unsigned flags) {
+    has_invalidation_flags_.siblings_affected_by_has |= flags;
   }
   bool AffectedByPseudoInHas() const {
     return has_invalidation_flags_.affected_by_pseudos_in_has;
@@ -223,363 +347,29 @@ class ElementSuperRareData : public GarbageCollected<ElementSuperRareData> {
     has_invalidation_flags_
         .ancestors_or_siblings_affected_by_focus_visible_in_has = true;
   }
-
-  void Trace(blink::Visitor*) const;
-
- private:
-  AtomicString nonce_;
-  Member<EditContext> edit_context_;
-  Member<DOMTokenList> part_;
-  std::unique_ptr<NamesMap> part_names_map_;
-  Member<InlineStylePropertyMap> cssom_map_wrapper_;
-  Member<ElementInternals> element_internals_;
-  Member<AccessibleNode> accessible_node_;
-  Member<DisplayLockContext> display_lock_context_;
-  Member<ContainerQueryData> container_query_data_;
-  std::unique_ptr<RegionCaptureCropId> region_capture_crop_id_;
-  Member<ResizeObserverDataMap> resize_observer_data_;
-  Member<CustomElementDefinition> custom_element_definition_;
-  AtomicString is_value_;
-  Member<ResizeObserverSize> last_intrinsic_size_;
-  Member<PopupData> popup_data_;
-  FocusgroupFlags focusgroup_flags_ = FocusgroupFlags::kNone;
-  HasInvalidationFlags has_invalidation_flags_;
-};
-
-class ElementRareData final : public NodeRareData {
- public:
-  explicit ElementRareData(NodeRenderingData*);
-  ~ElementRareData();
-
-  void SetPseudoElement(
-      PseudoId,
-      PseudoElement*,
-      const AtomicString& document_transition_tag = g_null_atom);
-  PseudoElement* GetPseudoElement(
-      PseudoId,
-      const AtomicString& document_transition_tag = g_null_atom) const;
-  PseudoElementData::PseudoElementVector GetPseudoElements() const;
-
-  void SetTabIndexExplicitly() {
-    SetElementFlag(ElementFlags::kTabIndexWasSetExplicitly, true);
+  bool AffectedByLogicalCombinationsInHas() const {
+    return has_invalidation_flags_.affected_by_logical_combinations_in_has;
   }
-
-  void ClearTabIndexExplicitly() {
-    ClearElementFlag(ElementFlags::kTabIndexWasSetExplicitly);
+  void SetAffectedByLogicalCombinationsInHas() {
+    has_invalidation_flags_.affected_by_logical_combinations_in_has = true;
   }
-
-  FocusgroupFlags GetFocusgroupFlags() const {
-    if (super_rare_data_)
-      return super_rare_data_->GetFocusgroupFlags();
-    return FocusgroupFlags::kNone;
+  bool AffectedByMultipleHas() const {
+    return has_invalidation_flags_.affected_by_multiple_has;
   }
-
-  void SetFocusgroupFlags(FocusgroupFlags flags) {
-    EnsureSuperRareData().SetFocusgroupFlags(flags);
-  }
-
-  void ClearFocusgroupFlags() {
-    if (!super_rare_data_)
-      return;
-    SetFocusgroupFlags(FocusgroupFlags::kNone);
-  }
-
-  CSSStyleDeclaration& EnsureInlineCSSStyleDeclaration(Element* owner_element);
-  InlineStylePropertyMap& EnsureInlineStylePropertyMap(Element* owner_element);
-
-  InlineStylePropertyMap* GetInlineStylePropertyMap() {
-    if (super_rare_data_)
-      return super_rare_data_->GetInlineStylePropertyMap();
-    return nullptr;
-  }
-
-  ShadowRoot* GetShadowRoot() const { return shadow_root_.Get(); }
-  void SetShadowRoot(ShadowRoot& shadow_root) {
-    DCHECK(!shadow_root_);
-    shadow_root_ = &shadow_root;
-  }
-
-  EditContext* GetEditContext() const {
-    if (super_rare_data_)
-      return super_rare_data_->GetEditContext();
-    return nullptr;
-  }
-  void SetEditContext(EditContext* edit_context) {
-    EnsureSuperRareData().SetEditContext(edit_context);
-  }
-
-  NamedNodeMap* AttributeMap() const { return attribute_map_.Get(); }
-  void SetAttributeMap(NamedNodeMap* attribute_map) {
-    attribute_map_ = attribute_map;
-  }
-
-  DOMTokenList* GetClassList() const { return class_list_.Get(); }
-  void SetClassList(DOMTokenList* class_list) {
-    class_list_ = class_list;
-  }
-
-  void SetPart(DOMTokenList* part) { EnsureSuperRareData().SetPart(part); }
-  DOMTokenList* GetPart() const {
-    if (super_rare_data_)
-      return super_rare_data_->GetPart();
-    return nullptr;
-  }
-
-  const NamesMap* PartNamesMap() const {
-    if (super_rare_data_)
-      return super_rare_data_->PartNamesMap();
-    return nullptr;
-  }
-  void SetPartNamesMap(const AtomicString part_names) {
-    EnsureSuperRareData().SetPartNamesMap(part_names);
-  }
-
-  DatasetDOMStringMap* Dataset() const { return dataset_.Get(); }
-  void SetDataset(DatasetDOMStringMap* dataset) {
-    dataset_ = dataset;
-  }
-
-  ScrollOffset SavedLayerScrollOffset() const {
-    return saved_layer_scroll_offset_;
-  }
-  void SetSavedLayerScrollOffset(ScrollOffset offset) {
-    saved_layer_scroll_offset_ = offset;
-  }
-
-  ElementAnimations* GetElementAnimations() {
-    return element_animations_.Get();
-  }
-  void SetElementAnimations(ElementAnimations* element_animations) {
-    element_animations_ = element_animations;
-  }
-
-  bool HasPseudoElements() const;
-  void ClearPseudoElements();
-
-  void SetCustomElementDefinition(CustomElementDefinition* definition) {
-    EnsureSuperRareData().SetCustomElementDefinition(definition);
-  }
-  CustomElementDefinition* GetCustomElementDefinition() const {
-    if (super_rare_data_)
-      return super_rare_data_->GetCustomElementDefinition();
-    return nullptr;
-  }
-  void SetIsValue(const AtomicString& is_value) {
-    EnsureSuperRareData().SetIsValue(is_value);
-  }
-  const AtomicString& IsValue() const {
-    if (super_rare_data_)
-      return super_rare_data_->IsValue();
-    return g_null_atom;
-  }
-  void SetDidAttachInternals() { did_attach_internals_ = true; }
-  bool DidAttachInternals() const { return did_attach_internals_; }
-  ElementInternals& EnsureElementInternals(HTMLElement& target) {
-    return EnsureSuperRareData().EnsureElementInternals(target);
-  }
-  const ElementInternals* GetElementInternals() const {
-    if (super_rare_data_)
-      return super_rare_data_->GetElementInternals();
-    return nullptr;
-  }
-
-  const RegionCaptureCropId* GetRegionCaptureCropId() const {
-    if (super_rare_data_)
-      return super_rare_data_->GetRegionCaptureCropId();
-    return nullptr;
-  }
-  void SetRegionCaptureCropId(std::unique_ptr<RegionCaptureCropId> value) {
-    EnsureSuperRareData().SetRegionCaptureCropId(std::move(value));
-  }
-
-  void SetStyleShouldForceLegacyLayout(bool force) {
-    style_should_force_legacy_layout_ = force;
-  }
-  bool StyleShouldForceLegacyLayout() const {
-    return style_should_force_legacy_layout_;
-  }
-  void SetShouldForceLegacyLayoutForChild(bool force) {
-    should_force_legacy_layout_for_child_ = force;
-  }
-  bool ShouldForceLegacyLayoutForChild() const {
-    return should_force_legacy_layout_for_child_;
-  }
-  bool HasUndoStack() const { return has_undo_stack_; }
-  void SetHasUndoStack(bool value) { has_undo_stack_ = value; }
-  bool ScrollbarPseudoElementStylesDependOnFontMetrics() const {
-    return scrollbar_pseudo_element_styles_depend_on_font_metrics_;
-  }
-  void SetScrollbarPseudoElementStylesDependOnFontMetrics(bool value) {
-    scrollbar_pseudo_element_styles_depend_on_font_metrics_ = value;
-  }
-  bool AffectedByNonSubjectHas() const {
-    return super_rare_data_ ? super_rare_data_->AffectedByNonSubjectHas()
-                            : false;
-  }
-  void SetAffectedByNonSubjectHas() {
-    EnsureSuperRareData().SetAffectedByNonSubjectHas();
-  }
-  bool AncestorsOrAncestorSiblingsAffectedByHas() const {
-    return super_rare_data_
-               ? super_rare_data_->AncestorsOrAncestorSiblingsAffectedByHas()
-               : false;
-  }
-  void SetAncestorsOrAncestorSiblingsAffectedByHas() {
-    EnsureSuperRareData().SetAncestorsOrAncestorSiblingsAffectedByHas();
-  }
-  bool SiblingsAffectedByHas() const {
-    return super_rare_data_ ? super_rare_data_->SiblingsAffectedByHas() : false;
-  }
-  bool AffectedByPseudoInHas() const {
-    return super_rare_data_ ? super_rare_data_->AffectedByPseudoInHas() : false;
-  }
-  void SetAffectedByPseudoInHas() {
-    EnsureSuperRareData().SetAffectedByPseudoInHas();
-  }
-  void SetSiblingsAffectedByHas() {
-    EnsureSuperRareData().SetSiblingsAffectedByHas();
-  }
-  bool AncestorsOrSiblingsAffectedByHoverInHas() const {
-    return super_rare_data_
-               ? super_rare_data_->AncestorsOrSiblingsAffectedByHoverInHas()
-               : false;
-  }
-  void SetAncestorsOrSiblingsAffectedByHoverInHas() {
-    EnsureSuperRareData().SetAncestorsOrSiblingsAffectedByHoverInHas();
-  }
-  bool AncestorsOrSiblingsAffectedByActiveInHas() const {
-    return super_rare_data_
-               ? super_rare_data_->AncestorsOrSiblingsAffectedByActiveInHas()
-               : false;
-  }
-  void SetAncestorsOrSiblingsAffectedByActiveInHas() {
-    EnsureSuperRareData().SetAncestorsOrSiblingsAffectedByActiveInHas();
-  }
-  bool AncestorsOrSiblingsAffectedByFocusInHas() const {
-    return super_rare_data_
-               ? super_rare_data_->AncestorsOrSiblingsAffectedByFocusInHas()
-               : false;
-  }
-  void SetAncestorsOrSiblingsAffectedByFocusInHas() {
-    EnsureSuperRareData().SetAncestorsOrSiblingsAffectedByFocusInHas();
-  }
-  bool AncestorsOrSiblingsAffectedByFocusVisibleInHas() const {
-    return super_rare_data_
-               ? super_rare_data_
-                     ->AncestorsOrSiblingsAffectedByFocusVisibleInHas()
-               : false;
-  }
-  void SetAncestorsOrSiblingsAffectedByFocusVisibleInHas() {
-    EnsureSuperRareData().SetAncestorsOrSiblingsAffectedByFocusVisibleInHas();
-  }
-
-  AccessibleNode* GetAccessibleNode() const {
-    if (super_rare_data_)
-      return super_rare_data_->GetAccessibleNode();
-    return nullptr;
-  }
-  AccessibleNode* EnsureAccessibleNode(Element* owner_element) {
-    return EnsureSuperRareData().EnsureAccessibleNode(owner_element);
-  }
-
-  AttrNodeList& EnsureAttrNodeList();
-  AttrNodeList* GetAttrNodeList() { return attr_node_list_.Get(); }
-  void RemoveAttrNodeList() { attr_node_list_.Clear(); }
-  void AddAttr(Attr* attr) {
-    EnsureAttrNodeList().push_back(attr);
-  }
-
-  ElementIntersectionObserverData* IntersectionObserverData() const {
-    return intersection_observer_data_.Get();
-  }
-  ElementIntersectionObserverData& EnsureIntersectionObserverData() {
-    if (!intersection_observer_data_) {
-      intersection_observer_data_ =
-          MakeGarbageCollected<ElementIntersectionObserverData>();
-    }
-    return *intersection_observer_data_;
-  }
-
-  using ResizeObserverDataMap =
-      HeapHashMap<Member<ResizeObserver>, Member<ResizeObservation>>;
-
-  ResizeObserverDataMap* ResizeObserverData() const {
-    if (super_rare_data_)
-      return super_rare_data_->ResizeObserverData();
-    return nullptr;
-  }
-  ResizeObserverDataMap& EnsureResizeObserverData();
-
-  PopupData* GetPopupData() const {
-    if (super_rare_data_)
-      return super_rare_data_->GetPopupData();
-    return nullptr;
-  }
-  PopupData& EnsurePopupData();
-  void RemovePopupData();
-
-  DisplayLockContext* EnsureDisplayLockContext(Element* element) {
-    return EnsureSuperRareData().EnsureDisplayLockContext(element);
-  }
-  DisplayLockContext* GetDisplayLockContext() const {
-    if (super_rare_data_)
-      return super_rare_data_->GetDisplayLockContext();
-    return nullptr;
-  }
-
-  ContainerQueryData& EnsureContainerQueryData() {
-    return EnsureSuperRareData().EnsureContainerQueryData();
-  }
-  ContainerQueryData* GetContainerQueryData() const {
-    if (super_rare_data_)
-      return super_rare_data_->GetContainerQueryData();
-    return nullptr;
-  }
-
-  ContainerQueryEvaluator* GetContainerQueryEvaluator() const {
-    ContainerQueryData* container_query_data = GetContainerQueryData();
-    if (!container_query_data)
-      return nullptr;
-    return container_query_data->GetContainerQueryEvaluator();
-  }
-  void SetContainerQueryEvaluator(ContainerQueryEvaluator* evaluator) {
-    ContainerQueryData* container_query_data = GetContainerQueryData();
-    if (container_query_data)
-      container_query_data->SetContainerQueryEvaluator(evaluator);
-    else if (evaluator)
-      EnsureContainerQueryData().SetContainerQueryEvaluator(evaluator);
-  }
-
-  const AtomicString& GetNonce() const {
-    if (super_rare_data_)
-      return super_rare_data_->GetNonce();
-    return g_null_atom;
-  }
-  void SetNonce(const AtomicString& nonce) {
-    EnsureSuperRareData().SetNonce(nonce);
-  }
-
-  void SaveLastIntrinsicSize(ResizeObserverSize* size) {
-    EnsureSuperRareData().SaveLastIntrinsicSize(size);
-  }
-  const ResizeObserverSize* LastIntrinsicSize() const {
-    if (super_rare_data_)
-      return super_rare_data_->LastIntrinsicSize();
-    return nullptr;
+  void SetAffectedByMultipleHas() {
+    has_invalidation_flags_.affected_by_multiple_has = true;
   }
 
   void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
-  ElementSuperRareData& EnsureSuperRareData() {
-    if (!super_rare_data_)
-      super_rare_data_ = MakeGarbageCollected<ElementSuperRareData>();
-    return *super_rare_data_;
-  }
-
-  Member<ElementSuperRareData> super_rare_data_;
-
   ScrollOffset saved_layer_scroll_offset_;
+
+  AtomicString nonce_;
+  AtomicString is_value_;
+
+  std::unique_ptr<NamesMap> part_names_map_;
+  std::unique_ptr<RegionCaptureCropId> region_capture_crop_id_;
 
   Member<DatasetDOMStringMap> dataset_;
   Member<ShadowRoot> shadow_root_;
@@ -587,11 +377,24 @@ class ElementRareData final : public NodeRareData {
   Member<NamedNodeMap> attribute_map_;
   Member<AttrNodeList> attr_node_list_;
   Member<InlineCSSStyleDeclaration> cssom_wrapper_;
-
   Member<ElementAnimations> element_animations_;
   Member<ElementIntersectionObserverData> intersection_observer_data_;
-
   Member<PseudoElementData> pseudo_element_data_;
+  Member<EditContext> edit_context_;
+  Member<DOMTokenList> part_;
+  Member<InlineStylePropertyMap> cssom_map_wrapper_;
+  Member<ElementInternals> element_internals_;
+  Member<AccessibleNode> accessible_node_;
+  Member<DisplayLockContext> display_lock_context_;
+  Member<ContainerQueryData> container_query_data_;
+  Member<ResizeObserverDataMap> resize_observer_data_;
+  Member<CustomElementDefinition> custom_element_definition_;
+  Member<ResizeObserverSize> last_intrinsic_size_;
+  Member<PopupData> popup_data_;
+  Member<CSSToggleMap> toggle_map_;
+
+  FocusgroupFlags focusgroup_flags_ = FocusgroupFlags::kNone;
+  HasInvalidationFlags has_invalidation_flags_;
 
   unsigned did_attach_internals_ : 1;
   unsigned should_force_legacy_layout_for_child_ : 1;

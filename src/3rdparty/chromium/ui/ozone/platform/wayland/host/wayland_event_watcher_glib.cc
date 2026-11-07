@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,22 @@
 
 #include <glib.h>
 
+#include "base/memory/raw_ptr.h"
+
 namespace ui {
 
 namespace {
 
+// The priorities of the event sources are important to be set correctly so that
+// GTK event source is able to process the events it requires. This uses
+// the same priority as MessagePumpGlib for fd watching.
+constexpr int kPriorityFdWatch = G_PRIORITY_DEFAULT_IDLE - 10;
+
 struct GLibWaylandSource : public GSource {
   // Note: The GLibWaylandSource is created and destroyed by GLib. So its
   // constructor/destructor may or may not get called.
-  WaylandEventWatcherGlib* event_watcher;
-  GPollFD* poll_fd;
+  raw_ptr<WaylandEventWatcherGlib> event_watcher;
+  raw_ptr<GPollFD> poll_fd;
 };
 
 gboolean WatchSourcePrepare(GSource* source, gint* timeout_ms) {
@@ -22,7 +29,7 @@ gboolean WatchSourcePrepare(GSource* source, gint* timeout_ms) {
   *timeout_ms = -1;
 
   auto* event_watcher_glib =
-      static_cast<GLibWaylandSource*>(source)->event_watcher;
+      static_cast<GLibWaylandSource*>(source)->event_watcher.get();
   if (event_watcher_glib->HandlePrepare())
     return FALSE;
 
@@ -41,7 +48,7 @@ gboolean WatchSourceDispatch(GSource* source,
                              GSourceFunc unused_func,
                              gpointer data) {
   auto* event_watcher_glib =
-      static_cast<GLibWaylandSource*>(source)->event_watcher;
+      static_cast<GLibWaylandSource*>(source)->event_watcher.get();
   event_watcher_glib->HandleDispatch();
   return TRUE;
 }
@@ -80,6 +87,7 @@ bool WaylandEventWatcherGlib::StartWatchingFD(int fd) {
   if (!context)
     context = g_main_context_default();
   g_source_attach(wayland_source_, context);
+  g_source_set_priority(wayland_source_, kPriorityFdWatch);
 
   started_ = true;
   return true;

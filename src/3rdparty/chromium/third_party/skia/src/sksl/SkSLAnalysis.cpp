@@ -22,7 +22,9 @@
 #include "src/sksl/SkSLCompiler.h"
 #include "src/sksl/SkSLConstantFolder.h"
 #include "src/sksl/SkSLContext.h"
+#include "src/sksl/SkSLIntrinsicList.h"
 #include "src/sksl/analysis/SkSLNoOpErrorReporter.h"
+#include "src/sksl/analysis/SkSLProgramUsage.h"
 #include "src/sksl/analysis/SkSLProgramVisitor.h"
 #include "src/sksl/ir/SkSLBinaryExpression.h"
 #include "src/sksl/ir/SkSLBlock.h"
@@ -39,7 +41,6 @@
 #include "src/sksl/ir/SkSLFunctionDefinition.h"
 #include "src/sksl/ir/SkSLIfStatement.h"
 #include "src/sksl/ir/SkSLIndexExpression.h"
-#include "src/sksl/ir/SkSLLiteral.h"
 #include "src/sksl/ir/SkSLPostfixExpression.h"
 #include "src/sksl/ir/SkSLPrefixExpression.h"
 #include "src/sksl/ir/SkSLProgram.h"
@@ -56,6 +57,8 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
+#include <type_traits>
 
 namespace SkSL {
 
@@ -112,24 +115,6 @@ protected:
 
         return INHERITED::visitExpression(e);
     }
-
-    using INHERITED = ProgramVisitor;
-};
-
-// Visitor that searches through the program for references to a particular builtin variable
-class BuiltinVariableVisitor : public ProgramVisitor {
-public:
-    BuiltinVariableVisitor(int builtin) : fBuiltin(builtin) {}
-
-    bool visitExpression(const Expression& e) override {
-        if (e.is<VariableReference>()) {
-            const VariableReference& var = e.as<VariableReference>();
-            return var.variable()->modifiers().fLayout.fBuiltin == fBuiltin;
-        }
-        return INHERITED::visitExpression(e);
-    }
-
-    int fBuiltin;
 
     using INHERITED = ProgramVisitor;
 };
@@ -332,8 +317,13 @@ SampleUsage Analysis::GetSampleUsage(const Program& program,
 }
 
 bool Analysis::ReferencesBuiltin(const Program& program, int builtin) {
-    BuiltinVariableVisitor visitor(builtin);
-    return visitor.visit(program);
+    SkASSERT(program.fUsage);
+    for (const auto& [variable, counts] : program.fUsage->fVariableCounts) {
+        if (counts.fRead > 0 && variable->modifiers().fLayout.fBuiltin == builtin) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool Analysis::ReferencesSampleCoords(const Program& program) {
@@ -362,6 +352,61 @@ bool Analysis::CallsColorTransformIntrinsics(const Program& program) {
 bool Analysis::ReturnsOpaqueColor(const FunctionDefinition& function) {
     ReturnsNonOpaqueColorVisitor visitor;
     return !visitor.visitProgramElement(function);
+}
+
+bool Analysis::ContainsRTAdjust(const Expression& expr) {
+    class ContainsRTAdjustVisitor : public ProgramVisitor {
+    public:
+        bool visitExpression(const Expression& expr) override {
+            if (expr.is<VariableReference>() &&
+                expr.as<VariableReference>().variable()->name() == Compiler::RTADJUST_NAME) {
+                return true;
+            }
+            return INHERITED::visitExpression(expr);
+        }
+
+        using INHERITED = ProgramVisitor;
+    };
+
+    ContainsRTAdjustVisitor visitor;
+    return visitor.visitExpression(expr);
+}
+
+bool Analysis::IsCompileTimeConstant(const Expression& expr) {
+    class IsCompileTimeConstantVisitor : public ProgramVisitor {
+    public:
+        bool visitExpression(const Expression& expr) override {
+            switch (expr.kind()) {
+                case Expression::Kind::kLiteral:
+                    // Literals are compile-time constants.
+                    return false;
+
+                case Expression::Kind::kConstructorArray:
+                case Expression::Kind::kConstructorCompound:
+                case Expression::Kind::kConstructorDiagonalMatrix:
+                case Expression::Kind::kConstructorMatrixResize:
+                case Expression::Kind::kConstructorSplat:
+                case Expression::Kind::kConstructorStruct:
+                    // Constructors might be compile-time constants, if they are composed entirely
+                    // of literals and constructors. (Casting constructors are intentionally omitted
+                    // here. If the value inside was a compile-time constant, we would have not have
+                    // generated a cast at all.)
+                    return INHERITED::visitExpression(expr);
+
+                default:
+                    // This expression isn't a compile-time constant.
+                    fIsConstant = false;
+                    return true;
+            }
+        }
+
+        bool fIsConstant = true;
+        using INHERITED = ProgramVisitor;
+    };
+
+    IsCompileTimeConstantVisitor visitor;
+    visitor.visitExpression(expr);
+    return visitor.fIsConstant;
 }
 
 bool Analysis::DetectVarDeclarationWithoutScope(const Statement& stmt, ErrorReporter* errors) {
@@ -428,23 +473,6 @@ bool Analysis::UpdateVariableRefKind(Expression* expr,
     return true;
 }
 
-bool Analysis::IsTrivialExpression(const Expression& expr) {
-    return expr.is<Literal>() ||
-           expr.is<VariableReference>() ||
-           (expr.is<Swizzle>() &&
-            IsTrivialExpression(*expr.as<Swizzle>().base())) ||
-           (expr.is<FieldAccess>() &&
-            IsTrivialExpression(*expr.as<FieldAccess>().base())) ||
-           (expr.isAnyConstructor() &&
-            expr.asAnyConstructor().argumentSpan().size() == 1 &&
-            IsTrivialExpression(*expr.asAnyConstructor().argumentSpan().front())) ||
-           (expr.isAnyConstructor() &&
-            expr.isConstantOrUniform()) ||
-           (expr.is<IndexExpression>() &&
-            expr.as<IndexExpression>().index()->isIntLiteral() &&
-            IsTrivialExpression(*expr.as<IndexExpression>().base()));
-}
-
 class ES2IndexingVisitor : public ProgramVisitor {
 public:
     ES2IndexingVisitor(ErrorReporter& errors) : fErrors(errors) {}
@@ -501,7 +529,6 @@ bool ProgramVisitor::visit(const Program& program) {
 
 template <typename T> bool TProgramVisitor<T>::visitExpression(typename T::Expression& e) {
     switch (e.kind()) {
-        case Expression::Kind::kCodeString:
         case Expression::Kind::kExternalFunctionReference:
         case Expression::Kind::kFunctionReference:
         case Expression::Kind::kLiteral:
@@ -589,7 +616,6 @@ template <typename T> bool TProgramVisitor<T>::visitStatement(typename T::Statem
         case Statement::Kind::kBreak:
         case Statement::Kind::kContinue:
         case Statement::Kind::kDiscard:
-        case Statement::Kind::kInlineMarker:
         case Statement::Kind::kNop:
             // Leaf statements just return false
             return false;

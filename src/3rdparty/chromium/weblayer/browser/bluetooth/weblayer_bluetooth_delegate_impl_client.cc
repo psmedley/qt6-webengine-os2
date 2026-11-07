@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,16 +59,16 @@ WebLayerBluetoothDelegateImplClient::ShowBluetoothScanningPrompt(
 #endif
 }
 
-void WebLayerBluetoothDelegateImplClient::ShowBluetoothDeviceCredentialsDialog(
+void WebLayerBluetoothDelegateImplClient::ShowBluetoothDevicePairDialog(
     content::RenderFrameHost* frame,
     const std::u16string& device_identifier,
-    content::BluetoothDelegate::CredentialsCallback callback) {
+    content::BluetoothDelegate::PairPromptCallback callback,
+    content::BluetoothDelegate::PairingKind,
+    const absl::optional<std::u16string>& pin) {
   // Web Bluetooth is not supported for desktop in WebLayer and Android already
   // bonds on demand, so this should not be called on any platform.
-  std::move(callback).Run(
-      content::BluetoothDelegate::DeviceCredentialsPromptResult::kCancelled,
-      /*result=*/std::u16string());
+  std::move(callback).Run(content::BluetoothDelegate::PairPromptResult(
+      content::BluetoothDelegate::PairPromptStatus::kCancelled));
   NOTREACHED();
 }
-
 }  // namespace weblayer

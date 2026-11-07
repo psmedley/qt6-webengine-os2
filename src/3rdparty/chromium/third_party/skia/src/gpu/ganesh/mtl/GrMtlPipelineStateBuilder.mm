@@ -71,7 +71,7 @@ static constexpr SkFourByteTag kSKSL_Tag = SkSetFourByteTag('S', 'K', 'S', 'L');
 
 void GrMtlPipelineStateBuilder::storeShadersInCache(const std::string shaders[],
                                                     const SkSL::Program::Inputs inputs[],
-                                                    SkSL::Program::Settings* settings,
+                                                    SkSL::ProgramSettings* settings,
                                                     sk_sp<SkData> pipelineData,
                                                     bool isSkSL) {
     sk_sp<SkData> key = SkData::MakeWithoutCopy(this->desc().asKey(),
@@ -322,7 +322,7 @@ static MTLBlendOperation blend_equation_to_mtl_blend_op(skgpu::BlendEquation equ
         MTLBlendOperationSubtract,         // skgpu::BlendEquation::kSubtract
         MTLBlendOperationReverseSubtract,  // skgpu::BlendEquation::kReverseSubtract
     };
-    static_assert(SK_ARRAY_COUNT(gTable) == (int)skgpu::BlendEquation::kFirstAdvanced);
+    static_assert(std::size(gTable) == (int)skgpu::BlendEquation::kFirstAdvanced);
     static_assert(0 == (int)skgpu::BlendEquation::kAdd);
     static_assert(1 == (int)skgpu::BlendEquation::kSubtract);
     static_assert(2 == (int)skgpu::BlendEquation::kReverseSubtract);
@@ -342,7 +342,7 @@ static MTLRenderPipelineColorAttachmentDescriptor* create_color_attachment(
     }
 
     // blending
-    const GrXferProcessor::BlendInfo& blendInfo = pipeline.getXferProcessor().getBlendInfo();
+    const skgpu::BlendInfo& blendInfo = pipeline.getXferProcessor().getBlendInfo();
 
     skgpu::BlendEquation equation = blendInfo.fEquation;
     skgpu::BlendCoeff srcCoeff = blendInfo.fSrcBlend;
@@ -370,13 +370,13 @@ static MTLRenderPipelineColorAttachmentDescriptor* create_color_attachment(
         }
     }
 
-    if (blendInfo.fWriteColor) {
+    if (blendInfo.fWritesColor) {
         mtlColorAttachment.writeMask = MTLColorWriteMaskAll;
     } else {
         mtlColorAttachment.writeMask = MTLColorWriteMaskNone;
     }
     if (writer) {
-        writer->writeBool(blendInfo.fWriteColor);
+        writer->writeBool(blendInfo.fWritesColor);
     }
     return mtlColorAttachment;
 }
@@ -542,7 +542,7 @@ GrMtlPipelineState* GrMtlPipelineStateBuilder::finalize(
 
         this->finalizeShaders();
 
-        SkSL::Program::Settings settings;
+        SkSL::ProgramSettings settings;
         settings.fSharpenTextures = true;
         SkASSERT(!this->fragColorIsInOut());
 
@@ -693,14 +693,13 @@ GrMtlPipelineState* GrMtlPipelineStateBuilder::finalize(
     id<MTLRenderPipelineState> pipelineState;
     {
         TRACE_EVENT0("skia.shaders", "newRenderPipelineStateWithDescriptor");
-#if defined(SK_BUILD_FOR_MAC)
-        pipelineState = GrMtlNewRenderPipelineStateWithDescriptor(
-                                                     fGpu->device(), pipelineDescriptor, &error);
-#else
-        pipelineState =
-            [fGpu->device() newRenderPipelineStateWithDescriptor: pipelineDescriptor
-                                                           error: &error];
-#endif
+        if (@available(macOS 10.15, *)) {
+            pipelineState = [fGpu->device() newRenderPipelineStateWithDescriptor: pipelineDescriptor
+                                                                           error: &error];
+        } else {
+            pipelineState = GrMtlNewRenderPipelineStateWithDescriptor(
+                    fGpu->device(), pipelineDescriptor, &error);
+        }
     }
     if (error) {
         SkDebugf("Error creating pipeline: %s\n",
@@ -738,7 +737,7 @@ bool GrMtlPipelineStateBuilder::PrecompileShaders(GrMtlGpu* gpu, const SkData& c
 
     auto errorHandler = gpu->getContext()->priv().getShaderErrorHandler();
 
-    SkSL::Program::Settings settings;
+    SkSL::ProgramSettings settings;
     settings.fSharpenTextures = true;
     GrPersistentCacheUtils::ShaderMetadata meta;
     meta.fSettings = &settings;

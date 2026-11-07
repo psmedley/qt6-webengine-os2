@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -97,11 +97,6 @@ enum FileSystemType {
   // This type is useful for creating a blob reference for a temporary
   // file which must go away when the blob's last reference is dropped.
   kFileSystemTypeForTransientFile,
-
-  // Sandboxed private filesystem. This filesystem cannot be opened
-  // via regular OpenFileSystem, and provides private filesystem space for
-  // given identifier in each origin.
-  kFileSystemTypePluginPrivate,
 
   // A filesystem that is mounted via the FileSystemProvider API.
   kFileSystemTypeProvided,

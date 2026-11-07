@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,7 @@
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-#include "chromeos/lacros/lacros_service.h"
+#include "chromeos/startup/browser_params_proxy.h"
 #endif
 
 namespace content {
@@ -39,9 +39,8 @@ bool IsCrOSLibHandwritingRootfsEnabled() {
          command_line->GetSwitchValueASCII(
              ash::switches::kOndeviceHandwritingSwitch) == "use_rootfs";
 #elif BUILDFLAG(IS_CHROMEOS_LACROS)
-  auto* service = chromeos::LacrosService::Get();
-  return service && service->init_params()->ondevice_handwriting_support ==
-                        crosapi::mojom::OndeviceHandwritingSupport::kUseRootfs;
+  return chromeos::BrowserParamsProxy::Get()->OndeviceHandwritingSupport() ==
+         crosapi::mojom::OndeviceHandwritingSupport::kUseRootfs;
 #else
   return false;
 #endif

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,6 @@ bool IsUnsandboxedSandboxType(Sandbox sandbox_type) {
     case Sandbox::kNoSandboxAndElevatedPrivileges:
       return true;
     case Sandbox::kXrCompositing:
-      return !base::FeatureList::IsEnabled(features::kXRSandbox);
     case Sandbox::kPdfConversion:
     case Sandbox::kIconReader:
     case Sandbox::kMediaFoundationCdm:
@@ -50,7 +49,7 @@ bool IsUnsandboxedSandboxType(Sandbox sandbox_type) {
     case Sandbox::kServiceWithJit:
     case Sandbox::kUtility:
     case Sandbox::kGpu:
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PPAPI)
     case Sandbox::kPpapi:
 #endif
     case Sandbox::kCdm:
@@ -74,6 +73,8 @@ bool IsUnsandboxedSandboxType(Sandbox sandbox_type) {
 #endif  // // BUILDFLAG(IS_CHROMEOS_ASH)
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
     case Sandbox::kZygoteIntermediateSandbox:
+#endif
+#if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
     case Sandbox::kScreenAI:
 #endif
     case Sandbox::kSpeechRecognition:
@@ -103,7 +104,7 @@ void SetCommandLineFlagsForSandboxType(base::CommandLine* command_line,
       DCHECK(command_line->GetSwitchValueASCII(switches::kProcessType) ==
              switches::kGpuProcess);
       break;
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PPAPI)
     case Sandbox::kPpapi:
       if (command_line->GetSwitchValueASCII(switches::kProcessType) ==
           switches::kUtilityProcess) {
@@ -149,7 +150,7 @@ void SetCommandLineFlagsForSandboxType(base::CommandLine* command_line,
 #if BUILDFLAG(IS_MAC)
     case Sandbox::kMirroring:
 #endif  // BUILDFLAG(IS_MAC)
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
     case Sandbox::kScreenAI:
 #endif
     case Sandbox::kSpeechRecognition:
@@ -194,7 +195,7 @@ sandbox::mojom::Sandbox SandboxTypeFromCommandLine(
     return Sandbox::kGpu;
   }
 
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PPAPI)
   if (process_type == switches::kPpapiPluginProcess)
     return Sandbox::kPpapi;
 #endif
@@ -239,7 +240,7 @@ std::string StringFromUtilitySandboxType(Sandbox sandbox_type) {
 #endif  // BUILDFLAG(IS_WIN)
     case Sandbox::kNetwork:
       return switches::kNetworkSandbox;
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PPAPI)
     case Sandbox::kPpapi:
       return switches::kPpapiSandbox;
 #endif
@@ -265,7 +266,7 @@ std::string StringFromUtilitySandboxType(Sandbox sandbox_type) {
       return switches::kServiceSandboxWithJit;
     case Sandbox::kSpeechRecognition:
       return switches::kSpeechRecognitionSandbox;
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
     case Sandbox::kScreenAI:
       return switches::kScreenAISandbox;
 #endif
@@ -337,7 +338,7 @@ sandbox::mojom::Sandbox UtilitySandboxTypeFromString(
   }
   if (sandbox_string == switches::kNetworkSandbox)
     return Sandbox::kNetwork;
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PPAPI)
   if (sandbox_string == switches::kPpapiSandbox)
     return Sandbox::kPpapi;
 #endif
@@ -369,7 +370,7 @@ sandbox::mojom::Sandbox UtilitySandboxTypeFromString(
     return Sandbox::kAudio;
   if (sandbox_string == switches::kSpeechRecognitionSandbox)
     return Sandbox::kSpeechRecognition;
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
   if (sandbox_string == switches::kScreenAISandbox)
     return Sandbox::kScreenAI;
 #endif

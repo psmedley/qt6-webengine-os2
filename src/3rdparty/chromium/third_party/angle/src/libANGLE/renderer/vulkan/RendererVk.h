@@ -38,6 +38,7 @@
 namespace angle
 {
 class Library;
+struct FrontendFeatures;
 }  // namespace angle
 
 namespace egl
@@ -81,6 +82,15 @@ class MemoryReport final : angle::NonCopyable
     VkDeviceSize mCurrentTotalImportedMemory;
     VkDeviceSize mMaxTotalImportedMemory;
     angle::HashMap<uint64_t, int> mUniqueIDCounts;
+};
+
+// Information used to accurately skip known synchronization issues in ANGLE.
+struct SkippedSyncvalMessage
+{
+    const char *messageId;
+    const char *messageContents1;
+    const char *messageContents2                      = "";
+    bool isDueToNonConformantCoherentFramebufferFetch = false;
 };
 }  // namespace vk
 
@@ -152,9 +162,10 @@ class RendererVk : angle::NonCopyable
     {
         return mPhysicalDeviceProperties;
     }
-    const VkPhysicalDeviceSubgroupProperties &getPhysicalDeviceSubgroupProperties() const
+    const VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT &
+    getPhysicalDevicePrimitivesGeneratedQueryFeatures() const
     {
-        return mSubgroupProperties;
+        return mPrimitivesGeneratedQueryFeatures;
     }
     const VkPhysicalDeviceFeatures &getPhysicalDeviceFeatures() const
     {
@@ -173,6 +184,8 @@ class RendererVk : angle::NonCopyable
     const gl::TextureCapsMap &getNativeTextureCaps() const;
     const gl::Extensions &getNativeExtensions() const;
     const gl::Limitations &getNativeLimitations() const;
+    ShPixelLocalStorageType getNativePixelLocalStorageType() const;
+    void initializeFrontendFeatures(angle::FrontendFeatures *features) const;
 
     uint32_t getQueueFamilyIndex() const { return mCurrentQueueFamilyIndex; }
     const VkQueueFamilyProperties &getQueueFamilyProperties() const
@@ -312,50 +325,68 @@ class RendererVk : angle::NonCopyable
             vk::SharedGarbage garbage(std::move(use), std::move(sharedGarbage));
             if (garbage.usedInRecordedCommands())
             {
-                std::lock_guard<std::mutex> lock(mGarbageMutex);
+                std::unique_lock<std::mutex> lock(mGarbageMutex);
                 mPendingSubmissionGarbage.push(std::move(garbage));
             }
             else if (!garbage.destroyIfComplete(this, getLastCompletedQueueSerial()))
             {
-                std::lock_guard<std::mutex> lock(mGarbageMutex);
+                std::unique_lock<std::mutex> lock(mGarbageMutex);
                 mSharedGarbage.push(std::move(garbage));
             }
         }
     }
 
-    void collectSuballocationGarbage(vk::SharedResourceUse &&use,
+    void collectSuballocationGarbage(vk::SharedResourceUse &use,
                                      vk::BufferSuballocation &&suballocation,
                                      vk::Buffer &&buffer)
     {
-        std::lock_guard<std::mutex> lock(mGarbageMutex);
-        if (use.usedInRecordedCommands())
+        if (use.isCurrentlyInUse(getLastCompletedQueueSerial()))
         {
-            mPendingSubmissionSuballocationGarbage.emplace(std::move(use), std::move(suballocation),
-                                                           std::move(buffer));
+            std::unique_lock<std::mutex> lock(mGarbageMutex);
+            if (use.usedInRecordedCommands())
+            {
+                mPendingSubmissionSuballocationGarbage.emplace(
+                    std::move(use), std::move(suballocation), std::move(buffer));
+            }
+            else
+            {
+                mSuballocationGarbageSizeInBytes += suballocation.getSize();
+                mSuballocationGarbage.emplace(std::move(use), std::move(suballocation),
+                                              std::move(buffer));
+            }
+            use.init();
         }
         else
         {
-            mSuballocationGarbage.emplace(std::move(use), std::move(suballocation),
-                                          std::move(buffer));
+            // mSuballocationGarbageDestroyed is atomic, so we dont need mGarbageMutex to protect
+            // it.
+            mSuballocationGarbageDestroyed += suballocation.getSize();
+            buffer.destroy(mDevice);
+            suballocation.destroy(this);
         }
     }
 
-    angle::Result getPipelineCache(vk::PipelineCache **pipelineCache);
-    void onNewGraphicsPipeline()
-    {
-        std::lock_guard<std::mutex> lock(mPipelineCacheMutex);
-        mPipelineCacheDirty = true;
-    }
+    angle::Result getPipelineCache(PipelineCacheAccess *pipelineCacheOut);
+    angle::Result mergeIntoPipelineCache(const vk::PipelineCache &pipelineCache);
 
     void onNewValidationMessage(const std::string &message);
     std::string getAndClearLastValidationMessage(uint32_t *countSinceLastClear);
+
+    const std::vector<const char *> &getSkippedValidationMessages() const
+    {
+        return mSkippedValidationMessages;
+    }
+    const std::vector<vk::SkippedSyncvalMessage> &getSkippedSyncvalMessages() const
+    {
+        return mSkippedSyncvalMessages;
+    }
 
     void onFramebufferFetchUsed();
     bool isFramebufferFetchUsed() const { return mIsFramebufferFetchUsed; }
 
     uint64_t getMaxFenceWaitTimeNs() const;
 
-    ANGLE_INLINE Serial getLastCompletedQueueSerial()
+    ANGLE_INLINE Serial getLastCompletedQueueSerial() const
     {
         if (isAsyncCommandQueueEnabled())
         {
@@ -363,14 +394,13 @@ class RendererVk : angle::NonCopyable
         }
         else
         {
-            vk::ScopedCommandQueueLock lock(this, mCommandQueueMutex);
             return mCommandQueue.getLastCompletedQueueSerial();
         }
     }
 
     ANGLE_INLINE bool isCommandQueueBusy()
     {
-        vk::ScopedCommandQueueLock lock(this, mCommandQueueMutex);
+        std::unique_lock<std::mutex> lock(mCommandQueueMutex);
         if (isAsyncCommandQueueEnabled())
         {
             return mCommandProcessor.isBusy();
@@ -390,6 +420,31 @@ class RendererVk : angle::NonCopyable
         else
         {
             return mCommandQueue.ensureNoPendingWork(context);
+        }
+    }
+
+    angle::VulkanPerfCounters getCommandQueuePerfCounters()
+    {
+        std::unique_lock<std::mutex> lock(mCommandQueueMutex);
+        if (isAsyncCommandQueueEnabled())
+        {
+            return mCommandProcessor.getPerfCounters();
+        }
+        else
+        {
+            return mCommandQueue.getPerfCounters();
+        }
+    }
+    void resetCommandQueuePerFrameCounters()
+    {
+        std::unique_lock<std::mutex> lock(mCommandQueueMutex);
+        if (isAsyncCommandQueueEnabled())
+        {
+            mCommandProcessor.resetPerFramePerfCounters();
+        }
+        else
+        {
+            mCommandQueue.resetPerFramePerfCounters();
         }
     }
 
@@ -419,7 +474,7 @@ class RendererVk : angle::NonCopyable
 
     bool haveSameFormatFeatureBits(angle::FormatID formatID1, angle::FormatID formatID2) const;
 
-    angle::Result cleanupGarbage(Serial lastCompletedQueueSerial);
+    void cleanupGarbage(Serial lastCompletedQueueSerial);
     void cleanupCompletedCommandsGarbage();
     void cleanupPendingSubmissionGarbage();
 
@@ -433,15 +488,7 @@ class RendererVk : angle::NonCopyable
                               vk::SecondaryCommandPools *commandPools,
                               Serial *submitSerialOut);
 
-    // When the device is lost, the commands queue is cleaned up.  This shouldn't be done
-    // immediately if the device loss is generated from the command queue itself (due to mutual
-    // exclusion requirements).
-    //
-    // - handleDeviceLost() defers device loss handling if the mutex is already taken
-    // - ScopedCommandQueueLock handles device loss at the end of the scope (i.e. when the command
-    //   queue operation is finished) by calling handleDeviceLostNoLock() before releasing the lock.
     void handleDeviceLost();
-    void handleDeviceLostNoLock();
     angle::Result finishToSerial(vk::Context *context, Serial serial);
     angle::Result waitForSerialWithUserTimeout(vk::Context *context,
                                                Serial serial,
@@ -488,7 +535,7 @@ class RendererVk : angle::NonCopyable
     // Accumulate cache stats for a specific cache
     void accumulateCacheStats(VulkanCacheType cache, const CacheStats &stats)
     {
-        std::lock_guard<std::mutex> localLock(mCacheStatsMutex);
+        std::unique_lock<std::mutex> localLock(mCacheStatsMutex);
         mVulkanCacheStats[cache].accumulate(stats);
     }
     // Log cache stats for all caches
@@ -497,6 +544,11 @@ class RendererVk : angle::NonCopyable
     VkPipelineStageFlags getSupportedVulkanPipelineStageMask() const
     {
         return mSupportedVulkanPipelineStageMask;
+    }
+
+    VkShaderStageFlags getSupportedVulkanShaderStageMask() const
+    {
+        return mSupportedVulkanShaderStageMask;
     }
 
     angle::Result getFormatDescriptorCountForVkFormat(ContextVk *contextVk,
@@ -547,14 +599,33 @@ class RendererVk : angle::NonCopyable
         return mDeviceLocalVertexConversionBufferMemoryTypeIndex;
     }
 
-    vk::BufferPool *getDefaultBufferPool(VkDeviceSize size, uint32_t memoryTypeIndex);
+    void addBufferBlockToOrphanList(vk::BufferBlock *block);
+    void pruneOrphanedBufferBlocks();
 
-    void pruneDefaultBufferPools();
-    bool isDueForBufferPoolPrune();
+    bool isShadingRateSupported(gl::ShadingRate shadingRate) const
+    {
+        return mSupportedFragmentShadingRates.test(shadingRate);
+    }
+
+    VkDeviceSize getSuballocationDestroyedSize() const
+    {
+        return mSuballocationGarbageDestroyed.load(std::memory_order_consume);
+    }
+    void onBufferPoolPrune() { mSuballocationGarbageDestroyed = 0; }
+    VkDeviceSize getSuballocationGarbageSize() const
+    {
+        return mSuballocationGarbageSizeInBytesCachedAtomic.load(std::memory_order_consume);
+    }
+
+    ANGLE_INLINE VkFilter getPreferredFilterForYUV(VkFilter defaultFilter)
+    {
+        return getFeatures().preferLinearFilterForYUV.enabled ? VK_FILTER_LINEAR : defaultFilter;
+    }
 
   private:
     angle::Result initializeDevice(DisplayVk *displayVk, uint32_t queueFamilyIndex);
     void ensureCapsInitialized() const;
+    void initializeValidationMessageSuppressions();
 
     void queryDeviceExtensionFeatures(const vk::ExtensionNameList &deviceExtensionNames);
 
@@ -574,6 +645,17 @@ class RendererVk : angle::NonCopyable
 
     // Initialize VMA allocator and buffer suballocator related data.
     angle::Result initializeMemoryAllocator(DisplayVk *displayVk);
+
+    // Query and cache supported fragment shading rates
+    bool canSupportFragmentShadingRate(const vk::ExtensionNameList &deviceExtensionNames);
+    // Perfer host visiable device local via device local based on device type and heap size.
+    bool canPreferDeviceLocalMemoryHostVisible(VkPhysicalDeviceType deviceType);
+
+    template <typename CommandBufferHelperT, typename RecyclerT>
+    angle::Result getCommandBufferImpl(vk::Context *context,
+                                       vk::CommandPool *commandPool,
+                                       RecyclerT *recycler,
+                                       CommandBufferHelperT **commandBufferHelperOut);
 
     egl::Display *mDisplay;
 
@@ -615,8 +697,11 @@ class RendererVk : angle::NonCopyable
     VkPhysicalDeviceExternalMemoryHostPropertiesEXT mExternalMemoryHostProperties;
     VkPhysicalDeviceShaderFloat16Int8FeaturesKHR mShaderFloat16Int8Features;
     VkPhysicalDeviceDepthStencilResolvePropertiesKHR mDepthStencilResolveProperties;
+    VkPhysicalDeviceMultisampledRenderToSingleSampledFeaturesGOOGLEX
+        mMultisampledRenderToSingleSampledFeaturesGOOGLEX;
     VkPhysicalDeviceMultisampledRenderToSingleSampledFeaturesEXT
         mMultisampledRenderToSingleSampledFeatures;
+    VkPhysicalDeviceImage2DViewOf3DFeaturesEXT mImage2dViewOf3dFeatures;
     VkPhysicalDeviceMultiviewFeatures mMultiviewFeatures;
     VkPhysicalDeviceFeatures2KHR mEnabledFeatures;
     VkPhysicalDeviceMultiviewProperties mMultiviewProperties;
@@ -626,8 +711,20 @@ class RendererVk : angle::NonCopyable
     VkPhysicalDeviceProtectedMemoryProperties mProtectedMemoryProperties;
     VkPhysicalDeviceHostQueryResetFeaturesEXT mHostQueryResetFeatures;
     VkPhysicalDeviceDepthClipControlFeaturesEXT mDepthClipControlFeatures;
+    VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT mPrimitivesGeneratedQueryFeatures;
+    VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT mPrimitiveTopologyListRestartFeatures;
     VkPhysicalDeviceBlendOperationAdvancedFeaturesEXT mBlendOperationAdvancedFeatures;
     VkPhysicalDeviceSamplerYcbcrConversionFeatures mSamplerYcbcrConversionFeatures;
+    VkPhysicalDevicePipelineCreationCacheControlFeaturesEXT mPipelineCreationCacheControlFeatures;
+    VkPhysicalDeviceExtendedDynamicStateFeaturesEXT mExtendedDynamicStateFeatures;
+    VkPhysicalDeviceExtendedDynamicState2FeaturesEXT mExtendedDynamicState2Features;
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR mFragmentShadingRateFeatures;
+    VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT mFragmentShaderInterlockFeatures;
+    VkPhysicalDeviceImagelessFramebufferFeaturesKHR mImagelessFramebufferFeatures;
+    VkPhysicalDevicePipelineRobustnessFeaturesEXT mPipelineRobustnessFeatures;
+    VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT
+        mRasterizationOrderAttachmentAccessFeatures;
+    angle::PackedEnumBitSet<gl::ShadingRate, uint8_t> mSupportedFragmentShadingRates;
     std::vector<VkQueueFamilyProperties> mQueueFamilyProperties;
     uint32_t mMaxVertexAttribDivisor;
     uint32_t mCurrentQueueFamilyIndex;
@@ -650,6 +747,16 @@ class RendererVk : angle::NonCopyable
     vk::SharedGarbageList mPendingSubmissionGarbage;
     vk::SharedBufferSuballocationGarbageList mSuballocationGarbage;
     vk::SharedBufferSuballocationGarbageList mPendingSubmissionSuballocationGarbage;
+    // Total suballocation garbage size in bytes.
+    VkDeviceSize mSuballocationGarbageSizeInBytes;
+
+    // Total bytes of suballocation that been destroyed since last prune call. This can be accessed
+    // without mGarbageMutex, thus needs to be atomic to avoid tsan complain.
+    std::atomic<VkDeviceSize> mSuballocationGarbageDestroyed;
+    // This is the cached value of mSuballocationGarbageSizeInBytes but is accessed with atomic
+    // operation. This can be accessed from different threads without mGarbageMutex, so that thread
+    // sanitizer won't complain.
+    std::atomic<VkDeviceSize> mSuballocationGarbageSizeInBytesCachedAtomic;
 
     vk::FormatTable mFormatTable;
     // A cache of VkFormatProperties as queried from the device over time.
@@ -670,17 +777,27 @@ class RendererVk : angle::NonCopyable
     uint32_t mDeviceLocalVertexConversionBufferMemoryTypeIndex;
     size_t mVertexConversionBufferAlignment;
 
+    // Holds orphaned BufferBlocks when ShareGroup gets destroyed
+    vk::BufferBlockPointerVector mOrphanedBufferBlocks;
+
     // All access to the pipeline cache is done through EGL objects so it is thread safe to not use
     // a lock.
     std::mutex mPipelineCacheMutex;
     vk::PipelineCache mPipelineCache;
     uint32_t mPipelineCacheVkUpdateTimeout;
-    bool mPipelineCacheDirty;
+    size_t mPipelineCacheSizeAtLastSync;
     bool mPipelineCacheInitialized;
 
     // Latest validation data for debug overlay.
     std::string mLastValidationMessage;
     uint32_t mValidationMessageCount;
+
+    // Skipped validation messages.  The exact contents of the list depends on the availability of
+    // certain extensions.
+    std::vector<const char *> mSkippedValidationMessages;
+    // Syncval skipped messages.  The exact contents of the list depends on the availability of
+    // certain extensions.
+    std::vector<vk::SkippedSyncvalMessage> mSkippedSyncvalMessages;
 
     // Whether framebuffer fetch has been used, for the purposes of more accurate syncval error
     // filtering.
@@ -710,6 +827,7 @@ class RendererVk : angle::NonCopyable
 
     // Command buffer pool management.
     std::mutex mCommandBufferRecyclerMutex;
+    vk::CommandBufferHandleAllocator mCommandBufferHandleAllocator;
     vk::CommandBufferRecycler<vk::OutsideRenderPassCommandBuffer,
                               vk::OutsideRenderPassCommandBufferHelper>
         mOutsideRenderPassCommandBufferRecycler;
@@ -733,7 +851,6 @@ class RendererVk : angle::NonCopyable
     DebugAnnotatorVk mAnnotator;
 
     // Stats about all Vulkan object caches
-    using VulkanCacheStats = angle::PackedEnumMap<VulkanCacheType, CacheStats>;
     VulkanCacheStats mVulkanCacheStats;
     mutable std::mutex mCacheStatsMutex;
 
@@ -747,18 +864,13 @@ class RendererVk : angle::NonCopyable
     // Note that this mask can have bits set that don't correspond to valid stages, so it's strictly
     // only useful for masking out unsupported stages in an otherwise valid set of stages.
     VkPipelineStageFlags mSupportedVulkanPipelineStageMask;
+    VkShaderStageFlags mSupportedVulkanShaderStageMask;
 
     // Use thread pool to compress cache data.
     std::shared_ptr<rx::WaitableCompressEvent> mCompressEvent;
 
     vk::ExtensionNameList mEnabledInstanceExtensions;
     vk::ExtensionNameList mEnabledDeviceExtensions;
-
-    vk::BufferPoolPointerArray mDefaultBufferPools;
-
-    std::unique_ptr<vk::BufferPool> mSmallBufferPool;
-
-    double mLastPruneTime;
 };
 
 }  // namespace rx

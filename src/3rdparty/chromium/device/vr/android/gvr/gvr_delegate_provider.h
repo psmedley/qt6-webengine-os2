@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,6 @@ class DEVICE_VR_EXPORT GvrDelegateProvider {
 
   virtual bool ShouldDisableGvrDevice() = 0;
   virtual void StartWebXRPresentation(
-      mojom::VRDisplayInfoPtr display_info,
       mojom::XRRuntimeSessionOptionsPtr options,
       base::OnceCallback<void(device::mojom::XRSessionPtr)> callback) = 0;
   virtual void ExitWebVRPresent() = 0;

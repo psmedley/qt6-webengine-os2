@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,12 +14,9 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
 #include "build/build_config.h"
 #include "headless/public/headless_browser_context.h"
-#include "headless/public/headless_devtools_channel.h"
 #include "headless/public/headless_export.h"
-#include "headless/public/headless_web_contents.h"
 #include "net/base/host_port_pair.h"
 #include "ui/gfx/font_render_params.h"
 #include "ui/gfx/geometry/size.h"
@@ -34,6 +31,9 @@ class SingleThreadTaskRunner;
 }
 
 namespace headless {
+
+class HeadlessDevToolsChannel;
+class HeadlessWebContents;
 
 // This class represents the global headless browser instance. To get a pointer
 // to one, call |HeadlessBrowserMain| to initiate the browser main loop. An

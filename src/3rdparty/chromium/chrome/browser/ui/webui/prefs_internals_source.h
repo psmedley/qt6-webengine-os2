@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@ class PrefsInternalsSource : public content::URLDataSource {
 
   // content::URLDataSource:
   std::string GetSource() override;
-  std::string GetMimeType(const std::string& path) override;
+  std::string GetMimeType(const GURL& url) override;
   void StartDataRequest(
       const GURL& url,
       const content::WebContents::Getter& wc_getter,

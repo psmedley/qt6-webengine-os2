@@ -37,7 +37,6 @@
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "decode.h"
-#include "internal.h"
 #include "libvpx.h"
 #include "profiles.h"
 
@@ -199,7 +198,7 @@ static int set_pix_fmt(AVCodecContext *avctx, struct vpx_image *img,
 }
 
 static int decode_frame(AVCodecContext *avctx, vpx_codec_ctx_t *decoder,
-                        uint8_t *data, uint32_t data_sz)
+                        const uint8_t *data, uint32_t data_sz)
 {
     if (vpx_codec_decode(decoder, data, data_sz, NULL, 0) != VPX_CODEC_OK) {
         const char *error  = vpx_codec_error(decoder);
@@ -215,11 +214,10 @@ static int decode_frame(AVCodecContext *avctx, vpx_codec_ctx_t *decoder,
     return 0;
 }
 
-static int vpx_decode(AVCodecContext *avctx,
-                      void *data, int *got_frame, AVPacket *avpkt)
+static int vpx_decode(AVCodecContext *avctx, AVFrame *picture,
+                      int *got_frame, AVPacket *avpkt)
 {
     VPxContext *ctx = avctx->priv_data;
-    AVFrame *picture = data;
     const void *iter = NULL;
     const void *iter_alpha = NULL;
     struct vpx_image *img, *img_alpha;
@@ -358,7 +356,7 @@ static av_cold int vp8_init(AVCodecContext *avctx)
 
 const FFCodec ff_libvpx_vp8_decoder = {
     .p.name         = "libvpx",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("libvpx VP8"),
+    CODEC_LONG_NAME("libvpx VP8"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_VP8,
     .p.capabilities = AV_CODEC_CAP_OTHER_THREADS | AV_CODEC_CAP_DR1,
@@ -366,8 +364,9 @@ const FFCodec ff_libvpx_vp8_decoder = {
     .priv_data_size = sizeof(VPxContext),
     .init           = vp8_init,
     .close          = vpx_free,
-    .decode         = vpx_decode,
-    .caps_internal  = FF_CODEC_CAP_AUTO_THREADS,
+    FF_CODEC_DECODE_CB(vpx_decode),
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE |
+                      FF_CODEC_CAP_AUTO_THREADS,
 };
 #endif /* CONFIG_LIBVPX_VP8_DECODER */
 
@@ -380,7 +379,7 @@ static av_cold int vp9_init(AVCodecContext *avctx)
 
 FFCodec ff_libvpx_vp9_decoder = {
     .p.name         = "libvpx-vp9",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("libvpx VP9"),
+    CODEC_LONG_NAME("libvpx VP9"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_VP9,
     .p.capabilities = AV_CODEC_CAP_OTHER_THREADS,
@@ -389,8 +388,9 @@ FFCodec ff_libvpx_vp9_decoder = {
     .priv_data_size = sizeof(VPxContext),
     .init           = vp9_init,
     .close          = vpx_free,
-    .decode         = vpx_decode,
-    .caps_internal  = FF_CODEC_CAP_AUTO_THREADS,
+    FF_CODEC_DECODE_CB(vpx_decode),
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE |
+                      FF_CODEC_CAP_AUTO_THREADS,
     .init_static_data = ff_vp9_init_static,
 };
 #endif /* CONFIG_LIBVPX_VP9_DECODER */

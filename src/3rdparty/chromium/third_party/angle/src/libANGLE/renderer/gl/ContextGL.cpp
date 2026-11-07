@@ -53,7 +53,7 @@ angle::Result ContextGL::initialize()
 
 CompilerImpl *ContextGL::createCompiler()
 {
-    return new CompilerGL(getFunctions());
+    return new CompilerGL(this);
 }
 
 ShaderImpl *ContextGL::createShader(const gl::ShaderState &data)
@@ -74,9 +74,12 @@ FramebufferImpl *ContextGL::createFramebuffer(const gl::FramebufferState &data)
     const FunctionsGL *funcs = getFunctions();
 
     GLuint fbo = 0;
-    funcs->genFramebuffers(1, &fbo);
+    if (!data.isDefault())
+    {
+        funcs->genFramebuffers(1, &fbo);
+    }
 
-    return new FramebufferGL(data, fbo, false, false);
+    return new FramebufferGL(data, fbo, false);
 }
 
 TextureImpl *ContextGL::createTexture(const gl::TextureState &state)
@@ -223,7 +226,7 @@ ANGLE_INLINE angle::Result ContextGL::setDrawArraysState(const gl::Context *cont
 {
     const angle::FeaturesGL &features = getFeaturesGL();
     if (context->getStateCache().hasAnyActiveClientAttrib() ||
-        (features.shiftInstancedArrayDataWithExtraOffset.enabled && first > 0))
+        (features.shiftInstancedArrayDataWithOffset.enabled && first > 0))
     {
         const gl::State &glState                = context->getState();
         const gl::ProgramExecutable *executable = getState().getProgramExecutable();
@@ -237,7 +240,7 @@ ANGLE_INLINE angle::Result ContextGL::setDrawArraysState(const gl::Context *cont
         ANGLE_TRY(vaoGL->validateState(context));
 #endif  // ANGLE_STATE_VALIDATION_ENABLED
     }
-    else if (features.shiftInstancedArrayDataWithExtraOffset.enabled && first == 0)
+    else if (features.shiftInstancedArrayDataWithOffset.enabled && first == 0)
     {
         // There could be previous draw call that has modified the attributes
         // Instead of forcefully streaming attributes, we just rebind the original ones
@@ -270,7 +273,7 @@ ANGLE_INLINE angle::Result ContextGL::setDrawElementsState(const gl::Context *co
     const gl::StateCache &stateCache        = context->getStateCache();
 
     const angle::FeaturesGL &features = getFeaturesGL();
-    if (features.shiftInstancedArrayDataWithExtraOffset.enabled)
+    if (features.shiftInstancedArrayDataWithOffset.enabled)
     {
         // There might be instanced arrays that are forced streaming for drawArraysInstanced
         // They cannot be ELEMENT_ARRAY_BUFFER
@@ -905,7 +908,7 @@ angle::Result ContextGL::onMakeCurrent(const gl::Context *context)
 angle::Result ContextGL::onUnMakeCurrent(const gl::Context *context)
 {
     ANGLE_TRY(flush(context));
-    if (getFeaturesGL().unbindFBOOnContextSwitch.enabled)
+    if (getFeaturesGL().unbindFBOBeforeSwitchingContext.enabled)
     {
         mRenderer->getStateManager()->bindFramebuffer(GL_FRAMEBUFFER, 0);
     }
@@ -930,6 +933,11 @@ const gl::Extensions &ContextGL::getNativeExtensions() const
 const gl::Limitations &ContextGL::getNativeLimitations() const
 {
     return mRenderer->getNativeLimitations();
+}
+
+ShPixelLocalStorageType ContextGL::getNativePixelLocalStorageType() const
+{
+    return mRenderer->getNativePixelLocalStorageType();
 }
 
 StateManagerGL *ContextGL::getStateManager()
@@ -972,6 +980,11 @@ angle::Result ContextGL::memoryBarrier(const gl::Context *context, GLbitfield ba
 angle::Result ContextGL::memoryBarrierByRegion(const gl::Context *context, GLbitfield barriers)
 {
     return mRenderer->memoryBarrierByRegion(barriers);
+}
+
+void ContextGL::framebufferFetchBarrier()
+{
+    mRenderer->framebufferFetchBarrier();
 }
 
 void ContextGL::setMaxShaderCompilerThreads(GLuint count)

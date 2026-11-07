@@ -4,6 +4,12 @@
 /* eslint-disable indent */
 (function(window) {
 
+/**
+ * @typedef {{runtimeAllowedHosts: !Array<string>, runtimeBlockedHosts: !Array<string>}} ExtensionHostsPolicy
+ */
+/**
+ * @typedef {{startPage: string, name: string, exposeExperimentalAPIs: boolean, hostsPolicy?: ExtensionHostsPolicy}} ExtensionDescriptor
+ */
   // DevToolsAPI ----------------------------------------------------------------
 
   const DevToolsAPIImpl = class {
@@ -24,7 +30,7 @@
       this._pendingExtensionDescriptors = [];
 
       /**
-       * @type {?function(!ExtensionDescriptor)}
+       * @type {?function(!ExtensionDescriptor): void}
        */
       this._addExtensionCallback = null;
 
@@ -395,31 +401,34 @@
    */
   const EnumeratedHistogram = {
     ActionTaken: 'DevTools.ActionTaken',
-    PanelClosed: 'DevTools.PanelClosed',
-    PanelShown: 'DevTools.PanelShown',
-    SidebarPaneShown: 'DevTools.SidebarPaneShown',
-    KeyboardShortcutFired: 'DevTools.KeyboardShortcutFired',
+    ConsoleShowsCorsErrors: 'DevTools.ConsoleShowsCorsErrors',
+    CSSHintShown: 'DevTools.CSSHintShown',
+    DeveloperResourceLoaded: 'DevTools.DeveloperResourceLoaded',
+    DeveloperResourceScheme: 'DevTools.DeveloperResourceScheme',
+    ExperimentDisabled: 'DevTools.ExperimentDisabled',
+    ExperimentEnabled: 'DevTools.ExperimentEnabled',
+    ExperimentEnabledAtLaunch: 'DevTools.ExperimentEnabledAtLaunch',
     IssueCreated: 'DevTools.IssueCreated',
     IssuesPanelIssueExpanded: 'DevTools.IssuesPanelIssueExpanded',
     IssuesPanelOpenedFrom: 'DevTools.IssuesPanelOpenedFrom',
     IssuesPanelResourceOpened: 'DevTools.IssuesPanelResourceOpened',
     KeybindSetSettingChanged: 'DevTools.KeybindSetSettingChanged',
-    ExperimentEnabledAtLaunch: 'DevTools.ExperimentEnabledAtLaunch',
-    ExperimentEnabled: 'DevTools.ExperimentEnabled',
-    ExperimentDisabled: 'DevTools.ExperimentDisabled',
-    DeveloperResourceLoaded: 'DevTools.DeveloperResourceLoaded',
-    DeveloperResourceScheme: 'DevTools.DeveloperResourceScheme',
+    KeyboardShortcutFired: 'DevTools.KeyboardShortcutFired',
+    Language: 'DevTools.Language',
     LinearMemoryInspectorRevealedFrom: 'DevTools.LinearMemoryInspector.RevealedFrom',
     LinearMemoryInspectorTarget: 'DevTools.LinearMemoryInspector.Target',
-    Language: 'DevTools.Language',
-    ConsoleShowsCorsErrors: 'DevTools.ConsoleShowsCorsErrors',
+    ManifestSectionSelected: 'DevTools.ManifestSectionSelected',
+    PanelClosed: 'DevTools.PanelClosed',
+    PanelShown: 'DevTools.PanelShown',
     RecordingEdited: 'DevTools.RecordingEdited',
     RecordingExported: 'DevTools.RecordingExported',
     RecordingReplayFinished: 'DevTools.RecordingReplayFinished',
+    RecordingReplaySpeed: 'DevTools.RecordingReplaySpeed',
     RecordingReplayStarted: 'DevTools.RecordingReplayStarted',
     RecordingToggled: 'DevTools.RecordingToggled',
-    SyncSetting: 'DevTools.SyncSetting',
+    SidebarPaneShown: 'DevTools.SidebarPaneShown',
     StyleTextCopied: 'DevTools.StyleTextCopied',
+    SyncSetting: 'DevTools.SyncSetting',
   };
 
   /**
@@ -1060,6 +1069,7 @@
       'emulation.showDeviceMode',
       'emulation.showRulers',
       'enableAsyncStackTraces',
+      'enableIgnoreListing',
       'eventListenerBreakpoints',
       'fileMappingEntries',
       'fileSystemMapping',
@@ -1097,6 +1107,7 @@
       'messageLevelFilters',
       'messageURLFilters',
       'monitoringXHREnabled',
+      'navigatorGroupByAuthored',
       'navigatorGroupByFolder',
       'navigatorHidden',
       'networkColorCodeResourceTypes',
@@ -1152,6 +1163,7 @@
       'showWhitespacesInEditor',
       'sidebarPosition',
       'skipContentScripts',
+      'automaticallyIgnoreListKnownThirdPartyScripts',
       'skipStackFramesPattern',
       'sourceMapInfobarDisabled',
       'sourcesPanelDebuggerSidebarSplitViewState',

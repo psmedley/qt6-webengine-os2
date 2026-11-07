@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,10 @@
 #include <unordered_map>
 #include <utility>
 
+#include "base/allocator/partition_allocator/partition_alloc_base/threading/platform_thread.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/time/time.h"
 #include "base/allocator/partition_allocator/starscan/metadata_allocator.h"
 #include "base/allocator/partition_allocator/starscan/starscan_fwd.h"
-#include "base/threading/platform_thread.h"
-#include "base/time/time.h"
 
 namespace partition_alloc {
 
@@ -74,12 +74,12 @@ class StatsCollector final {
     using PerThreadEvents =
         std::array<DeferredTraceEvent, static_cast<size_t>(IdType::kNumIds)>;
     using UnderlyingMap = std::unordered_map<
-        ::base::PlatformThreadId,
+        internal::base::PlatformThreadId,
         PerThreadEvents,
-        std::hash<::base::PlatformThreadId>,
+        std::hash<internal::base::PlatformThreadId>,
         std::equal_to<>,
-        MetadataAllocator<
-            std::pair<const ::base::PlatformThreadId, PerThreadEvents>>>;
+        MetadataAllocator<std::pair<const internal::base::PlatformThreadId,
+                                    PerThreadEvents>>>;
 
     inline void RegisterBeginEventFromCurrentThread(IdType id);
     inline void RegisterEndEventFromCurrentThread(IdType id);
@@ -252,12 +252,5 @@ inline StatsCollector::MetadataString StatsCollector::ToUMAString(
 
 }  // namespace internal
 }  // namespace partition_alloc
-
-// TODO(crbug.com/1151236): Remove this when migration is complete.
-namespace base::internal {
-
-using ::partition_alloc::internal::StatsCollector;
-
-}  // namespace base::internal
 
 #endif  // BASE_ALLOCATOR_PARTITION_ALLOCATOR_STARSCAN_STATS_COLLECTOR_H_

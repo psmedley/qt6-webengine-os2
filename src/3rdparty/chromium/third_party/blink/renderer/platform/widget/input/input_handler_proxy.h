@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,13 @@
 #include <memory>
 
 #include "base/time/time.h"
+#include "cc/input/browser_controls_state.h"
 #include "cc/input/input_handler.h"
 #include "cc/input/snap_fling_controller.h"
 #include "cc/paint/element_id.h"
 #include "third_party/blink/public/common/input/web_coalesced_input_event.h"
 #include "third_party/blink/public/common/input/web_gesture_event.h"
+#include "third_party/blink/public/mojom/input/input_handler.mojom-blink.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 
@@ -150,7 +152,8 @@ class PLATFORM_EXPORT InputHandlerProxy : public cc::InputHandlerClient,
       std::unique_ptr<blink::WebCoalescedInputEvent> event,
       std::unique_ptr<DidOverscrollParams>,
       const blink::WebInputEventAttribution&,
-      std::unique_ptr<cc::EventMetrics> metrics)>;
+      std::unique_ptr<cc::EventMetrics> metrics,
+      mojom::blink::ScrollResultDataPtr)>;
   void HandleInputEventWithLatencyInfo(
       std::unique_ptr<blink::WebCoalescedInputEvent> event,
       std::unique_ptr<cc::EventMetrics> metrics,
@@ -202,6 +205,11 @@ class PLATFORM_EXPORT InputHandlerProxy : public cc::InputHandlerClient,
   void SynchronouslyZoomBy(float magnify_delta,
                            const gfx::Point& anchor);
 
+  // Defers posting BeginMainFrame tasks. This is used during the main thread
+  // hit test for a GestureScrollBegin, to avoid posting a frame before the
+  // compositor thread has had a chance to update the scroll offset.
+  void SetDeferBeginMainFrame(bool defer_begin_main_frame) const;
+
   // cc::InputHandlerClient implementation.
   void WillShutdown() override;
   void Animate(base::TimeTicks time) override;
@@ -225,6 +233,10 @@ class PLATFORM_EXPORT InputHandlerProxy : public cc::InputHandlerClient,
   gfx::PointF ScrollByForSnapFling(const gfx::Vector2dF& delta) override;
   void ScrollEndForSnapFling(bool did_finish) override;
   void RequestAnimationForSnapFling() override;
+
+  void UpdateBrowserControlsState(cc::BrowserControlsState constraints,
+                                  cc::BrowserControlsState current,
+                                  bool animate);
 
   bool gesture_scroll_on_impl_thread_for_testing() const {
     return handling_gesture_on_impl_thread_;
@@ -254,7 +266,7 @@ class PLATFORM_EXPORT InputHandlerProxy : public cc::InputHandlerClient,
   EventDisposition HandleGestureScrollUpdate(
       const blink::WebGestureEvent& event,
       const blink::WebInputEventAttribution& original_attribution,
-      const cc::EventMetrics* original_metrics);
+      cc::EventMetrics* metrics);
   EventDisposition HandleGestureScrollEnd(const blink::WebGestureEvent& event);
   EventDisposition HandleTouchStart(EventWithCallback* event_with_callback);
   EventDisposition HandleTouchMove(EventWithCallback* event_with_callback);
@@ -310,7 +322,7 @@ class PLATFORM_EXPORT InputHandlerProxy : public cc::InputHandlerClient,
   void RecordMainThreadScrollingReasons(blink::WebGestureDevice device,
                                         uint32_t reasons_from_scroll_begin,
                                         bool was_main_thread_hit_tested,
-                                        bool needs_main_thread_repaint);
+                                        uint32_t main_thread_repaint_reasons);
 
   bool HasQueuedEventsReadyForDispatch();
 
@@ -349,6 +361,11 @@ class PLATFORM_EXPORT InputHandlerProxy : public cc::InputHandlerClient,
   // dispatched.  If the event causes overscroll, the overscroll metadata is
   // bundled in the event ack, saving an IPC.
   std::unique_ptr<DidOverscrollParams> current_overscroll_params_;
+
+  // Used to cache the scroll result data - e.g. root scroll offset - when a
+  // scroll gesture is handled. This data is then passed back using
+  // |EventDispositionCallback|.
+  mojom::blink::ScrollResultDataPtr current_scroll_result_data_;
 
   std::unique_ptr<CompositorThreadEventQueue> compositor_event_queue_;
 

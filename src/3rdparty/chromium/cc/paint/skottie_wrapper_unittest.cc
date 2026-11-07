@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -183,6 +183,53 @@ TEST(SkottieWrapperTest, LoadsCorrectAssetsForSeek) {
               OnAssetLoaded(HashSkottieResourceId("image_1"), _, _, _));
   skottie->Seek(/*t=*/0.75, mock_callback.Get());
   Mock::VerifyAndClearExpectations(&mock_callback);
+}
+
+TEST(SkottieWrapperTest, LoadsColorNodes) {
+  auto skottie = CreateSkottieFromString(kLottieDataWithoutAssets1);
+  ASSERT_TRUE(skottie->is_valid());
+  EXPECT_THAT(
+      skottie->GetCurrentColorPropertyValues(),
+      UnorderedElementsAre(
+          Pair(HashSkottieResourceId(kLottieDataWithoutAssets1Color1Node),
+               kLottieDataWithoutAssets1Color1),
+          Pair(HashSkottieResourceId(kLottieDataWithoutAssets1Color2Node),
+               kLottieDataWithoutAssets1Color2)));
+}
+
+TEST(SkottieWrapperTest, SetsColorNodesWithDraw) {
+  auto skottie = CreateSkottieFromString(kLottieDataWithoutAssets1);
+  ASSERT_TRUE(skottie->is_valid());
+  ::testing::NiceMock<MockCanvas> canvas;
+
+  SkottieColorMap color_map = {
+      {HashSkottieResourceId(kLottieDataWithoutAssets1Color1Node),
+       SK_ColorYELLOW},
+      {HashSkottieResourceId(kLottieDataWithoutAssets1Color2Node),
+       SK_ColorCYAN}};
+  skottie->Draw(&canvas, /*t=*/0, SkRect::MakeWH(500, 500),
+                SkottieWrapper::FrameDataCallback(), color_map,
+                SkottieTextPropertyValueMap());
+  EXPECT_THAT(
+      skottie->GetCurrentColorPropertyValues(),
+      UnorderedElementsAre(
+          Pair(HashSkottieResourceId(kLottieDataWithoutAssets1Color1Node),
+               SK_ColorYELLOW),
+          Pair(HashSkottieResourceId(kLottieDataWithoutAssets1Color2Node),
+               SK_ColorCYAN)));
+
+  color_map = {{HashSkottieResourceId(kLottieDataWithoutAssets1Color2Node),
+                SK_ColorMAGENTA}};
+  skottie->Draw(&canvas, /*t=*/0, SkRect::MakeWH(500, 500),
+                SkottieWrapper::FrameDataCallback(), color_map,
+                SkottieTextPropertyValueMap());
+  EXPECT_THAT(
+      skottie->GetCurrentColorPropertyValues(),
+      UnorderedElementsAre(
+          Pair(HashSkottieResourceId(kLottieDataWithoutAssets1Color1Node),
+               SK_ColorYELLOW),
+          Pair(HashSkottieResourceId(kLottieDataWithoutAssets1Color2Node),
+               SK_ColorMAGENTA)));
 }
 
 TEST(SkottieWrapperTest, LoadsTextNodes) {

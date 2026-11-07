@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -414,9 +414,7 @@ String TrustedTypesCheckForScript(const String& script,
 String TrustedTypesCheckForScriptURL(const String& script_url,
                                      const ExecutionContext* execution_context,
                                      ExceptionState& exception_state) {
-  bool require_trusted_type =
-      RequireTrustedTypesCheck(execution_context) &&
-      RuntimeEnabledFeatures::TrustedDOMTypesEnabled(execution_context);
+  bool require_trusted_type = RequireTrustedTypesCheck(execution_context);
   if (!require_trusted_type) {
     return script_url;
   }
@@ -597,6 +595,12 @@ String TrustedTypesCheckForExecCommand(
     const ExecutionContext* execution_context,
     ExceptionState& exception_state) {
   return TrustedTypesCheckForHTML(html, execution_context, exception_state);
+}
+
+bool IsTrustedTypesEventHandlerAttribute(const QualifiedName& q_name) {
+  return q_name.NamespaceURI().IsNull() &&
+         TrustedTypePolicyFactory::IsEventHandlerAttributeName(
+             q_name.LocalName());
 }
 
 }  // namespace blink

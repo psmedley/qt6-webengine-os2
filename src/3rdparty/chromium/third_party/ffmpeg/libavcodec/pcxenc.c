@@ -194,10 +194,11 @@ static int pcx_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
 
 const FFCodec ff_pcx_encoder = {
     .p.name         = "pcx",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("PC Paintbrush PCX image"),
+    CODEC_LONG_NAME("PC Paintbrush PCX image"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_PCX,
-    .encode2        = pcx_encode_frame,
+    .p.capabilities = AV_CODEC_CAP_DR1,
+    FF_CODEC_ENCODE_CB(pcx_encode_frame),
     .p.pix_fmts     = (const enum AVPixelFormat[]){
         AV_PIX_FMT_RGB24,
         AV_PIX_FMT_RGB8, AV_PIX_FMT_BGR8, AV_PIX_FMT_RGB4_BYTE, AV_PIX_FMT_BGR4_BYTE,
@@ -205,5 +206,4 @@ const FFCodec ff_pcx_encoder = {
         AV_PIX_FMT_MONOBLACK,
         AV_PIX_FMT_NONE
     },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };

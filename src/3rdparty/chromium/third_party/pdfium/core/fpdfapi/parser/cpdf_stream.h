@@ -7,10 +7,13 @@
 #ifndef CORE_FPDFAPI_PARSER_CPDF_STREAM_H_
 #define CORE_FPDFAPI_PARSER_CPDF_STREAM_H_
 
+#include <stdint.h>
+
 #include <memory>
 #include <set>
 
 #include "core/fpdfapi/parser/cpdf_object.h"
+#include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/fx_memory_wrappers.h"
 #include "core/fxcrt/fx_stream.h"
 #include "core/fxcrt/fx_string_wrappers.h"
@@ -25,25 +28,23 @@ class CPDF_Stream final : public CPDF_Object {
   // CPDF_Object:
   Type GetType() const override;
   RetainPtr<CPDF_Object> Clone() const override;
-  CPDF_Dictionary* GetDict() override;
-  const CPDF_Dictionary* GetDict() const override;
+  RetainPtr<const CPDF_Dictionary> GetDict() const override;
   WideString GetUnicodeText() const override;
-  bool IsStream() const override;
-  CPDF_Stream* AsStream() override;
-  const CPDF_Stream* AsStream() const override;
+  CPDF_Stream* AsMutableStream() override;
   bool WriteTo(IFX_ArchiveStream* archive,
                const CPDF_Encryptor* encryptor) const override;
 
   size_t GetRawSize() const { return m_dwSize; }
-  // Will be null in case when stream is not memory based.
-  // Use CPDF_StreamAcc to data access in all cases.
-  uint8_t* GetInMemoryRawData() const { return m_pDataBuf.get(); }
+  // Can only be called when stream is memory-based.
+  // This is meant to be used by CPDF_StreamAcc only.
+  // Other callers should use CPDF_StreamAcc to access data in all cases.
+  const uint8_t* GetInMemoryRawData() const;
 
   // Copies span or stream into internally-owned buffer.
   void SetData(pdfium::span<const uint8_t> pData);
   void SetDataFromStringstream(fxcrt::ostringstream* stream);
 
-  void TakeData(std::unique_ptr<uint8_t, FxFreeDeleter> pData, size_t size);
+  void TakeData(DataVector<uint8_t> data);
 
   // Set data and remove "Filter" and "DecodeParms" fields from stream
   // dictionary. Copies span or stream into internally-owned buffer.
@@ -52,9 +53,10 @@ class CPDF_Stream final : public CPDF_Object {
 
   void InitStream(pdfium::span<const uint8_t> pData,
                   RetainPtr<CPDF_Dictionary> pDict);
-  void InitStreamFromFile(const RetainPtr<IFX_SeekableReadStream>& pFile,
+  void InitStreamFromFile(RetainPtr<IFX_SeekableReadStream> pFile,
                           RetainPtr<CPDF_Dictionary> pDict);
 
+  // Can only be called when a stream is not memory-based.
   bool ReadRawData(FX_FILESIZE offset, uint8_t* pBuf, size_t buf_size) const;
 
   bool IsMemoryBased() const { return m_bMemoryBased; }
@@ -64,6 +66,8 @@ class CPDF_Stream final : public CPDF_Object {
   CPDF_Stream();
   CPDF_Stream(pdfium::span<const uint8_t> pData,
               RetainPtr<CPDF_Dictionary> pDict);
+  CPDF_Stream(DataVector<uint8_t> pData, RetainPtr<CPDF_Dictionary> pDict);
+  // TODO(crbug.com/pdfium/1872): Replace with vector version above.
   CPDF_Stream(std::unique_ptr<uint8_t, FxFreeDeleter> pData,
               size_t size,
               RetainPtr<CPDF_Dictionary> pDict);
@@ -73,6 +77,10 @@ class CPDF_Stream final : public CPDF_Object {
       bool bDirect,
       std::set<const CPDF_Object*>* pVisited) const override;
 
+  // TODO(crbug.com/pdfium/1872): Replace with vector version.
+  void TakeDataInternal(std::unique_ptr<uint8_t, FxFreeDeleter> pData,
+                        size_t size);
+
   bool m_bMemoryBased = true;
   size_t m_dwSize = 0;
   RetainPtr<CPDF_Dictionary> m_pDict;
@@ -81,7 +89,7 @@ class CPDF_Stream final : public CPDF_Object {
 };
 
 inline CPDF_Stream* ToStream(CPDF_Object* obj) {
-  return obj ? obj->AsStream() : nullptr;
+  return obj ? obj->AsMutableStream() : nullptr;
 }
 
 inline const CPDF_Stream* ToStream(const CPDF_Object* obj) {

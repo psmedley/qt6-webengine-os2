@@ -1,4 +1,4 @@
-load("//tensorflow_lite_support/cc/port:build_defs.bzl", "support_cc_proto_library", "support_py_proto_library")
+load("//tensorflow_lite_support/cc/port:build_defs.bzl", "support_py_proto_library")
 
 package(
     default_visibility = ["//tensorflow_lite_support:users"],
@@ -13,7 +13,7 @@ proto_library(
     ],
 )
 
-support_cc_proto_library(
+cc_proto_library(
     name = "nl_classifier_options_cc_proto",
     deps = [
         ":nl_classifier_options_proto",
@@ -112,7 +112,7 @@ proto_library(
     ],
 )
 
-support_cc_proto_library(
+cc_proto_library(
     name = "text_embedder_options_cc_proto",
     deps = [":text_embedder_options_proto"],
 )
@@ -166,5 +166,22 @@ cc_library(
     deps = [
         ":bert_clu_annotator_options_cc_proto",
         "//tensorflow_lite_support/cc/task/core/proto:base_options_proto_inc",
+    ],
+)
+
+proto_library(
+    name = "text_searcher_options_proto",
+    srcs = ["text_searcher_options.proto"],
+    deps = [
+        "//tensorflow_lite_support/cc/task/core/proto:base_options_proto",
+        "//tensorflow_lite_support/cc/task/processor/proto:embedding_options_proto",
+        "//tensorflow_lite_support/cc/task/processor/proto:search_options_proto",
+    ],
+)
+
+cc_proto_library(
+    name = "text_searcher_options_cc_proto",
+    deps = [
+        ":text_searcher_options_proto",
     ],
 )

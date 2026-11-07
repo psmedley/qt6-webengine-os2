@@ -184,11 +184,11 @@ bool SkBitmapProcState::init(const SkMatrix& inv, SkAlpha paintAlpha,
                              const SkSamplingOptions& sampling) {
     SkASSERT(!inv.hasPerspective());
     SkASSERT(SkOpts::S32_alpha_D32_filter_DXDY || inv.isScaleTranslate());
+    SkASSERT(!sampling.isAniso());
     SkASSERT(!sampling.useCubic);
     SkASSERT(sampling.mipmap != SkMipmapMode::kLinear);
 
     fPixmap.reset();
-    fInvMatrix = inv;
     fBilerp = false;
 
     auto* access = SkMipmapAccessor::Make(&fAlloc, (const SkImage*)fImage, inv, sampling.mipmap);
@@ -196,6 +196,7 @@ bool SkBitmapProcState::init(const SkMatrix& inv, SkAlpha paintAlpha,
         return false;
     }
     std::tie(fPixmap, fInvMatrix) = access->level();
+    fInvMatrix.preConcat(inv);
 
     fPaintAlpha = paintAlpha;
     fBilerp = sampling.filter == SkFilterMode::kLinear;

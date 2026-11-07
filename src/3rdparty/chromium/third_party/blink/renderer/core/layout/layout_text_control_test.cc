@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,7 +32,7 @@ class LayoutTextControlTest : public testing::WithParamInterface<bool>,
   // Focus on |control|, select 1-3 characters, get the first LayoutText, and
   // check if selection invalidation state is clean.
   LayoutText* SetupLayoutTextWithCleanSelection(TextControlElement* control) {
-    control->focus();
+    control->Focus();
     control->SetSelectionRange(1, 3);
     UpdateAllLifecyclePhasesForTest();
     auto* selected_text = GetInnerLayoutText(control);

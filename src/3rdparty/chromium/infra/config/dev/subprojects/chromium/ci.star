@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -92,7 +92,7 @@ ci_builder(
 ci_builder(
     name = "mac-arm-rel-swarming",
     cpu = cpu.ARM64,
-    os = os.MAC_11,
+    os = os.MAC_DEFAULT,
 )
 
 ci_builder(

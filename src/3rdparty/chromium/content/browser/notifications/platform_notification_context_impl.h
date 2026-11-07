@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,6 +80,7 @@ class CONTENT_EXPORT PlatformNotificationContextImpl
       RenderProcessHost* render_process_host,
       const url::Origin& origin,
       const GURL& document_url,
+      const WeakDocumentPtr& weak_document_ptr,
       mojo::PendingReceiver<blink::mojom::NotificationService> receiver);
 
   // Removes |service| from the list of owned services, for example because the

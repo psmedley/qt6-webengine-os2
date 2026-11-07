@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/trace_event/trace_event.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/renderer/bindings/modules/v8/v8_union_gpucanvascontext_imagebitmaprenderingcontext_offscreencanvasrenderingcontext2d_webgl2renderingcontext_webglrenderingcontext.h"
+#include "third_party/blink/renderer/modules/shorter_includes.h"
+#include SHORT_INCLUDE_FILE(third_party/blink/renderer/bindings/modules/v8/v8_union,gpucanvascontext_imagebitmaprenderingcontext_offscreencanvasrenderingcontext2d_webgl2renderingcontext_webglrenderingcontext)
 #include "third_party/blink/renderer/core/css/offscreen_font_selector.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/css/properties/computed_style_utils.h"
@@ -773,7 +774,7 @@ bool OffscreenCanvasRenderingContext2D::IsCanvas2DBufferValid() const {
 
 void OffscreenCanvasRenderingContext2D::DispatchContextLostEvent(
     TimerBase* time) {
-  PostDeferrableAction(WTF::Bind(
+  PostDeferrableAction(WTF::BindOnce(
       [](BaseRenderingContext2D* context) { context->ResetInternal(); },
       WrapPersistent(this)));
   BaseRenderingContext2D::DispatchContextLostEvent(time);

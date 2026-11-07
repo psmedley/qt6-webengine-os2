@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include "base/notreached.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_flags.h"
 #include "third_party/skia/include/core/SkPath.h"
@@ -31,6 +30,7 @@
 #include "ui/gfx/image/image_skia.h"
 #include "ui/native_theme/common_theme.h"
 #include "ui/native_theme/native_theme_features.h"
+#include "ui/native_theme/native_theme_fluent.h"
 #include "ui/native_theme/overlay_scrollbar_constants_aura.h"
 
 namespace ui {
@@ -54,6 +54,8 @@ const SkScalar kScrollRadius =
 #if !BUILDFLAG(IS_APPLE)
 // static
 NativeTheme* NativeTheme::GetInstanceForWeb() {
+  if (IsFluentScrollbarEnabled())
+    return NativeThemeFluent::web_instance();
   return NativeThemeAura::web_instance();
 }
 
@@ -75,11 +77,12 @@ NativeTheme* NativeTheme::GetInstanceForDarkUI() {
 // NativeThemeAura:
 
 NativeThemeAura::NativeThemeAura(bool use_overlay_scrollbars,
-                                 bool should_only_use_dark_colors)
-    : NativeThemeBase(should_only_use_dark_colors),
+                                 bool should_only_use_dark_colors,
+                                 ui::SystemTheme system_theme)
+    : NativeThemeBase(should_only_use_dark_colors, system_theme),
       use_overlay_scrollbars_(use_overlay_scrollbars) {
 // We don't draw scrollbar buttons.
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   set_scrollbar_button_length(0);
 #endif
 
@@ -121,7 +124,9 @@ void NativeThemeAura::PaintMenuPopupBackground(
     const MenuBackgroundExtraParams& menu_background,
     ColorScheme color_scheme) const {
   DCHECK(color_provider);
-  SkColor color = color_provider->GetColor(kColorMenuBackground);
+  // TODO(crbug/1308932): Remove FromColor and make all SkColor4f.
+  SkColor4f color =
+      SkColor4f::FromColor(color_provider->GetColor(kColorMenuBackground));
   if (menu_background.corner_radius > 0) {
     cc::PaintFlags flags;
     flags.setStyle(cc::PaintFlags::kFill_Style);

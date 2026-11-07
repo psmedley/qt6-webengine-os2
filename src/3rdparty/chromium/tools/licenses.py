@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -340,6 +340,13 @@ SPECIAL_CASES = {
         "License File":
         "/third_party/swiftshader/third_party/SPIRV-Tools/LICENSE",
     },
+    os.path.join('third_party', 'swiftshader', 'third_party', 'SPIRV-Headers'): {
+        "Name": "SPIRV-Headers",
+        "URL": "https://github.com/KhronosGroup/SPIRV-Headers",
+        "License": "Apache 2.0",
+        "License File":
+        "/third_party/swiftshader/third_party/SPIRV-Headers/LICENSE",
+    },
 }
 
 # Special value for 'License File' field used to indicate that the license file
@@ -615,7 +622,7 @@ def GetThirdPartyDepsFromGNDepsOutput(gn_deps, target_os):
   return sorted(third_party_deps)
 
 
-def FindThirdPartyDeps(gn_out_dir, gn_target, target_os):
+def FindThirdPartyDeps(gn_binary, gn_out_dir, gn_target, gn_generate, target_os):
   if not gn_out_dir:
     raise RuntimeError("--gn-out-dir is required if --gn-target is used.")
 
@@ -626,11 +633,15 @@ def FindThirdPartyDeps(gn_out_dir, gn_target, target_os):
   try:
     with tempfile.TemporaryDirectory(dir=gn_out_dir) as tmp_dir:
       shutil.copy(os.path.join(gn_out_dir, "args.gn"), tmp_dir)
-      subprocess.check_output(
-          [_GnBinary(), "gen",
-           "--root=%s" % _REPOSITORY_ROOT, tmp_dir])
+      if not gn_generate:
+          subprocess.check_output(
+              [gn_binary, "gen",
+              "--root=%s" % _REPOSITORY_ROOT, tmp_dir])
+      else:
+         tmp_dir = gn_out_dir
       gn_deps = subprocess.check_output([
-          _GnBinary(), "desc",
+          gn_binary, "desc",
+          "--script-executable=%s" % sys.executable,
           "--root=%s" % _REPOSITORY_ROOT, tmp_dir, gn_target, "deps",
           "--as=buildfile", "--all"
       ])
@@ -675,8 +686,10 @@ def GenerateCredits(file_template_file,
                     entry_template_file,
                     output_file,
                     target_os,
+                    gn_binary,
                     gn_out_dir,
                     gn_target,
+                    gn_generate,
                     extra_third_party_dirs=None,
                     depfile=None):
   """Generate about:credits."""
@@ -707,7 +720,7 @@ def GenerateCredits(file_template_file,
     }
 
   if gn_target:
-    third_party_dirs = FindThirdPartyDeps(gn_out_dir, gn_target, target_os)
+    third_party_dirs = FindThirdPartyDeps(gn_binary, gn_out_dir, gn_target, gn_generate, target_os)
 
     # Sanity-check to raise a build error if invalid gn_... settings are
     # somehow passed to this script.
@@ -817,7 +830,7 @@ def _ReadFile(path):
     return f.read()
 
 
-def GenerateLicenseFile(output_file, gn_out_dir, gn_target, target_os):
+def GenerateLicenseFile(output_file, gn_binary, gn_out_dir, gn_target, gn_generate, target_os):
   """Generate a plain-text LICENSE file which can be used when you ship a part
     of Chromium code (specified by gn_target) as a stand-alone library
     (e.g., //ios/web_view).
@@ -825,7 +838,7 @@ def GenerateLicenseFile(output_file, gn_out_dir, gn_target, target_os):
     The LICENSE file contains licenses of both Chromium and third-party
     libraries which gn_target depends on. """
 
-  third_party_dirs = FindThirdPartyDeps(gn_out_dir, gn_target, target_os)
+  third_party_dirs = FindThirdPartyDeps(gn_binary, gn_out_dir, gn_target, gn_generate, target_os)
 
   # Start with Chromium's LICENSE file.
   content = [_ReadFile('LICENSE')]
@@ -863,6 +876,8 @@ def main():
   parser.add_argument(
       '--gn-out-dir', help='GN output directory for scanning dependencies.')
   parser.add_argument('--gn-target', help='GN target to scan for dependencies.')
+  parser.add_argument('--gn-binary', help="GN binary location.")
+  parser.add_argument('--gn-generate', action='store_false', help='Generates gn project.')
   parser.add_argument(
       'command', choices=['help', 'scan', 'credits', 'license_file'])
   parser.add_argument('output_file', nargs='?')
@@ -871,19 +886,25 @@ def main():
   args.extra_third_party_dirs = build_utils.ParseGnList(
       args.extra_third_party_dirs)
 
+  if not args.gn_binary:
+    gn_binary = _GnBinary()
+  else:
+    gn_binary = args.gn_binary
+
   if args.command == 'scan':
     if not ScanThirdPartyDirs():
       return 1
   elif args.command == 'credits':
     if not GenerateCredits(args.file_template, args.entry_template,
-                           args.output_file, args.target_os, args.gn_out_dir,
-                           args.gn_target, args.extra_third_party_dirs,
+                           args.output_file, args.target_os, gn_binary,
+                           args.gn_out_dir,
+                           args.gn_target, args.gn_generate, args.extra_third_party_dirs,
                            args.depfile):
       return 1
   elif args.command == 'license_file':
     try:
-      GenerateLicenseFile(args.output_file, args.gn_out_dir, args.gn_target,
-                          args.target_os)
+      GenerateLicenseFile(args.output_file, gn_binary, args.gn_out_dir, gn_binary, args.gn_target,
+                          args.gn_generate, args.target_os)
     except LicenseError as e:
       print("Failed to parse README.chromium: {}".format(e))
       return 1

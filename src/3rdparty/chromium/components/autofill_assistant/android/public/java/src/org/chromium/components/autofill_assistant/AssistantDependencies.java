@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,11 +27,10 @@ import org.chromium.ui.base.WindowAndroid;
 @JNINamespace("autofill_assistant")
 public interface AssistantDependencies extends AssistantStaticDependencies {
     /**
-     * Updates dependencies that are tied to the activity.
+     * Updates dependencies that are tied to the activity. The activity attached to the WebContents
+     * is used (if any).
      * @return Whether a new activity could be found.
      */
-    boolean maybeUpdateDependencies(Activity activity);
-
     boolean maybeUpdateDependencies(WebContents webContents);
 
     Activity getActivity();

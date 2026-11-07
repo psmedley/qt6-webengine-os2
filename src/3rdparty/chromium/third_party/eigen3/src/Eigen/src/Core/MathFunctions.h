@@ -229,6 +229,63 @@ struct imag_ref_retval
   typedef typename NumTraits<Scalar>::Real & type;
 };
 
+
+/****************************************************************************
+* Implementation of sign                                                 *
+****************************************************************************/
+template<typename Scalar, bool IsComplex = (NumTraits<Scalar>::IsComplex!=0),
+    bool IsInteger = (NumTraits<Scalar>::IsInteger!=0)>
+struct sign_impl
+{
+  EIGEN_DEVICE_FUNC
+  static inline Scalar run(const Scalar& a)
+  {
+    return Scalar( (a>Scalar(0)) - (a<Scalar(0)) );
+  }
+};
+
+template<typename Scalar>
+struct sign_impl<Scalar, false, false>
+{
+  EIGEN_DEVICE_FUNC
+  static inline Scalar run(const Scalar& a)
+  {
+    return (std::isnan)(a) ? a : Scalar( (a>Scalar(0)) - (a<Scalar(0)) );
+  }
+};
+
+template<typename Scalar, bool IsInteger>
+struct sign_impl<Scalar, true, IsInteger>
+{
+  EIGEN_DEVICE_FUNC
+  static inline Scalar run(const Scalar& a)
+  {
+    using real_type = typename NumTraits<Scalar>::Real;
+    real_type aa = std::abs(a);
+    if (aa==real_type(0))
+      return Scalar(0);
+    aa = real_type(1)/aa;
+    return Scalar(a.real()*aa, a.imag()*aa );
+  }
+};
+
+// The sign function for bool is the identity.
+template<>
+struct sign_impl<bool, false, true>
+{
+  EIGEN_DEVICE_FUNC
+  static inline bool run(const bool& a)
+  {
+    return a;
+  }
+};
+
+template<typename Scalar>
+struct sign_retval
+{
+  typedef Scalar type;
+};
+
 /****************************************************************************
 * Implementation of conj                                                 *
 ****************************************************************************/
@@ -434,9 +491,9 @@ struct cast_impl
 // generating warnings on clang.  Here we explicitly cast the real component.
 template<typename OldType, typename NewType>
 struct cast_impl<OldType, NewType,
-  typename internal::enable_if<
+  typename std::enable_if_t<
     !NumTraits<OldType>::IsComplex && NumTraits<NewType>::IsComplex
-  >::type>
+  >>
 {
   EIGEN_DEVICE_FUNC
   static inline NewType run(const OldType& x)
@@ -891,7 +948,7 @@ struct random_default_impl<Scalar, false, true>
     // ScalarX is the widest of ScalarU and unsigned int.
     // We'll deal only with ScalarX and unsigned int below thus avoiding signed
     // types and arithmetic and signed overflows (which are undefined behavior).
-    typedef typename conditional<(ScalarU(-1) > unsigned(-1)), ScalarU, unsigned>::type ScalarX;
+    typedef std::conditional_t<(ScalarU(-1) > unsigned(-1)), ScalarU, unsigned> ScalarX;
     // The following difference doesn't overflow, provided our integer types are two's
     // complement and have the same number of padding bits in signed and unsigned variants.
     // This is the case in most modern implementations of C++.
@@ -962,22 +1019,22 @@ inline EIGEN_MATHFUNC_RETVAL(random, Scalar) random()
 
 template<typename T>
 EIGEN_DEVICE_FUNC
-typename internal::enable_if<internal::is_integral<T>::value,bool>::type
+std::enable_if_t<internal::is_integral<T>::value,bool>
 isnan_impl(const T&) { return false; }
 
 template<typename T>
 EIGEN_DEVICE_FUNC
-typename internal::enable_if<internal::is_integral<T>::value,bool>::type
+std::enable_if_t<internal::is_integral<T>::value,bool>
 isinf_impl(const T&) { return false; }
 
 template<typename T>
 EIGEN_DEVICE_FUNC
-typename internal::enable_if<internal::is_integral<T>::value,bool>::type
+std::enable_if_t<internal::is_integral<T>::value,bool>
 isfinite_impl(const T&) { return true; }
 
 template<typename T>
 EIGEN_DEVICE_FUNC
-typename internal::enable_if<(!internal::is_integral<T>::value)&&(!NumTraits<T>::IsComplex),bool>::type
+std::enable_if_t<(!internal::is_integral<T>::value)&&(!NumTraits<T>::IsComplex),bool>
 isfinite_impl(const T& x)
 {
   #if defined(EIGEN_GPU_COMPILE_PHASE)
@@ -992,7 +1049,7 @@ isfinite_impl(const T& x)
 
 template<typename T>
 EIGEN_DEVICE_FUNC
-typename internal::enable_if<(!internal::is_integral<T>::value)&&(!NumTraits<T>::IsComplex),bool>::type
+std::enable_if_t<(!internal::is_integral<T>::value)&&(!NumTraits<T>::IsComplex),bool>
 isinf_impl(const T& x)
 {
   #if defined(EIGEN_GPU_COMPILE_PHASE)
@@ -1007,7 +1064,7 @@ isinf_impl(const T& x)
 
 template<typename T>
 EIGEN_DEVICE_FUNC
-typename internal::enable_if<(!internal::is_integral<T>::value)&&(!NumTraits<T>::IsComplex),bool>::type
+std::enable_if_t<(!internal::is_integral<T>::value)&&(!NumTraits<T>::IsComplex),bool>
 isnan_impl(const T& x)
 {
   #if defined(EIGEN_GPU_COMPILE_PHASE)
@@ -1232,7 +1289,7 @@ inline EIGEN_MATHFUNC_RETVAL(real, Scalar) real(const Scalar& x)
 
 template<typename Scalar>
 EIGEN_DEVICE_FUNC
-inline typename internal::add_const_on_value_type< EIGEN_MATHFUNC_RETVAL(real_ref, Scalar) >::type real_ref(const Scalar& x)
+inline internal::add_const_on_value_type_t< EIGEN_MATHFUNC_RETVAL(real_ref, Scalar) > real_ref(const Scalar& x)
 {
   return internal::real_ref_impl<Scalar>::run(x);
 }
@@ -1260,7 +1317,7 @@ inline EIGEN_MATHFUNC_RETVAL(arg, Scalar) arg(const Scalar& x)
 
 template<typename Scalar>
 EIGEN_DEVICE_FUNC
-inline typename internal::add_const_on_value_type< EIGEN_MATHFUNC_RETVAL(imag_ref, Scalar) >::type imag_ref(const Scalar& x)
+inline internal::add_const_on_value_type_t< EIGEN_MATHFUNC_RETVAL(imag_ref, Scalar) > imag_ref(const Scalar& x)
 {
   return internal::imag_ref_impl<Scalar>::run(x);
 }
@@ -1277,6 +1334,13 @@ EIGEN_DEVICE_FUNC
 inline EIGEN_MATHFUNC_RETVAL(conj, Scalar) conj(const Scalar& x)
 {
   return EIGEN_MATHFUNC_IMPL(conj, Scalar)::run(x);
+}
+
+template<typename Scalar>
+EIGEN_DEVICE_FUNC
+inline EIGEN_MATHFUNC_RETVAL(sign, Scalar) sign(const Scalar& x)
+{
+  return EIGEN_MATHFUNC_IMPL(sign, Scalar)::run(x);
 }
 
 template<typename Scalar>
@@ -1503,7 +1567,7 @@ double log(const double &x) { return ::log(x); }
 
 template<typename T>
 EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE
-typename internal::enable_if<NumTraits<T>::IsSigned || NumTraits<T>::IsComplex,typename NumTraits<T>::Real>::type
+std::enable_if_t<NumTraits<T>::IsSigned || NumTraits<T>::IsComplex,typename NumTraits<T>::Real>
 abs(const T &x) {
   EIGEN_USING_STD(abs);
   return abs(x);
@@ -1511,7 +1575,7 @@ abs(const T &x) {
 
 template<typename T>
 EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE
-typename internal::enable_if<!(NumTraits<T>::IsSigned || NumTraits<T>::IsComplex),typename NumTraits<T>::Real>::type
+std::enable_if_t<!(NumTraits<T>::IsSigned || NumTraits<T>::IsComplex),typename NumTraits<T>::Real>
 abs(const T &x) {
   return x;
 }

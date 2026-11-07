@@ -1,8 +1,10 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/network/public/cpp/private_network_access_check_result.h"
+
+#include <ostream>
 
 #include "base/strings/string_piece.h"
 #include "services/network/public/mojom/cors.mojom-shared.h"
@@ -40,6 +42,11 @@ base::StringPiece PrivateNetworkAccessCheckResultToStringPiece(Result result) {
     case Result::kBlockedByInconsistentIpAddressSpace:
       return "blocked-by-inconsistent-ip-address-space";
   }
+}
+
+std::ostream& operator<<(std::ostream& out,
+                         PrivateNetworkAccessCheckResult result) {
+  return out << PrivateNetworkAccessCheckResultToStringPiece(result);
 }
 
 absl::optional<CorsError> PrivateNetworkAccessCheckResultToCorsError(

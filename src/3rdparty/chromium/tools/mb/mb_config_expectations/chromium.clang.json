@@ -9,7 +9,6 @@
       "use_cfi_diag": true,
       "use_cfi_icall": true,
       "use_cfi_recover": true,
-      "use_rbe": true,
       "use_remoteexec": true,
       "use_thin_lto": true
     }
@@ -56,6 +55,7 @@
   "ToTAndroid": {
     "gn_args": {
       "dcheck_always_on": false,
+      "debuggable_apks": false,
       "ffmpeg_branding": "Chrome",
       "is_clang": true,
       "is_component_build": false,
@@ -69,6 +69,7 @@
   },
   "ToTAndroid (dbg)": {
     "gn_args": {
+      "debuggable_apks": false,
       "is_clang": true,
       "is_component_build": true,
       "is_debug": true,
@@ -79,6 +80,7 @@
   "ToTAndroid x64": {
     "gn_args": {
       "dcheck_always_on": true,
+      "debuggable_apks": false,
       "is_clang": true,
       "is_component_build": true,
       "is_debug": false,
@@ -90,6 +92,7 @@
   "ToTAndroid x86": {
     "gn_args": {
       "dcheck_always_on": true,
+      "debuggable_apks": false,
       "is_clang": true,
       "is_component_build": true,
       "is_debug": false,
@@ -101,6 +104,7 @@
   "ToTAndroid64": {
     "gn_args": {
       "dcheck_always_on": false,
+      "debuggable_apks": false,
       "is_clang": true,
       "is_debug": false,
       "llvm_force_head_revision": true,
@@ -110,6 +114,7 @@
   },
   "ToTAndroidASan": {
     "gn_args": {
+      "debuggable_apks": false,
       "is_asan": true,
       "is_clang": true,
       "is_component_build": true,
@@ -123,6 +128,7 @@
   "ToTAndroidCoverage x86": {
     "gn_args": {
       "dcheck_always_on": true,
+      "debuggable_apks": false,
       "is_clang": true,
       "is_component_build": true,
       "is_debug": false,
@@ -135,6 +141,7 @@
   "ToTAndroidOfficial": {
     "gn_args": {
       "dcheck_always_on": false,
+      "debuggable_apks": false,
       "ffmpeg_branding": "Chrome",
       "is_clang": true,
       "is_component_build": false,
@@ -178,7 +185,7 @@
       "target_os": "fuchsia"
     }
   },
-  "ToTFuchsiaOfficial": {
+  "ToTFuchsiaOfficial arm64": {
     "gn_args": {
       "is_clang": true,
       "is_component_build": false,
@@ -269,7 +276,6 @@
       "is_clang": true,
       "is_official_build": true,
       "llvm_force_head_revision": true,
-      "strip_absolute_paths_from_debug_symbols": true,
       "symbol_level": 0
     }
   },
@@ -406,7 +412,6 @@
       "is_clang": true,
       "is_official_build": true,
       "llvm_force_head_revision": true,
-      "strip_absolute_paths_from_debug_symbols": true,
       "symbol_level": 0
     }
   },

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -94,17 +94,30 @@ class BatchElementCheckerBrowserTest
     return proto;
   }
 
-  static ElementConditionProto Match(Selector selector, bool strict = false) {
+  static ElementConditionProto Match(Selector selector,
+                                     bool strict = false,
+                                     std::string payload = "") {
     ElementConditionProto proto;
     *proto.mutable_match() = selector.proto;
     proto.set_require_unique_element(strict);
+    if (!payload.empty()) {
+      proto.set_payload(payload);
+    }
     return proto;
+  }
+
+  static SelectorObserver::Settings SelectorObserverDefaultSettings(
+      base::TimeDelta max_wait_time) {
+    return {max_wait_time, base::Seconds(1), base::Seconds(15),
+            base::Milliseconds(100)};
   }
 
   // Run Observer BatchElementChecker on the provided conditions. The second
   // value in the pairs (bool) is the match expectation.
   void RunObserverBatchElementChecker(
-      const std::vector<std::pair<ElementConditionProto, bool>>& conditions) {
+      const std::vector<std::pair<ElementConditionProto, bool>>& conditions,
+      base::flat_set<std::string> expected_payloads = {},
+      base::TimeDelta max_wait_time = base::Seconds(30)) {
     base::RunLoop run_loop;
     BatchElementChecker checker;
     std::vector<bool> actual_results(conditions.size(), false);
@@ -116,28 +129,33 @@ class BatchElementCheckerBrowserTest
           conditions[i].first,
           base::BindOnce(&BatchElementCheckerBrowserTest::
                              ObserverBatchElementCheckerElementCallback,
-                         &actual_results, i));
+                         &actual_results, i, &expected_payloads));
     }
     checker.AddAllDoneCallback(base::BindOnce(
         &BatchElementCheckerBrowserTest::
             ObserverBatchElementCheckerAllDoneCallback,
         run_loop.QuitClosure(), &expected_results, &actual_results));
 
-    checker.EnableObserver(base::Seconds(30), base::Seconds(1),
-                           base::Seconds(15));
+    checker.EnableObserver(SelectorObserverDefaultSettings(max_wait_time));
     checker.Run(web_controller_.get());
     run_loop.Run();
+    EXPECT_EQ(expected_payloads.size(), 0u);
     EXPECT_EQ(web_controller_->pending_workers_.size(), 0u);
   }
 
   static void ObserverBatchElementCheckerElementCallback(
       std::vector<bool>* res,
       size_t i,
+      base::flat_set<std::string>* missing_payloads,
       const ClientStatus& status,
       const std::vector<std::string>& payloads,
       const std::vector<std::string>& tags,
       const base::flat_map<std::string, DomObjectFrameStack>& elms) {
     (*res)[i] = status.ok();
+    for (const std::string& payload : payloads) {
+      EXPECT_EQ(missing_payloads->erase(payload), 1u)
+          << "Got unexpected payload " << payload;
+    }
   }
 
   static void ObserverBatchElementCheckerAllDoneCallback(
@@ -204,10 +222,34 @@ IN_PROC_BROWSER_TEST_F(BatchElementCheckerBrowserTest,
                 Match(Selector({"#iframe", "#doesnotexist"}))})}),
       true  // Expected to match.
   }});
+
+  RunObserverBatchElementChecker(
+      {{
+          AnyOfConditions({// A visible element.
+                           Match(Selector({"#button"}), false, "a"),
+                           // A nonexistent element.
+                           Match(Selector({"#doesnotexist"}), false, "b")}),
+          true,  // Expected to match.
+      }},
+      /* expected_payloads= */ {"a"});
+
+  RunObserverBatchElementChecker(
+      {{
+          NoneOfConditions({// A visible element.
+                            Match(Selector({"#button"}), false, "a"),
+                            // A nonexistent element.
+                            Match(Selector({"#doesnotexist"}), false, "b")}),
+          false,  // Expected to not match.
+      }},
+      // Payload should be there even if root condition doesn't match.
+      /* expected_payloads= */ {"a"},
+      // Condition will never match, so no need to wait a long time for it.
+      /* max_wait_time= */ base::Milliseconds(1));
 }
 
+// TODO(crbug.com/1360532): Flaky on many platforms.
 IN_PROC_BROWSER_TEST_F(BatchElementCheckerBrowserTest,
-                       ObserverBatchElementCheckerDynamicElements) {
+                       DISABLED_ObserverBatchElementCheckerDynamicElements) {
   RunObserverBatchElementChecker({{
       // A selector that only matches for ~200ms.
       Match(Selector({".dynamic.about-2-seconds"})),
@@ -291,7 +333,9 @@ IN_PROC_BROWSER_TEST_F(BatchElementCheckerBrowserTest, SelectorObserver) {
                                DomObjectFrameStack>& elements) {
         EXPECT_TRUE(status.ok());
         EXPECT_EQ(elements.size(), 1u);
-        EXPECT_EQ(elements.count(iframe_button_id), 1u);
+        const auto& entry = elements.find(iframe_button_id);
+        ASSERT_NE(entry, elements.end());
+        EXPECT_TRUE(entry->second.render_frame_id);
         run_loop.Quit();
       });
 
@@ -335,7 +379,7 @@ IN_PROC_BROWSER_TEST_F(BatchElementCheckerBrowserTest, SelectorObserver) {
         /* proto = */
         Selector({"#iframeExternal", ".dynamic.about-2-seconds"}).proto,
         /* strict = */ true}},
-      base::Seconds(30), base::Seconds(1), base::Seconds(15), update_callback);
+      SelectorObserverDefaultSettings(base::Seconds(30)), update_callback);
 
   run_loop.Run();
   ASSERT_TRUE(expected_updates.empty());
@@ -375,7 +419,7 @@ IN_PROC_BROWSER_TEST_F(BatchElementCheckerBrowserTest,
       {{/* selector_id = */ button_id,
         /* proto = */ Selector({"#iframeRedirecting", "#button"}).proto,
         /* strict = */ true}},
-      base::Seconds(30), base::Seconds(1), base::Seconds(15), update_callback);
+      SelectorObserverDefaultSettings(base::Seconds(30)), update_callback);
 
   run_loop.Run();
 }
@@ -411,7 +455,7 @@ IN_PROC_BROWSER_TEST_F(BatchElementCheckerBrowserTest,
       {{/* selector_id = */ SelectorObserver::SelectorId(1),
         /* proto = */ Selector({"#does_not_exist"}).proto,
         /* strict = */ true}},
-      base::Milliseconds(300), base::Seconds(1), base::Seconds(15),
+      SelectorObserverDefaultSettings(base::Milliseconds(300)),
       mock_callback.Get());
 
   run_loop.Run();
@@ -454,7 +498,7 @@ IN_PROC_BROWSER_TEST_F(BatchElementCheckerBrowserTest,
       {{/* selector_id = */ button_id,
         /* proto = */ Selector({"#iframe", "#button"}).proto,
         /* strict = */ true}},
-      base::Milliseconds(1), base::Seconds(1), base::Seconds(15),
+      SelectorObserverDefaultSettings(base::Milliseconds(1)),
       update_callback.Get());
 
   run_loop.Run();

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,7 +54,7 @@ class CONTENT_EXPORT ScreenOrientationProvider
   // WebContentsObserver
   void DidToggleFullscreenModeForTab(bool entered_fullscreen,
                                      bool will_cause_resize) override;
-  void DidFinishNavigation(NavigationHandle* navigation_handle) override;
+  void PrimaryPageChanged(Page& page) override;
 
  private:
   // Calls on |on_result_callback_| with |result|, followed by resetting

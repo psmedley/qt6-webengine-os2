@@ -86,11 +86,18 @@ struct DeviceFeatures {
     VkPhysicalDeviceRayTracingMotionBlurFeaturesNV ray_tracing_motion_blur_features;
     VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR shader_integer_dot_product_features;
     VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT primitive_topology_list_restart_features;
-    VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeaturesKHR zero_initialize_work_group_memory_features;
     VkPhysicalDeviceRGBA10X6FormatsFeaturesEXT rgba10x6_formats_features;
     VkPhysicalDeviceImageViewMinLodFeaturesEXT image_view_min_lod_features;
     VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT primitives_generated_query_features;
     VkPhysicalDeviceImage2DViewOf3DFeaturesEXT image_2d_view_of_3d_features;
+    VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT graphics_pipeline_library_features;
+    VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR shader_subgroup_uniform_control_flow_features;
+    VkPhysicalDeviceRayTracingMaintenance1FeaturesKHR ray_tracing_maintenance1_features;
+    VkPhysicalDeviceNonSeamlessCubeMapFeaturesEXT non_seamless_cube_map_features;
+    VkPhysicalDeviceMultisampledRenderToSingleSampledFeaturesEXT multisampled_render_to_single_sampled_features;
+    VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT shader_module_identifier_features;
+    VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT attachment_feedback_loop_layout_features;
+    VkPhysicalDevicePipelineProtectedAccessFeaturesEXT pipeline_protected_access_features;
     // If a new feature is added here that involves a SPIR-V capability add also in spirv_validation_generator.py
     // This is known by checking the table in the spec or if the struct is in a <spirvcapability> in vk.xml
 };

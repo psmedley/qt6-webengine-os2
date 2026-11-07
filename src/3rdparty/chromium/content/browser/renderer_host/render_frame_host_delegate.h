@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,6 +77,7 @@ namespace blink {
 namespace mojom {
 class DisplayCutoutHost;
 class FullscreenOptions;
+class WindowFeatures;
 }
 class PageState;
 namespace web_pref {
@@ -97,7 +98,6 @@ class ClipboardFormatType;
 namespace content {
 class FrameTreeNode;
 class PrerenderHostRegistry;
-class RenderFrameHostImpl;
 class RenderWidgetHostImpl;
 class SessionStorageNamespace;
 class SiteInstanceGroup;
@@ -323,6 +323,14 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
       bool is_fullscreen,
       blink::mojom::FullscreenOptionsPtr options);
 
+#if BUILDFLAG(IS_ANDROID)
+  // Updates information to determine whether a user gesture should carryover to
+  // future navigations. This is needed so navigations within a certain
+  // timeframe of a request initiated by a gesture will be treated as if they
+  // were initiated by a gesture too, otherwise the navigation may be blocked.
+  virtual void UpdateUserGestureCarryoverInfo() {}
+#endif
+
   // Let the delegate decide whether postMessage should be delivered to
   // |target_rfh| from a source frame in the given SiteInstance.  This defaults
   // to false and overrides the RenderFrameHost's decision if true.
@@ -354,14 +362,8 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // initializations instead.
   virtual bool IsInnerWebContentsForGuest();
 
-  // Searches the WebContents for a focused frame, potentially in an inner
-  // WebContents. If this WebContents has no focused frame, returns |nullptr|.
-  // If there is no inner WebContents at the focused tree node, returns its
-  // RenderFrameHost. If there is an inner WebContents, search it for focused
-  // frames and inner contents. If an inner WebContents does not have a focused
-  // frame, return its main frame, since the attachment frame in its outer
-  // WebContents is not live.
-  virtual RenderFrameHostImpl* GetFocusedFrameIncludingInnerWebContents();
+  // Returns the focused frame if it exists, potentially in an inner frame tree.
+  virtual RenderFrameHostImpl* GetFocusedFrame();
 
   // Called by when |source_rfh| advances focus to a RenderFrameProxyHost.
   virtual void OnAdvanceFocus(RenderFrameHostImpl* source_rfh) {}
@@ -408,20 +410,21 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
       bool has_user_gesture,
       SessionStorageNamespace* session_storage_namespace);
 
-  // Show a previously created page with the specified disposition and bounds.
-  // The window is identified by the |main_frame_widget_route_id| passed to
-  // CreateNewWindow.
+  // Show a previously created page with the specified disposition and window
+  // features. The window is identified by the |main_frame_widget_route_id|
+  // passed to CreateNewWindow.
   //
   // The passed |opener| is the RenderFrameHost initiating the window creation.
   // It will never be null, even if the opener is suppressed via |params|.
   //
   // Note: this is not called "ShowWindow" because that will clash with
   // the Windows function which is actually a #define.
-  virtual void ShowCreatedWindow(RenderFrameHostImpl* opener,
-                                 int main_frame_widget_route_id,
-                                 WindowOpenDisposition disposition,
-                                 const gfx::Rect& initial_rect,
-                                 bool user_gesture) {}
+  virtual void ShowCreatedWindow(
+      RenderFrameHostImpl* opener,
+      int main_frame_widget_route_id,
+      WindowOpenDisposition disposition,
+      const blink::mojom::WindowFeatures& window_features,
+      bool user_gesture) {}
 
   // The main frame document element is ready. This happens when the document
   // has finished parsing.
@@ -659,6 +662,9 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
                                   const base::FilePath& path,
                                   bool is_hung) {}
 #endif
+
+  // The load progress for the primary main frame was changed.
+  virtual void DidChangeLoadProgressForPrimaryMainFrame() {}
 
  protected:
   virtual ~RenderFrameHostDelegate() = default;

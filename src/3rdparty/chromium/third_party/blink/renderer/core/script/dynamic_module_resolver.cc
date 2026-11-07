@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,8 +134,11 @@ void DynamicImportTreeClient::NotifyModuleTreeLoadFinished(
 
   // <spec step="9">Otherwise, set promise to the result of running a module
   // script given result and true.</spec>
-  ScriptEvaluationResult result = module_script->RunScriptAndReturnValue(
-      V8ScriptRunner::RethrowErrorsOption::Rethrow(String()));
+  ScriptEvaluationResult result =
+      module_script->RunScriptOnScriptStateAndReturnValue(
+          script_state,
+          ExecuteScriptPolicy::kDoNotExecuteScriptWhenScriptsDisabled,
+          V8ScriptRunner::RethrowErrorsOption::Rethrow(String()));
 
   switch (result.GetResultType()) {
     case ScriptEvaluationResult::ResultType::kException:

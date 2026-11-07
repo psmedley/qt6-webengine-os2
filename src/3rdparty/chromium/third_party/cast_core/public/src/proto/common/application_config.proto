@@ -16,6 +16,8 @@ syntax = "proto3";
 
 package cast.common;
 
+import "proto/common/value.proto";
+
 option optimize_for = LITE_RUNTIME;
 
 // Generic Cast application config.
@@ -32,6 +34,10 @@ message ApplicationConfig {
     CastWebApplicationConfig cast_web_app_config = 4;
     NativeApplicationConfig native_app_config = 5;
   }
+
+  // Cast features. The keys in the dictionary must be well defined to allow
+  // easy data expantion.
+  cast.common.Dictionary extra_features = 7;
 }
 
 // Config for applications running in CastLite runtime.
@@ -39,14 +45,6 @@ message CastLiteApplicationConfig {
   // Cast application URL (https). Will be augumented with URL rewrite rules to
   // add appropriate headers/parameters.
   string url = 1;
-  // Below definitions are used only with legacy MSP API implementation of
-  // CastLite.
-  string api_url = 2;
-  string api_key = 3;
-  bool uses_server_session = 4;
-  bool uses_grpc = 5;
-  bool is_default_audio_receiver = 6;
-  string session_id = 7;
 }
 
 // Config for applications running in Cast Web runtime.

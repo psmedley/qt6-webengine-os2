@@ -60,6 +60,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/core/loader/render_blocking_resource_manager.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer_view.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
@@ -231,7 +232,7 @@ FontFace* FontFace::Create(Document* document,
       font_face->SetPropertyFromStyle(properties,
                                       AtRuleDescriptorID::SizeAdjust) &&
       font_face->GetFontSelectionCapabilities().IsValid() &&
-      !font_face->family().IsEmpty()) {
+      !font_face->family().empty()) {
     font_face->InitCSSFontFace(document->GetExecutionContext(), *src);
     return font_face;
   }
@@ -242,8 +243,8 @@ FontFace::FontFace(ExecutionContext* context,
                    const StyleRuleFontFace* style_rule,
                    bool is_user_style)
     : ExecutionContextClient(context),
-      status_(kUnloaded),
       style_rule_(style_rule),
+      status_(kUnloaded),
       is_user_style_(is_user_style) {}
 
 FontFace::FontFace(ExecutionContext* context,
@@ -270,10 +271,8 @@ FontFace::FontFace(ExecutionContext* context,
                         AtRuleDescriptorID::DescentOverride);
   SetPropertyFromString(context, descriptors->lineGapOverride(),
                         AtRuleDescriptorID::LineGapOverride);
-  if (RuntimeEnabledFeatures::CSSFontFaceSizeAdjustEnabled()) {
-    SetPropertyFromString(context, descriptors->sizeAdjust(),
-                          AtRuleDescriptorID::SizeAdjust);
-  }
+  SetPropertyFromString(context, descriptors->sizeAdjust(),
+                        AtRuleDescriptorID::SizeAdjust);
 }
 
 FontFace::~FontFace() = default;
@@ -502,23 +501,23 @@ void FontFace::SetLoadStatus(LoadStatusType status) {
         GetExecutionContext()
             ->GetTaskRunner(TaskType::kDOMManipulation)
             ->PostTask(FROM_HERE,
-                       WTF::Bind(&LoadedProperty::Resolve<FontFace*>,
-                                 WrapPersistent(loaded_property_.Get()),
-                                 WrapPersistent(this)));
+                       WTF::BindOnce(&LoadedProperty::Resolve<FontFace*>,
+                                     WrapPersistent(loaded_property_.Get()),
+                                     WrapPersistent(this)));
       } else {
         GetExecutionContext()
             ->GetTaskRunner(TaskType::kDOMManipulation)
             ->PostTask(FROM_HERE,
-                       WTF::Bind(&LoadedProperty::Reject<DOMException*>,
-                                 WrapPersistent(loaded_property_.Get()),
-                                 WrapPersistent(error_.Get())));
+                       WTF::BindOnce(&LoadedProperty::Reject<DOMException*>,
+                                     WrapPersistent(loaded_property_.Get()),
+                                     WrapPersistent(error_.Get())));
       }
     }
 
     GetExecutionContext()
         ->GetTaskRunner(TaskType::kDOMManipulation)
-        ->PostTask(FROM_HERE,
-                   WTF::Bind(&FontFace::RunCallbacks, WrapPersistent(this)));
+        ->PostTask(FROM_HERE, WTF::BindOnce(&FontFace::RunCallbacks,
+                                            WrapPersistent(this)));
   }
 }
 
@@ -757,13 +756,6 @@ FontSelectionCapabilities FontFace::GetFontSelectionCapabilities() const {
   if (weight_) {
     if (auto* identifier_value = DynamicTo<CSSIdentifierValue>(weight_.Get())) {
       switch (identifier_value->GetValueID()) {
-        // Although 'lighter' and 'bolder' are valid keywords for
-        // font-weights, they are invalid inside font-face rules so they are
-        // ignored. Reference:
-        // http://www.w3.org/TR/css3-fonts/#descdef-font-weight.
-        case CSSValueID::kLighter:
-        case CSSValueID::kBolder:
-          break;
         case CSSValueID::kNormal:
           capabilities.weight = {NormalWeightValue(), NormalWeightValue(),
                                  FontSelectionRange::RangeType::kSetExplicitly};
@@ -871,7 +863,8 @@ void FontFace::InitCSSFontFace(ExecutionContext* context, const CSSValue& src) {
         RemoteFontFaceSource* source =
             MakeGarbageCollected<RemoteFontFaceSource>(
                 css_font_face_, font_selector,
-                CSSValueToFontDisplay(display_.Get()));
+                CSSValueToFontDisplay(display_.Get()),
+                context->GetTaskRunner(TaskType::kFontLoading));
         item.Fetch(context, source);
         css_font_face_->AddSource(source);
       }
@@ -896,7 +889,7 @@ void FontFace::InitCSSFontFace(ExecutionContext* context,
   if (source->IsValid()) {
     SetLoadStatus(kLoaded);
   } else {
-    if (!ots_parse_message_.IsEmpty()) {
+    if (!ots_parse_message_.empty()) {
       context->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
           mojom::blink::ConsoleMessageSource::kOther,
           mojom::blink::ConsoleMessageLevel::kWarning,

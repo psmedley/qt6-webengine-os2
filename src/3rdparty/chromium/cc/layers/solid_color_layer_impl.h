@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@ class CC_EXPORT SolidColorLayerImpl : public LayerImpl {
                                const Occlusion& occlusion_in_layer_space,
                                viz::SharedQuadState* shared_quad_state,
                                const gfx::Rect& visible_layer_rect,
-                               SkColor color,
+                               SkColor4f color,
                                bool force_anti_aliasing_off,
                                SkBlendMode effect_blend_mode,
                                AppendQuadsData* append_quads_data);

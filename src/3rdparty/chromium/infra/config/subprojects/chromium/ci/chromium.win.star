@@ -1,4 +1,4 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Definitions of builders in the chromium.win builder group."""
@@ -6,7 +6,7 @@
 load("//lib/args.star", "args")
 load("//lib/branches.star", "branches")
 load("//lib/builder_config.star", "builder_config")
-load("//lib/builders.star", "goma", "os", "reclient", "sheriff_rotations")
+load("//lib/builders.star", "os", "reclient", "sheriff_rotations")
 load("//lib/ci.star", "ci")
 load("//lib/consoles.star", "consoles")
 
@@ -15,7 +15,8 @@ ci.defaults.set(
     cores = 8,
     executable = ci.DEFAULT_EXECUTABLE,
     execution_timeout = ci.DEFAULT_EXECUTION_TIMEOUT,
-    goma_backend = goma.backend.RBE_PROD,
+    reclient_instance = reclient.instance.DEFAULT_TRUSTED,
+    reclient_jobs = reclient.jobs.DEFAULT,
     main_console_view = "main",
     os = os.WINDOWS_DEFAULT,
     pool = ci.DEFAULT_POOL,
@@ -33,6 +34,9 @@ consoles.console_view(
         "debug|tester": consoles.ordering(short_names = ["7", "10"]),
     },
 )
+
+# TODO(gbeaty) Investigate if the testers need to run on windows, if not, switch
+# them to ci.thin_tester
 
 ci.builder(
     name = "WebKit Win10",
@@ -83,13 +87,24 @@ ci.builder(
     ),
     cores = 32,
     os = os.WINDOWS_ANY,
-    goma_backend = None,
-    reclient_jobs = reclient.jobs.DEFAULT,
-    reclient_instance = reclient.instance.DEFAULT_TRUSTED,
 )
 
 ci.builder(
     name = "Win x64 Builder (dbg)",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(
+            config = "chromium",
+        ),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = [
+                "mb",
+            ],
+            build_config = builder_config.build_config.DEBUG,
+            target_bits = 64,
+        ),
+        build_gs_bucket = "chromium-win-archive",
+    ),
     builderless = True,
     console_view_entry = consoles.console_view_entry(
         category = "debug|builder",
@@ -97,13 +112,25 @@ ci.builder(
     ),
     cores = 32,
     os = os.WINDOWS_ANY,
-    goma_backend = None,
-    reclient_jobs = reclient.jobs.DEFAULT,
-    reclient_instance = reclient.instance.DEFAULT_TRUSTED,
 )
 
 ci.builder(
     name = "Win10 Tests x64 (dbg)",
+    builder_spec = builder_config.builder_spec(
+        execution_mode = builder_config.execution_mode.TEST,
+        gclient_config = builder_config.gclient_config(
+            config = "chromium",
+        ),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = [
+                "mb",
+            ],
+            build_config = builder_config.build_config.DEBUG,
+            target_bits = 64,
+        ),
+        build_gs_bucket = "chromium-win-archive",
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "debug|tester",
         short_name = "10",
@@ -220,9 +247,6 @@ ci.builder(
     cores = 32,
     cq_mirrors_console_view = "mirrors",
     os = os.WINDOWS_ANY,
-    goma_backend = None,
-    reclient_jobs = reclient.jobs.DEFAULT,
-    reclient_instance = reclient.instance.DEFAULT_TRUSTED,
 )
 
 ci.builder(
@@ -253,9 +277,6 @@ ci.builder(
     cores = 32,
     cq_mirrors_console_view = "mirrors",
     os = os.WINDOWS_ANY,
-    goma_backend = None,
-    reclient_jobs = reclient.jobs.DEFAULT,
-    reclient_instance = reclient.instance.DEFAULT_TRUSTED,
 )
 
 ci.builder(
@@ -288,6 +309,37 @@ ci.builder(
     triggered_by = ["ci/Win x64 Builder"],
 )
 
+ci.thin_tester(
+    name = "Win11 Tests x64",
+    builder_spec = builder_config.builder_spec(
+        execution_mode = builder_config.execution_mode.TEST,
+        gclient_config = builder_config.gclient_config(
+            config = "chromium",
+            apply_configs = [
+                "use_clang_coverage",
+            ],
+        ),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = [
+                "mb",
+            ],
+            build_config = builder_config.build_config.RELEASE,
+            target_bits = 64,
+            target_platform = builder_config.target_platform.WIN,
+        ),
+        build_gs_bucket = "chromium-win-archive",
+    ),
+    console_view_entry = consoles.console_view_entry(
+        category = "release|tester",
+        short_name = "w11",
+    ),
+    triggered_by = ["ci/Win x64 Builder"],
+    # TODO(kuanhuang): Add back to sheriff rotation after verified green.
+    sheriff_rotations = args.ignore_default(None),
+    tree_closing = False,
+)
+
 ci.builder(
     name = "Windows deterministic",
     console_view_entry = consoles.console_view_entry(
@@ -296,5 +348,4 @@ ci.builder(
     ),
     executable = "recipe:swarming/deterministic_build",
     execution_timeout = 12 * time.hour,
-    goma_jobs = goma.jobs.J150,
 )

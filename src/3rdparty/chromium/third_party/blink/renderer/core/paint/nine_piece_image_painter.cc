@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,6 +39,7 @@ struct TileParameters {
   float scale_factor;
   float phase;
   float spacing;
+  STACK_ALLOCATED();
 };
 
 absl::optional<TileParameters> ComputeTileParameters(
@@ -46,15 +47,15 @@ absl::optional<TileParameters> ComputeTileParameters(
     float dst_extent,
     float src_extent,
     float in_scale_factor) {
+  float scaled_tile_extent = src_extent * in_scale_factor;
   switch (tile_rule) {
     case kRoundImageRule: {
       float repetitions =
-          std::max(1.0f, roundf(dst_extent / (src_extent * in_scale_factor)));
+          std::max(1.0f, roundf(dst_extent / scaled_tile_extent));
       float scale_factor = dst_extent / (src_extent * repetitions);
       return TileParameters{scale_factor, 0, 0};
     }
     case kRepeatImageRule: {
-      float scaled_tile_extent = src_extent * in_scale_factor;
       // We want to construct the phase such that the pattern is centered (when
       // stretch is not set for a particular rule).
       float phase = (dst_extent - scaled_tile_extent) / 2;
@@ -62,10 +63,10 @@ absl::optional<TileParameters> ComputeTileParameters(
     }
     case kSpaceImageRule: {
       absl::optional<float> spacing =
-          CalculateSpaceNeeded(dst_extent, src_extent);
+          CalculateSpaceNeeded(dst_extent, scaled_tile_extent);
       if (!spacing)
         return absl::nullopt;
-      return TileParameters{1, *spacing, *spacing};
+      return TileParameters{in_scale_factor, *spacing, *spacing};
     }
     case kStretchImageRule:
       return TileParameters{in_scale_factor, 0, 0};
@@ -130,8 +131,11 @@ void PaintPieces(GraphicsContext& context,
     if (!ShouldTile(draw_info)) {
       // Since there is no way for the developer to specify decode behavior,
       // use kSync by default.
+      // TODO(sohom): Per crbug.com/1351498 investigate and set
+      // ImagePaintTimingInfo parameters correctly
       context.DrawImage(image, Image::kSyncDecode, image_auto_dark_mode,
-                        draw_info.destination, &draw_info.source);
+                        ImagePaintTimingInfo(), draw_info.destination,
+                        &draw_info.source);
       continue;
     }
 
@@ -165,8 +169,10 @@ void PaintPieces(GraphicsContext& context,
         draw_info.destination.origin() +
         (gfx::PointF(h_tile->phase, v_tile->phase) - tile_origin_in_dest_space);
     tiling_info.spacing = gfx::SizeF(h_tile->spacing, v_tile->spacing);
+    // TODO(sohom): Per crbug.com/1351498 investigate and set
+    // ImagePaintTimingInfo parameters correctly
     context.DrawImageTiled(image, draw_info.destination, tiling_info,
-                           image_auto_dark_mode);
+                           image_auto_dark_mode, ImagePaintTimingInfo());
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,6 +51,7 @@
 #include "net/dns/public/doh_provider_entry.h"
 #include "net/dns/system_dns_config_change_notifier.h"
 #include "net/dns/test_dns_config_service.h"
+#include "net/first_party_sets/global_first_party_sets.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/log/file_net_log_observer.h"
 #include "net/log/net_log.h"
@@ -82,8 +83,9 @@
 #include "third_party/boringssl/src/include/openssl/cpu.h"
 #endif
 
-#if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)) && \
-    !BUILDFLAG(IS_CHROMECAST)
+#if (BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CASTOS)) || \
+    BUILDFLAG(IS_CHROMEOS_LACROS)
+
 #include "components/os_crypt/key_storage_config_linux.h"
 #endif
 
@@ -97,6 +99,10 @@
 #include "services/network/ct_log_list_distributor.h"
 #include "services/network/sct_auditing/sct_auditing_cache.h"
 #endif
+
+namespace net {
+class FirstPartySetEntry;
+}
 
 namespace network {
 
@@ -462,21 +468,6 @@ void NetworkService::DeregisterNetworkContext(NetworkContext* network_context) {
   network_contexts_.erase(network_context);
 }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-void NetworkService::ReinitializeLogging(mojom::LoggingSettingsPtr settings) {
-  logging::LoggingSettings logging_settings;
-  logging_settings.logging_dest = settings->logging_dest;
-  base::ScopedFD log_file_descriptor = settings->log_file_descriptor.TakeFD();
-  logging_settings.log_file = fdopen(log_file_descriptor.release(), "a");
-  if (!logging_settings.log_file) {
-    LOG(ERROR) << "Failed to open new log file handle";
-    return;
-  }
-  if (!logging::InitLogging(logging_settings))
-    LOG(ERROR) << "Unable to reinitialize logging";
-}
-#endif
-
 void NetworkService::CreateNetLogEntriesForActiveObjects(
     net::NetLog::ThreadSafeObserver* observer) {
   std::set<net::URLRequestContext*> contexts;
@@ -491,15 +482,13 @@ void NetworkService::SetParams(mojom::NetworkServiceParamsPtr params) {
 
 void NetworkService::StartNetLog(base::File file,
                                  net::NetLogCaptureMode capture_mode,
-                                 base::Value client_constants) {
-  DCHECK(client_constants.is_dict());
-  std::unique_ptr<base::DictionaryValue> constants =
-      base::DictionaryValue::From(
-          base::Value::ToUniquePtrValue(net::GetNetConstants()));
-  constants->MergeDictionary(&client_constants);
+                                 base::Value::Dict client_constants) {
+  base::Value::Dict constants = net::GetNetConstants();
+  constants.Merge(std::move(client_constants));
 
   file_net_log_observer_ = net::FileNetLogObserver::CreateUnboundedPreExisting(
-      std::move(file), capture_mode, std::move(constants));
+      std::move(file), capture_mode,
+      std::make_unique<base::Value>(std::move(constants)));
   file_net_log_observer_->StartObserving(net_log_);
 }
 
@@ -801,9 +790,8 @@ void NetworkService::BindTestInterface(
   }
 }
 
-void NetworkService::SetFirstPartySets(
-    const base::flat_map<net::SchemefulSite, net::SchemefulSite>& sets) {
-  first_party_sets_manager_->SetCompleteSets(sets);
+void NetworkService::SetFirstPartySets(net::GlobalFirstPartySets sets) {
+  first_party_sets_manager_->SetCompleteSets(std::move(sets));
 }
 
 void NetworkService::SetExplicitlyAllowedPorts(

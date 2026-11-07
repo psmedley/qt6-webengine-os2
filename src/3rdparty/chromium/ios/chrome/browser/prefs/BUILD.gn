@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -20,7 +20,14 @@ source_set("prefs") {
     "//components/search_engines",
     "//components/sync_preferences",
     "//ios/chrome/browser",
-    "//ios/chrome/browser/policy:feature_flags",
+  ]
+}
+
+source_set("pref_names") {
+  configs += [ "//build/config/compiler:enable_arc" ]
+  sources = [
+    "pref_names.cc",
+    "pref_names.h",
   ]
 }
 
@@ -33,6 +40,7 @@ source_set("browser_prefs") {
   deps = [
     "//components/autofill/core/browser",
     "//components/browsing_data/core",
+    "//components/commerce/core:pref_names",
     "//components/component_updater",
     "//components/component_updater/installer_policies",
     "//components/content_settings/core/browser",
@@ -61,6 +69,7 @@ source_set("browser_prefs") {
     "//components/proxy_config",
     "//components/safe_browsing/core/common:safe_browsing_prefs",
     "//components/search_engines",
+    "//components/segmentation_platform/public",
     "//components/sessions",
     "//components/signin/public/identity_manager",
     "//components/strings",
@@ -81,7 +90,9 @@ source_set("browser_prefs") {
     "//ios/chrome/browser/net",
     "//ios/chrome/browser/policy:policy_util",
     "//ios/chrome/browser/prerender:prerender_pref",
+    "//ios/chrome/browser/push_notification:push_notification_service",
     "//ios/chrome/browser/signin",
+    "//ios/chrome/browser/ui:feature_flags",
     "//ios/chrome/browser/ui/authentication",
     "//ios/chrome/browser/ui/authentication/signin",
     "//ios/chrome/browser/ui/bookmarks:constants",

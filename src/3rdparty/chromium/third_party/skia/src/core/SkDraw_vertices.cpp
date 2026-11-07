@@ -7,9 +7,10 @@
 
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkString.h"
-#include "include/private/SkNx.h"
+#include "include/private/SkVx.h"
 #include "src/core/SkArenaAlloc.h"
 #include "src/core/SkAutoBlitterChoose.h"
+#include "src/core/SkBlenderBase.h"
 #include "src/core/SkConvertPixels.h"
 #include "src/core/SkCoreBlitters.h"
 #include "src/core/SkDraw.h"
@@ -21,15 +22,15 @@
 #include "src/core/SkVMBlitter.h"
 #include "src/core/SkVertState.h"
 #include "src/core/SkVerticesPriv.h"
-#include "src/shaders/SkColorShader.h"
-#include "src/shaders/SkComposeShader.h"
 #include "src/shaders/SkShaderBase.h"
 
 struct Matrix43 {
     float fMat[12];    // column major
 
-    Sk4f map(float x, float y) const {
-        return Sk4f::Load(&fMat[0]) * x + Sk4f::Load(&fMat[4]) * y + Sk4f::Load(&fMat[8]);
+    skvx::float4 map(float x, float y) const {
+        return skvx::float4::Load(&fMat[0]) * x +
+               skvx::float4::Load(&fMat[4]) * y +
+               skvx::float4::Load(&fMat[8]);
     }
 
     // Pass a by value, so we don't have to worry about aliasing with this
@@ -81,11 +82,6 @@ public:
                 int index0, int index1, int index2);
 
 protected:
-#ifdef SK_ENABLE_LEGACY_SHADERCONTEXT
-    Context* onMakeContext(const ContextRec& rec, SkArenaAlloc* alloc) const override {
-        return nullptr;
-    }
-#endif
     bool onAppendStages(const SkStageRec& rec) const override {
         rec.fPipeline->append(SkRasterPipeline::seed_shader);
         if (fUsePersp) {
@@ -174,9 +170,9 @@ bool SkTriColorShader::update(const SkMatrix& ctmInv, const SkPoint pts[],
 
     fM33.setConcat(im, ctmInv);
 
-    Sk4f c0 = Sk4f::Load(colors[index0].vec()),
-         c1 = Sk4f::Load(colors[index1].vec()),
-         c2 = Sk4f::Load(colors[index2].vec());
+    auto c0 = skvx::float4::Load(colors[index0].vec()),
+         c1 = skvx::float4::Load(colors[index1].vec()),
+         c2 = skvx::float4::Load(colors[index2].vec());
 
     (c1 - c0).store(&fM43.fMat[0]);
     (c2 - c0).store(&fM43.fMat[4]);
@@ -282,7 +278,7 @@ static void fill_triangle_3(const VertState& state, SkBlitter* blitter, const Sk
         const int count = SkTo<int>(outP - outPoints);
         SkASSERT(count == 0 || count == 3 || count == 4);
         for (int i = 0; i < count; ++i) {
-            float scale = 1.0f / outPoints[i].fZ;
+            float scale = sk_ieee_float_divide(1.0f, outPoints[i].fZ);
             dst[i].set(outPoints[i].fX * scale, outPoints[i].fY * scale);
         }
         return count;
@@ -373,33 +369,39 @@ void SkDraw::drawFixedVertices(const SkVertices* vertices,
     }
 
     // Combines per-vertex colors with 'shader' using 'blender'.
-    auto applyShaderColorBlend = [&](SkShader* shader) -> SkShader* {
+    auto applyShaderColorBlend = [&](SkShader* shader) -> sk_sp<SkShader> {
         if (!colors) {
-            return shader;
+            return sk_ref_sp(shader);
         }
         if (blenderIsDst) {
-            return triColorShader;
+            return sk_ref_sp(triColorShader);
         }
+        sk_sp<SkShader> shaderWithWhichToBlend;
         if (!shader) {
             // When there is no shader then the blender applies to the vertex colors and opaque
             // paint color.
-            shader = outerAlloc->make<SkColor4Shader>(paint.getColor4f().makeOpaque(), nullptr);
+            shaderWithWhichToBlend = SkShaders::Color(paint.getColor4f().makeOpaque(), nullptr);
+        } else {
+            shaderWithWhichToBlend = sk_ref_sp(shader);
         }
-        return outerAlloc->make<SkShader_Blend>(
-                blender, sk_ref_sp(triColorShader), sk_ref_sp(shader));
+        return SkShaders::Blend(blender,
+                                sk_ref_sp(triColorShader),
+                                std::move(shaderWithWhichToBlend));
     };
 
     auto rpblit = [&]() {
         VertState state(vertexCount, indices, indexCount);
         VertState::Proc vertProc = state.chooseProc(info.mode());
-        SkShader* shader = applyShaderColorBlend(paintShader);
+        sk_sp<SkShader> blendShader = applyShaderColorBlend(paintShader);
+        SkSurfaceProps props = SkSurfacePropsCopyOrDefault(fProps);
 
         SkPaint shaderPaint(paint);
-        shaderPaint.setShader(sk_ref_sp(shader));
+        shaderPaint.setShader(blendShader);
 
         if (!texCoords) {  // only tricolor shader
-            auto blitter = SkCreateRasterPipelineBlitter(
-                    fDst, shaderPaint, *fMatrixProvider, outerAlloc, this->fRC->clipShader());
+            auto blitter = SkCreateRasterPipelineBlitter(fDst, shaderPaint, *fMatrixProvider,
+                                                         outerAlloc, this->fRC->clipShader(),
+                                                         props);
             if (!blitter) {
                 return false;
             }
@@ -420,9 +422,10 @@ void SkDraw::drawFixedVertices(const SkVertices* vertices,
                           fDst.colorSpace(),
                           shaderPaint,
                           nullptr,
-                          *fMatrixProvider};
-        if (auto updater = as_SB(shader)->appendUpdatableStages(rec)) {
-            bool isOpaque = shader->isOpaque();
+                          *fMatrixProvider,
+                          props};
+        if (auto updater = as_SB(blendShader)->appendUpdatableStages(rec)) {
+            bool isOpaque = blendShader->isOpaque();
             if (triColorShader) {
                 isOpaque = false;  // unless we want to walk all the colors, and see if they are
                                    // all opaque (and the blend mode will keep them that way
@@ -474,8 +477,9 @@ void SkDraw::drawFixedVertices(const SkVertices* vertices,
                 }
 
                 // It'd be nice if we could detect this will fail earlier.
-                auto blitter = SkCreateRasterPipelineBlitter(
-                        fDst, shaderPaint, *matrixProvider, &innerAlloc, this->fRC->clipShader());
+                auto blitter = SkCreateRasterPipelineBlitter(fDst, shaderPaint, *matrixProvider,
+                                                             &innerAlloc, this->fRC->clipShader(),
+                                                             props);
                 if (!blitter) {
                     return false;
                 }
@@ -497,10 +501,10 @@ void SkDraw::drawFixedVertices(const SkVertices* vertices,
             texCoordShader = as_SB(shader)->updatableShader(outerAlloc);
             shader = texCoordShader;
         }
-        shader = applyShaderColorBlend(shader);
+        sk_sp<SkShader> blenderShader = applyShaderColorBlend(shader);
 
         SkPaint shaderPaint{paint};
-        shaderPaint.setShader(sk_ref_sp(shader));
+        shaderPaint.setShader(std::move(blenderShader));
         auto blitter = SkVMBlitter::Make(
                 fDst, shaderPaint, *fMatrixProvider, outerAlloc, this->fRC->clipShader());
         if (!blitter) {
@@ -543,8 +547,7 @@ void SkDraw::drawVertices(const SkVertices* vertices,
 
     constexpr size_t kDefVertexCount = 16;
     constexpr size_t kOuterSize = sizeof(SkTriColorShader) +
-                                 sizeof(SkShader_Blend) +
-                                 (2 * sizeof(SkPoint) + sizeof(SkColor4f)) * kDefVertexCount;
+                                  (2 * sizeof(SkPoint) + sizeof(SkColor4f)) * kDefVertexCount;
     SkSTArenaAlloc<kOuterSize> outerAlloc;
 
     SkPoint*  dev2 = nullptr;

@@ -31,8 +31,9 @@
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
-#include "third_party/blink/renderer/bindings/modules/v8/v8_union_canvasrenderingcontext2d_gpucanvascontext_imagebitmaprenderingcontext_webgl2renderingcontext_webglrenderingcontext.h"
-#include "third_party/blink/renderer/bindings/modules/v8/v8_union_gpucanvascontext_imagebitmaprenderingcontext_offscreencanvasrenderingcontext2d_webgl2renderingcontext_webglrenderingcontext.h"
+#include "third_party/blink/renderer/modules/shorter_includes.h"
+#include SHORT_INCLUDE_FILE(third_party/blink/renderer/bindings/modules/v8/v8_union,canvasrenderingcontext2d_gpucanvascontext_imagebitmaprenderingcontext_webgl2renderingcontext_webglrenderingcontext)
+#include SHORT_INCLUDE_FILE(third_party/blink/renderer/bindings/modules/v8/v8_union,gpucanvascontext_imagebitmaprenderingcontext_offscreencanvasrenderingcontext2d_webgl2renderingcontext_webglrenderingcontext)
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
@@ -130,6 +131,10 @@ CanvasRenderingContext* WebGLRenderingContext::Factory::Create(
     host->HostDispatchEvent(
         WebGLContextEvent::Create(event_type_names::kWebglcontextcreationerror,
                                   "Could not create a WebGL context."));
+    // We must dispose immediately so that when rendering_context is
+    // garbage-collected, it will not interfere with a subsequently created
+    // rendering context.
+    rendering_context->Dispose();
     return nullptr;
   }
   rendering_context->InitializeNewContext();
@@ -169,11 +174,6 @@ ImageBitmap* WebGLRenderingContext::TransferToImageBitmap(
 }
 
 void WebGLRenderingContext::RegisterContextExtensions() {
-  // Register extensions.
-  static const char* const kBothPrefixes[] = {
-      "", "WEBKIT_", nullptr,
-  };
-
   RegisterExtension(angle_instanced_arrays_);
   RegisterExtension(ext_blend_min_max_);
   RegisterExtension(ext_color_buffer_half_float_);
@@ -185,8 +185,7 @@ void WebGLRenderingContext::RegisterContextExtensions() {
   RegisterExtension(ext_shader_texture_lod_);
   RegisterExtension(ext_texture_compression_bptc_);
   RegisterExtension(ext_texture_compression_rgtc_);
-  RegisterExtension(ext_texture_filter_anisotropic_, kApprovedExtension,
-                    kBothPrefixes);
+  RegisterExtension(ext_texture_filter_anisotropic_, kApprovedExtension);
   RegisterExtension(exts_rgb_);
   RegisterExtension(khr_parallel_shader_compile_);
   RegisterExtension(oes_element_index_uint_);
@@ -201,16 +200,14 @@ void WebGLRenderingContext::RegisterContextExtensions() {
   RegisterExtension(webgl_compressed_texture_astc_);
   RegisterExtension(webgl_compressed_texture_etc_);
   RegisterExtension(webgl_compressed_texture_etc1_);
-  RegisterExtension(webgl_compressed_texture_pvrtc_, kApprovedExtension,
-                    kBothPrefixes);
-  RegisterExtension(webgl_compressed_texture_s3tc_, kApprovedExtension,
-                    kBothPrefixes);
+  RegisterExtension(webgl_compressed_texture_pvrtc_, kApprovedExtension);
+  RegisterExtension(webgl_compressed_texture_s3tc_, kApprovedExtension);
   RegisterExtension(webgl_compressed_texture_s3tc_srgb_);
   RegisterExtension(webgl_debug_renderer_info_);
   RegisterExtension(webgl_debug_shaders_);
-  RegisterExtension(webgl_depth_texture_, kApprovedExtension, kBothPrefixes);
+  RegisterExtension(webgl_depth_texture_, kApprovedExtension);
   RegisterExtension(webgl_draw_buffers_);
-  RegisterExtension(webgl_lose_context_, kApprovedExtension, kBothPrefixes);
+  RegisterExtension(webgl_lose_context_, kApprovedExtension);
   RegisterExtension(webgl_multi_draw_);
   RegisterExtension(webgl_video_texture_, kDraftExtension);
   RegisterExtension(webgl_webcodecs_video_frame_, kDraftExtension);

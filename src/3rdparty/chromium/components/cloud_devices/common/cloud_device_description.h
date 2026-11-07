@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,9 +28,7 @@ class CloudDeviceDescription {
   bool InitFromString(const std::string& json);
   bool InitFromValue(base::Value value);
 
-  static bool IsValidTicket(const base::Value& value);
-
-  std::string ToString() const;
+  std::string ToStringForTesting() const;
 
   base::Value ToValue() &&;
 

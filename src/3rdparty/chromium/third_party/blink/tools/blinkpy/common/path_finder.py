@@ -56,6 +56,28 @@ def add_blinkpy_thirdparty_dir_to_sys_path():
         sys.path.insert(0, path)
 
 
+def add_testing_dir_to_sys_path():
+    path = get_testing_dir()
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+
+def add_build_android_to_sys_path():
+    path = get_build_android_dir()
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+
+def bootstrap_wpt_imports():
+    """Bootstrap the availability of all wpt-vended packages."""
+    path = os.path.join(get_wpt_tools_wpt_dir(), 'tools')
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    # This module is under `//third_party/wpt_tools/wpt/tools`, and has the side
+    # effect of inserting wpt-related directories into `sys.path`.
+    import localpaths  # pylint: disable=unused-import
+
+
 def add_depot_tools_dir_to_os_path():
     path = get_depot_tools_dir()
     if path not in os.environ['PATH']:
@@ -83,6 +105,14 @@ def get_depot_tools_dir():
 def get_source_dir():
     return os.path.join(get_chromium_src_dir(), 'third_party', 'blink',
                         'renderer')
+
+
+def get_testing_dir():
+    return os.path.join(get_chromium_src_dir(), 'testing')
+
+
+def get_build_android_dir():
+    return os.path.join(get_chromium_src_dir(), 'build', 'android')
 
 
 def get_typ_dir():
@@ -114,16 +144,10 @@ def add_blink_tools_dir_to_sys_path():
         sys.path.insert(0, path)
 
 
-def _does_blink_web_tests_exist():
-    return os.path.exists(
-        os.path.join(get_chromium_src_dir(), 'third_party', 'blink',
-                     'web_tests'))
-
-
-TESTS_IN_BLINK = _does_blink_web_tests_exist()
 # web_tests path relative to the repository root.
 # Path separators are always '/', and this contains the trailing '/'.
 RELATIVE_WEB_TESTS = 'third_party/blink/web_tests/'
+RELATIVE_WPT_TESTS = 'third_party/blink/web_tests/external/wpt/'
 WEB_TESTS_LAST_COMPONENT = 'web_tests'
 
 
@@ -142,6 +166,10 @@ class PathFinder(object):
     def web_tests_dir(self):
         return self.path_from_chromium_base('third_party', 'blink',
                                             'web_tests')
+
+    def wpt_tests_dir(self):
+        return self.path_from_chromium_base('third_party', 'blink',
+                                            'web_tests', 'external', 'wpt')
 
     def perf_tests_dir(self):
         return self.path_from_chromium_base('third_party', 'blink',
@@ -179,6 +207,9 @@ class PathFinder(object):
     def path_from_web_tests(self, *comps):
         return self._filesystem.join(self.web_tests_dir(), *comps)
 
+    def path_from_wpt_tests(self, *comps):
+        return self._filesystem.join(self.wpt_tests_dir(), *comps)
+
     def strip_web_tests_path(self, web_test_abs_path):
         web_tests_path = self.path_from_web_tests('')
         if web_test_abs_path.startswith(web_tests_path):
@@ -206,6 +237,9 @@ class PathFinder(object):
 
     def is_wpt_path(self, test_path):
         return test_path.startswith(self.wpt_prefix())
+
+    def is_wpt_internal_path(self, test_path):
+        return test_path.startswith('wpt_internal/')
 
     def is_webdriver_test_path(self, test_path):
         return test_path.startswith(self.webdriver_prefix())

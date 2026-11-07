@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,8 +36,7 @@ base::span<const base::TimeDelta> EarlyDeadlines(
 }
 
 base::TimeDelta ExpiryDeadline(const CommonSourceInfo& source) {
-  base::TimeDelta expiry_deadline =
-      source.expiry_time() - source.impression_time();
+  base::TimeDelta expiry_deadline = source.expiry_time() - source.source_time();
 
   constexpr base::TimeDelta kMinExpiryDeadline = base::Days(2);
   if (expiry_deadline < kMinExpiryDeadline)
@@ -46,11 +45,11 @@ base::TimeDelta ExpiryDeadline(const CommonSourceInfo& source) {
   return expiry_deadline;
 }
 
-base::Time ReportTimeFromDeadline(base::Time impression_time,
+base::Time ReportTimeFromDeadline(base::Time source_time,
                                   base::TimeDelta deadline) {
   // Valid conversion reports should always have a valid reporting deadline.
   DCHECK(!deadline.is_zero());
-  return impression_time + deadline + kWindowDeadlineOffset;
+  return source_time + deadline + kWindowDeadlineOffset;
 }
 
 }  // namespace
@@ -83,14 +82,14 @@ base::Time ComputeReportTime(const CommonSourceInfo& source,
   for (base::TimeDelta early_deadline : EarlyDeadlines(source.source_type())) {
     // If this window is valid for the conversion, use it.
     // |trigger_time| is roughly ~now.
-    if (source.impression_time() + early_deadline >= trigger_time &&
+    if (source.source_time() + early_deadline >= trigger_time &&
         early_deadline < deadline_to_use) {
       deadline_to_use = early_deadline;
       break;
     }
   }
 
-  return ReportTimeFromDeadline(source.impression_time(), deadline_to_use);
+  return ReportTimeFromDeadline(source.source_time(), deadline_to_use);
 }
 
 int NumReportWindows(AttributionSourceType source_type) {
@@ -111,10 +110,10 @@ base::Time ReportTimeAtWindow(const CommonSourceInfo& source,
           ? early_deadlines[window_index]
           : ExpiryDeadline(source);
 
-  return ReportTimeFromDeadline(source.impression_time(), deadline);
+  return ReportTimeFromDeadline(source.source_time(), deadline);
 }
 
-std::string SerializeAttributionJson(const base::Value& body,
+std::string SerializeAttributionJson(const base::Value::Dict& body,
                                      bool pretty_print) {
   int options = pretty_print ? base::JSONWriter::OPTIONS_PRETTY_PRINT : 0;
 
@@ -150,27 +149,24 @@ bool AttributionFilterDataMatch(const AttributionFilterData& source,
           return negated != source_filter->second.empty();
         }
 
-        auto predicate = [&](const std::string& value) {
-          return negated != base::Contains(source_filter->second, value);
-        };
-
-        // Negating filters must ensure no value matches any source-side value,
-        // whereas only one value must match normally.
-        return negated ? base::ranges::all_of(trigger_filter.second, predicate)
-                       : base::ranges::any_of(trigger_filter.second, predicate);
+        bool has_intersection = base::ranges::any_of(
+            trigger_filter.second, [&](const std::string& value) {
+              return base::Contains(source_filter->second, value);
+            });
+        // Negating filters are considered matched if the intersection of the
+        // filter values is empty.
+        return negated != has_intersection;
       });
 }
 
 bool AttributionFiltersMatch(const AttributionFilterData& source_filter_data,
                              const AttributionFilterData& trigger_filters,
                              const AttributionFilterData& trigger_not_filters) {
-  if (!trigger_filters.filter_values().empty() &&
-      !AttributionFilterDataMatch(source_filter_data, trigger_filters)) {
+  if (!AttributionFilterDataMatch(source_filter_data, trigger_filters)) {
     return false;
   }
 
-  if (!trigger_not_filters.filter_values().empty() &&
-      !AttributionFilterDataMatch(source_filter_data, trigger_not_filters,
+  if (!AttributionFilterDataMatch(source_filter_data, trigger_not_filters,
                                   /*negated=*/true)) {
     return false;
   }

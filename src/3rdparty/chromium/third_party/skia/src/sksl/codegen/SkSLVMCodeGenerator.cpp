@@ -20,12 +20,15 @@
 #include "include/private/SkSLProgramElement.h"
 #include "include/private/SkSLStatement.h"
 #include "include/private/SkSLString.h"
+#include "include/private/SkStringView.h"
 #include "include/private/SkTArray.h"
 #include "include/private/SkTHash.h"
 #include "include/private/SkTPin.h"
 #include "include/sksl/SkSLOperator.h"
 #include "include/sksl/SkSLPosition.h"
+#include "src/sksl/SkSLBuiltinTypes.h"
 #include "src/sksl/SkSLCompiler.h"
+#include "src/sksl/SkSLIntrinsicList.h"
 #include "src/sksl/SkSLProgramSettings.h"
 #include "src/sksl/ir/SkSLBinaryExpression.h"
 #include "src/sksl/ir/SkSLBlock.h"
@@ -61,9 +64,11 @@
 #include "src/sksl/tracing/SkVMDebugTrace.h"
 
 #include <algorithm>
-#include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <iterator>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace {
@@ -152,7 +157,7 @@ struct Value {
         return fVals[i];
     }
 
-    SkSpan<skvm::Val> asSpan() { return SkMakeSpan(fVals); }
+    SkSpan<skvm::Val> asSpan() { return SkSpan(fVals); }
 
 private:
     SkSTArray<4, skvm::Val, true> fVals;
@@ -330,6 +335,8 @@ private:
                                 const std::function <Value(skvm::F32 x, skvm::F32 y)>& float_comp,
                                 const std::function <Value(skvm::I32 x, skvm::I32 y)>& int_comp);
 
+    void determineLineOffsets();
+
     //
     // Global state for the lifetime of the generator:
     //
@@ -338,6 +345,9 @@ private:
     SkVMDebugTrace* fDebugTrace;
     int fTraceHookID = -1;
     SkVMCallbacks* fCallbacks;
+    // contains the position of each newline in the source, plus a zero at the beginning and the
+    // total source length at the end as sentinels
+    std::vector<int> fLineOffsets;
 
     struct Slot {
         skvm::Val  val;
@@ -415,6 +425,7 @@ void SkVMGenerator::writeProgram(SkSpan<skvm::Val> uniforms,
                                  const FunctionDefinition& function,
                                  SkSpan<skvm::Val> arguments,
                                  SkSpan<skvm::Val> outReturn) {
+    this->determineLineOffsets();
     fConditionMask = fLoopMask = fBuilder->splat(0xffff'ffff);
 
     this->setupGlobals(uniforms, device);
@@ -425,6 +436,17 @@ void SkVMGenerator::writeProgram(SkSpan<skvm::Val> uniforms,
     for (size_t i = 0; i < outReturn.size(); ++i) {
         outReturn[i] = fSlots[returnSlot + i].val;
     }
+}
+
+void SkVMGenerator::determineLineOffsets() {
+    SkASSERT(fLineOffsets.empty());
+    fLineOffsets.push_back(0);
+    for (size_t i = 0; i < fProgram.fSource->length(); ++i) {
+        if ((*fProgram.fSource)[i] == '\n') {
+            fLineOffsets.push_back(i);
+        }
+    }
+    fLineOffsets.push_back(fProgram.fSource->length());
 }
 
 void SkVMGenerator::setupGlobals(SkSpan<skvm::Val> uniforms, skvm::Coord device) {
@@ -528,6 +550,13 @@ int SkVMGenerator::getDebugFunctionInfo(const FunctionDeclaration& decl) {
     SkASSERT(fDebugTrace);
 
     std::string name = decl.description();
+
+    // When generating the debug trace, we typically mark every function as `noinline`. This makes
+    // the trace more confusing, since this isn't in the source program, so remove it.
+    static constexpr std::string_view kNoInline = "noinline ";
+    if (skstd::starts_with(name, kNoInline)) {
+        name = name.substr(kNoInline.size());
+    }
 
     // Look for a matching SkVMFunctionInfo slot.
     for (size_t index = 0; index < fDebugTrace->fFuncInfo.size(); ++index) {
@@ -691,7 +720,12 @@ size_t SkVMGenerator::createSlot(const std::string& name,
 // TODO(skia:13058): remove this and track positions directly
 int SkVMGenerator::getLine(Position pos) {
     if (pos.valid()) {
-        return pos.line(*fProgram.fSource);
+        // Binary search within fLineOffets to find the line.
+        SkASSERT(fLineOffsets.size() >= 2);
+        SkASSERT(fLineOffsets[0] == 0);
+        SkASSERT(fLineOffsets.back() == (int)fProgram.fSource->length());
+        return std::distance(fLineOffsets.begin(), std::upper_bound(fLineOffsets.begin(),
+                fLineOffsets.end(), pos.startOffset()));
     } else {
         return -1;
     }
@@ -1316,7 +1350,7 @@ Value SkVMGenerator::writeIntrinsicCall(const FunctionCall& c) {
     const size_t nargs = c.arguments().size();
     const size_t kMaxArgs = 3;  // eg: clamp, mix, smoothstep
     Value args[kMaxArgs];
-    SkASSERT(nargs >= 1 && nargs <= SK_ARRAY_COUNT(args));
+    SkASSERT(nargs >= 1 && nargs <= std::size(args));
 
     // All other intrinsics have at most three args, and those can all be evaluated up front:
     for (size_t i = 0; i < nargs; ++i) {
@@ -1574,7 +1608,7 @@ Value SkVMGenerator::writeFunctionCall(const FunctionCall& call) {
         // This merges currentFunction().fReturned into fConditionMask. Lanes that conditionally
         // returned in the current function would otherwise resume execution within the child.
         ScopedCondition m(this, ~currentFunction().fReturned);
-        returnSlot = this->writeFunction(call, funcDef, SkMakeSpan(argVals));
+        returnSlot = this->writeFunction(call, funcDef, SkSpan(argVals));
     }
 
     // Propagate new values of any 'out' params back to the original arguments
@@ -2066,7 +2100,6 @@ void SkVMGenerator::writeStatement(const Statement& s) {
         case Statement::Kind::kDo:
             SkDEBUGFAIL("Unsupported control flow");
             break;
-        case Statement::Kind::kInlineMarker:
         case Statement::Kind::kNop:
             break;
         default:
@@ -2094,13 +2127,13 @@ skvm::Color ProgramToSkVM(const Program& program,
         switch (param->modifiers().fLayout.fBuiltin) {
             case SK_MAIN_COORDS_BUILTIN:
                 SkASSERT(param->type().slotCount() == 2);
-                SkASSERT((argSlots + 2) <= SK_ARRAY_COUNT(args));
+                SkASSERT((argSlots + 2) <= std::size(args));
                 args[argSlots++] = local.x.id;
                 args[argSlots++] = local.y.id;
                 break;
             case SK_INPUT_COLOR_BUILTIN:
                 SkASSERT(param->type().slotCount() == 4);
-                SkASSERT((argSlots + 4) <= SK_ARRAY_COUNT(args));
+                SkASSERT((argSlots + 4) <= std::size(args));
                 args[argSlots++] = inputColor.r.id;
                 args[argSlots++] = inputColor.g.id;
                 args[argSlots++] = inputColor.b.id;
@@ -2108,7 +2141,7 @@ skvm::Color ProgramToSkVM(const Program& program,
                 break;
             case SK_DEST_COLOR_BUILTIN:
                 SkASSERT(param->type().slotCount() == 4);
-                SkASSERT((argSlots + 4) <= SK_ARRAY_COUNT(args));
+                SkASSERT((argSlots + 4) <= std::size(args));
                 args[argSlots++] = destColor.r.id;
                 args[argSlots++] = destColor.g.id;
                 args[argSlots++] = destColor.b.id;
@@ -2119,7 +2152,7 @@ skvm::Color ProgramToSkVM(const Program& program,
                 return {};
         }
     }
-    SkASSERT(argSlots <= SK_ARRAY_COUNT(args));
+    SkASSERT(argSlots <= std::size(args));
 
     // Make sure that the SkVMDebugTrace starts from a clean slate.
     if (debugTrace) {
@@ -2129,7 +2162,7 @@ skvm::Color ProgramToSkVM(const Program& program,
     }
 
     SkVMGenerator generator(program, builder, debugTrace, callbacks);
-    generator.writeProgram(uniforms, device, function, {args, argSlots}, SkMakeSpan(result));
+    generator.writeProgram(uniforms, device, function, {args, argSlots}, SkSpan(result));
 
     return skvm::Color{{builder, result[0]},
                        {builder, result[1]},
@@ -2208,7 +2241,7 @@ bool ProgramToSkVM(const Program& program,
     Callbacks callbacks(sampledColor);
 
     SkVMGenerator generator(program, b, debugTrace, &callbacks);
-    generator.writeProgram(uniforms, device, function, SkMakeSpan(argVals), SkMakeSpan(returnVals));
+    generator.writeProgram(uniforms, device, function, SkSpan(argVals), SkSpan(returnVals));
 
     // If the SkSL tried to use any shader, colorFilter, or blender objects - we don't have a
     // mechanism (yet) for binding to those.
@@ -2372,7 +2405,7 @@ bool testingOnly_ProgramToSkVMShader(const Program& program,
     skvm::Color destColor = builder->uniformColor(SkColors::kBlack, &uniforms);
 
     skvm::Color result = SkSL::ProgramToSkVM(program, *main, builder, debugTrace,
-                                             SkMakeSpan(uniformVals), device, local, inColor,
+                                             SkSpan(uniformVals), device, local, inColor,
                                              destColor, &callbacks);
 
     storeF(builder->varying<float>(), result.r);

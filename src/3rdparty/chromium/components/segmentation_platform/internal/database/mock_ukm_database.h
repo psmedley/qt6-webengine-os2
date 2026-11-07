@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,8 @@ class MockUkmDatabase : public UkmDatabase {
   MockUkmDatabase();
   ~MockUkmDatabase() override;
 
+  MOCK_METHOD1(InitDatabase, void(SuccessCallback callback));
+
   MOCK_METHOD1(StoreUkmEntry, void(ukm::mojom::UkmEntryPtr ukm_entry));
 
   MOCK_METHOD3(UpdateUrlForUkmSource,
@@ -25,7 +27,12 @@ class MockUkmDatabase : public UkmDatabase {
 
   MOCK_METHOD1(OnUrlValidated, void(const GURL& url));
 
-  MOCK_METHOD1(RemoveUrls, void(const std::vector<GURL>& urls));
+  MOCK_METHOD2(RemoveUrls, void(const std::vector<GURL>& urls, bool));
+
+  MOCK_METHOD2(RunReadonlyQueries,
+               void(QueryList&& queries, QueryCallback callback));
+
+  MOCK_METHOD1(DeleteEntriesOlderThan, void(base::Time time));
 };
 
 }  // namespace segmentation_platform

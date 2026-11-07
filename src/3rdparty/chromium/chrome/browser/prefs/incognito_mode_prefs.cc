@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@
 #endif  // BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-#include "chromeos/lacros/lacros_service.h"
+#include "chromeos/startup/browser_params_proxy.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
 // static
@@ -81,9 +81,9 @@ bool IncognitoModePrefs::ShouldLaunchIncognito(
       GetAvailabilityInternal(prefs, DONT_CHECK_PARENTAL_CONTROLS) ==
           IncognitoModePrefs::Availability::kForced;
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-  auto* init_params = chromeos::LacrosService::Get()->init_params();
+  auto* init_params = chromeos::BrowserParamsProxy::Get();
   should_use_incognito |=
-      init_params->initial_browser_action ==
+      init_params->InitialBrowserAction() ==
       crosapi::mojom::InitialBrowserAction::kOpenIncognitoWindow;
 #endif
   return should_use_incognito &&

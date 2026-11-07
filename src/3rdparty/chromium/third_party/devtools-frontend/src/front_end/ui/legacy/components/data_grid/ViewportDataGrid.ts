@@ -7,8 +7,7 @@ import * as i18n from '../../../../core/i18n/i18n.js';
 import * as Platform from '../../../../core/platform/platform.js';
 import * as UI from '../../legacy.js';
 
-import type {DataGridData, Parameters} from './DataGrid.js';
-import {DataGridImpl, DataGridNode} from './DataGrid.js';
+import {DataGridImpl, DataGridNode, type DataGridData, type Parameters} from './DataGrid.js';
 
 const UIStrings = {
   /**
@@ -172,7 +171,7 @@ export class ViewportDataGrid<T> extends Common.ObjectWrapper.eventMixin<EventTy
       delete this.updateAnimationFrameId;
     }
 
-    const clientHeight = this.scrollContainer.clientHeight;
+    const clientHeight = this.scrollContainer.clientHeight - this.headerHeightInScroller();
     let scrollTop: number = this.scrollContainer.scrollTop;
     const currentScrollTop = scrollTop;
     const maxScrollTop = Math.max(0, this.contentHeight() - clientHeight);
@@ -249,11 +248,12 @@ export class ViewportDataGrid<T> extends Common.ObjectWrapper.eventMixin<EventTy
     }
     const toY = fromY + node.nodeSelfHeight();
     let scrollTop: number = this.scrollContainer.scrollTop;
+    const visibleHeight = this.scrollContainer.offsetHeight - this.headerHeightInScroller();
     if (scrollTop > fromY) {
       scrollTop = fromY;
       this.stickToBottom = false;
-    } else if (scrollTop + (this.scrollContainer as HTMLElement).offsetHeight < toY) {
-      scrollTop = toY - (this.scrollContainer as HTMLElement).offsetHeight;
+    } else if (scrollTop + visibleHeight < toY) {
+      scrollTop = toY - visibleHeight;
     }
     this.scrollContainer.scrollTop = scrollTop;
   }

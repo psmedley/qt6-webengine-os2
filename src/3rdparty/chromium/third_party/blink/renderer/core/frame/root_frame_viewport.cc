@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -372,6 +372,10 @@ PhysicalRect RootFrameViewport::ScrollIntoView(
   // Return the newly moved rect to absolute coordinates.
   // TODO(szager): PaintLayerScrollableArea::ScrollIntoView clips the return
   // value to the visible content rect, but this does not.
+  // TODO(bokan): This returns an unchanged rect for scroll sequences (the PLSA
+  // version correctly computes what the rect will be when the sequence is
+  // executed) and we can't just adjust by `new_scroll_offset` since, to get to
+  // absolute coordinates, we must offset by only the layout viewport's scroll.
   rect_in_document.Move(
       -PhysicalOffset::FromVector2dFRound(LayoutViewport().GetScrollOffset()));
   return rect_in_document;
@@ -668,6 +672,16 @@ void RootFrameViewport::SetNeedsResnap(bool needs_resnap) {
 absl::optional<gfx::PointF> RootFrameViewport::GetSnapPositionAndSetTarget(
     const cc::SnapSelectionStrategy& strategy) {
   return LayoutViewport().GetSnapPositionAndSetTarget(strategy);
+}
+
+gfx::PointF RootFrameViewport::ScrollOffsetToPosition(
+    const ScrollOffset& offset) const {
+  return LayoutViewport().ScrollOffsetToPosition(offset);
+}
+
+ScrollOffset RootFrameViewport::ScrollPositionToOffset(
+    const gfx::PointF& position) const {
+  return LayoutViewport().ScrollPositionToOffset(position);
 }
 
 void RootFrameViewport::Trace(Visitor* visitor) const {

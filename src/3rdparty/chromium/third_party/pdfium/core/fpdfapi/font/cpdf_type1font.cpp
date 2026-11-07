@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <utility>
 
 #include "build/build_config.h"
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
@@ -15,8 +16,8 @@
 #include "core/fxcrt/span_util.h"
 #include "core/fxge/cfx_fontmapper.h"
 #include "core/fxge/cfx_gemodule.h"
+#include "core/fxge/freetype/fx_freetype.h"
 #include "core/fxge/fx_font.h"
-#include "core/fxge/fx_freetype.h"
 
 #if BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_IOS)
 #include <Carbon/Carbon.h>
@@ -68,8 +69,8 @@ bool FT_UseType1Charmap(FXFT_FaceRec* face) {
 }  // namespace
 
 CPDF_Type1Font::CPDF_Type1Font(CPDF_Document* pDocument,
-                               CPDF_Dictionary* pFontDict)
-    : CPDF_SimpleFont(pDocument, pFontDict) {
+                               RetainPtr<CPDF_Dictionary> pFontDict)
+    : CPDF_SimpleFont(pDocument, std::move(pFontDict)) {
 #if BUILDFLAG(IS_APPLE)
   memset(m_ExtGID, 0xff, sizeof(m_ExtGID));
 #endif
@@ -94,7 +95,8 @@ bool CPDF_Type1Font::Load() {
   if (!IsBase14Font())
     return LoadCommon();
 
-  const CPDF_Dictionary* pFontDesc = m_pFontDict->GetDictFor("FontDescriptor");
+  RetainPtr<const CPDF_Dictionary> pFontDesc =
+      m_pFontDict->GetDictFor("FontDescriptor");
   if (pFontDesc && pFontDesc->KeyExist("Flags")) {
     m_Flags = pFontDesc->GetIntegerFor("Flags");
   } else if (IsSymbolicFont()) {

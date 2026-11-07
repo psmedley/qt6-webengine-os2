@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -203,7 +203,7 @@ class COMPONENT_EXPORT(UI_BASE) OSExchangeDataProviderWin
  private:
   void SetVirtualFileContentAtIndexForTesting(base::span<const uint8_t> data,
                                               DWORD tymed,
-                                              size_t index);
+                                              LONG index);
 
   scoped_refptr<DataObjectImpl> data_;
   Microsoft::WRL::ComPtr<IDataObject> source_object_;

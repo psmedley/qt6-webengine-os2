@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,15 @@
 #include "base/test/mock_callback.h"
 #include "components/autofill_assistant/browser/actions/mock_action_delegate.h"
 #include "components/autofill_assistant/browser/client_status.h"
-#include "components/autofill_assistant/browser/mock_website_login_manager.h"
-#include "components/autofill_assistant/browser/save_password_leak_detection_delegate.h"
+#include "components/autofill_assistant/browser/public/password_change/mock_website_login_manager.h"
+#include "components/autofill_assistant/browser/public/password_change/save_password_leak_detection_delegate.h"
 #include "components/password_manager/core/browser/mock_password_change_success_tracker.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace {
 const char kOrigin[] = "https://example.com";
 const char kUsername[] = "username";
+const bool kPhished = false;
 }  // namespace
 
 namespace autofill_assistant {
@@ -71,9 +72,10 @@ TEST_F(SaveSubmittedPasswordActionTest, SaveSubmittedPasswordSuccess) {
   EXPECT_CALL(mock_website_login_manager_, SaveSubmittedPassword);
   EXPECT_CALL(
       mock_password_change_success_tracker_,
-      OnChangePasswordFlowCompleted(
-          GURL(kOrigin), kUsername,
-          PasswordChangeSuccessTracker::EndEvent::kAutomatedOwnPasswordFlow));
+      OnChangePasswordFlowCompleted(GURL(kOrigin), kUsername,
+                                    PasswordChangeSuccessTracker::EndEvent::
+                                        kAutomatedFlowOwnPasswordChosen,
+                                    kPhished));
 
   // Check for leaked credentials.
   EXPECT_CALL(mock_website_login_manager_,
@@ -143,9 +145,10 @@ TEST_F(SaveSubmittedPasswordActionTest, SaveLeakedNewSubmittedPassword) {
   EXPECT_CALL(mock_website_login_manager_, SaveSubmittedPassword);
   EXPECT_CALL(
       mock_password_change_success_tracker_,
-      OnChangePasswordFlowCompleted(
-          GURL(kOrigin), kUsername,
-          PasswordChangeSuccessTracker::EndEvent::kAutomatedOwnPasswordFlow));
+      OnChangePasswordFlowCompleted(GURL(kOrigin), kUsername,
+                                    PasswordChangeSuccessTracker::EndEvent::
+                                        kAutomatedFlowOwnPasswordChosen,
+                                    kPhished));
 
   // Check for leaked credentials.
   EXPECT_CALL(mock_website_login_manager_,
@@ -180,9 +183,10 @@ TEST_F(SaveSubmittedPasswordActionTest, SaveSubmittedPasswordLeakError) {
   EXPECT_CALL(mock_website_login_manager_, SaveSubmittedPassword);
   EXPECT_CALL(
       mock_password_change_success_tracker_,
-      OnChangePasswordFlowCompleted(
-          GURL(kOrigin), kUsername,
-          PasswordChangeSuccessTracker::EndEvent::kAutomatedOwnPasswordFlow));
+      OnChangePasswordFlowCompleted(GURL(kOrigin), kUsername,
+                                    PasswordChangeSuccessTracker::EndEvent::
+                                        kAutomatedFlowOwnPasswordChosen,
+                                    kPhished));
 
   // Check for leaked credentials.
   EXPECT_CALL(mock_website_login_manager_,
@@ -221,9 +225,10 @@ TEST_F(SaveSubmittedPasswordActionTest,
   EXPECT_CALL(mock_website_login_manager_, SaveSubmittedPassword);
   EXPECT_CALL(
       mock_password_change_success_tracker_,
-      OnChangePasswordFlowCompleted(
-          GURL(kOrigin), kUsername,
-          PasswordChangeSuccessTracker::EndEvent::kAutomatedOwnPasswordFlow));
+      OnChangePasswordFlowCompleted(GURL(kOrigin), kUsername,
+                                    PasswordChangeSuccessTracker::EndEvent::
+                                        kAutomatedFlowOwnPasswordChosen,
+                                    kPhished));
 
   // Since no timeout was submitted in the action, no leak check is performed.
   EXPECT_CALL(mock_website_login_manager_,
@@ -271,9 +276,10 @@ TEST_F(SaveSubmittedPasswordActionTest,
   EXPECT_CALL(mock_website_login_manager_, SaveSubmittedPassword);
   EXPECT_CALL(
       mock_password_change_success_tracker_,
-      OnChangePasswordFlowCompleted(
-          GURL(kOrigin), kUsername,
-          PasswordChangeSuccessTracker::EndEvent::kAutomatedOwnPasswordFlow));
+      OnChangePasswordFlowCompleted(GURL(kOrigin), kUsername,
+                                    PasswordChangeSuccessTracker::EndEvent::
+                                        kAutomatedFlowOwnPasswordChosen,
+                                    kPhished));
 
   // Since no timeout was submitted in the action, no leak check is performed.
   EXPECT_CALL(mock_website_login_manager_,

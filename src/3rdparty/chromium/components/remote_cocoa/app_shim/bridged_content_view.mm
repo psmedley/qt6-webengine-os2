@@ -1,8 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "components/remote_cocoa/app_shim/bridged_content_view.h"
+
+#include <limits>
 
 #include "base/check_op.h"
 #import "base/mac/foundation_util.h"
@@ -18,6 +20,7 @@
 #import "ui/base/cocoa/appkit_utils.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
 #import "ui/base/dragdrop/cocoa_dnd_util.h"
+#include "ui/base/cocoa/find_pasteboard.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_mac.h"
 #include "ui/base/ime/input_method.h"
@@ -306,7 +309,7 @@ NSArray* SupportedPasteboardTypes() {
   if (ui::PlatformEventSource::ShouldIgnoreNativePlatformEvents())
     return;
 
-  BOOL isScrollEvent = [theEvent type] == NSScrollWheel;
+  BOOL isScrollEvent = [theEvent type] == NSEventTypeScrollWheel;
 
   // If it's the view's window, process normally.
   if ([target isEqual:source]) {
@@ -314,7 +317,7 @@ NSArray* SupportedPasteboardTypes() {
       [self scrollWheel:theEvent];
     } else {
       [self mouseEvent:theEvent];
-      if ([theEvent type] == NSLeftMouseUp)
+      if ([theEvent type] == NSEventTypeLeftMouseUp)
         [self handleLeftMouseUp:theEvent];
     }
     return;
@@ -431,7 +434,7 @@ NSArray* SupportedPasteboardTypes() {
   // Always propagate the shift modifier if present. Shift doesn't always alter
   // the command selector, but should always be passed along. Control and Alt
   // have different meanings on Mac, so they do not propagate automatically.
-  if ([_keyDownEvent modifierFlags] & NSShiftKeyMask)
+  if ([_keyDownEvent modifierFlags] & NSEventModifierFlagShift)
     eventFlags |= ui::EF_SHIFT_DOWN;
 
   // Generate a synthetic event with the keycode toolkit-views expects.
@@ -533,9 +536,12 @@ NSArray* SupportedPasteboardTypes() {
   // Currently there seems to be no use case to pass non-character events routed
   // from insertText: handlers to the View hierarchy.
   if (isFinalInsertForKeyEvent && ![self hasMarkedText]) {
+    int flags = ui::EF_NONE;
+    if ([_keyDownEvent isARepeat])
+      flags |= ui::EF_IS_REPEAT;
     ui::KeyEvent charEvent([text characterAtIndex:0],
                            ui::KeyboardCodeFromNSEvent(_keyDownEvent),
-                           ui::DomCodeFromNSEvent(_keyDownEvent), ui::EF_NONE);
+                           ui::DomCodeFromNSEvent(_keyDownEvent), flags);
     [self handleKeyEvent:&charEvent];
     _hasUnhandledKeyDownEvent = NO;
     if (charEvent.handled())
@@ -624,7 +630,7 @@ NSArray* SupportedPasteboardTypes() {
   if (!_bridge)
     return;
 
-  DCHECK([theEvent type] != NSScrollWheel);
+  DCHECK([theEvent type] != NSEventTypeScrollWheel);
   auto event = std::make_unique<ui::MouseEvent>(theEvent);
   [self adjustUiEventLocation:event.get() fromNativeEvent:theEvent];
 
@@ -1345,24 +1351,30 @@ NSArray* SupportedPasteboardTypes() {
 // NSServicesMenuRequestor protocol
 
 - (BOOL)writeSelectionToPasteboard:(NSPasteboard*)pboard types:(NSArray*)types {
-  // NB: The NSServicesMenuRequestor protocol has not (as of 10.14) been
+  // NB: The NSServicesMenuRequestor protocol has not (as of macOS 12) been
   // upgraded to request UTIs rather than obsolete PboardType constants. Handle
   // either for when it is upgraded.
-  DCHECK([types containsObject:NSStringPboardType] ||
-         [types containsObject:base::mac::CFToNSCast(kUTTypeUTF8PlainText)]);
+  bool wasAbleToWriteAtLeastOneType = false;
 
-  bool result = NO;
-  std::u16string text;
-  if (_bridge)
-    _bridge->text_input_host()->GetSelectionText(&result, &text);
-  if (!result)
-    return NO;
-  return [pboard writeObjects:@[ base::SysUTF16ToNSString(text) ]];
+  if ([types containsObject:NSStringPboardType] ||
+      [types containsObject:base::mac::CFToNSCast(kUTTypeUTF8PlainText)]) {
+    bool result = false;
+    std::u16string selection_text;
+    if (_bridge)
+      _bridge->text_input_host()->GetSelectionText(&result, &selection_text);
+
+    if (result) {
+      NSString* text = base::SysUTF16ToNSString(selection_text);
+      wasAbleToWriteAtLeastOneType |= [pboard writeObjects:@[ text ]];
+    }
+  }
+
+  return wasAbleToWriteAtLeastOneType;
 }
 
 - (BOOL)readSelectionFromPasteboard:(NSPasteboard*)pboard {
-  NSArray* objects = [pboard readObjectsForClasses:@ [[NSString class]]
-      options:0];
+  NSArray* objects = [pboard readObjectsForClasses:@[ [NSString class] ]
+                                           options:nil];
   DCHECK([objects count] == 1);
   [self insertText:[objects lastObject]];
   return YES;
@@ -1381,16 +1393,12 @@ NSArray* SupportedPasteboardTypes() {
 - (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)range
                                                actualRange:
                                                    (NSRangePointer)actualRange {
-  // On TouchBar Macs, the IME subsystem sometimes sends an invalid range with a
-  // non-zero length. This will cause a DCHECK in gfx::Range, so repair it here.
-  // See https://crbug.com/888782.
-  if (range.location == NSNotFound)
-    range.length = 0;
   std::u16string substring;
   gfx::Range actual_range = gfx::Range::InvalidRange();
   if (_bridge) {
     _bridge->text_input_host()->GetAttributedSubstringForRange(
-        gfx::Range(range), &substring, &actual_range);
+        gfx::Range::FromPossiblyInvalidNSRange(range), &substring,
+        &actual_range);
   }
   if (actualRange) {
     // To maintain consistency with NSTextView, return range {0,0} for an out of
@@ -1398,6 +1406,7 @@ NSArray* SupportedPasteboardTypes() {
     *actualRange =
         actual_range.IsValid() ? actual_range.ToNSRange() : NSMakeRange(0, 0);
   }
+
   return substring.empty()
              ? nil
              : [[[NSAttributedString alloc]
@@ -1521,9 +1530,21 @@ NSArray* SupportedPasteboardTypes() {
   return @[];
 }
 
+- (void)copyToFindPboard:(id)sender {
+  NSString* selection =
+      [[self attributedSubstringForProposedRange:[self selectedRange]
+                                     actualRange:nullptr] string];
+  if (selection.length > 0)
+    [[FindPasteboard sharedInstance] setFindText:selection];
+}
+
 // NSUserInterfaceValidations protocol implementation.
 
 - (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {
+  // Special case this, since there's no cross-platform text command for it.
+  if (item.action == @selector(copyToFindPboard:))
+    return [self selectedRange].length > 0;
+
   ui::TextEditCommand command = GetTextEditCommandForMenuAction([item action]);
 
   if (command == ui::TextEditCommand::INVALID_COMMAND)

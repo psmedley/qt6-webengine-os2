@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,6 +60,7 @@ void FilterMediaList(std::vector<DesktopMediaList::Type>& media_types,
 
 void ShowCaptureTerminatedDialog(content::WebContents* contents);
 
+// TODO(crbug.com/1342069): Use Origin instead of GURL.
 bool IsGetDisplayMediaSetSelectAllScreensAllowed(
     content::BrowserContext* context,
     const GURL& url);

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -225,13 +225,14 @@ TEST_F(BrowsingTopicsStateTest, AddEpoch) {
   EXPECT_EQ(state.epochs()[1].calculation_time(), kTime2);
 
   // Failed topics calculation.
-  state.AddEpoch(EpochTopics());
+  state.AddEpoch(EpochTopics(kTime3));
   EXPECT_EQ(state.epochs().size(), 3u);
   EXPECT_FALSE(state.epochs()[0].empty());
   EXPECT_EQ(state.epochs()[0].calculation_time(), kTime1);
   EXPECT_FALSE(state.epochs()[1].empty());
   EXPECT_EQ(state.epochs()[1].calculation_time(), kTime2);
   EXPECT_TRUE(state.epochs()[2].empty());
+  EXPECT_EQ(state.epochs()[2].calculation_time(), kTime3);
 
   // Successful topics calculation at `kTime4`.
   state.AddEpoch(CreateTestEpochTopics(kTime4));

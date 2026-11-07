@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@ import './folder_node.js';
 import './item.js';
 
 import {assert} from 'chrome://resources/js/assert_ts.js';
-import {EventTracker} from 'chrome://resources/js/event_tracker.m.js';
-import {isTextInputElement} from 'chrome://resources/js/util.m.js';
+import {EventTracker} from 'chrome://resources/js/event_tracker.js';
+import {isTextInputElement} from 'chrome://resources/js/util.js';
 
 import {changeFolderOpen, deselectItems, selectItem} from './actions.js';
 import {highlightUpdatedItems, trackUpdatedItems} from './api_listener.js';
@@ -18,10 +18,10 @@ import {Store} from './store.js';
 import {BookmarkElement, BookmarkNode, DragData, DropDestination, NodeMap, ObjectMap} from './types.js';
 import {canEditNode, canReorderChildren, getDisplayedList, hasChildFolders, isShowingSearch, normalizeNode} from './util.js';
 
-type NormalizedDragData = {
-  elements: BookmarkNode[],
-  sameProfile: boolean,
-};
+interface NormalizedDragData {
+  elements: BookmarkNode[];
+  sameProfile: boolean;
+}
 
 function isBookmarkItem(element: Element): boolean {
   return element.tagName === 'BOOKMARKS-ITEM';
@@ -80,7 +80,7 @@ export class DragInfo {
   setNativeDragData(newDragData: DragData) {
     this.dragData = {
       sameProfile: newDragData.sameProfile,
-      elements: newDragData.elements!.map((x) => normalizeNode(x))
+      elements: newDragData.elements!.map((x) => normalizeNode(x)),
     };
   }
 
@@ -134,11 +134,12 @@ export class DragInfo {
   }
 }
 
+const EXPAND_FOLDER_DELAY: number = 400;
+
 /**
  * Manages auto expanding of sidebar folders on hover while dragging.
  */
 class AutoExpander {
-  EXPAND_FOLDER_DELAY: number = 400;
   private lastElement_: BookmarkElement|null = null;
   private debouncer_: Debouncer;
 
@@ -165,7 +166,7 @@ class AutoExpander {
 
     // If dragging over the same node, reset the expander delay.
     if (overElement && overElement === this.lastElement_) {
-      this.debouncer_.restartTimeout(this.EXPAND_FOLDER_DELAY);
+      this.debouncer_.restartTimeout(EXPAND_FOLDER_DELAY);
       return;
     }
 
@@ -281,11 +282,15 @@ export class DNDManager {
     this.dropIndicator_ = new DropIndicator();
     this.autoExpander_ = new AutoExpander();
 
-    this.eventTracker_.add(document, 'dragstart', e => this.onDragStart_(e));
-    this.eventTracker_.add(document, 'dragenter', e => this.onDragEnter_(e));
-    this.eventTracker_.add(document, 'dragover', e => this.onDragOver_(e));
+    this.eventTracker_.add(document, 'dragstart',
+                           (e: Event) => this.onDragStart_(e));
+    this.eventTracker_.add(document, 'dragenter',
+                           (e: Event) => this.onDragEnter_(e));
+    this.eventTracker_.add(document, 'dragover',
+                           (e: Event) => this.onDragOver_(e));
     this.eventTracker_.add(document, 'dragleave', () => this.onDragLeave_());
-    this.eventTracker_.add(document, 'drop', e => this.onDrop_(e));
+    this.eventTracker_.add(document, 'drop',
+                           (e: Event) => this.onDrop_(e));
     this.eventTracker_.add(document, 'dragend', () => this.clearDragData_());
     this.eventTracker_.add(document, 'mousedown', () => this.onMouseDown_());
     this.eventTracker_.add(document, 'touchstart', () => this.onTouchStart_());

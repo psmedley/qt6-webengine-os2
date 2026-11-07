@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -83,6 +83,7 @@ class MEDIA_MOJO_EXPORT MojoRendererService final : public mojom::Renderer,
 
   // RendererClient implementation.
   void OnError(PipelineStatus status) final;
+  void OnFallback(PipelineStatus status) final;
   void OnEnded() final;
   void OnStatisticsUpdate(const PipelineStatistics& stats) final;
   void OnBufferingStateChange(BufferingState state,

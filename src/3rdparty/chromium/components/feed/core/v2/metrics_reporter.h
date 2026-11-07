@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "components/feed/core/v2/enums.h"
+#include "components/feed/core/v2/feed_network.h"
 #include "components/feed/core/v2/public/common_enums.h"
 #include "components/feed/core/v2/public/stream_type.h"
 #include "components/feed/core/v2/public/web_feed_subscriptions.h"
@@ -44,6 +45,8 @@ class MetricsReporter {
         base::OnceCallback<void(int)> callback) = 0;
     virtual void RegisterFeedUserSettingsFieldTrial(
         base::StringPiece group) = 0;
+    virtual ContentOrder GetContentOrder(
+        const StreamType& stream_type) const = 0;
   };
 
   explicit MetricsReporter(PrefService* profile_prefs);
@@ -57,6 +60,7 @@ class MetricsReporter {
   void OnMetadataInitialized(bool isEnabledByEnterprisePolicy,
                              bool isFeedVisible,
                              bool isSignedIn,
+                             bool isEnabled,
                              const feedstore::Metadata& metadata);
 
   // User interactions. See |FeedApi| for definitions.
@@ -65,12 +69,17 @@ class MetricsReporter {
                                   int index_in_stream,
                                   int stream_slice_count);
   void FeedViewed(SurfaceId surface_id);
-  void OpenAction(const StreamType& stream_type, int index_in_stream);
+  void OpenAction(const StreamType& stream_type,
+                  int index_in_stream,
+                  OpenActionType action_type);
   void OpenVisitComplete(base::TimeDelta visit_time);
-  void OpenInNewTabAction(const StreamType& stream_type, int index_in_stream);
   void PageLoaded();
   void OtherUserAction(const StreamType& stream_type,
                        FeedUserActionType action_type);
+  // Report a period of time during which at least one content slice was visible
+  // enough or covering enough of the viewport.
+  void ReportStableContentSliceVisibilityTimeForGoodVisits(
+      base::TimeDelta delta);
 
   // Indicates the user scrolled the feed by |distance_dp| and then stopped
   // scrolling.
@@ -97,7 +106,7 @@ class MetricsReporter {
                             bool loaded_new_content_from_network,
                             base::TimeDelta stored_content_age,
                             const ContentStats& content_stats,
-                            const RequestMetadata& request_metadata,
+                            ContentOrder content_order,
                             std::unique_ptr<LoadLatencyTimes> load_latencies);
   virtual void OnBackgroundRefresh(const StreamType& stream_type,
                                    LoadStreamStatus final_status);
@@ -133,15 +142,14 @@ class MetricsReporter {
                                           WebFeedRefreshStatus status,
                                           int subscribed_web_feed_count);
 
-  // Notice events.
-  void OnNoticeCreated(const StreamType& stream_type, const std::string& key);
-  void OnNoticeViewed(const StreamType& stream_type, const std::string& key);
-  void OnNoticeOpenAction(const StreamType& stream_type,
-                          const std::string& key);
-  void OnNoticeDismissed(const StreamType& stream_type, const std::string& key);
-  void OnNoticeAcknowledged(const StreamType& stream_type,
-                            const std::string& key,
-                            NoticeAcknowledgementPath acknowledgement_path);
+  // Info card events.
+  void OnInfoCardTrackViewStarted(const StreamType& stream_type,
+                                  int info_card_type);
+  void OnInfoCardViewed(const StreamType& stream_type, int info_card_type);
+  void OnInfoCardClicked(const StreamType& stream_type, int info_card_type);
+  void OnInfoCardDismissedExplicitly(const StreamType& stream_type,
+                                     int info_card_type);
+  void OnInfoCardStateReset(const StreamType& stream_type, int info_card_type);
 
  private:
   // State replicated for reporting per-stream-type metrics.
@@ -184,7 +192,6 @@ class MetricsReporter {
   void ReportGetMoreIfNeeded(SurfaceId surface_id, bool success);
   void FinalizeMetrics();
   void FinalizeVisit();
-  void ReportSubscriptionCountAtEngagementTime(int subscription_count);
   void ReportFollowCountOnLoad(bool content_shown, int subscription_count);
 
   StreamStats& ForStream(const StreamType& stream_type);
@@ -224,6 +231,24 @@ class MetricsReporter {
   // Non-null only directly after a stream load.
   std::unique_ptr<LoadLatencyTimes> load_latencies_;
   bool load_latencies_recorded_ = false;
+
+  class GoodVisitState {
+   public:
+    void OnScroll();
+    void OnGoodExplicitInteraction();
+    void OnOpenComplete(base::TimeDelta open_duration);
+    void AddTimeInFeed(base::TimeDelta time);
+    void ExtendOrStartNewVisit();
+
+   private:
+    void MaybeReportGoodVisit();
+
+    base::Time visit_start_{}, visit_end_{};
+    bool did_report_good_visit_ = false;
+    base::TimeDelta time_in_feed_{};
+    bool did_scroll_ = false;
+  };
+  absl::optional<GoodVisitState> good_visit_state_;
 
   base::WeakPtrFactory<MetricsReporter> weak_ptr_factory_{this};
 };

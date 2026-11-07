@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@
 #include "net/base/load_flags.h"
 #include "net/base/url_util.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "net/url_request/url_fetcher.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"

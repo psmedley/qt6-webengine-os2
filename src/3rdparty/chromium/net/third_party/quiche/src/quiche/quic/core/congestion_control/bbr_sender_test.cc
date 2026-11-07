@@ -108,7 +108,8 @@ class BbrSenderTest : public QuicTest {
   }
 
   void SetUp() override {
-    if (GetQuicFlag(FLAGS_quic_bbr_test_regression_mode) == "regress") {
+    if (quiche::GetQuicheCommandLineFlag(FLAGS_quic_bbr_test_regression_mode) ==
+        "regress") {
       SendAlgorithmTestResult expected;
       ASSERT_TRUE(LoadSendAlgorithmTestResult(&expected));
       random_seed_ = expected.random_seed();
@@ -121,7 +122,7 @@ class BbrSenderTest : public QuicTest {
 
   ~BbrSenderTest() {
     const std::string regression_mode =
-        GetQuicFlag(FLAGS_quic_bbr_test_regression_mode);
+        quiche::GetQuicheCommandLineFlag(FLAGS_quic_bbr_test_regression_mode);
     const QuicTime::Delta simulated_duration = clock_->Now() - QuicTime::Zero();
     if (regression_mode == "record") {
       RecordSendAlgorithmTestResult(random_seed_,
@@ -160,7 +161,7 @@ class BbrSenderTest : public QuicTest {
         QuicSentPacketManagerPeer::GetUnackedPacketMap(
             QuicConnectionPeer::GetSentPacketManager(endpoint->connection())),
         kInitialCongestionWindowPackets,
-        GetQuicFlag(FLAGS_quic_max_congestion_window), &random_,
+        GetQuicFlag(quic_max_congestion_window), &random_,
         QuicConnectionPeer::GetStats(endpoint->connection()));
     QuicConnectionPeer::SetSendAlgorithm(endpoint->connection(), sender);
     endpoint->RecordTrace();
@@ -432,14 +433,13 @@ TEST_F(BbrSenderTest, SimpleTransfer2RTTAggregationBytes) {
 TEST_F(BbrSenderTest, SimpleTransferAckDecimation) {
   SetConnectionOption(kBSAO);
   // Decrease the CWND gain so extra CWND is required with stretch acks.
-  SetQuicFlag(FLAGS_quic_bbr_cwnd_gain, 1.0);
+  SetQuicFlag(quic_bbr_cwnd_gain, 1.0);
   sender_ = new BbrSender(
       bbr_sender_.connection()->clock()->Now(), rtt_stats_,
       QuicSentPacketManagerPeer::GetUnackedPacketMap(
           QuicConnectionPeer::GetSentPacketManager(bbr_sender_.connection())),
-      kInitialCongestionWindowPackets,
-      GetQuicFlag(FLAGS_quic_max_congestion_window), &random_,
-      QuicConnectionPeer::GetStats(bbr_sender_.connection()));
+      kInitialCongestionWindowPackets, GetQuicFlag(quic_max_congestion_window),
+      &random_, QuicConnectionPeer::GetStats(bbr_sender_.connection()));
   QuicConnectionPeer::SetSendAlgorithm(bbr_sender_.connection(), sender_);
   CreateDefaultSetup();
 

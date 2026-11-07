@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -95,7 +95,7 @@ struct AnimatingLayoutManager::LayoutFadeInfo {
   // The view next (trailing side) to the fading view which is in both the
   // starting and target layout, or null if none.
   View* next_view = nullptr;
-  // The full-size bounds, normalized to the orientation of the layout manaer,
+  // The full-size bounds, normalized to the orientation of the layout manager,
   // that |child_view| starts with, if fading out, or ends with, if fading in.
   NormalizedRect reference_bounds;
   // The offset from the end of |prev_view| and the start of |next_view|. Insets
@@ -370,6 +370,11 @@ bool AnimatingLayoutManager::HasObserver(Observer* observer) const {
 gfx::Size AnimatingLayoutManager::GetPreferredSize(const View* host) const {
   if (!target_layout_manager())
     return gfx::Size();
+
+  // If animation is disabled, preferred size does not change with current
+  // animation state.
+  if (!gfx::Animation::ShouldRenderRichAnimation())
+    return target_layout_manager()->GetPreferredSize(host);
 
   switch (bounds_animation_mode_) {
     case BoundsAnimationMode::kUseHostBounds:
@@ -730,7 +735,7 @@ void AnimatingLayoutManager::UpdateCurrentLayout(double percent) {
 
   for (const LayoutFadeInfo& fade_info : fade_infos_) {
     // This shouldn't happen but we should ensure that with a check.
-    DCHECK_NE(-1, host_view()->GetIndexOf(fade_info.child_view));
+    DCHECK(host_view()->GetIndexOf(fade_info.child_view).has_value());
 
     // Views that were previously fading are animated as normal, so nothing to
     // do here.
@@ -942,7 +947,7 @@ void AnimatingLayoutManager::ResolveFades() {
   for (const LayoutFadeInfo& fade_info : fade_infos_) {
     View* const child = fade_info.child_view;
     if (fade_info.fade_type == LayoutFadeType::kFadingOut &&
-        host_view()->GetIndexOf(child) >= 0 &&
+        host_view()->GetIndexOf(child).has_value() &&
         !IsChildViewIgnoredByLayout(child) && !IsChildIncludedInLayout(child)) {
       SetViewVisibility(child, false);
     }

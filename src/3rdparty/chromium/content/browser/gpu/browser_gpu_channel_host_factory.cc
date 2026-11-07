@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,16 +17,14 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
-#include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
-#include "components/viz/common/features.h"
 #include "components/viz/host/gpu_host_impl.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
+#include "content/browser/gpu/gpu_disk_cache_factory.h"
 #include "content/browser/gpu/gpu_memory_buffer_manager_singleton.h"
 #include "content/browser/gpu/gpu_process_host.h"
-#include "content/browser/gpu/shader_cache_factory.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -34,11 +32,8 @@
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
-#include "gpu/command_buffer/service/gpu_switches.h"
-#include "gpu/config/gpu_finch_features.h"
 #include "gpu/ipc/common/gpu_client_ids.h"
 #include "gpu/ipc/common/gpu_watchdog_timeout.h"
-#include "gpu/ipc/in_process_command_buffer.h"
 #include "services/resource_coordinator/public/mojom/memory_instrumentation/constants.mojom.h"
 
 #if BUILDFLAG(IS_MAC)
@@ -283,7 +278,10 @@ void BrowserGpuChannelHostFactory::CloseChannel() {
     gpu_channel_ = nullptr;
   }
 
-  gpu_memory_buffer_manager_.reset();
+  // This will unblock any other threads waiting on CreateGpuMemoryBuffer()
+  // requests. It runs before IO and thread pool threads are stopped to avoid
+  // shutdown hangs.
+  gpu_memory_buffer_manager_->Shutdown();
 }
 
 BrowserGpuChannelHostFactory::BrowserGpuChannelHostFactory()
@@ -291,31 +289,7 @@ BrowserGpuChannelHostFactory::BrowserGpuChannelHostFactory()
       gpu_client_tracing_id_(
           memory_instrumentation::mojom::kServiceTracingProcessId),
       gpu_memory_buffer_manager_(
-          new GpuMemoryBufferManagerSingleton(gpu_client_id_)) {
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableGpuShaderDiskCache)) {
-    DCHECK(GetContentClient());
-    base::FilePath cache_dir =
-        GetContentClient()->browser()->GetShaderDiskCacheDirectory();
-    if (!cache_dir.empty()) {
-      GetUIThreadTaskRunner({})->PostTask(
-          FROM_HERE,
-          base::BindOnce(
-              &BrowserGpuChannelHostFactory::InitializeShaderDiskCacheOnIO,
-              gpu_client_id_, cache_dir));
-    }
-
-    base::FilePath gr_cache_dir =
-        GetContentClient()->browser()->GetGrShaderDiskCacheDirectory();
-    if (!gr_cache_dir.empty()) {
-      GetUIThreadTaskRunner({})->PostTask(
-          FROM_HERE,
-          base::BindOnce(
-              &BrowserGpuChannelHostFactory::InitializeGrShaderDiskCacheOnIO,
-              gr_cache_dir));
-    }
-  }
-}
+          new GpuMemoryBufferManagerSingleton(gpu_client_id_)) {}
 
 BrowserGpuChannelHostFactory::~BrowserGpuChannelHostFactory() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -471,22 +445,6 @@ void BrowserGpuChannelHostFactory::RestartTimeout() {
   timeout_.Start(FROM_HERE, base::Seconds(kGpuChannelTimeoutInSeconds),
                  base::BindOnce(&DumpGpuStackOnProcessThread));
 #endif  // BUILDFLAG(IS_ANDROID)
-}
-
-// static
-void BrowserGpuChannelHostFactory::InitializeShaderDiskCacheOnIO(
-    int gpu_client_id,
-    const base::FilePath& cache_dir) {
-  GetShaderCacheFactorySingleton()->SetCacheInfo(gpu_client_id, cache_dir);
-  GetShaderCacheFactorySingleton()->SetCacheInfo(
-      gpu::kDisplayCompositorClientId, cache_dir);
-}
-
-// static
-void BrowserGpuChannelHostFactory::InitializeGrShaderDiskCacheOnIO(
-    const base::FilePath& cache_dir) {
-  GetShaderCacheFactorySingleton()->SetCacheInfo(gpu::kGrShaderCacheClientId,
-                                                 cache_dir);
 }
 
 }  // namespace content

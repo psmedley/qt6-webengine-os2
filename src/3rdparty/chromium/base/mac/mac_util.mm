@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -338,9 +338,10 @@ int DarwinMajorVersionInternal() {
   int darwin_major_version = 0;
   char* dot = strchr(uname_info.release, '.');
   if (dot) {
-    if (!base::StringToInt(base::StringPiece(uname_info.release,
-                                             dot - uname_info.release),
-                           &darwin_major_version)) {
+    if (!base::StringToInt(
+            base::StringPiece(uname_info.release,
+                              static_cast<size_t>(dot - uname_info.release)),
+            &darwin_major_version)) {
       dot = NULL;
     }
   }
@@ -441,10 +442,13 @@ bool ParseModelIdentifier(const std::string& ident,
     return false;
   int32_t major_tmp, minor_tmp;
   std::string::const_iterator begin = ident.begin();
-  if (!StringToInt(MakeStringPiece(begin + number_loc, begin + comma_loc),
+  if (!StringToInt(MakeStringPiece(begin + static_cast<ptrdiff_t>(number_loc),
+                                   begin + static_cast<ptrdiff_t>(comma_loc)),
                    &major_tmp) ||
-      !StringToInt(MakeStringPiece(begin + comma_loc + 1, ident.end()),
-                   &minor_tmp))
+      !StringToInt(
+          MakeStringPiece(begin + static_cast<ptrdiff_t>(comma_loc) + 1,
+                          ident.end()),
+          &minor_tmp))
     return false;
   *type = ident.substr(0, number_loc);
   *major = major_tmp;
@@ -453,14 +457,9 @@ bool ParseModelIdentifier(const std::string& ident,
 }
 
 std::string GetOSDisplayName() {
-  std::string os_name;
-  if (IsAtMostOS10_11())
-    os_name = "OS X";
-  else
-    os_name = "macOS";
   std::string version_string = base::SysNSStringToUTF8(
       [[NSProcessInfo processInfo] operatingSystemVersionString]);
-  return os_name + " " + version_string;
+  return "macOS " + version_string;
 }
 
 std::string GetPlatformSerialNumber() {

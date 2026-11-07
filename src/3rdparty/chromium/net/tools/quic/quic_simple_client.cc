@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@
 #include "net/third_party/quiche/src/quiche/quic/core/quic_server_id.h"
 #include "net/third_party/quiche/src/quiche/quic/platform/api/quic_flags.h"
 #include "net/third_party/quiche/src/quiche/quic/tools/quic_simple_client_session.h"
-#include "net/third_party/quiche/src/quiche/spdy/core/spdy_header_block.h"
+#include "net/third_party/quiche/src/quiche/spdy/core/http2_header_block.h"
 
 using std::string;
 
@@ -45,11 +45,9 @@ QuicSimpleClient::QuicSimpleClient(
           config,
           CreateQuicConnectionHelper(),
           CreateQuicAlarmFactory(),
-          base::WrapUnique(
-              new QuicClientMessageLooplNetworkHelper(&clock_, this)),
+          std::make_unique<QuicClientMessageLooplNetworkHelper>(&clock_, this),
           std::move(proof_verifier),
-          nullptr),
-      initialized_(false) {
+          nullptr) {
   set_server_address(server_address);
 }
 
@@ -65,8 +63,9 @@ std::unique_ptr<quic::QuicSession> QuicSimpleClient::CreateQuicClientSession(
     const quic::ParsedQuicVersionVector& supported_versions,
     quic::QuicConnection* connection) {
   return std::make_unique<quic::QuicSimpleClientSession>(
-      *config(), supported_versions, connection, server_id(), crypto_config(),
-      push_promise_index(), drop_response_body());
+      *config(), supported_versions, connection, network_helper(), server_id(),
+      crypto_config(), push_promise_index(), drop_response_body(),
+      /*enable_web_transport=*/false);
 }
 
 QuicChromiumConnectionHelper* QuicSimpleClient::CreateQuicConnectionHelper() {

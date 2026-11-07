@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,22 +60,22 @@ inline testing::Matcher<const std::vector<Suggestion>&> SuggestionVectorIdsAre(
       elts_are_matcher, &Suggestion::frontend_id));
 }
 
-// Like SuggestionVectorIdsAre above, but tests the values.
+// Like SuggestionVectorIdsAre above, but tests the main_texts.
 template <class EltsAreMatcher>
 inline testing::Matcher<const std::vector<Suggestion>&>
-SuggestionVectorValuesAre(const EltsAreMatcher& elts_are_matcher) {
+SuggestionVectorMainTextsAre(const EltsAreMatcher& elts_are_matcher) {
   return testing::MakeMatcher(
-      new SuggestionVectorMembersAreMatcher<std::u16string>(
-          elts_are_matcher, &Suggestion::value));
+      new SuggestionVectorMembersAreMatcher<Suggestion::Text>(
+          elts_are_matcher, &Suggestion::main_text));
 }
 
 // Like SuggestionVectorIdsAre above, but tests the labels.
 template <class EltsAreMatcher>
 inline testing::Matcher<const std::vector<Suggestion>&>
 SuggestionVectorLabelsAre(const EltsAreMatcher& elts_are_matcher) {
-  return testing::MakeMatcher(
-      new SuggestionVectorMembersAreMatcher<std::u16string>(
-          elts_are_matcher, &Suggestion::label));
+  return testing::MakeMatcher(new SuggestionVectorMembersAreMatcher<
+                              std::vector<std::vector<Suggestion::Text>>>(
+      elts_are_matcher, &Suggestion::labels));
 }
 
 // Like SuggestionVectorIdsAre above, but tests the icons.

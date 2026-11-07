@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -79,6 +79,9 @@ class CORE_EXPORT RootFrameViewport final
   gfx::Rect ScrollCornerRect() const override;
   void UpdateScrollOffset(const ScrollOffset&,
                           mojom::blink::ScrollType) override;
+  gfx::PointF ScrollOffsetToPosition(const ScrollOffset& offset) const override;
+  ScrollOffset ScrollPositionToOffset(
+      const gfx::PointF& position) const override;
   gfx::Vector2d ScrollOffsetInt() const override;
   ScrollOffset GetScrollOffset() const override;
   gfx::Vector2d MinimumScrollOffsetInt() const override;

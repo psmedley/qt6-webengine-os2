@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -128,25 +128,6 @@ HashedHost HashMainFrameHostForStorage(const std::string& main_frame_host) {
   crypto::SHA256HashString(kMainFrameHostStoragePrefix + main_frame_host,
                            &result, sizeof(result));
   return HashedHost(result);
-}
-
-base::Time DeriveHistoryDataStartTime(base::Time calculation_time,
-                                      base::Time data_accessible_since) {
-  return std::max(data_accessible_since,
-                  calculation_time -
-                      blink::features::kBrowsingTopicsTimePeriodPerEpoch.Get());
-}
-
-base::Time DeriveApiUsageContextDataStartTime(
-    base::Time calculation_time,
-    base::Time data_accessible_since) {
-  return std::max(
-      data_accessible_since,
-      calculation_time -
-          blink::features::
-                  kBrowsingTopicsNumberOfEpochsOfObservationDataToUseForFiltering
-                      .Get() *
-              blink::features::kBrowsingTopicsTimePeriodPerEpoch.Get());
 }
 
 void OverrideHmacKeyForTesting(ReadOnlyHmacKey hmac_key) {

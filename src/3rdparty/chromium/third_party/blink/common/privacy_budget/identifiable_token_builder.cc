@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -155,8 +155,8 @@ bool IdentifiableTokenBuilder::IsAligned() const {
 
 IdentifiableTokenBuilder::ByteSpan IdentifiableTokenBuilder::GetPartialBlock()
     const {
-  return ByteSpan(BlockBuffer::const_iterator(partial_.begin()),
-                  BlockBuffer::const_iterator(position_));
+  return ByteSpan(partial_.data(),
+                  partial_.data() + (position_- partial_.begin()));
 }
 
 }  // namespace blink

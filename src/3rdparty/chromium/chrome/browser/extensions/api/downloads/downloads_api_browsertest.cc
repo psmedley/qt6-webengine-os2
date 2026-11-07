@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,9 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "chrome/browser/download/bubble/download_bubble_controller.h"
+#include "chrome/browser/download/bubble/download_display.h"
+#include "chrome/browser/download/bubble/download_display_controller.h"
 #include "chrome/browser/download/download_core_service.h"
 #include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/download/download_file_icon_extractor.h"
@@ -41,6 +44,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/extension_action_test_helper.h"
 #include "chrome/common/extensions/api/downloads.h"
 #include "chrome/common/pref_names.h"
@@ -48,6 +52,8 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/download/public/common/download_item.h"
 #include "components/prefs/pref_service.h"
+#include "components/safe_browsing/content/common/file_type_policies_test_util.h"
+#include "components/safe_browsing/core/common/features.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -165,11 +171,10 @@ class DownloadsEventsListener : public EventRouter::TestObserver {
            (event_name_ == downloads::OnChanged::kEventName))) {
         // We expect a non-empty list for these events.
         if (!args_.is_list() || !other.args_.is_list() ||
-            args_.GetListDeprecated().empty() ||
-            other.args_.GetListDeprecated().empty())
+            args_.GetList().empty() || other.args_.GetList().empty())
           return false;
-        const base::Value& left_dict = args_.GetListDeprecated()[0];
-        const base::Value& right_dict = other.args_.GetListDeprecated()[0];
+        const base::Value& left_dict = args_.GetList()[0];
+        const base::Value& right_dict = other.args_.GetList()[0];
         if (!left_dict.is_dict() || !right_dict.is_dict())
           return false;
         // Expect that all keys present in both dictionaries are equal. If a key
@@ -208,7 +213,8 @@ class DownloadsEventsListener : public EventRouter::TestObserver {
 
     Event* new_event = new Event(
         Profile::FromBrowserContext(event.restrict_to_browser_context),
-        event.event_name, *event.event_args.get(), base::Time::Now());
+        event.event_name, base::Value(event.event_args.Clone()),
+        base::Time::Now());
     events_.push_back(base::WrapUnique(new_event));
     if (waiting_ && waiting_for_.get() && new_event->Satisfies(*waiting_for_)) {
       waiting_ = false;
@@ -332,27 +338,11 @@ class DownloadExtensionTest : public ExtensionApiTest {
   };
 
   void LoadExtension(const char* name, bool enable_file_access = false) {
-    // Store the created Extension object so that we can attach it to
-    // ExtensionFunctions.  Also load the extension in incognito profiles for
-    // testing incognito.
-    extension_ = ExtensionBrowserTest::LoadExtension(
-        test_data_dir_.AppendASCII(name),
-        {.allow_in_incognito = true, .allow_file_access = enable_file_access});
-    CHECK(extension_);
-    content::WebContents* tab = chrome::AddSelectedTabWithURL(
-        current_browser(),
-        extension_->GetResourceURL("empty.html"),
-        ui::PAGE_TRANSITION_LINK);
-    EXPECT_TRUE(content::WaitForLoadStop(tab));
-    EventRouter::Get(current_browser()->profile())
-        ->AddEventListener(downloads::OnCreated::kEventName,
-                           tab->GetMainFrame()->GetProcess(), GetExtensionId());
-    EventRouter::Get(current_browser()->profile())
-        ->AddEventListener(downloads::OnChanged::kEventName,
-                           tab->GetMainFrame()->GetProcess(), GetExtensionId());
-    EventRouter::Get(current_browser()->profile())
-        ->AddEventListener(downloads::OnErased::kEventName,
-                           tab->GetMainFrame()->GetProcess(), GetExtensionId());
+    extension_ = LoadExtensionInternal(name, enable_file_access);
+  }
+
+  void LoadSecondExtension(const char* name) {
+    second_extension_ = LoadExtensionInternal(name, false);
   }
 
   content::RenderProcessHost* AddFilenameDeterminer() {
@@ -364,8 +354,9 @@ class DownloadExtensionTest : public ExtensionApiTest {
         ui::PAGE_TRANSITION_LINK);
     EventRouter::Get(current_browser()->profile())
         ->AddEventListener(downloads::OnDeterminingFilename::kEventName,
-                           tab->GetMainFrame()->GetProcess(), GetExtensionId());
-    return tab->GetMainFrame()->GetProcess();
+                           tab->GetPrimaryMainFrame()->GetProcess(),
+                           GetExtensionId());
+    return tab->GetPrimaryMainFrame()->GetProcess();
   }
 
   void RemoveFilenameDeterminer(content::RenderProcessHost* host) {
@@ -464,6 +455,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
   std::string GetExtensionId() {
     return extension_->id();
   }
+  std::string GetSecondExtensionId() { return second_extension_->id(); }
 
   std::string GetFilename(const char* path) {
     std::string result = downloads_directory().AppendASCII(path).AsUTF8Unsafe();
@@ -553,7 +545,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
     EXPECT_EQ(0, manager->NonMaliciousInProgressCount());
     EXPECT_EQ(0, manager->InProgressCount());
     if (manager->InProgressCount() != 0)
-      return NULL;
+      return nullptr;
     return CreateSlowTestDownload(first_download_.get(), kFirstDownloadUrl);
   }
 
@@ -622,14 +614,12 @@ class DownloadExtensionTest : public ExtensionApiTest {
   }
 
   bool RunFunction(ExtensionFunction* function, const std::string& args) {
-    scoped_refptr<ExtensionFunction> delete_function(function);
-    SetUpExtensionFunction(function);
-    bool result = extension_function_test_utils::RunFunction(
-        function, args, current_browser(), GetFlags());
-    if (!result) {
-      LOG(ERROR) << function->GetError();
-    }
-    return result;
+    return RunFunctionInternal(extension_, function, args);
+  }
+
+  bool RunFunctionInSecondExtension(ExtensionFunction* function,
+                                    const std::string& args) {
+    return RunFunctionInternal(second_extension_, function, args);
   }
 
   api_test_utils::RunFunctionFlags GetFlags() {
@@ -645,7 +635,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
   std::unique_ptr<base::Value> RunFunctionAndReturnResult(
       scoped_refptr<ExtensionFunction> function,
       const std::string& args) {
-    SetUpExtensionFunction(function.get());
+    SetUpExtensionFunction(extension_, function.get());
     return extension_function_test_utils::RunFunctionAndReturnSingleResult(
         function.get(), args, current_browser(), GetFlags());
   }
@@ -653,7 +643,15 @@ class DownloadExtensionTest : public ExtensionApiTest {
   std::string RunFunctionAndReturnError(
       scoped_refptr<ExtensionFunction> function,
       const std::string& args) {
-    SetUpExtensionFunction(function.get());
+    SetUpExtensionFunction(extension_, function.get());
+    return extension_function_test_utils::RunFunctionAndReturnError(
+        function.get(), args, current_browser(), GetFlags());
+  }
+
+  std::string RunFunctionAndReturnErrorInSecondExtension(
+      scoped_refptr<ExtensionFunction> function,
+      const std::string& args) {
+    SetUpExtensionFunction(second_extension_, function.get());
     return extension_function_test_utils::RunFunctionAndReturnError(
         function.get(), args, current_browser(), GetFlags());
   }
@@ -661,7 +659,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
   bool RunFunctionAndReturnString(scoped_refptr<ExtensionFunction> function,
                                   const std::string& args,
                                   std::string* result_string) {
-    SetUpExtensionFunction(function.get());
+    SetUpExtensionFunction(extension_, function.get());
     std::unique_ptr<base::Value> result(
         RunFunctionAndReturnResult(function, args));
     EXPECT_TRUE(result.get());
@@ -685,12 +683,13 @@ class DownloadExtensionTest : public ExtensionApiTest {
   const Extension* extension() { return extension_; }
 
  private:
-  void SetUpExtensionFunction(ExtensionFunction* function) {
-    if (extension_) {
+  void SetUpExtensionFunction(const raw_ptr<const Extension>& extension,
+                              ExtensionFunction* function) {
+    if (extension) {
       const GURL url = current_browser_ == incognito_browser_ &&
-                               !IncognitoInfo::IsSplitMode(extension_)
+                               !IncognitoInfo::IsSplitMode(extension)
                            ? GURL(url::kAboutBlankURL)
-                           : extension_->GetResourceURL("empty.html");
+                           : extension->GetResourceURL("empty.html");
       // Watch and wait for the navigation to take place.
       auto observer = std::make_unique<content::TestNavigationObserver>(url);
       observer->WatchExistingWebContents();
@@ -699,14 +698,56 @@ class DownloadExtensionTest : public ExtensionApiTest {
       content::WebContents* tab = chrome::AddSelectedTabWithURL(
           current_browser(), url, ui::PAGE_TRANSITION_LINK);
       observer->WaitForNavigationFinished();
-      function->set_extension(extension_.get());
-      function->SetRenderFrameHost(tab->GetMainFrame());
+      function->set_extension(extension.get());
+      function->SetRenderFrameHost(tab->GetPrimaryMainFrame());
       function->set_source_process_id(
-          tab->GetMainFrame()->GetProcess()->GetID());
+          tab->GetPrimaryMainFrame()->GetProcess()->GetID());
     }
   }
 
+  bool RunFunctionInternal(const raw_ptr<const Extension>& extension,
+                           ExtensionFunction* function,
+                           const std::string& args) {
+    scoped_refptr<ExtensionFunction> delete_function(function);
+    SetUpExtensionFunction(extension, function);
+    bool result = extension_function_test_utils::RunFunction(
+        function, args, current_browser(), GetFlags());
+    if (!result) {
+      LOG(ERROR) << function->GetError();
+    }
+    return result;
+  }
+
+  raw_ptr<const Extension> LoadExtensionInternal(const char* name,
+                                                 bool enable_file_access) {
+    // Store the created Extension object so that we can attach it to
+    // ExtensionFunctions.  Also load the extension in incognito profiles for
+    // testing incognito.
+    raw_ptr<const Extension> extension = ExtensionBrowserTest::LoadExtension(
+        test_data_dir_.AppendASCII(name),
+        {.allow_in_incognito = true, .allow_file_access = enable_file_access});
+    CHECK(extension);
+    content::WebContents* tab = chrome::AddSelectedTabWithURL(
+        current_browser(), extension->GetResourceURL("empty.html"),
+        ui::PAGE_TRANSITION_LINK);
+    EXPECT_TRUE(content::WaitForLoadStop(tab));
+    EventRouter::Get(current_browser()->profile())
+        ->AddEventListener(downloads::OnCreated::kEventName,
+                           tab->GetPrimaryMainFrame()->GetProcess(),
+                           extension->id());
+    EventRouter::Get(current_browser()->profile())
+        ->AddEventListener(downloads::OnChanged::kEventName,
+                           tab->GetPrimaryMainFrame()->GetProcess(),
+                           extension->id());
+    EventRouter::Get(current_browser()->profile())
+        ->AddEventListener(downloads::OnErased::kEventName,
+                           tab->GetPrimaryMainFrame()->GetProcess(),
+                           extension->id());
+    return extension;
+  }
+
   raw_ptr<const Extension> extension_;
+  raw_ptr<const Extension> second_extension_;
   raw_ptr<Browser> incognito_browser_;
   raw_ptr<Browser> current_browser_;
   std::unique_ptr<DownloadsEventsListener> events_listener_;
@@ -1065,9 +1106,9 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   GetCurrentManager()->GetAllDownloads(&items);
   EXPECT_EQ(0UL, items.size());
   ASSERT_TRUE(result);
-  download_item = NULL;
+  download_item = nullptr;
   ASSERT_TRUE(result->is_list());
-  base::Value::ListView result_list = result->GetListDeprecated();
+  const base::Value::List& result_list = result->GetList();
   ASSERT_EQ(1UL, result_list.size());
   ASSERT_TRUE(result_list[0].is_int());
   EXPECT_EQ(id, result_list[0].GetInt());
@@ -1210,7 +1251,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       RunFunctionAndReturnResult(new DownloadsSearchFunction(), "[{}]"));
   ASSERT_TRUE(result.get());
   ASSERT_TRUE(result->is_list());
-  ASSERT_EQ(1UL, result->GetListDeprecated().size());
+  ASSERT_EQ(1UL, result->GetList().size());
 }
 
 // Test that file existence check should be performed after search.
@@ -1229,7 +1270,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest, FileExistenceCheckAfterSearch) {
       RunFunctionAndReturnResult(new DownloadsSearchFunction(), "[{}]"));
   ASSERT_TRUE(result.get());
   ASSERT_TRUE(result->is_list());
-  ASSERT_EQ(1UL, result->GetListDeprecated().size());
+  ASSERT_EQ(1UL, result->GetList().size());
 
   // Check file removal update will eventually come. WaitForEvent() will
   // immediately return if the file is already removed.
@@ -1276,8 +1317,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsSearchFunction(), "[{\"filenameRegex\": \"foobar\"}]"));
   ASSERT_TRUE(result.get());
   ASSERT_TRUE(result->is_list());
-  ASSERT_EQ(1UL, result->GetListDeprecated().size());
-  const base::Value& item_value = result->GetListDeprecated()[0];
+  ASSERT_EQ(1UL, result->GetList().size());
+  const base::Value& item_value = result->GetList()[0];
   ASSERT_TRUE(item_value.is_dict());
   absl::optional<int> item_id = item_value.FindIntKey("id");
   ASSERT_TRUE(item_id);
@@ -1296,8 +1337,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest, DownloadExtensionTest_SearchId) {
       base::StringPrintf("[{\"id\": %u}]", items[0]->GetId())));
   ASSERT_TRUE(result.get());
   ASSERT_TRUE(result->is_list());
-  ASSERT_EQ(1UL, result->GetListDeprecated().size());
-  const base::Value& item_value = result->GetListDeprecated()[0];
+  ASSERT_EQ(1UL, result->GetList().size());
+  const base::Value& item_value = result->GetList()[0];
   ASSERT_TRUE(item_value.is_dict());
   absl::optional<int> item_id = item_value.FindIntKey("id");
   ASSERT_TRUE(item_id);
@@ -1317,7 +1358,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                                  "[{\"id\": 0, \"filename\": \"foobar\"}]"));
   ASSERT_TRUE(result.get());
   ASSERT_TRUE(result->is_list());
-  ASSERT_EQ(0UL, result->GetListDeprecated().size());
+  ASSERT_EQ(0UL, result->GetList().size());
 }
 
 // Test a single |orderBy| parameter for search().
@@ -1336,9 +1377,9 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsSearchFunction(), "[{\"orderBy\": [\"filename\"]}]"));
   ASSERT_TRUE(result.get());
   ASSERT_TRUE(result->is_list());
-  ASSERT_EQ(2UL, result->GetListDeprecated().size());
-  const base::Value& item0_value = result->GetListDeprecated()[0];
-  const base::Value& item1_value = result->GetListDeprecated()[1];
+  ASSERT_EQ(2UL, result->GetList().size());
+  const base::Value& item0_value = result->GetList()[0];
+  const base::Value& item1_value = result->GetList()[1];
   ASSERT_TRUE(item0_value.is_dict());
   ASSERT_TRUE(item1_value.is_dict());
   const std::string* item0_name = item0_value.FindStringKey("filename");
@@ -1366,9 +1407,9 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsSearchFunction(), "[{\"orderBy\": []}]"));
   ASSERT_TRUE(result.get());
   ASSERT_TRUE(result->is_list());
-  ASSERT_EQ(2UL, result->GetListDeprecated().size());
-  const base::Value& item0_value = result->GetListDeprecated()[0];
-  const base::Value& item1_value = result->GetListDeprecated()[1];
+  ASSERT_EQ(2UL, result->GetList().size());
+  const base::Value& item0_value = result->GetList()[0];
+  const base::Value& item1_value = result->GetList()[1];
   ASSERT_TRUE(item0_value.is_dict());
   ASSERT_TRUE(item1_value.is_dict());
   const std::string* item0_name = item0_value.FindStringKey("filename");
@@ -1400,7 +1441,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsSearchFunction(), "[{\"danger\": \"content\"}]"));
   ASSERT_TRUE(result.get());
   ASSERT_TRUE(result->is_list());
-  ASSERT_EQ(1UL, result->GetListDeprecated().size());
+  ASSERT_EQ(1UL, result->GetList().size());
 }
 
 // Test the |state| option for search().
@@ -1416,7 +1457,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsSearchFunction(), "[{\"state\": \"in_progress\"}]"));
   ASSERT_TRUE(result.get());
   ASSERT_TRUE(result->is_list());
-  ASSERT_EQ(1UL, result->GetListDeprecated().size());
+  ASSERT_EQ(1UL, result->GetList().size());
 }
 
 // Test the |limit| option for search().
@@ -1430,7 +1471,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       new DownloadsSearchFunction(), "[{\"limit\": 1}]"));
   ASSERT_TRUE(result.get());
   ASSERT_TRUE(result->is_list());
-  ASSERT_EQ(1UL, result->GetListDeprecated().size());
+  ASSERT_EQ(1UL, result->GetList().size());
 }
 
 // Test invalid search parameters.
@@ -1474,8 +1515,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                                  "\"limit\": 1}]"));
   ASSERT_TRUE(result.get());
   ASSERT_TRUE(result->is_list());
-  ASSERT_EQ(1UL, result->GetListDeprecated().size());
-  const base::Value& item_value = result->GetListDeprecated()[0];
+  ASSERT_EQ(1UL, result->GetList().size());
+  const base::Value& item_value = result->GetList()[0];
   ASSERT_TRUE(item_value.is_dict());
   const std::string* item_name = item_value.FindStringKey("filename");
   ASSERT_TRUE(item_name);
@@ -1515,9 +1556,9 @@ IN_PROC_BROWSER_TEST_F(
       RunFunctionAndReturnResult(new DownloadsSearchFunction(), "[{}]");
   ASSERT_TRUE(result_value.get());
   ASSERT_TRUE(result_value->is_list());
-  ASSERT_EQ(2UL, result_value->GetListDeprecated().size());
+  ASSERT_EQ(2UL, result_value->GetList().size());
   {
-    const base::Value& result_dict = result_value->GetListDeprecated()[0];
+    const base::Value& result_dict = result_value->GetList()[0];
     ASSERT_TRUE(result_dict.is_dict());
     const std::string* filename = result_dict.FindStringKey("filename");
     ASSERT_TRUE(filename);
@@ -1528,7 +1569,7 @@ IN_PROC_BROWSER_TEST_F(
     EXPECT_FALSE(is_incognito.value());
   }
   {
-    const base::Value& result_dict = result_value->GetListDeprecated()[1];
+    const base::Value& result_dict = result_value->GetList()[1];
     ASSERT_TRUE(result_dict.is_dict());
     const std::string* filename = result_dict.FindStringKey("filename");
     ASSERT_TRUE(filename);
@@ -1546,9 +1587,9 @@ IN_PROC_BROWSER_TEST_F(
       RunFunctionAndReturnResult(new DownloadsSearchFunction(), "[{}]");
   ASSERT_TRUE(result_value.get());
   ASSERT_TRUE(result_value->is_list());
-  ASSERT_EQ(1UL, result_value->GetListDeprecated().size());
+  ASSERT_EQ(1UL, result_value->GetList().size());
   {
-    const base::Value& result_dict = result_value->GetListDeprecated()[0];
+    const base::Value& result_dict = result_value->GetList()[0];
     ASSERT_TRUE(result_dict.is_dict());
     const std::string* filename = result_dict.FindStringKey("filename");
     ASSERT_TRUE(filename);
@@ -1848,7 +1889,7 @@ class CustomResponse : public net::test_server::HttpResponse {
   void SendResponse(
       base::WeakPtr<net::test_server::HttpResponseDelegate> delegate) override {
     base::StringPairs headers = {
-        //"HTTP/1.1 200 OK\r\n"
+        // "HTTP/1.1 200 OK\r\n"
         {"Content-type", "application/octet-stream"},
         {"Cache-Control", "max-age=0"},
     };
@@ -1963,6 +2004,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
       "hOsT",
       "kEEp-aLivE",
       "rEfErEr",
+      "sEt-cOoKiE",
       "tE",
       "trAilER",
       "trANsfer-eNcodiNg",
@@ -2384,7 +2426,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                                  "  \"filename\": {"
                                  "    \"previous\": \"\","
                                  "    \"current\": \"%s\"}}]",
-                                 result_id, GetFilename("file").c_str())));
+                                 result_id, GetFilename("file.txt").c_str())));
   ASSERT_TRUE(WaitFor(downloads::OnChanged::kEventName,
                       base::StringPrintf(
                           "[{\"id\": %d,"
@@ -3190,6 +3232,9 @@ IN_PROC_BROWSER_TEST_F(
 IN_PROC_BROWSER_TEST_F(
     DownloadExtensionTest,
     DownloadExtensionTest_OnDeterminingFilename_SafeOverride) {
+  safe_browsing::FileTypePoliciesTestOverlay scoped_dangerous =
+      safe_browsing::ScopedMarkAllFilesDangerousForTesting();
+
   GoOnTheRecord();
   LoadExtension("downloads_split");
   AddFilenameDeterminer();
@@ -4438,7 +4483,7 @@ IN_PROC_BROWSER_TEST_F(
   content::RenderProcessHost* host = AddFilenameDeterminer();
 
   // Start a download.
-  DownloadItem* item = NULL;
+  DownloadItem* item = nullptr;
   {
     DownloadManager* manager = GetCurrentManager();
     std::unique_ptr<content::DownloadTestObserver> observer(
@@ -4462,7 +4507,7 @@ IN_PROC_BROWSER_TEST_F(
     for (auto iter = items.begin(); iter != items.end(); ++iter) {
       if ((*iter)->GetState() == DownloadItem::IN_PROGRESS) {
         // There should be only one IN_PROGRESS item.
-        EXPECT_EQ(NULL, item);
+        EXPECT_EQ(nullptr, item);
         item = *iter;
       }
     }
@@ -4570,17 +4615,13 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   EXPECT_TRUE(RunFunction(new DownloadsSetShelfEnabledFunction(), "[false]"));
   EXPECT_FALSE(DownloadCoreServiceFactory::GetForBrowserContext(
                    current_browser()->profile())
-                   ->IsShelfEnabled());
+                   ->IsDownloadUiEnabled());
   EXPECT_TRUE(RunFunction(new DownloadsSetShelfEnabledFunction(), "[true]"));
   EXPECT_TRUE(DownloadCoreServiceFactory::GetForBrowserContext(
                   current_browser()->profile())
-                  ->IsShelfEnabled());
-  // TODO(benjhayden) Test that existing shelves are hidden.
-  // TODO(benjhayden) Test multiple extensions.
-  // TODO(benjhayden) Test disabling extensions.
+                  ->IsDownloadUiEnabled());
   // TODO(benjhayden) Test that browsers associated with other profiles are not
   // affected.
-  // TODO(benjhayden) Test incognito.
 }
 
 // TODO(benjhayden) Figure out why DisableExtension() does not fire
@@ -4588,6 +4629,21 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
 
 // TODO(benjhayden) Test that the shelf is shown for download() both with and
 // without a WebContents.
+
+IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
+                       DownloadExtensionTest_SetUiOptions) {
+  LoadExtension("downloads_split");
+  EXPECT_TRUE(RunFunction(new DownloadsSetUiOptionsFunction(),
+                          R"([{"enabled": false}])"));
+  EXPECT_FALSE(DownloadCoreServiceFactory::GetForBrowserContext(
+                   current_browser()->profile())
+                   ->IsDownloadUiEnabled());
+  EXPECT_TRUE(RunFunction(new DownloadsSetUiOptionsFunction(),
+                          R"([{"enabled": true}])"));
+  EXPECT_TRUE(DownloadCoreServiceFactory::GetForBrowserContext(
+                  current_browser()->profile())
+                  ->IsDownloadUiEnabled());
+}
 
 void OnDangerPromptCreated(DownloadDangerPrompt* prompt) {
   prompt->InvokeActionForTesting(DownloadDangerPrompt::ACCEPT);
@@ -4604,6 +4660,9 @@ void OnDangerPromptCreated(DownloadDangerPrompt* prompt) {
 #endif
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                        MAYBE_DownloadExtensionTest_AcceptDanger) {
+  safe_browsing::FileTypePoliciesTestOverlay scoped_dangerous =
+      safe_browsing::ScopedMarkAllFilesDangerousForTesting();
+
   // Download a file that will be marked dangerous; click the browser action
   // button; the browser action poup will call acceptDanger(); when the
   // DownloadDangerPrompt is created, pretend that the user clicks the Accept
@@ -4692,6 +4751,141 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                                          R"(    "current": false}}])",
                                          result_id)));
 }
+
+// The DownloadExtensionBubbleEnabledTest relies on the download surface, which
+// ChromeOS_ASH doesn't use (see crbug.com/1323505).
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+class DownloadExtensionBubbleEnabledTest : public DownloadExtensionTest {
+ public:
+  DownloadExtensionBubbleEnabledTest() {
+    feature_list_.InitAndEnableFeature(safe_browsing::kDownloadBubble);
+  }
+
+  DownloadDisplay* GetDownloadToolbarButton() {
+    return current_browser()
+        ->window()
+        ->GetDownloadBubbleUIController()
+        ->GetDownloadDisplayController()
+        ->download_display_for_testing();
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(DownloadExtensionBubbleEnabledTest,
+                       DownloadExtensionBubbleEnabledTest_SetUiOptions) {
+  DownloadManager::DownloadVector items;
+  CreateTwoDownloads(&items);
+  ScopedItemVectorCanceller delete_items(&items);
+  LoadExtension("downloads_split");
+
+  EXPECT_TRUE(RunFunction(new DownloadsSetUiOptionsFunction(),
+                          R"([{"enabled": true}])"));
+  EXPECT_TRUE(GetDownloadToolbarButton()->IsShowing());
+
+  EXPECT_TRUE(RunFunction(new DownloadsSetUiOptionsFunction(),
+                          R"([{"enabled": false}])"));
+  EXPECT_FALSE(GetDownloadToolbarButton()->IsShowing());
+
+  items[0]->Cancel(true);
+  // Remain hidden on download updates.
+  EXPECT_FALSE(GetDownloadToolbarButton()->IsShowing());
+}
+
+IN_PROC_BROWSER_TEST_F(
+    DownloadExtensionBubbleEnabledTest,
+    DownloadExtensionBubbleEnabledTest_SetUiOptionsBeforeDownloadStart) {
+  LoadExtension("downloads_split");
+  EXPECT_TRUE(RunFunction(new DownloadsSetUiOptionsFunction(),
+                          R"([{"enabled": false}])"));
+  DownloadManager::DownloadVector items;
+  CreateTwoDownloads(&items);
+  ScopedItemVectorCanceller delete_items(&items);
+  EXPECT_FALSE(GetDownloadToolbarButton()->IsShowing());
+}
+
+IN_PROC_BROWSER_TEST_F(
+    DownloadExtensionBubbleEnabledTest,
+    DownloadExtensionBubbleEnabledTest_SetUiOptionsShowDetails) {
+  LoadExtension("downloads_split");
+  DownloadManager::DownloadVector items;
+  CreateTwoDownloads(&items);
+  ScopedItemVectorCanceller delete_items(&items);
+
+  EXPECT_TRUE(GetDownloadToolbarButton()->IsShowing());
+  // Details are not shown because the download item is observed by an
+  // extension.
+  EXPECT_FALSE(GetDownloadToolbarButton()->IsShowingDetails());
+
+  items[0]->Cancel(true);
+  EXPECT_TRUE(GetDownloadToolbarButton()->IsShowing());
+  // Details are not shown because the download item is observed by an
+  // extension.
+  EXPECT_FALSE(GetDownloadToolbarButton()->IsShowingDetails());
+
+  DisableExtension(GetExtensionId());
+  items[1]->Cancel(true);
+  EXPECT_TRUE(GetDownloadToolbarButton()->IsShowing());
+  // Details are shown because the extension is disabled.
+  EXPECT_TRUE(GetDownloadToolbarButton()->IsShowingDetails());
+}
+
+IN_PROC_BROWSER_TEST_F(
+    DownloadExtensionBubbleEnabledTest,
+    DownloadExtensionBubbleEnabledTest_SetUiOptionsOffTheRecord) {
+  LoadExtension("downloads_split");
+  EXPECT_TRUE(RunFunction(new DownloadsSetUiOptionsFunction(),
+                          R"([{"enabled": false}])"));
+  DownloadManager::DownloadVector items;
+  CreateTwoDownloads(&items);
+  ScopedItemVectorCanceller delete_items(&items);
+  EXPECT_FALSE(GetDownloadToolbarButton()->IsShowing());
+
+  GoOffTheRecord();
+  EXPECT_FALSE(GetDownloadToolbarButton()->IsShowing());
+
+  EXPECT_TRUE(RunFunction(new DownloadsSetUiOptionsFunction(),
+                          R"([{"enabled": true}])"));
+  items[0]->Cancel(true);
+  EXPECT_TRUE(GetDownloadToolbarButton()->IsShowing());
+
+  GoOnTheRecord();
+  EXPECT_TRUE(GetDownloadToolbarButton()->IsShowing());
+}
+
+IN_PROC_BROWSER_TEST_F(
+    DownloadExtensionBubbleEnabledTest,
+    DownloadExtensionBubbleEnabledTest_SetUiOptionsMultipleExtensions) {
+  LoadExtension("downloads_split");
+  EXPECT_TRUE(RunFunction(new DownloadsSetUiOptionsFunction(),
+                          R"([{"enabled": false}])"));
+  DownloadManager::DownloadVector items;
+  CreateTwoDownloads(&items);
+  ScopedItemVectorCanceller delete_items(&items);
+  EXPECT_FALSE(GetDownloadToolbarButton()->IsShowing());
+
+  LoadSecondExtension("downloads_spanning");
+  // Returns error because the first extension has disabled the UI.
+  EXPECT_STREQ(errors::kUiDisabled, RunFunctionAndReturnErrorInSecondExtension(
+                                        new DownloadsSetUiOptionsFunction(),
+                                        R"([{"enabled": true}])")
+                                        .c_str());
+  // Two extensions can set the UI to disabled at the same time. No error should
+  // be returned.
+  EXPECT_TRUE(RunFunctionInSecondExtension(new DownloadsSetUiOptionsFunction(),
+                                           R"([{"enabled": false}])"));
+
+  DisableExtension(GetExtensionId());
+  items[0]->Pause();
+  // The UI keeps disabled because the second extension has set it to disabled.
+  EXPECT_FALSE(GetDownloadToolbarButton()->IsShowing());
+
+  DisableExtension(GetSecondExtensionId());
+  items[0]->Cancel(true);
+  EXPECT_TRUE(GetDownloadToolbarButton()->IsShowing());
+}
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 class DownloadsApiTest : public ExtensionApiTest {
  public:

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_util.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
@@ -36,6 +37,7 @@
 #include "components/update_client/component_unpacker.h"
 #include "components/update_client/update_client.h"
 #include "components/update_client/update_client_errors.h"
+#include "components/update_client/update_query_params.h"
 #include "components/update_client/utils.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
@@ -356,6 +358,17 @@ void ComponentInstaller::StartRegistration(
                   << ").";
       older_paths.push_back(path);
       continue;
+    } else {
+      const base::Value::List* accept_archs =
+          manifest.GetDict().FindList("accept_arch");
+      if (accept_archs != nullptr &&
+          base::ranges::none_of(*accept_archs, [](const base::Value& v) {
+            return v.is_string() &&
+                   v.GetString() == update_client::UpdateQueryParams::GetArch();
+          })) {
+        older_paths.push_back(path);
+        continue;
+      }
     }
 
     // New valid |version| folder found!

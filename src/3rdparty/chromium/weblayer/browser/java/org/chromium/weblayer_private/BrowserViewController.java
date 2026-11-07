@@ -1,9 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.weblayer_private;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.res.Resources;
 import android.os.RemoteException;
@@ -11,7 +12,6 @@ import android.util.AndroidRuntimeException;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
-import android.webkit.ValueCallback;
 import android.widget.FrameLayout;
 import android.widget.RelativeLayout;
 
@@ -42,7 +42,6 @@ import org.chromium.ui.modaldialog.ModalDialogProperties;
 import org.chromium.ui.modaldialog.SimpleModalDialogController;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.util.TokenHolder;
-import org.chromium.weblayer_private.interfaces.BrowserEmbeddabilityMode;
 
 /**
  * BrowserViewController controls the set of Views needed to show the WebContents.
@@ -116,8 +115,7 @@ public final class BrowserViewController
         mContentViewRenderView = new ContentViewRenderView(context, recreateForConfigurationChange);
         mContentViewRenderView.addOnAttachStateChangeListener(listener);
 
-        mContentViewRenderView.onNativeLibraryLoaded(
-                mWindowAndroid, BrowserEmbeddabilityMode.UNSUPPORTED);
+        mContentViewRenderView.onNativeLibraryLoaded(mWindowAndroid);
         mTopControlsContainerView =
                 new BrowserControlsContainerView(context, mContentViewRenderView, this, true,
                         (savedState == null) ? null : savedState.mTopControlsState);
@@ -188,9 +186,18 @@ public final class BrowserViewController
         });
         mContentViewRenderView.addView(mBottomSheetContainer);
 
+        Activity activity = ContextUtils.activityFromContext(context);
+        if (activity == null) {
+            // TODO(rayankans): Remove assumptions about Activity from BottomSheetController.
+            mBottomSheetController = null;
+            mPwaBottomSheetController = null;
+            mBottomSheetObserver = null;
+            return;
+        }
         mBottomSheetController = BottomSheetControllerFactory.createBottomSheetController(
-                () -> mScrim, (v) -> {}, ContextUtils.activityFromContext(context).getWindow(),
-                KeyboardVisibilityDelegate.getInstance(), () -> mBottomSheetContainer);
+                () -> mScrim, (v) -> {}, activity.getWindow(),
+                KeyboardVisibilityDelegate.getInstance(), () -> mBottomSheetContainer,
+                () -> mContentViewRenderView.getHeight());
         BottomSheetControllerFactory.attach(mWindowAndroid, mBottomSheetController);
 
         mPwaBottomSheetController = PwaBottomSheetControllerFactory.createPwaBottomSheetController(
@@ -234,9 +241,11 @@ public final class BrowserViewController
     }
 
     public void destroy() {
-        BottomSheetControllerFactory.detach(mBottomSheetController);
-        mBottomSheetController.removeObserver(mBottomSheetObserver);
-        PwaBottomSheetControllerFactory.detach(mPwaBottomSheetController);
+        if (mBottomSheetController != null) {
+            BottomSheetControllerFactory.detach(mBottomSheetController);
+            mBottomSheetController.removeObserver(mBottomSheetObserver);
+            PwaBottomSheetControllerFactory.detach(mPwaBottomSheetController);
+        }
         mWindowAndroid.setModalDialogManager(null);
         setActiveTab(null);
         if (mOnscreenContentProvider != null) mOnscreenContentProvider.destroy();
@@ -450,11 +459,6 @@ public final class BrowserViewController
         mContentViewRenderView.setWebContentsHeightDelta(
                 mTopControlsContainerView.getContentHeightDelta()
                 + mBottomControlsContainerView.getContentHeightDelta());
-    }
-
-    public void setEmbeddabilityMode(
-            @BrowserEmbeddabilityMode int mode, ValueCallback<Boolean> callback) {
-        mContentViewRenderView.requestMode(mode, callback);
     }
 
     public void setMinimumSurfaceSize(int width, int height) {

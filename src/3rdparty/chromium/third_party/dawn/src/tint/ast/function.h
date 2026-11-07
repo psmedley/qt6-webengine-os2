@@ -26,89 +26,91 @@
 #include "src/tint/ast/builtin_attribute.h"
 #include "src/tint/ast/group_attribute.h"
 #include "src/tint/ast/location_attribute.h"
+#include "src/tint/ast/parameter.h"
 #include "src/tint/ast/pipeline_stage.h"
-#include "src/tint/ast/variable.h"
 
 namespace tint::ast {
 
 /// A Function statement.
 class Function final : public Castable<Function, Node> {
- public:
-  /// Create a function
-  /// @param program_id the identifier of the program that owns this node
-  /// @param source the variable source
-  /// @param symbol the function symbol
-  /// @param params the function parameters
-  /// @param return_type the return type
-  /// @param body the function body
-  /// @param attributes the function attributes
-  /// @param return_type_attributes the return type attributes
-  Function(ProgramID program_id,
-           const Source& source,
-           Symbol symbol,
-           VariableList params,
-           const Type* return_type,
-           const BlockStatement* body,
-           AttributeList attributes,
-           AttributeList return_type_attributes);
-  /// Move constructor
-  Function(Function&&);
+  public:
+    /// Create a function
+    /// @param pid the identifier of the program that owns this node
+    /// @param nid the unique node identifier
+    /// @param source the variable source
+    /// @param symbol the function symbol
+    /// @param params the function parameters
+    /// @param return_type the return type
+    /// @param body the function body
+    /// @param attributes the function attributes
+    /// @param return_type_attributes the return type attributes
+    Function(ProgramID pid,
+             NodeID nid,
+             const Source& source,
+             Symbol symbol,
+             utils::VectorRef<const Parameter*> params,
+             const Type* return_type,
+             const BlockStatement* body,
+             utils::VectorRef<const Attribute*> attributes,
+             utils::VectorRef<const Attribute*> return_type_attributes);
+    /// Move constructor
+    Function(Function&&);
 
-  ~Function() override;
+    ~Function() override;
 
-  /// @returns the functions pipeline stage or None if not set
-  ast::PipelineStage PipelineStage() const;
+    /// @returns the functions pipeline stage or None if not set
+    ast::PipelineStage PipelineStage() const;
 
-  /// @returns true if this function is an entry point
-  bool IsEntryPoint() const { return PipelineStage() != PipelineStage::kNone; }
+    /// @returns true if this function is an entry point
+    bool IsEntryPoint() const { return PipelineStage() != PipelineStage::kNone; }
 
-  /// Clones this node and all transitive child nodes using the `CloneContext`
-  /// `ctx`.
-  /// @param ctx the clone context
-  /// @return the newly cloned node
-  const Function* Clone(CloneContext* ctx) const override;
+    /// Clones this node and all transitive child nodes using the `CloneContext`
+    /// `ctx`.
+    /// @param ctx the clone context
+    /// @return the newly cloned node
+    const Function* Clone(CloneContext* ctx) const override;
 
-  /// The function symbol
-  const Symbol symbol;
+    /// The function symbol
+    const Symbol symbol;
 
-  /// The function params
-  const VariableList params;
+    /// The function params
+    const utils::Vector<const Parameter*, 8> params;
 
-  /// The function return type
-  const Type* const return_type;
+    /// The function return type
+    const Type* const return_type;
 
-  /// The function body
-  const BlockStatement* const body;
+    /// The function body
+    const BlockStatement* const body;
 
-  /// The attributes attached to this function
-  const AttributeList attributes;
+    /// The attributes attached to this function
+    const utils::Vector<const Attribute*, 2> attributes;
 
-  /// The attributes attached to the function return type.
-  const AttributeList return_type_attributes;
+    /// The attributes attached to the function return type.
+    const utils::Vector<const Attribute*, 2> return_type_attributes;
 };
 
 /// A list of functions
-class FunctionList : public std::vector<const Function*> {
- public:
-  /// Appends f to the end of the list
-  /// @param f the function to append to this list
-  void Add(const Function* f) { this->emplace_back(f); }
+class FunctionList : public utils::Vector<const Function*, 8> {
+  public:
+    /// Appends f to the end of the list
+    /// @param f the function to append to this list
+    void Add(const Function* f) { this->Push(f); }
 
-  /// Returns the function with the given name
-  /// @param sym the function symbol to search for
-  /// @returns the associated function or nullptr if none exists
-  const Function* Find(Symbol sym) const;
+    /// Returns the function with the given name
+    /// @param sym the function symbol to search for
+    /// @returns the associated function or nullptr if none exists
+    const Function* Find(Symbol sym) const;
 
-  /// Returns the function with the given name
-  /// @param sym the function symbol to search for
-  /// @param stage the pipeline stage
-  /// @returns the associated function or nullptr if none exists
-  const Function* Find(Symbol sym, PipelineStage stage) const;
+    /// Returns the function with the given name
+    /// @param sym the function symbol to search for
+    /// @param stage the pipeline stage
+    /// @returns the associated function or nullptr if none exists
+    const Function* Find(Symbol sym, PipelineStage stage) const;
 
-  /// @param stage the pipeline stage
-  /// @returns true if the Builder contains an entrypoint function with
-  /// the given stage
-  bool HasStage(PipelineStage stage) const;
+    /// @param stage the pipeline stage
+    /// @returns true if the Builder contains an entrypoint function with
+    /// the given stage
+    bool HasStage(PipelineStage stage) const;
 };
 
 }  // namespace tint::ast

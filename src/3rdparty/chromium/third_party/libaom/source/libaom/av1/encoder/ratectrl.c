@@ -2160,6 +2160,7 @@ void av1_rc_postencode_update(AV1_COMP *cpi, uint64_t bytes_used) {
   }
 #endif
   if (current_frame->frame_type == KEY_FRAME) rc->frames_since_key = 0;
+
   rc->prev_coded_width = cm->width;
   rc->prev_coded_height = cm->height;
   // if (current_frame->frame_number == 1 && cm->show_frame)

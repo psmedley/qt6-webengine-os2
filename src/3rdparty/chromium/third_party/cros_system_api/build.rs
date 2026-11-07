@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium OS Authors. All rights reserved.
+// Copyright 2019 The ChromiumOS Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,6 +36,11 @@ const BINDINGS_TO_GENERATE: &[(&str, &str, BindingsType)] = &[
         BindingsType::Client(OPTS),
     ),
     (
+        "org_chromium_dlcservice",
+        "dlcservice/dbus_adaptors/org.chromium.DlcServiceInterface.xml",
+        BindingsType::Client(OPTS),
+    ),
+    (
         "org_chromium_flimflam_manager",
         "shill/dbus_bindings/org.chromium.flimflam.Manager.dbus-xml",
         BindingsType::Client(OPTS),
@@ -43,6 +48,11 @@ const BINDINGS_TO_GENERATE: &[(&str, &str, BindingsType)] = &[
     (
         "org_chromium_flimflam_service",
         "shill/dbus_bindings/org.chromium.flimflam.Service.dbus-xml",
+        BindingsType::Client(OPTS),
+    ),
+    (
+        "org_chromium_power_manager",
+        "power_manager/dbus_bindings/org.chromium.PowerManager.xml",
         BindingsType::Client(OPTS),
     ),
     (
@@ -55,23 +65,39 @@ const BINDINGS_TO_GENERATE: &[(&str, &str, BindingsType)] = &[
         "cryptohome/dbus_bindings/org.chromium.UserDataAuth.xml",
         BindingsType::Client(OPTS),
     ),
+    (
+        "org_chromium_vtpm",
+        "vtpm/dbus_bindings/org.chromium.Vtpm.xml",
+        BindingsType::Client(OPTS),
+    ),
 ];
 
 // (<module name>, <relative path to .proto file>)
 // When adding additional protos, remember to include the source project and subtree in the
 // ebuild. Otherwise, the source files will not be accessible when building dev-rust/system_api.
 const PROTOS_TO_GENERATE: &[(&str, &str)] = &[
+    ("arc", "system_api/dbus/arc/arc.proto"),
     (
         "auth_factor",
         "system_api/dbus/cryptohome/auth_factor.proto",
     ),
+    (
+        "concierge_service",
+        "system_api/dbus/vm_concierge/concierge_service.proto",
+    ),
+    ("dlcservice", "system_api/dbus/dlcservice/dlcservice.proto"),
     ("fido", "system_api/dbus/cryptohome/fido.proto"),
     ("key", "system_api/dbus/cryptohome/key.proto"),
     ("rpc", "system_api/dbus/cryptohome/rpc.proto"),
     (
+        "shadercached",
+        "system_api/dbus/shadercached/shadercached.proto",
+    ),
+    (
         "UserDataAuth",
         "system_api/dbus/cryptohome/UserDataAuth.proto",
     ),
+    ("vtpm_interface", "vtpm/vtpm_interface.proto"),
 ];
 
 fn generate_protos(source_dir: &Path, protos: &[(&str, &str)]) -> Result<()> {
@@ -90,11 +116,13 @@ fn generate_protos(source_dir: &Path, protos: &[(&str, &str)]) -> Result<()> {
     for (module, input_path) in protos {
         let input_path = source_dir.join(input_path);
         let input_dir = input_path.parent().unwrap();
+        let parent_input_dir = source_dir.join("system_api/dbus");
 
         // Invoke protobuf compiler.
         protoc_rust::Codegen::new()
             .input(input_path.as_os_str().to_str().unwrap())
             .include(input_dir.as_os_str().to_str().unwrap())
+            .include(parent_input_dir)
             .out_dir(&out_dir)
             .run()
             .expect("protoc");

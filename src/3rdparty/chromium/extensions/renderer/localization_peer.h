@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,7 +59,9 @@ class ExtensionLocalizationPeer : public blink::WebRequestPeer {
   bool OnReceivedRedirect(const net::RedirectInfo& redirect_info,
                           network::mojom::URLResponseHeadPtr head,
                           std::vector<std::string>*) override;
-  void OnReceivedResponse(network::mojom::URLResponseHeadPtr head) override;
+  void OnReceivedResponse(
+      network::mojom::URLResponseHeadPtr head,
+      base::TimeTicks response_arrival_at_renderer) override;
   void OnStartLoadingResponseBody(
       mojo::ScopedDataPipeConsumerHandle body) override;
   void OnTransferSizeUpdated(int transfer_size_diff) override;

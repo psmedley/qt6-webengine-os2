@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -79,7 +79,8 @@ void ScopedCriticalAction::Core::EndBackgroundTask(scoped_refptr<Core> core) {
     if (core->background_task_id_ == UIBackgroundTaskInvalid) {
       return;
     }
-    task_id = core->background_task_id_;
+    task_id =
+        static_cast<UIBackgroundTaskIdentifier>(core->background_task_id_);
     core->background_task_id_ = UIBackgroundTaskInvalid;
   }
 

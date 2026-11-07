@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,18 +20,16 @@
 #include "components/permissions/prediction_service/prediction_common.h"
 #include "components/permissions/prediction_service/prediction_request_features.h"
 #include "components/permissions/request_type.h"
-#include "components/ukm/content/source_url_recorder.h"
-#include "content/public/browser/permission_type.h"
 #include "content/public/browser/web_contents.h"
 #include "services/metrics/public/cpp/metrics_utils.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
+#include "third_party/blink/public/common/permissions/permission_utils.h"
 #include "url/gurl.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #include "base/android/jni_string.h"
-#include "components/permissions/android/jni_headers/PermissionUmaUtil_jni.h"
 #endif
 
 namespace permissions {
@@ -50,7 +48,7 @@ namespace permissions {
                                permission_bubble_type);                      \
   }
 
-using content::PermissionType;
+using blink::PermissionType;
 
 namespace {
 
@@ -108,8 +106,8 @@ RequestTypeForUma GetUmaValueForRequestType(RequestType request_type) {
     case RequestType::kVrSession:
       return RequestTypeForUma::PERMISSION_VR;
 #if !BUILDFLAG(IS_ANDROID)
-    case RequestType::kWindowPlacement:
-      return RequestTypeForUma::PERMISSION_WINDOW_PLACEMENT;
+    case RequestType::kWindowManagement:
+      return RequestTypeForUma::PERMISSION_WINDOW_MANAGEMENT;
 #endif
   }
 }
@@ -154,7 +152,7 @@ std::string GetPermissionRequestString(RequestTypeForUma type) {
       return "StorageAccess";
     case RequestTypeForUma::PERMISSION_CAMERA_PAN_TILT_ZOOM:
       return "CameraPanTiltZoom";
-    case RequestTypeForUma::PERMISSION_WINDOW_PLACEMENT:
+    case RequestTypeForUma::PERMISSION_WINDOW_MANAGEMENT:
       return "WindowPlacement";
     case RequestTypeForUma::PERMISSION_LOCAL_FONTS:
       return "LocalFonts";
@@ -578,13 +576,6 @@ void PermissionUmaUtil::PermissionPromptResolved(
     RecordPermissionPromptPriorCount(
         permission, priorIgnorePrefix,
         autoblocker->GetIgnoreCount(requesting_origin, permission));
-#if BUILDFLAG(IS_ANDROID)
-    if (permission == ContentSettingsType::GEOLOCATION &&
-        permission_action != PermissionAction::IGNORED) {
-      RecordWithBatteryBucket("Permissions.BatteryLevel." + action_string +
-                              ".Geolocation");
-    }
-#endif
   }
 
   base::UmaHistogramEnumeration("Permissions.Action.WithDisposition." +
@@ -659,14 +650,6 @@ void PermissionUmaUtil::RecordPermissionPromptPriorCount(
       ->Add(count);
 }
 
-#if BUILDFLAG(IS_ANDROID)
-void PermissionUmaUtil::RecordWithBatteryBucket(const std::string& histogram) {
-  JNIEnv* env = base::android::AttachCurrentThread();
-  Java_PermissionUmaUtil_recordWithBatteryBucket(
-      env, base::android::ConvertUTF8ToJavaString(env, histogram));
-}
-#endif
-
 void PermissionUmaUtil::RecordInfobarDetailsExpanded(bool expanded) {
   base::UmaHistogramBoolean("Permissions.Prompt.Infobar.DetailsExpanded",
                             expanded);
@@ -731,9 +714,7 @@ PermissionUmaUtil::ScopedRevocationReporter::ScopedRevocationReporter(
   content_settings::SettingInfo setting_info;
   settings_map->GetWebsiteSetting(primary_url, secondary_url, content_type_,
                                   &setting_info);
-  last_modified_date_ = settings_map->GetSettingLastModifiedDate(
-      setting_info.primary_pattern, setting_info.secondary_pattern,
-      content_type);
+  last_modified_date_ = setting_info.metadata.last_modified;
 }
 
 PermissionUmaUtil::ScopedRevocationReporter::ScopedRevocationReporter(
@@ -778,7 +759,7 @@ PermissionUmaUtil::ScopedRevocationReporter::~ScopedRevocationReporter() {
 void PermissionUmaUtil::RecordPermissionUsage(
     ContentSettingsType permission_type,
     content::BrowserContext* browser_context,
-    const content::WebContents* web_contents,
+    content::WebContents* web_contents,
     const GURL& requesting_origin) {
   PermissionsClient::Get()->GetUkmSourceId(
       browser_context, web_contents, requesting_origin,
@@ -794,7 +775,7 @@ void PermissionUmaUtil::RecordPermissionAction(
     PermissionPromptDisposition ui_disposition,
     absl::optional<PermissionPromptDispositionReason> ui_reason,
     const GURL& requesting_origin,
-    const content::WebContents* web_contents,
+    content::WebContents* web_contents,
     content::BrowserContext* browser_context,
     absl::optional<PredictionGrantLikelihood> predicted_grant_likelihood,
     absl::optional<bool> prediction_decision_held_back) {
@@ -912,7 +893,7 @@ void PermissionUmaUtil::RecordPermissionAction(
       base::UmaHistogramEnumeration("Permissions.Action.CameraPanTiltZoom",
                                     action, PermissionAction::NUM);
       break;
-    case ContentSettingsType::WINDOW_PLACEMENT:
+    case ContentSettingsType::WINDOW_MANAGEMENT:
       base::UmaHistogramEnumeration("Permissions.Action.WindowPlacement",
                                     action, PermissionAction::NUM);
       break;
@@ -1000,24 +981,6 @@ void PermissionUmaUtil::RecordAutoDSEPermissionReverted(
   base::UmaHistogramEnumeration(
       "Permissions.DSE.AutoPermissionRevertTransition." + permission_string,
       transition);
-
-  if (transition == AutoDSEPermissionRevertTransition::INVALID_END_STATE) {
-    base::UmaHistogramEnumeration(
-        "Permissions.DSE.InvalidAutoPermissionRevertTransition."
-        "BackedUpSetting." +
-            permission_string,
-        backed_up_setting, CONTENT_SETTING_NUM_SETTINGS);
-    base::UmaHistogramEnumeration(
-        "Permissions.DSE.InvalidAutoPermissionRevertTransition."
-        "EffectiveSetting." +
-            permission_string,
-        effective_setting, CONTENT_SETTING_NUM_SETTINGS);
-    base::UmaHistogramEnumeration(
-        "Permissions.DSE.InvalidAutoPermissionRevertTransition."
-        "EndStateSetting." +
-            permission_string,
-        end_state_setting, CONTENT_SETTING_NUM_SETTINGS);
-  }
 }
 
 // static
@@ -1054,6 +1017,53 @@ void PermissionUmaUtil::RecordPermissionPredictionServiceHoldback(
         "Permissions.PredictionService.Response." +
             GetPermissionRequestString(GetUmaValueForRequestType(request_type)),
         is_heldback);
+  }
+}
+
+// static
+void PermissionUmaUtil::RecordPageInfoDialogAccessType(
+    PageInfoDialogAccessType access_type) {
+  base::UmaHistogramEnumeration(
+      "Permissions.ConfirmationChip.PageInfoDialogAccessType", access_type);
+}
+
+// static
+void PermissionUmaUtil::RecordPageInfoPermissionChangeWithin1m(
+    ContentSettingsType type,
+    PermissionAction previous_action,
+    ContentSetting setting_after) {
+  DCHECK(IsRequestablePermissionType(type));
+  std::string permission_type = GetPermissionRequestString(
+      GetUmaValueForRequestType(ContentSettingsTypeToRequestType(type)));
+  std::string histogram_name =
+      "Permissions.PageInfo.ChangedWithin1m." + permission_type;
+  switch (previous_action) {
+    case PermissionAction::GRANTED:
+    case PermissionAction::GRANTED_ONCE:
+      if (setting_after == ContentSetting::CONTENT_SETTING_BLOCK) {
+        base::UmaHistogramEnumeration(histogram_name,
+                                      PermissionChangeAction::REVOKED);
+      } else if (setting_after == ContentSetting::CONTENT_SETTING_DEFAULT) {
+        base::UmaHistogramEnumeration(
+            histogram_name, PermissionChangeAction::RESET_FROM_ALLOWED);
+      }
+      break;
+    case PermissionAction::DENIED:
+      if (setting_after == ContentSetting::CONTENT_SETTING_ALLOW) {
+        base::UmaHistogramEnumeration(histogram_name,
+                                      PermissionChangeAction::REALLOWED);
+      } else if (setting_after == ContentSetting::CONTENT_SETTING_DEFAULT) {
+        base::UmaHistogramEnumeration(
+            histogram_name, PermissionChangeAction::RESET_FROM_DENIED);
+      }
+      break;
+    case PermissionAction::DISMISSED:  // dismissing had no effect on content
+                                       // setting
+    case PermissionAction::IGNORED:    // ignoring has no effect on content
+                                       // settings
+    case PermissionAction::REVOKED:  // not a relevant use case for this metric
+    case PermissionAction::NUM:      // placeholder
+      break;                         // NOP
   }
 }
 

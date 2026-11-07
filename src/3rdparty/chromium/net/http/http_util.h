@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -450,7 +450,7 @@ class NET_EXPORT HttpUtil {
 
    private:
     HttpUtil::ValuesIterator props_;
-    bool valid_;
+    bool valid_ = true;
 
     std::string::const_iterator name_begin_;
     std::string::const_iterator name_end_;
@@ -463,7 +463,7 @@ class NET_EXPORT HttpUtil {
     // into the original's unquoted_value_ member.
     std::string unquoted_value_;
 
-    bool value_is_quoted_;
+    bool value_is_quoted_ = false;
 
     // True if values are required for each name/value pair; false if a
     // name is permitted to appear without a corresponding value.

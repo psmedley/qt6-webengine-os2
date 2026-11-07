@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/callback_forward.h"
 #include "components/password_manager/core/browser/password_form_digest.h"
+#include "components/password_manager/core/browser/password_store_backend_error.h"
 #include "components/password_manager/core/browser/password_store_change.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
@@ -26,20 +27,14 @@ struct PasswordForm;
 class FieldInfoStore;
 class SmartBubbleStatsStore;
 
-enum class PasswordStoreBackendError {
-  // Error which isn't specified properly, should be treated as kUnrecoverable.
-  kUnspecified,
-  // Recoverable which can be possible fixed by retrying request.
-  kRecoverable,
-  // Unrecoverable errors which can't be fixed easily. It may require some input
-  // from a user (to enter a passphrase) or indicate broken database.
-  kUnrecoverable,
-};
-
 using LoginsResult = std::vector<std::unique_ptr<PasswordForm>>;
 using LoginsReply = base::OnceCallback<void(LoginsResult)>;
-using PasswordStoreChangeListReply =
-    base::OnceCallback<void(absl::optional<PasswordStoreChangeList>)>;
+
+using PasswordChanges = absl::optional<PasswordStoreChangeList>;
+using PasswordChangesOrError =
+    absl::variant<PasswordChanges, PasswordStoreBackendError>;
+using PasswordChangesOrErrorReply =
+    base::OnceCallback<void(PasswordChangesOrError)>;
 
 using LoginsResultOrError =
     absl::variant<LoginsResult, PasswordStoreBackendError>;
@@ -52,26 +47,6 @@ using LoginsOrErrorReply = base::OnceCallback<void(LoginsResultOrError)>;
 // IO operation from possibly blocking the main thread.
 class PasswordStoreBackend {
  public:
-  // Delegate which provides information about current sync status and an
-  // account used for syncing. It can be called only after Sync service was
-  // instantiated.
-  class SyncDelegate {
-   public:
-    SyncDelegate() = default;
-    SyncDelegate(const SyncDelegate&) = delete;
-    SyncDelegate(SyncDelegate&&) = delete;
-    SyncDelegate& operator=(const SyncDelegate&) = delete;
-    SyncDelegate& operator=(SyncDelegate&&) = delete;
-    virtual ~SyncDelegate() = default;
-
-    // Tells whether sync enabled or not.
-    virtual bool IsSyncingPasswordsEnabled() = 0;
-
-    // Active syncing account if one exist. If sync disabled absl::nullopt will
-    // be returned.
-    virtual absl::optional<std::string> GetSyncingAccount() = 0;
-  };
-
   using RemoteChangesReceived =
       base::RepeatingCallback<void(absl::optional<PasswordStoreChangeList>)>;
 
@@ -113,9 +88,8 @@ class PasswordStoreBackend {
   // If |include_psl|==true, the PSL-matched forms are also included.
   // If multiple forms are given, those will be concatenated.
   // Callback is called on the main sequence.
-  // TODO(crbug.com/1217071): Check whether this needs OptionalLoginsReply, too.
   virtual void FillMatchingLoginsAsync(
-      LoginsReply callback,
+      LoginsOrErrorReply callback,
       bool include_psl,
       const std::vector<PasswordFormDigest>& forms) = 0;
 
@@ -126,29 +100,28 @@ class PasswordStoreBackend {
   // TODO(crbug.com/1217071): Delete corresponding Impl method from
   //  PasswordStore and the async method on backend_ instead.
 
-  // The completion callback in each of the write operations below receive an
-  // optional PasswordStoreChangeList. In case of success that the changelist
-  // will be populated with the executed changes. An empty changelist indicates
-  // that some error has occurred during the execution. The absence of the
-  // changelist indicates that the used backend (e.g. on Android) cannot
-  // confirm of the execution and a re-fetch is required to know the current
-  // state of the backend.
+  // The completion callback in each of the write operations below receive a
+  // variant of optional PasswordStoreChangeList or PasswordStoreBackendError.
+  // In case of success that the changelist will be populated with the executed
+  // changes. The absence of the changelist indicates that the used backend
+  // (e.g. on Android) cannot confirm of the execution and a re-fetch is
+  // required to know the current state of the backend.
   virtual void AddLoginAsync(const PasswordForm& form,
-                             PasswordStoreChangeListReply callback) = 0;
+                             PasswordChangesOrErrorReply callback) = 0;
   virtual void UpdateLoginAsync(const PasswordForm& form,
-                                PasswordStoreChangeListReply callback) = 0;
+                                PasswordChangesOrErrorReply callback) = 0;
   virtual void RemoveLoginAsync(const PasswordForm& form,
-                                PasswordStoreChangeListReply callback) = 0;
+                                PasswordChangesOrErrorReply callback) = 0;
   virtual void RemoveLoginsByURLAndTimeAsync(
       const base::RepeatingCallback<bool(const GURL&)>& url_filter,
       base::Time delete_begin,
       base::Time delete_end,
       base::OnceCallback<void(bool)> sync_completion,
-      PasswordStoreChangeListReply callback) = 0;
+      PasswordChangesOrErrorReply callback) = 0;
   virtual void RemoveLoginsCreatedBetweenAsync(
       base::Time delete_begin,
       base::Time delete_end,
-      PasswordStoreChangeListReply callback) = 0;
+      PasswordChangesOrErrorReply callback) = 0;
   virtual void DisableAutoSignInForOriginsAsync(
       const base::RepeatingCallback<bool(const GURL&)>& origin_filter,
       base::OnceClosure completion) = 0;
@@ -169,11 +142,10 @@ class PasswordStoreBackend {
 
   // Factory function for creating the backend. The Local backend requires the
   // provided `login_db_path` for storage and Android backend for migration
-  // purposes. |sync_delegate| is also required for migration purposes.
+  // purposes.
   static std::unique_ptr<PasswordStoreBackend> Create(
       const base::FilePath& login_db_path,
-      PrefService* prefs,
-      std::unique_ptr<SyncDelegate> sync_delegate);
+      PrefService* prefs);
 };
 
 }  // namespace password_manager

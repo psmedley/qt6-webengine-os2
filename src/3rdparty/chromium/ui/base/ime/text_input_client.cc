@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,9 @@ namespace ui {
 TextInputClient::~TextInputClient() {
 }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-absl::optional<GrammarFragment> TextInputClient::GetGrammarFragment(
-    const gfx::Range& range) {
+#if BUILDFLAG(IS_CHROMEOS)
+absl::optional<GrammarFragment> TextInputClient::GetGrammarFragmentAtCursor()
+    const {
   return absl::nullopt;
 }
 

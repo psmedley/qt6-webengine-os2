@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@
 #include "base/time/time.h"
 #include "net/base/isolation_info.h"
 #include "net/base/net_export.h"
-#include "net/base/network_change_notifier.h"
+#include "net/base/network_handle.h"
 #include "net/dns/dns_config.h"
 #include "net/dns/public/secure_dns_mode.h"
 
@@ -181,15 +181,10 @@ class NET_EXPORT_PRIVATE ResolveContext : public base::CheckedObserver {
   // (alternative service info if it supports QUIC, for instance).
   const IsolationInfo& isolation_info() const { return isolation_info_; }
 
-  // Network to perform the DNS lookups for. When equal to kInvalidNetworkHandle
-  // the decision of which one to target is left to the resolver.
-  // Virtual for testing.
-  virtual NetworkChangeNotifier::NetworkHandle GetTargetNetwork() const;
-
-  // Helper method to know whether this ResolveContext must be registered to
-  // receive cache and per-session data invalidations (i.e., receive
-  // InvalidateCachesAndPerSessionData type of calls) to function properly.
-  bool MustRegisterForInvalidations() const;
+  // Network to perform the DNS lookups for. When equal to
+  // handles::kInvalidNetworkHandle the decision of which one to target is left
+  // to the resolver. Virtual for testing.
+  virtual handles::NetworkHandle GetTargetNetwork() const;
 
   base::SafeRef<ResolveContext> AsSafeRef() {
     return weak_ptr_factory_.GetSafeRef();
@@ -211,7 +206,7 @@ class NET_EXPORT_PRIVATE ResolveContext : public base::CheckedObserver {
     ~ServerStats();
 
     // Count of consecutive failures after last success.
-    int last_failure_count;
+    int last_failure_count = 0;
 
     // True if any success has ever been recorded for this server for the
     // current connection.

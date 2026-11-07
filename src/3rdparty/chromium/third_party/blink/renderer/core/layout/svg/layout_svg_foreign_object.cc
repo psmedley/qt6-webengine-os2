@@ -32,8 +32,10 @@
 
 namespace blink {
 
-LayoutSVGForeignObject::LayoutSVGForeignObject(SVGForeignObjectElement* node)
-    : LayoutSVGBlock(node) {}
+LayoutSVGForeignObject::LayoutSVGForeignObject(Element* element)
+    : LayoutSVGBlock(element) {
+  DCHECK(IsA<SVGForeignObjectElement>(element));
+}
 
 LayoutSVGForeignObject::~LayoutSVGForeignObject() = default;
 
@@ -149,7 +151,7 @@ bool LayoutSVGForeignObject::NodeAtPointFromSVG(
     HitTestResult& result,
     const HitTestLocation& hit_test_location,
     const PhysicalOffset& accumulated_offset,
-    HitTestAction) {
+    HitTestPhase) {
   NOT_DESTROYED();
   DCHECK_EQ(accumulated_offset, PhysicalOffset());
   TransformedHitTestLocation local_location(hit_test_location,
@@ -184,11 +186,11 @@ bool LayoutSVGForeignObject::NodeAtPoint(
     HitTestResult& result,
     const HitTestLocation& hit_test_location,
     const PhysicalOffset& accumulated_offset,
-    HitTestAction hit_test_action) {
+    HitTestPhase phase) {
   NOT_DESTROYED();
   // Skip LayoutSVGBlock's override.
   return LayoutBlockFlow::NodeAtPoint(result, hit_test_location,
-                                      accumulated_offset, hit_test_action);
+                                      accumulated_offset, phase);
 }
 
 PaintLayerType LayoutSVGForeignObject::LayerTypeRequired() const {

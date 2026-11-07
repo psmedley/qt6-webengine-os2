@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,6 +49,9 @@ class ShellContentRendererClient : public ContentRendererClient {
 #if BUILDFLAG(ENABLE_MOJO_CDM)
   void GetSupportedKeySystems(media::GetSupportedKeySystemsCB cb) override;
 #endif
+
+  std::unique_ptr<blink::WebPrescientNetworking> CreatePrescientNetworking(
+      RenderFrame* render_frame) override;
 
  private:
   std::unique_ptr<web_cache::WebCacheImpl> web_cache_impl_;

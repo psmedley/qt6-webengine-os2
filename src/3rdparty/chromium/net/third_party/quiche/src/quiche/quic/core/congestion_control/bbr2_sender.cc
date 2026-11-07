@@ -16,6 +16,7 @@
 #include "quiche/quic/platform/api/quic_flag_utils.h"
 #include "quiche/quic/platform/api/quic_flags.h"
 #include "quiche/quic/platform/api/quic_logging.h"
+#include "quiche/common/platform/api/quiche_logging.h"
 #include "quiche/common/print_elements.h"
 
 namespace quic {
@@ -126,6 +127,10 @@ void Bbr2Sender::ApplyConnectionOptions(
     QUIC_RELOADABLE_FLAG_COUNT_N(quic_bbr2_extra_acked_window, 2, 2);
     model_.SetMaxAckHeightTrackerWindowLength(40);
   }
+  if (ContainsQuicTag(connection_options, kBBQ1)) {
+    params_.startup_pacing_gain = 2.773;
+    params_.drain_pacing_gain = 1.0 / params_.drain_cwnd_gain;
+  }
   if (ContainsQuicTag(connection_options, kBBQ2)) {
     params_.startup_cwnd_gain = 2.885;
     params_.drain_cwnd_gain = 2.885;
@@ -167,27 +172,19 @@ void Bbr2Sender::ApplyConnectionOptions(
   if (ContainsQuicTag(connection_options, kB201)) {
     params_.probe_bw_check_cwnd_limited_before_aggregation_epoch = true;
   }
-  if (GetQuicReloadableFlag(quic_bbr2_no_probe_up_exit_if_no_queue) &&
-      ContainsQuicTag(connection_options, kB202)) {
+  if (ContainsQuicTag(connection_options, kB202)) {
     params_.probe_up_dont_exit_if_no_queue_ = true;
   }
-  if (GetQuicReloadableFlag(quic_bbr2_ignore_inflight_hi_in_probe_up) &&
-      ContainsQuicTag(connection_options, kB203)) {
-    QUIC_RELOADABLE_FLAG_COUNT(quic_bbr2_ignore_inflight_hi_in_probe_up);
+  if (ContainsQuicTag(connection_options, kB203)) {
     params_.probe_up_ignore_inflight_hi = true;
   }
-  if (GetQuicReloadableFlag(quic_bbr2_startup_extra_acked) &&
-      ContainsQuicTag(connection_options, kB204)) {
-    QUIC_RELOADABLE_FLAG_COUNT_N(quic_bbr2_startup_extra_acked, 1, 2);
+  if (ContainsQuicTag(connection_options, kB204)) {
     model_.SetReduceExtraAckedOnBandwidthIncrease(true);
   }
-  if (GetQuicReloadableFlag(quic_bbr2_startup_extra_acked) &&
-      ContainsQuicTag(connection_options, kB205)) {
-    QUIC_RELOADABLE_FLAG_COUNT_N(quic_bbr2_startup_extra_acked, 2, 2);
+  if (ContainsQuicTag(connection_options, kB205)) {
     params_.startup_include_extra_acked = true;
   }
-  if (GetQuicReloadableFlag(quic_bbr2_exit_startup_on_persistent_queue2) &&
-      ContainsQuicTag(connection_options, kB207)) {
+  if (ContainsQuicTag(connection_options, kB207)) {
     params_.exit_startup_on_persistent_queue = true;
   }
 
@@ -197,15 +194,11 @@ void Bbr2Sender::ApplyConnectionOptions(
   if (ContainsQuicTag(connection_options, kBBRB)) {
     model_.SetLimitMaxAckHeightTrackerBySendRate(true);
   }
-  if (GetQuicReloadableFlag(
-          quic_bbr2_add_bytes_acked_after_inflight_hi_limited) &&
-      ContainsQuicTag(connection_options, kBBQ0)) {
+  if (ContainsQuicTag(connection_options, kBBQ0)) {
     params_.probe_up_includes_acks_after_cwnd_limited = true;
   }
 
-  if (GetQuicReloadableFlag(quic_bbr2_startup_probe_up_loss_events) &&
-      ContainsQuicTag(connection_options, kB206)) {
-    QUIC_RELOADABLE_FLAG_COUNT(quic_bbr2_startup_probe_up_loss_events);
+  if (ContainsQuicTag(connection_options, kB206)) {
     params_.startup_full_loss_count = params_.probe_bw_full_loss_count;
   }
 }
@@ -221,7 +214,7 @@ Limits<QuicByteCount> Bbr2Sender::GetCwndLimitsByMode() const {
     case Bbr2Mode::PROBE_RTT:
       return probe_rtt_.GetCwndLimits();
     default:
-      QUIC_NOTREACHED();
+      QUICHE_NOTREACHED();
       return Unlimited<QuicByteCount>();
   }
 }
@@ -502,11 +495,6 @@ void Bbr2Sender::OnExitQuiescence(QuicTime now) {
     }
     last_quiescence_start_ = QuicTime::Zero();
   }
-}
-
-bool Bbr2Sender::ShouldSendProbingPacket() const {
-  // TODO(wub): Implement ShouldSendProbingPacket properly.
-  return BBR2_MODE_DISPATCH(IsProbingForBandwidth());
 }
 
 std::string Bbr2Sender::GetDebugState() const {

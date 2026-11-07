@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,11 +22,10 @@
 #include "base/win/scoped_handle.h"
 #include "net/base/address_family.h"
 #include "net/base/completion_once_callback.h"
-#include "net/base/datagram_buffer.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_export.h"
-#include "net/base/network_change_notifier.h"
+#include "net/base/network_handle.h"
 #include "net/log/net_log_with_source.h"
 #include "net/socket/datagram_socket.h"
 #include "net/socket/diff_serv_code_point.h"
@@ -99,7 +98,7 @@ class NET_EXPORT QwaveApi {
                        LPOVERLAPPED overlapped);
 
  private:
-  std::atomic<bool> qwave_supported_;
+  std::atomic<bool> qwave_supported_{false};
 
   CreateHandleFn create_handle_func_;
   CloseHandleFn close_handle_func_;
@@ -176,7 +175,7 @@ class NET_EXPORT UDPSocketWin : public base::win::ObjectWatcher::Delegate {
   int Open(AddressFamily address_family);
 
   // Not implemented. Returns ERR_NOT_IMPLEMENTED.
-  int BindToNetwork(NetworkChangeNotifier::NetworkHandle network);
+  int BindToNetwork(handles::NetworkHandle network);
 
   // Connects the socket to connect with a certain |address|.
   // Should be called after Open().
@@ -348,23 +347,6 @@ class NET_EXPORT UDPSocketWin : public base::win::ObjectWatcher::Delegate {
   // to switch to non-blocking IO.
   void UseNonBlockingIO();
 
-  void SetWriteAsyncEnabled(bool enabled);
-  bool WriteAsyncEnabled();
-  void SetMaxPacketSize(size_t max_packet_size);
-  void SetWriteMultiCoreEnabled(bool enabled);
-  void SetSendmmsgEnabled(bool enabled);
-  void SetWriteBatchingActive(bool active);
-
-  int WriteAsync(DatagramBuffers buffers,
-                 CompletionOnceCallback callback,
-                 const NetworkTrafficAnnotationTag& traffic_annotation);
-  int WriteAsync(const char* buffer,
-                 size_t buf_len,
-                 CompletionOnceCallback callback,
-                 const NetworkTrafficAnnotationTag& traffic_annotation);
-
-  DatagramBuffers GetUnwrittenBuffers();
-
   // Apply |tag| to this socket.
   void ApplySocketTag(const SocketTag& tag);
 
@@ -430,19 +412,19 @@ class NET_EXPORT UDPSocketWin : public base::win::ObjectWatcher::Delegate {
   virtual QwaveApi* GetQwaveApi() const;
 
   SOCKET socket_;
-  int addr_family_;
-  bool is_connected_;
+  int addr_family_ = 0;
+  bool is_connected_ = false;
 
   // Bitwise-or'd combination of SocketOptions. Specifies the set of
   // options that should be applied to |socket_| before Bind().
   int socket_options_;
 
   // Multicast interface.
-  uint32_t multicast_interface_;
+  uint32_t multicast_interface_ = 0;
 
   // Multicast socket options cached for SetMulticastOption.
   // Cannot be used after Bind().
-  int multicast_time_to_live_;
+  int multicast_time_to_live_ = 1;
 
   // These are mutable since they're just cached copies to make
   // GetPeerAddress/GetLocalAddress smarter.
@@ -455,7 +437,7 @@ class NET_EXPORT UDPSocketWin : public base::win::ObjectWatcher::Delegate {
   scoped_refptr<Core> core_;
 
   // True if non-blocking IO is used.
-  bool use_non_blocking_io_;
+  bool use_non_blocking_io_ = false;
 
   // Watches |read_write_event_|.
   base::win::ObjectWatcher read_write_watcher_;
@@ -467,10 +449,10 @@ class NET_EXPORT UDPSocketWin : public base::win::ObjectWatcher::Delegate {
   scoped_refptr<IOBuffer> read_iobuffer_;
   scoped_refptr<IOBuffer> write_iobuffer_;
 
-  int read_iobuffer_len_;
-  int write_iobuffer_len_;
+  int read_iobuffer_len_ = 0;
+  int write_iobuffer_len_ = 0;
 
-  raw_ptr<IPEndPoint> recv_from_address_;
+  raw_ptr<IPEndPoint> recv_from_address_ = nullptr;
 
   // Cached copy of the current address we're sending to, if any.  Used for
   // logging.

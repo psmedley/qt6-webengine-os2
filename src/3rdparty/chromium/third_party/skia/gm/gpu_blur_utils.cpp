@@ -15,9 +15,9 @@
 #include "src/gpu/ganesh/GrRecordingContextPriv.h"
 #include "src/gpu/ganesh/GrStyle.h"
 #include "src/gpu/ganesh/SkGr.h"
+#include "src/gpu/ganesh/SurfaceDrawContext.h"
 #include "src/gpu/ganesh/effects/GrBlendFragmentProcessor.h"
 #include "src/gpu/ganesh/effects/GrTextureEffect.h"
-#include "src/gpu/ganesh/v1/SurfaceDrawContext_v1.h"
 #include "src/image/SkImage_Base.h"
 
 namespace {
@@ -60,7 +60,7 @@ static GrSurfaceProxyView slow_blur(GrRecordingContext* rContext,
                                SkIPoint offset,
                                SkTileMode mode) {
         GrImageInfo info(GrColorType::kRGBA_8888, kPremul_SkAlphaType, nullptr, resultSize);
-        auto sfc = rContext->priv().makeSFC(info);
+        auto sfc = rContext->priv().makeSFC(info, /*label=*/{});
         if (!sfc) {
             return GrSurfaceProxyView{};
         }

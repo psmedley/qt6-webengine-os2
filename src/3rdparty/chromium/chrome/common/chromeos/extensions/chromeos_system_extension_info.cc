@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,16 @@
 
 #include "base/check.h"
 #include "base/command_line.h"
+#include "base/containers/flat_set.h"
 
 namespace chromeos {
 
 namespace switches {
+
+// Overrides |manufacturer| field of the ChromeOSSystemExtensionInfo structure.
+// Used for development/testing.
+const char kTelemetryExtensionManufacturerOverrideForTesting[] =
+    "telemetry-extension-manufacturer-override-for-testing";
 
 // Overrides |pwa_origin| field of the ChromeOSSystemExtensionInfo structure.
 // Used for development/testing.
@@ -29,12 +35,15 @@ using ChromeOSSystemExtensionInfos =
 
 const ChromeOSSystemExtensionInfos& getMap() {
   static const ChromeOSSystemExtensionInfos kExtensionIdToExtensionInfoMap{
-      // TODO(b/200920331): replace google.com with OEM-specific origin.
       {/*extension_id=*/"gogonhoemckpdpadfnjnpgbjpbjnodgc",
-       {/*manufacturer=*/"HP", /*pwa_origin=*/"*://www.google.com/*"}},
+       {/*manufacturers=*/{"HP", "ASUS"},
+        /*pwa_origin=*/"*://googlechromelabs.github.io/*"}},
       {/*extension_id=*/"alnedpmllcfpgldkagbfbjkloonjlfjb",
-       {/*manufacturer=*/"HP",
-        /*pwa_origin=*/"https://hpcs-appschr.hpcloud.hp.com/*"}}};
+       {/*manufacturers=*/{"HP"},
+        /*pwa_origin=*/"https://hpcs-appschr.hpcloud.hp.com/*"}},
+      {/*extension_id=*/"hdnhcpcfohaeangjpkcjkgmgmjanbmeo",
+       {/*manufacturers=*/{"ASUS"},
+        /*pwa_origin=*/"https://dlcdnccls.asus.com/*"}}};
 
   return kExtensionIdToExtensionInfoMap;
 }
@@ -42,9 +51,9 @@ const ChromeOSSystemExtensionInfos& getMap() {
 }  // namespace
 
 ChromeOSSystemExtensionInfo::ChromeOSSystemExtensionInfo(
-    const std::string& manufacturer,
+    base::flat_set<std::string> manufacturers,
     const std::string& pwa_origin)
-    : manufacturer(manufacturer), pwa_origin(pwa_origin) {}
+    : manufacturers(std::move(manufacturers)), pwa_origin(pwa_origin) {}
 ChromeOSSystemExtensionInfo::ChromeOSSystemExtensionInfo(
     const ChromeOSSystemExtensionInfo& other) = default;
 ChromeOSSystemExtensionInfo::~ChromeOSSystemExtensionInfo() = default;
@@ -64,6 +73,12 @@ ChromeOSSystemExtensionInfo GetChromeOSExtensionInfoForId(
           switches::kTelemetryExtensionPwaOriginOverrideForTesting)) {
     info.pwa_origin = command_line->GetSwitchValueASCII(
         switches::kTelemetryExtensionPwaOriginOverrideForTesting);
+  }
+
+  if (command_line->HasSwitch(
+          switches::kTelemetryExtensionManufacturerOverrideForTesting)) {
+    info.manufacturers = {command_line->GetSwitchValueASCII(
+        switches::kTelemetryExtensionManufacturerOverrideForTesting)};
   }
 
   return info;

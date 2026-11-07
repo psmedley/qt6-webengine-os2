@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,6 +45,9 @@ class ChannelPosix : public Channel,
                               size_t extra_header_size,
                               std::vector<PlatformHandle>* handles,
                               bool* deferred) override;
+  bool GetReadPlatformHandlesForIpcz(
+      size_t num_handles,
+      std::vector<PlatformHandle>& handles) override;
   bool OnControlMessage(Message::MessageType message_type,
                         const void* payload,
                         size_t payload_size,

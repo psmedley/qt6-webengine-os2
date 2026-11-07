@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,8 +43,7 @@ class ClipboardReader : public GarbageCollected<ClipboardReader> {
   // ClipboardWriter::IsValidType() must return true for `mime_type`.
   static ClipboardReader* Create(SystemClipboard* system_clipboard,
                                  const String& mime_type,
-                                 ClipboardPromise* promise,
-                                 bool is_custom_format_type);
+                                 ClipboardPromise* promise);
   virtual ~ClipboardReader();
 
   // Reads from the system clipboard and encodes on a background thread.

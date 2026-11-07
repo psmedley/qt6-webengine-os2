@@ -40,6 +40,7 @@ class SpirvValidationHelperOutputGeneratorOptions(GeneratorOptions):
                  removeExtensions = None,
                  emitExtensions = None,
                  emitSpirv = None,
+                 emitFormats = None,
                  sortProcedure = regSortFeatures,
                  genFuncPointers = True,
                  protectFile = True,
@@ -65,6 +66,7 @@ class SpirvValidationHelperOutputGeneratorOptions(GeneratorOptions):
                 removeExtensions = removeExtensions,
                 emitExtensions = emitExtensions,
                 emitSpirv = emitSpirv,
+                emitFormats = emitFormats,
                 sortProcedure = sortProcedure)
         self.genFuncPointers = genFuncPointers
         self.protectFile     = protectFile
@@ -87,6 +89,7 @@ class SpirvValidationHelperOutputGenerator(OutputGenerator):
         OutputGenerator.__init__(self, errFile, warnFile, diagFile)
         self.extensions = dict()
         self.capabilities = dict()
+        self.formats = dict()
 
         # TODO - Remove these ExludeList array in future when script is been used in a few releases
         #
@@ -95,7 +98,20 @@ class SpirvValidationHelperOutputGenerator(OutputGenerator):
         # These 2 arrays SHOULD be empty when possible and when the SPIR-V Headers are updated these
         # should be attempted to be cleared
         self.extensionExcludeList = []
-        self.capabilityExcludeList = []
+        self.capabilityExcludeList = [
+            'TextureBlockMatchQCOM',
+            'TextureBoxFilterQCOM',
+            'TextureSampleWeightedQCOM',
+            'RayTracingOpacityMicromapEXT', # waiting for https://github.com/KhronosGroup/SPIRV-Headers/pull/292
+        ]
+
+        # There are some enums that share the same value in the SPIR-V header.
+        # This array remove the duplicate to not print out, usually due to being the older value given
+        self.capabilityAliasList = [
+          'ShaderViewportIndexLayerNV',
+          'ShadingRateNV',
+          'FragmentBarycentricNV',
+        ]
 
         # This is a list that maps the Vulkan struct a feature field is with the internal
         # state tracker's enabled features value
@@ -130,6 +146,8 @@ class SpirvValidationHelperOutputGenerator(OutputGenerator):
             {'vulkan' : 'VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT', 'layer' : 'shader_atomic_float2_features'},
             {'vulkan' : 'VkPhysicalDeviceRayTracingMotionBlurFeaturesNV', 'layer' : 'ray_tracing_motion_blur_features'},
             {'vulkan' : 'VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR', 'layer' : 'shader_integer_dot_product_features'},
+            {'vulkan' : 'VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR', 'layer' : 'shader_subgroup_uniform_control_flow_features'},
+            {'vulkan' : 'VkPhysicalDeviceRayTracingMaintenance1FeaturesKHR', 'layer' : 'ray_tracing_maintenance1_features'},
         ]
 
         # Promoted features structure in state_tracker.cpp are put in the VkPhysicalDeviceVulkan*Features structs
@@ -220,6 +238,7 @@ class SpirvValidationHelperOutputGenerator(OutputGenerator):
         write(self.extensionStruct(), file=self.outFile)
         write(self.enumHelper(), file=self.outFile)
         write(self.validateFunction(), file=self.outFile)
+        write(self.formatHelper(), file=self.outFile)
         # Finish processing in superclass
         OutputGenerator.endFile(self)
     #
@@ -270,15 +289,39 @@ class SpirvValidationHelperOutputGenerator(OutputGenerator):
         elif spirvElem.tag == 'spirvextension':
             self.extensions[name] = enables
     #
+    # Capture all Format elements from registry
+    def genFormat(self, format, formatinfo, alias):
+        OutputGenerator.genFormat(self, format, formatinfo, alias)
+        elem = format.elem
+        formatName = elem.get('name')
+
+        spirvImageFormat = elem.find('spirvimageformat')
+        if (spirvImageFormat is not None):
+            self.formats[formatName] = spirvImageFormat.get('name')
+    #
+    # Creates SPIR-V image format helper
+    def formatHelper(self):
+        output = '\n// Will return the Vulkan format for a given SPIR-V image format value\n'
+        output += '// Note: will return VK_FORMAT_UNDEFINED if non valid input\n'
+        output += '// This was in vk_format_utils but the SPIR-V Header dependency was an issue\n'
+        output += '//   see https://github.com/KhronosGroup/Vulkan-ValidationLayers/pull/4647\n'
+        output += 'VkFormat CoreChecks::CompatibleSpirvImageFormat(uint32_t spirv_image_format) const {\n'
+        output += '    switch (spirv_image_format) {\n'
+        for f, spirvFormat in sorted(self.formats.items()):
+            output += '        case spv::ImageFormat{}:\n'.format(spirvFormat)
+            output += '            return {};\n'.format(f)
+        output += '        default:\n'
+        output += '            return VK_FORMAT_UNDEFINED;\n'
+        output += '     }\n'
+        output += '}'
+        return output
+    #
     # Creates the Enum string helpers for better error messages. Same idea of vk_enum_string_helper.h but for SPIR-V
     def enumHelper(self):
-        # There are some enums that share the same value in the SPIR-V header.
-        # This array remove the duplicate to not print out, usually due to being the older value given
-        excludeList = ['ShaderViewportIndexLayerNV', 'ShadingRateNV']
         output =  'static inline const char* string_SpvCapability(uint32_t input_value) {\n'
         output += '    switch ((spv::Capability)input_value) {\n'
         for name, enables in sorted(self.capabilities.items()):
-            if (name not in excludeList) and (name not in self.capabilityExcludeList):
+            if (name not in self.capabilityAliasList) and (name not in self.capabilityExcludeList):
                 output += '         case spv::Capability' + name + ':\n'
                 output += '            return \"' + name + '\";\n'
         output += '        default:\n'

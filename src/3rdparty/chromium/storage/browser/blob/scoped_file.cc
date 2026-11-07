@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,8 +69,7 @@ void ScopedFile::Reset() {
            << path_.value();
 
   if (scope_out_policy_ == DELETE_ON_SCOPE_OUT) {
-    file_task_runner_->PostTask(
-        FROM_HERE, base::BindOnce(base::GetDeleteFileCallback(), path_));
+    file_task_runner_->PostTask(FROM_HERE, base::GetDeleteFileCallback(path_));
   }
 
   // Clear all fields.

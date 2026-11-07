@@ -1,9 +1,10 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/printing/print_job_worker_oop.h"
 
+#include "base/metrics/histogram_functions.h"
 #include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -31,6 +32,20 @@ using content::BrowserThread;
 namespace printing {
 
 namespace {
+
+// Enumeration of printing events when submitting a job to a print driver.
+// This must stay in sync with the corresponding histogram in `histograms.xml`.
+// These values are persisted to logs.  Entries should not be renumbered and
+// numeric values should never be reused.
+enum class PrintOopResult {
+  kSuccessful = 0,
+  kCanceled = 1,
+  kAccessDenied = 2,
+  kFailed = 3,
+  kMaxValue = kFailed,
+};
+
+constexpr char kPrintOopPrintResultHistogramName[] = "Printing.Oop.PrintResult";
 
 mojom::PrintTargetType DeterminePrintTargetType(
     const base::Value::Dict& job_settings) {
@@ -89,7 +104,8 @@ void PrintJobWorkerOop::OnDidUseDefaultSettings(
   if (print_settings->is_result_code()) {
     result = print_settings->get_result_code();
     DCHECK_NE(result, mojom::ResultCode::kSuccess);
-    PRINTER_LOG(ERROR) << "Error trying to use default settings: " << result;
+    PRINTER_LOG(ERROR) << "Error trying to use default settings via service: "
+                       << result;
 
     // TODO(crbug.com/809738)  Fill in support for handling of access-denied
     // result code.  Blocked on crbug.com/1243873 for Windows.
@@ -112,7 +128,8 @@ void PrintJobWorkerOop::OnDidAskUserForSettings(
     result = print_settings->get_result_code();
     DCHECK_NE(result, mojom::ResultCode::kSuccess);
     if (result != mojom::ResultCode::kCanceled) {
-      PRINTER_LOG(ERROR) << "Error getting settings from user: " << result;
+      PRINTER_LOG(ERROR) << "Error getting settings from user via service: "
+                         << result;
     }
 
     // TODO(crbug.com/809738)  Fill in support for handling of access-denied
@@ -156,14 +173,14 @@ void PrintJobWorkerOop::OnDidRenderPrintedPage(uint32_t page_index,
   }
   scoped_refptr<PrintedPage> page = document()->GetPage(page_index);
   if (!page) {
-    DLOG(ERROR) << "Unable to get page " << page_index << " for document "
-                << document()->cookie();
+    PRINTER_LOG(ERROR) << "Unable to get page " << page_index
+                       << " via service for document " << document()->cookie();
     task_runner()->PostTask(FROM_HERE,
                             base::BindOnce(&PrintJobWorkerOop::OnFailure,
                                            worker_weak_factory_.GetWeakPtr()));
     return;
   }
-  VLOG(1) << "Rendered printed page with service for document "
+  VLOG(1) << "Rendered printed page via service for document "
           << document()->cookie() << " page " << page_index;
 
   // Signal everyone that the page is printed.
@@ -190,7 +207,7 @@ void PrintJobWorkerOop::OnDidRenderPrintedDocument(mojom::ResultCode result) {
     NotifyFailure(result);
     return;
   }
-  VLOG(1) << "Rendered printed document with service for document "
+  VLOG(1) << "Rendered printed document via service for document "
           << document()->cookie();
   SendDocumentDone();
 }
@@ -202,14 +219,16 @@ void PrintJobWorkerOop::OnDidDocumentDone(int job_id,
   DCHECK_EQ(pages_printed_count_, document()->page_count());
 #endif
   if (result != mojom::ResultCode::kSuccess) {
-    VLOG(1) << "Error completing printing via service for document "
-            << document()->cookie() << ": " << result;
+    PRINTER_LOG(ERROR) << "Error completing printing via service for document "
+                       << document()->cookie() << ": " << result;
     NotifyFailure(result);
     return;
   }
-  VLOG(1) << "Printing completed with service for document "
-          << document()->cookie();
+  PRINTER_LOG(EVENT) << "Printing completed via service for document "
+                     << document()->cookie();
   UnregisterServiceManagerClient();
+  base::UmaHistogramEnumeration(kPrintOopPrintResultHistogramName,
+                                PrintOopResult::kSuccessful);
   FinishDocumentDone(job_id);
 }
 
@@ -227,7 +246,8 @@ bool PrintJobWorkerOop::SpoolPage(PrintedPage* page) {
   base::MappedReadOnlyRegion region_mapping =
       metafile->GetDataAsSharedMemoryRegion();
   if (simulate_spooling_memory_errors_ || !region_mapping.IsValid()) {
-    PRINTER_LOG(ERROR) << "Spooling page failed due to shared memory error.";
+    PRINTER_LOG(ERROR)
+        << "Spooling page via service failed due to shared memory error.";
     content::GetUIThreadTaskRunner({})->PostTask(
         FROM_HERE, base::BindOnce(&PrintJobWorkerOop::NotifyFailure,
                                   ui_weak_factory_.GetWeakPtr(),
@@ -255,7 +275,7 @@ bool PrintJobWorkerOop::SpoolDocument() {
       metafile->GetDataAsSharedMemoryRegion();
   if (simulate_spooling_memory_errors_ || !region_mapping.IsValid()) {
     PRINTER_LOG(ERROR)
-        << "Spooling document failed due to shared memory error.";
+        << "Spooling document via service failed due to shared memory error.";
     content::GetUIThreadTaskRunner({})->PostTask(
         FROM_HERE, base::BindOnce(&PrintJobWorkerOop::NotifyFailure,
                                   ui_weak_factory_.GetWeakPtr(),
@@ -282,23 +302,17 @@ void PrintJobWorkerOop::OnDocumentDone() {
   // PrintBackend service.
 }
 
-void PrintJobWorkerOop::InvokeUseDefaultSettings(SettingsCallback callback) {
-  content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE,
-      base::BindOnce(&PrintJobWorkerOop::SendUseDefaultSettings,
-                     ui_weak_factory_.GetWeakPtr(), std::move(callback)));
+void PrintJobWorkerOop::UseDefaultSettings(SettingsCallback callback) {
+  SendUseDefaultSettings(std::move(callback));
 }
 
-void PrintJobWorkerOop::InvokeGetSettingsWithUI(uint32_t document_page_count,
-                                                bool has_selection,
-                                                bool is_scripted,
-                                                SettingsCallback callback) {
+void PrintJobWorkerOop::GetSettingsWithUI(uint32_t document_page_count,
+                                          bool has_selection,
+                                          bool is_scripted,
+                                          SettingsCallback callback) {
 #if BUILDFLAG(IS_WIN)
-  content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE,
-      base::BindOnce(&PrintJobWorkerOop::SendAskUserForSettings,
-                     ui_weak_factory_.GetWeakPtr(), document_page_count,
-                     has_selection, is_scripted, std::move(callback)));
+  SendAskUserForSettings(document_page_count, has_selection, is_scripted,
+                         std::move(callback));
 #else
   // Invoke the browser version of getting settings with the system UI:
   //   - macOS:  It is impossible to invoke a system dialog UI from a service
@@ -309,13 +323,13 @@ void PrintJobWorkerOop::InvokeGetSettingsWithUI(uint32_t document_page_count,
   //       browser process.
   //   - Other platforms don't have a system print UI or do not use OOP
   //     printing, so this does not matter.
-  PrintJobWorker::InvokeGetSettingsWithUI(document_page_count, has_selection,
-                                          is_scripted, std::move(callback));
+  PrintJobWorker::GetSettingsWithUI(document_page_count, has_selection,
+                                    is_scripted, std::move(callback));
 #endif
 }
 
-void PrintJobWorkerOop::UpdatePrintSettings(base::Value::Dict new_settings,
-                                            SettingsCallback callback) {
+void PrintJobWorkerOop::SetSettings(base::Value::Dict new_settings,
+                                    SettingsCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Do not take a const reference, as `new_settings` will be modified below.
@@ -380,6 +394,7 @@ bool PrintJobWorkerOop::TryRestartPrinting() {
 void PrintJobWorkerOop::NotifyFailure(mojom::ResultCode result) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
+  PrintOopResult uma_result = PrintOopResult::kFailed;
   if (result == mojom::ResultCode::kAccessDenied) {
     // An attempt to restart could be undesirable if some pages were able to
     // be sent to the destination before the error occurred.  If we receive
@@ -393,7 +408,11 @@ void PrintJobWorkerOop::NotifyFailure(mojom::ResultCode result) {
     PrintBackendServiceManager& service_mgr =
         PrintBackendServiceManager::GetInstance();
     service_mgr.SetPrinterDriverFoundToRequireElevatedPrivilege(device_name_);
+    uma_result = PrintOopResult::kAccessDenied;
+  } else if (result == mojom::ResultCode::kCanceled) {
+    uma_result = PrintOopResult::kCanceled;
   }
+  base::UmaHistogramEnumeration(kPrintOopPrintResultHistogramName, uma_result);
   ShowErrorDialog();
 
   // Initiate rest of regular failure handling.
@@ -411,14 +430,13 @@ void PrintJobWorkerOop::OnDidUpdatePrintSettings(
   if (print_settings->is_result_code()) {
     result = print_settings->get_result_code();
     DCHECK_NE(result, mojom::ResultCode::kSuccess);
-    PRINTER_LOG(ERROR) << "Error updating print settings for `" << device_name
-                       << "`: " << result;
+    PRINTER_LOG(ERROR) << "Error updating print settings via service for `"
+                       << device_name << "`: " << result;
 
     // TODO(crbug.com/809738)  Fill in support for handling of access-denied
     // result code.
   } else {
-    VLOG(1) << "Update print settings from service complete for "
-            << device_name;
+    VLOG(1) << "Update print settings via service complete for " << device_name;
     result = mojom::ResultCode::kSuccess;
     printing_context()->ApplyPrintSettings(print_settings->get_settings());
   }
@@ -489,8 +507,8 @@ void PrintJobWorkerOop::SendStartPrinting(const std::string& device_name,
   document_name_ = document_name;
 
   const int32_t document_cookie = document()->cookie();
-  VLOG(1) << "Starting printing via service for to `" << device_name_
-          << "` for document " << document_cookie;
+  PRINTER_LOG(DEBUG) << "Starting printing via service for to `" << device_name_
+                     << "` for document " << document_cookie;
 
   PrintBackendServiceManager& service_mgr =
       PrintBackendServiceManager::GetInstance();

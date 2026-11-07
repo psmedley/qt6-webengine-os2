@@ -37,19 +37,23 @@ import type * as Platform from '../platform/platform.js';
 import {FrontendMessageSource, FrontendMessageType} from './ConsoleModelTypes.js';
 export {FrontendMessageSource, FrontendMessageType} from './ConsoleModelTypes.js';
 
-import type {EventData} from './CPUProfilerModel.js';
-import {CPUProfilerModel, Events as CPUProfilerModelEvents} from './CPUProfilerModel.js';
-import type {Location} from './DebuggerModel.js';
-import {Events as DebuggerModelEvents} from './DebuggerModel.js';
+import {CPUProfilerModel, Events as CPUProfilerModelEvents, type EventData} from './CPUProfilerModel.js';
+
+import {Events as DebuggerModelEvents, type Location} from './DebuggerModel.js';
 import {LogModel} from './LogModel.js';
 import {RemoteObject} from './RemoteObject.js';
-import {Events as ResourceTreeModelEvents, ResourceTreeModel} from './ResourceTreeModel.js';
-import type {ConsoleAPICall, ExceptionWithTimestamp, ExecutionContext, QueryObjectRequestedEvent} from './RuntimeModel.js';
-import {Events as RuntimeModelEvents, RuntimeModel} from './RuntimeModel.js';
-import type {Target} from './Target.js';
-import {TargetManager} from './TargetManager.js';
-import type {Observer} from './TargetManager.js';
-import type {ResourceTreeFrame} from './ResourceTreeModel.js';
+import {Events as ResourceTreeModelEvents, ResourceTreeModel, type ResourceTreeFrame} from './ResourceTreeModel.js';
+
+import {
+  Events as RuntimeModelEvents,
+  RuntimeModel,
+  type ConsoleAPICall,
+  type ExceptionWithTimestamp,
+  type ExecutionContext,
+  type QueryObjectRequestedEvent,
+} from './RuntimeModel.js';
+import {type Target, Type} from './Target.js';
+import {TargetManager, type Observer} from './TargetManager.js';
 
 const UIStrings = {
   /**
@@ -136,7 +140,7 @@ export class ConsoleModel extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
     }
 
     const resourceTreeModel = target.model(ResourceTreeModel);
-    if (resourceTreeModel && !target.parentTarget()) {
+    if (resourceTreeModel && target.parentTarget()?.type() !== Type.Frame) {
       eventListeners.push(resourceTreeModel.addEventListener(
           ResourceTreeModelEvents.MainFrameNavigated, this.mainFrameNavigated, this));
     }
@@ -149,7 +153,7 @@ export class ConsoleModel extends Common.ObjectWrapper.ObjectWrapper<EventTypes>
           RuntimeModelEvents.ExceptionRevoked, this.exceptionRevoked.bind(this, runtimeModel)));
       eventListeners.push(runtimeModel.addEventListener(
           RuntimeModelEvents.ConsoleAPICalled, this.consoleAPICalled.bind(this, runtimeModel)));
-      if (!target.parentTarget()) {
+      if (target.parentTarget()?.type() !== Type.Frame) {
         eventListeners.push(runtimeModel.debuggerModel().addEventListener(
             DebuggerModelEvents.GlobalObjectCleared, this.clearIfNecessary, this));
       }

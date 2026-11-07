@@ -1171,6 +1171,24 @@ StatusCode DecoderImpl::CopyFrameToOutputBuffer(
   buffer_.spatial_id = frame->spatial_id();
   buffer_.temporal_id = frame->temporal_id();
   buffer_.buffer_private_data = frame->buffer_private_data();
+  if (frame->hdr_cll_set()) {
+    buffer_.has_hdr_cll = 1;
+    buffer_.hdr_cll = frame->hdr_cll();
+  } else {
+    buffer_.has_hdr_cll = 0;
+  }
+  if (frame->hdr_mdcv_set()) {
+    buffer_.has_hdr_mdcv = 1;
+    buffer_.hdr_mdcv = frame->hdr_mdcv();
+  } else {
+    buffer_.has_hdr_mdcv = 0;
+  }
+  if (frame->itut_t35_set()) {
+    buffer_.has_itut_t35 = 1;
+    buffer_.itut_t35 = frame->itut_t35();
+  } else {
+    buffer_.has_itut_t35 = 0;
+  }
   output_frame_ = frame;
   return kStatusOk;
 }
@@ -1602,7 +1620,7 @@ StatusCode DecoderImpl::ApplyFilmGrain(
          (*film_grain_frame)->buffer()->stride(kPlaneV));
   const int output_stride_uv = (*film_grain_frame)->buffer()->stride(kPlaneU);
 #if LIBGAV1_MAX_BITDEPTH >= 10
-  if (displayable_frame->buffer()->bitdepth() > 8) {
+  if (displayable_frame->buffer()->bitdepth() == 10) {
     FilmGrain<10> film_grain(displayable_frame->film_grain_params(),
                              displayable_frame->buffer()->is_monochrome(),
                              color_matrix_is_identity,
@@ -1625,6 +1643,30 @@ StatusCode DecoderImpl::ApplyFilmGrain(
     return kStatusOk;
   }
 #endif  // LIBGAV1_MAX_BITDEPTH >= 10
+#if LIBGAV1_MAX_BITDEPTH == 12
+  if (displayable_frame->buffer()->bitdepth() == 12) {
+    FilmGrain<12> film_grain(displayable_frame->film_grain_params(),
+                             displayable_frame->buffer()->is_monochrome(),
+                             color_matrix_is_identity,
+                             displayable_frame->buffer()->subsampling_x(),
+                             displayable_frame->buffer()->subsampling_y(),
+                             displayable_frame->upscaled_width(),
+                             displayable_frame->frame_height(), thread_pool);
+    if (!film_grain.AddNoise(
+            displayable_frame->buffer()->data(kPlaneY),
+            displayable_frame->buffer()->stride(kPlaneY),
+            displayable_frame->buffer()->data(kPlaneU),
+            displayable_frame->buffer()->data(kPlaneV), input_stride_uv,
+            (*film_grain_frame)->buffer()->data(kPlaneY),
+            (*film_grain_frame)->buffer()->stride(kPlaneY),
+            (*film_grain_frame)->buffer()->data(kPlaneU),
+            (*film_grain_frame)->buffer()->data(kPlaneV), output_stride_uv)) {
+      LIBGAV1_DLOG(ERROR, "film_grain.AddNoise() failed.");
+      return kStatusOutOfMemory;
+    }
+    return kStatusOk;
+  }
+#endif  // LIBGAV1_MAX_BITDEPTH == 12
   FilmGrain<8> film_grain(displayable_frame->film_grain_params(),
                           displayable_frame->buffer()->is_monochrome(),
                           color_matrix_is_identity,

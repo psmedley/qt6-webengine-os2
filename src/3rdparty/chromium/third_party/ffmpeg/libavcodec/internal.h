@@ -28,12 +28,14 @@
 
 #include "libavutil/buffer.h"
 #include "libavutil/channel_layout.h"
-#include "libavutil/fifo.h"
 #include "libavutil/mathematics.h"
 #include "libavutil/pixfmt.h"
 #include "avcodec.h"
-#include "bsf.h"
 #include "config.h"
+
+#if CONFIG_LCMS2
+# include "fflcms2.h"
+#endif
 
 #define FF_SANE_NB_CHANNELS 512U
 
@@ -47,10 +49,6 @@
 #   define STRIDE_ALIGN 8
 #endif
 
-typedef struct EncodeSimpleContext {
-    AVFrame *in_frame;
-} EncodeSimpleContext;
-
 typedef struct AVCodecInternal {
     /**
      * When using frame-threaded decoding, this field is set for the first
@@ -59,10 +57,16 @@ typedef struct AVCodecInternal {
     int is_copy;
 
     /**
-     * An audio frame with less than required samples has been submitted and
-     * padded with silence. Reject all subsequent frames.
+     * An audio frame with less than required samples has been submitted (and
+     * potentially padded with silence). Reject all subsequent frames.
      */
     int last_audio_frame;
+
+    /**
+     * Audio encoders can set this flag during init to indicate that they
+     * want the small last frame to be padded to a multiple of pad_samples.
+     */
+    int pad_samples;
 
     AVBufferRef *pool;
 
@@ -77,14 +81,14 @@ typedef struct AVCodecInternal {
      * avcodec_flush_buffers().
      */
     AVPacket *in_pkt;
-    AVBSFContext *bsf;
+    struct AVBSFContext *bsf;
 
     /**
      * Properties (timestamps+side data) extracted from the last packet passed
      * for decoding.
      */
     AVPacket *last_pkt_props;
-    AVFifo *pkt_props;
+    struct AVFifo *pkt_props;
 
     /**
      * temporary buffer used for encoders to store their bitstream
@@ -101,7 +105,21 @@ typedef struct AVCodecInternal {
 
     void *frame_thread_encoder;
 
-    EncodeSimpleContext es;
+    /**
+     * The input frame is stored here for encoders implementing the simple
+     * encode API.
+     *
+     * Not allocated in other cases.
+     */
+    AVFrame *in_frame;
+
+    /**
+     * When the AV_CODEC_FLAG_RECON_FRAME flag is used. the encoder should store
+     * here the reconstructed frame corresponding to the last returned packet.
+     *
+     * Not allocated in other cases.
+     */
+    AVFrame *recon_frame;
 
     /**
      * If this is set, then FFCodec->close (if existing) needs to be called
@@ -125,15 +143,13 @@ typedef struct AVCodecInternal {
     int draining;
 
     /**
-     * buffers for using new encode/decode API through legacy API
+     * Temporary buffers for newly received or not yet output packets/frames.
      */
     AVPacket *buffer_pkt;
     AVFrame *buffer_frame;
     int draining_done;
 
     int showed_multi_packet_warning;
-
-    int skip_samples_multiplier;
 
     /* to prevent infinite loop on errors when draining */
     int nb_draining_errors;
@@ -143,11 +159,11 @@ typedef struct AVCodecInternal {
     int initial_format;
     int initial_width, initial_height;
     int initial_sample_rate;
-#if FF_API_OLD_CHANNEL_LAYOUT
-    int initial_channels;
-    uint64_t initial_channel_layout;
-#endif
     AVChannelLayout initial_ch_layout;
+
+#if CONFIG_LCMS2
+    FFIccContext icc; /* used to read and write embedded ICC profiles */
+#endif
 } AVCodecInternal;
 
 /**
@@ -168,18 +184,6 @@ void ff_color_frame(AVFrame *frame, const int color[4]);
 #define FF_MAX_EXTRADATA_SIZE ((1 << 28) - AV_INPUT_BUFFER_PADDING_SIZE)
 
 /**
- * Rescale from sample rate to AVCodecContext.time_base.
- */
-static av_always_inline int64_t ff_samples_to_time_base(AVCodecContext *avctx,
-                                                        int64_t samples)
-{
-    if(samples == AV_NOPTS_VALUE)
-        return AV_NOPTS_VALUE;
-    return av_rescale_q(samples, (AVRational){ 1, avctx->sample_rate },
-                        avctx->time_base);
-}
-
-/**
  * 2^(x) for integer x
  * @return correctly rounded float
  */
@@ -198,56 +202,9 @@ static av_always_inline float ff_exp2fi(int x) {
         return 0;
 }
 
-/**
- * Get a buffer for a frame. This is a wrapper around
- * AVCodecContext.get_buffer() and should be used instead calling get_buffer()
- * directly.
- */
-int ff_get_buffer(AVCodecContext *avctx, AVFrame *frame, int flags);
-
-#define FF_REGET_BUFFER_FLAG_READONLY 1 ///< the returned buffer does not need to be writable
-/**
- * Identical in function to ff_get_buffer(), except it reuses the existing buffer
- * if available.
- */
-int ff_reget_buffer(AVCodecContext *avctx, AVFrame *frame, int flags);
-
-int ff_thread_can_start_frame(AVCodecContext *avctx);
-
 int avpriv_h264_has_num_reorder_frames(AVCodecContext *avctx);
 
 int avpriv_codec_get_cap_skip_frame_fill_param(const AVCodec *codec);
-
-/**
- * Check that the provided frame dimensions are valid and set them on the codec
- * context.
- */
-int ff_set_dimensions(AVCodecContext *s, int width, int height);
-
-/**
- * Check that the provided sample aspect ratio is valid and set it on the codec
- * context.
- */
-int ff_set_sar(AVCodecContext *avctx, AVRational sar);
-
-/**
- * Add or update AV_FRAME_DATA_MATRIXENCODING side data.
- */
-int ff_side_data_update_matrix_encoding(AVFrame *frame,
-                                        enum AVMatrixEncoding matrix_encoding);
-
-/**
- * Select the (possibly hardware accelerated) pixel format.
- * This is a wrapper around AVCodecContext.get_format() and should be used
- * instead of calling get_format() directly.
- *
- * The list of pixel formats must contain at least one valid entry, and is
- * terminated with AV_PIX_FMT_NONE.  If it is possible to decode to software,
- * the last entry in the list must be the most accurate software format.
- * If it is not possible to decode to software, AVCodecContext.sw_pix_fmt
- * must be set before calling this function.
- */
-int ff_get_format(AVCodecContext *avctx, const enum AVPixelFormat *fmt);
 
 /**
  * Add a CPB properties side data to an encoding context.
@@ -287,7 +244,5 @@ int64_t ff_guess_coded_bitrate(AVCodecContext *avctx);
  */
 int ff_int_from_list_or_default(void *ctx, const char * val_name, int val,
                                 const int * array_valid_values, int default_value);
-
-void ff_dvdsub_parse_palette(uint32_t *palette, const char *p);
 
 #endif /* AVCODEC_INTERNAL_H */

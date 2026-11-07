@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WIDGET_WIDGET_BASE_H_
 
 #include "base/time/time.h"
+#include "cc/animation/animation_timeline.h"
 #include "cc/mojo_embedder/async_layer_tree_frame_sink.h"
 #include "cc/paint/element_id.h"
 #include "cc/trees/browser_controls_params.h"
@@ -33,6 +34,7 @@
 
 namespace cc {
 class AnimationHost;
+class AnimationTimeline;
 class LayerTreeHost;
 class LayerTreeSettings;
 }  // namespace cc
@@ -52,13 +54,13 @@ struct ScreenInfos;
 namespace blink {
 class ImeEventGuard;
 class LayerTreeView;
+class PageScheduler;
 class WidgetBaseClient;
 class WidgetInputHandlerManager;
 class WidgetCompositor;
 
 namespace scheduler {
-class WebAgentGroupScheduler;
-class WebRenderWidgetSchedulingState;
+class WidgetScheduler;
 }
 
 // This class is the foundational class for all widgets that blink creates.
@@ -78,7 +80,8 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       bool hidden,
       bool never_composited,
-      bool is_for_child_local_root);
+      bool is_embedded,
+      bool is_for_scalable_page);
   ~WidgetBase() override;
 
   // Initialize the compositor. |settings| is typically null. When |settings| is
@@ -92,8 +95,7 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
   // The `frame_widget_input_handler` must be invalidated when the WidgetBase is
   // destroyed/invalidated.
   void InitializeCompositing(
-      scheduler::WebAgentGroupScheduler& agent_group_scheduler,
-      bool for_child_local_root_frame,
+      PageScheduler& page_scheduler,
       const display::ScreenInfos& screen_infos,
       const cc::LayerTreeSettings* settings,
       base::WeakPtr<mojom::blink::FrameWidgetInputHandler>
@@ -106,6 +108,8 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
 
   // Shutdown the compositor.
   void Shutdown();
+
+  void DidFirstVisuallyNonEmptyPaint(base::TimeTicks&);
 
   // Set the compositor as visible. If |visible| is true, then the compositor
   // will request a new layer frame sink, begin producing frames from the
@@ -149,8 +153,11 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
       const cc::CompositorCommitData& commit_data) override;
   void BeginMainFrame(base::TimeTicks frame_time) override;
   void OnDeferMainFrameUpdatesChanged(bool) override;
-  void OnDeferCommitsChanged(bool defer_status,
-                             cc::PaintHoldingReason reason) override;
+  void OnDeferCommitsChanged(
+      bool defer_status,
+      cc::PaintHoldingReason reason,
+      absl::optional<cc::PaintHoldingCommitTrigger> trigger) override;
+  void OnPauseRenderingChanged(bool) override;
   void DidBeginMainFrame() override;
   void RequestNewLayerTreeFrameSink(
       LayerTreeFrameSinkCallback callback) override;
@@ -178,9 +185,9 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
   void ScheduleAnimationForWebTests() override;
 
   cc::AnimationHost* AnimationHost() const;
+  cc::AnimationTimeline* ScrollAnimationTimeline() const;
   cc::LayerTreeHost* LayerTreeHost() const;
-  scheduler::WebRenderWidgetSchedulingState* RendererWidgetSchedulingState()
-      const;
+  scheduler::WidgetScheduler* WidgetScheduler();
 
   mojom::blink::WidgetHost* GetWidgetHostRemote() { return widget_host_.get(); }
 
@@ -367,6 +374,8 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
     return local_surface_id_from_parent_;
   }
 
+  bool is_embedded() const { return is_embedded_; }
+
  private:
   bool CanComposeInline();
   void UpdateTextInputStateInternal(bool show_virtual_keyboard,
@@ -417,8 +426,12 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
 
   // Indicates that we are never visible, so never produce graphical output.
   const bool never_composited_;
-  // Indicates this is for a child local root.
-  const bool is_for_child_local_root_;
+  // Indicates this is for a child local root or a nested main frame.
+  // TODO(crbug.com/1254770): revisit this for portals.
+  const bool is_embedded_ = false;
+  // Indicates that this widget is for a portal element, top level frame, or a
+  // GuestView.
+  const bool is_for_scalable_page_ = false;
   // Set true by initialize functions, used to check that only one is called.
   bool initialized_ = false;
 
@@ -431,8 +444,7 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
 
   std::unique_ptr<LayerTreeView> layer_tree_view_;
   scoped_refptr<WidgetInputHandlerManager> widget_input_handler_manager_;
-  std::unique_ptr<scheduler::WebRenderWidgetSchedulingState>
-      render_widget_scheduling_state_;
+  scoped_refptr<scheduler::WidgetScheduler> widget_scheduler_;
   bool has_focus_ = false;
   WidgetBaseInputHandler input_handler_{this};
   scoped_refptr<WidgetCompositor> widget_compositor_;
@@ -523,6 +535,9 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
   // TODO(dtapuska): Figure out if we can change this to Blink Space.
   // See https://crbug.com/1131389
   gfx::Size visible_viewport_size_in_dips_;
+
+  // The AnimationTimeline for smooth scrolls in this widget.
+  scoped_refptr<cc::AnimationTimeline> scroll_animation_timeline_;
 
   // Indicates that we shouldn't bother generated paint events.
   bool is_hidden_;

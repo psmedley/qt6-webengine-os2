@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -46,6 +46,7 @@ blink_python_runner("runtime_enabled_features") {
              "../build/scripts/templates/runtime_enabled_features.cc.tmpl",
              "../build/scripts/templates/runtime_enabled_features.h.tmpl",
              "../build/scripts/templates/runtime_enabled_features_test_helpers.h.tmpl",
+             "../build/scripts/templates/web_runtime_features_base.cc.tmpl",
            ]
 
   build_scripts_output_dir = "$blink_platform_output_dir/../build/scripts"
@@ -53,6 +54,7 @@ blink_python_runner("runtime_enabled_features") {
     "$blink_platform_output_dir/runtime_enabled_features.cc",
     "$blink_platform_output_dir/runtime_enabled_features.h",
     "$blink_platform_output_dir/testing/runtime_enabled_features_test_helpers.h",
+    "$blink_platform_output_dir/exported/web_runtime_features_base.cc",
     "$build_scripts_output_dir/runtime_enabled_features.pickle",
   ]
 
@@ -262,8 +264,6 @@ jumbo_component("platform") {
     "animation/compositor_animation_client.cc",
     "animation/compositor_animation_client.h",
     "animation/compositor_animation_delegate.h",
-    "animation/compositor_animation_timeline.cc",
-    "animation/compositor_animation_timeline.h",
     "animation/timing_function.cc",
     "animation/timing_function.h",
     "audio/audio_array.h",
@@ -379,6 +379,7 @@ jumbo_component("platform") {
     "bindings/callback_interface_base.h",
     "bindings/callback_method_retriever.cc",
     "bindings/callback_method_retriever.h",
+    "bindings/cross_thread_copier.h",
     "bindings/custom_wrappable.h",
     "bindings/dictionary_base.cc",
     "bindings/dictionary_base.h",
@@ -397,8 +398,6 @@ jumbo_component("platform") {
     "bindings/extensions_registry.h",
     "bindings/idl_member_installer.cc",
     "bindings/idl_member_installer.h",
-    "bindings/microtask.cc",
-    "bindings/microtask.h",
     "bindings/multi_worlds_v8_reference.cc",
     "bindings/multi_worlds_v8_reference.h",
     "bindings/name_client.h",
@@ -423,8 +422,12 @@ jumbo_component("platform") {
     "bindings/script_state.h",
     "bindings/script_wrappable.cc",
     "bindings/script_wrappable.h",
+    "bindings/source_location.cc",
+    "bindings/source_location.h",
     "bindings/string_resource.cc",
     "bindings/string_resource.h",
+    "bindings/thread_debugger.cc",
+    "bindings/thread_debugger.h",
     "bindings/to_v8.h",
     "bindings/trace_wrapper_v8_reference.h",
     "bindings/trace_wrapper_v8_string.cc",
@@ -482,7 +485,6 @@ jumbo_component("platform") {
     "disk_data_allocator.h",
     "disk_data_metadata.h",
     "exported/file_path_conversion.cc",
-    "exported/impression_conversions.cc",
     "exported/interface_registry.cc",
     "exported/mediastream/web_media_stream.cc",
     "exported/mediastream/web_media_stream_source.cc",
@@ -621,6 +623,8 @@ jumbo_component("platform") {
     "fonts/generic_font_family_settings.cc",
     "fonts/generic_font_family_settings.h",
     "fonts/glyph_metrics_map.h",
+    "fonts/lock_for_parallel_text_shaping.h",
+    "fonts/ng_text_fragment_paint_info.cc",
     "fonts/ng_text_fragment_paint_info.h",
     "fonts/opentype/font_format_check.cc",
     "fonts/opentype/font_format_check.h",
@@ -634,6 +638,8 @@ jumbo_component("platform") {
     "fonts/opentype/open_type_math_stretch_data.h",
     "fonts/opentype/open_type_math_support.cc",
     "fonts/opentype/open_type_math_support.h",
+    "fonts/opentype/open_type_math_test_fonts.cc",
+    "fonts/opentype/open_type_math_test_fonts.h",
     "fonts/opentype/open_type_types.h",
     "fonts/opentype/open_type_vertical_data.cc",
     "fonts/opentype/open_type_vertical_data.h",
@@ -714,6 +720,7 @@ jumbo_component("platform") {
     "fonts/web_font_render_style.cc",
     "fonts/web_font_typeface_factory.cc",
     "fonts/web_font_typeface_factory.h",
+    "geometry/anchor_query_enums.h",
     "geometry/blend.h",
     "geometry/calculation_expression_node.cc",
     "geometry/calculation_expression_node.h",
@@ -780,6 +787,8 @@ jumbo_component("platform") {
     "graphics/color_space_gamut.h",
     "graphics/color_space_profile_data.cc",
     "graphics/color_space_profile_data.h",
+    "graphics/compositing/adjust_mask_layer_geometry.cc",
+    "graphics/compositing/adjust_mask_layer_geometry.h",
     "graphics/compositing/chunk_to_layer_mapper.cc",
     "graphics/compositing/chunk_to_layer_mapper.h",
     "graphics/compositing/content_layer_client_impl.cc",
@@ -890,7 +899,6 @@ jumbo_component("platform") {
     "graphics/filters/spot_light_source.h",
     "graphics/generated_image.cc",
     "graphics/generated_image.h",
-    "graphics/gpu/dawn_callback.h",
     "graphics/gpu/dawn_control_client_holder.cc",
     "graphics/gpu/dawn_control_client_holder.h",
     "graphics/gpu/drawing_buffer.cc",
@@ -907,12 +915,15 @@ jumbo_component("platform") {
     "graphics/gpu/shared_gpu_context.h",
     "graphics/gpu/webgl_image_conversion.cc",
     "graphics/gpu/webgl_image_conversion.h",
+    "graphics/gpu/webgpu_callback.h",
     "graphics/gpu/webgpu_mailbox_texture.cc",
     "graphics/gpu/webgpu_mailbox_texture.h",
     "graphics/gpu/webgpu_resource_provider_cache.cc",
     "graphics/gpu/webgpu_resource_provider_cache.h",
     "graphics/gpu/webgpu_swap_buffer_provider.cc",
     "graphics/gpu/webgpu_swap_buffer_provider.h",
+    "graphics/gpu/webgpu_texture_alpha_clearer.cc",
+    "graphics/gpu/webgpu_texture_alpha_clearer.h",
     "graphics/gpu/xr_frame_transport.cc",
     "graphics/gpu/xr_frame_transport.h",
     "graphics/gpu/xr_webgl_drawing_buffer.cc",
@@ -1005,6 +1016,7 @@ jumbo_component("platform") {
     "graphics/paint/paint_canvas.h",
     "graphics/paint/paint_chunk.cc",
     "graphics/paint/paint_chunk.h",
+    "graphics/paint/paint_chunk_subset.cc",
     "graphics/paint/paint_chunk_subset.h",
     "graphics/paint/paint_chunker.cc",
     "graphics/paint/paint_chunker.h",
@@ -1078,8 +1090,7 @@ jumbo_component("platform") {
     "graphics/scoped_interpolation_quality.h",
     "graphics/scrollbar_theme_settings.cc",
     "graphics/scrollbar_theme_settings.h",
-    "graphics/skia/image_pixel_locker.cc",
-    "graphics/skia/image_pixel_locker.h",
+    "graphics/skia/sk_image_info_hash.h",
     "graphics/skia/sk_size_hash.h",
     "graphics/skia/skia_utils.cc",
     "graphics/skia/skia_utils.h",
@@ -1178,6 +1189,8 @@ jumbo_component("platform") {
     "mediastream/media_stream_audio_track.h",
     "mediastream/media_stream_component.cc",
     "mediastream/media_stream_component.h",
+    "mediastream/media_stream_component_impl.cc",
+    "mediastream/media_stream_component_impl.h",
     "mediastream/media_stream_descriptor.cc",
     "mediastream/media_stream_descriptor.h",
     "mediastream/media_stream_source.cc",
@@ -1186,6 +1199,8 @@ jumbo_component("platform") {
     "mediastream/media_stream_track_platform.h",
     "mediastream/media_stream_web_audio_source.cc",
     "mediastream/media_stream_web_audio_source.h",
+    "mediastream/transferred_media_stream_component.cc",
+    "mediastream/transferred_media_stream_component.h",
     "mediastream/webaudio_destination_consumer.h",
     "mediastream/webaudio_media_stream_source.cc",
     "mediastream/webaudio_media_stream_source.h",
@@ -1218,7 +1233,6 @@ jumbo_component("platform") {
     "mojo/heap_mojo_wrapper_mode.h",
     "mojo/kurl_mojom_traits.h",
     "mojo/mojo_binding_context.h",
-    "mojo/mojo_helper.h",
     "mojo/security_origin_mojom_traits.h",
     "mojo/shared_storage_mojom_traits.cc",
     "mojo/shared_storage_mojom_traits.h",
@@ -1365,6 +1379,8 @@ jumbo_component("platform") {
     "text/mathml_operator_dictionary.h",
     "text/platform_locale.cc",
     "text/platform_locale.h",
+    "text/quotes_data.cc",
+    "text/quotes_data.h",
     "text/segmented_string.cc",
     "text/segmented_string.h",
     "text/suffix_tree.h",
@@ -1379,7 +1395,6 @@ jumbo_component("platform") {
     "text/text_direction.h",
     "text/text_encoding_detector.cc",
     "text/text_encoding_detector.h",
-    "text/text_justify.h",
     "text/text_run.cc",
     "text/text_run.h",
     "text/text_run_iterator.h",
@@ -1461,6 +1476,8 @@ jumbo_component("platform") {
     "webrtc/webrtc_video_frame_adapter.h",
     "webrtc/webrtc_video_utils.cc",
     "webrtc/webrtc_video_utils.h",
+    "widget/compositing/categorized_worker_pool.cc",
+    "widget/compositing/categorized_worker_pool.h",
     "widget/compositing/layer_tree_settings.cc",
     "widget/compositing/layer_tree_settings.h",
     "widget/compositing/layer_tree_view.cc",
@@ -1655,6 +1672,7 @@ jumbo_component("platform") {
     "//gin",
     "//gpu:gpu",
     "//gpu/command_buffer/client:webgpu_interface",
+    "//gpu/webgpu:common",
     "//media",
     "//media/capture:capture_switches",
     "//media/capture/mojom:video_capture",
@@ -1674,7 +1692,6 @@ jumbo_component("platform") {
     "//third_party/blink/renderer/platform/wtf",
     "//third_party/ced",
     "//third_party/emoji-segmenter",
-    "//third_party/harfbuzz-ng:hb_scoped_util",
     "//third_party/icu",
     "//third_party/libyuv",
     "//third_party/one_euro_filter",
@@ -1896,6 +1913,8 @@ jumbo_static_library("test_support") {
     "testing/paint_test_configurations.h",
     "testing/picture_matchers.cc",
     "testing/picture_matchers.h",
+    "testing/scoped_fake_ukm_recorder.cc",
+    "testing/scoped_fake_ukm_recorder.h",
     "testing/scoped_main_thread_overrider.cc",
     "testing/scoped_main_thread_overrider.h",
     "testing/scoped_mocked_url.cc",
@@ -1908,6 +1927,7 @@ jumbo_static_library("test_support") {
     "testing/testing_platform_support.h",
     "testing/testing_platform_support_with_mock_scheduler.cc",
     "testing/testing_platform_support_with_mock_scheduler.h",
+    "testing/transformation_matrix_test_helpers.h",
     "testing/unit_test_helpers.cc",
     "testing/unit_test_helpers.h",
     "testing/url_test_helpers.cc",
@@ -1950,10 +1970,12 @@ jumbo_static_library("test_support") {
     "//third_party/blink/renderer/platform/loader:test_support",
     "//third_party/blink/renderer/platform/media:test_support",
     "//third_party/blink/renderer/platform/scheduler:test_support",
+    "//ui/gfx:test_support",
   ]
 
   deps = [
     "//base/test:test_support",
+    "//components/ukm:test_support",
     "//gin",
     "//media:test_support",
     "//mojo/core/embedder",
@@ -1975,21 +1997,25 @@ test("blink_platform_unittests") {
   deps = [ ":blink_platform_unittests_sources" ]
 
   if (is_fuchsia) {
+    additional_manifest_fragments = [
+      "//build/config/fuchsia/test/test_fonts.shard.test-cml",
+      "//build/config/fuchsia/test/mark_vmo_executable.shard.test-cml",
+    ]
+
     # Oilpan reuses V8's v8::PageAllocator which generally requires JIT
     # permissions.
-    # TODO(https://crbug.com/1287051): Requires fuchsia.sys.Launcher.
-    use_cfv2 = false
-    additional_manifest_fragments =
-        [ "//build/config/fuchsia/test/jit_capabilities.test-cmx" ]
-
-    # Use the following when switching to CFv2:
-    # test_runner_shard = "//build/config/fuchsia/test/elf_test_ambient_exec_runner.shard.test-cml"
+    test_runner_shard = "//build/config/fuchsia/test/elf_test_ambient_exec_runner.shard.test-cml"
   }
 
   if (is_android) {
-    # Required because of an indirect dependency on //media/base/android via
-    # platform/media:unit_tests.
-    deps += [ "//media/base/android:media_java" ]
+    deps += [
+      # Required because of an indirect dependency on //media/base/android via
+      # platform/media:unit_tests.
+      "//media/base/android:media_java",
+
+      # Required to disable broken tests.
+      "//testing/buildbot/filters:blink_platform_unittests",
+    ]
   }
 }
 
@@ -2001,7 +2027,6 @@ jumbo_source_set("blink_platform_unittests_sources") {
   sources = [
     "animation/animation_translation_util_test.cc",
     "animation/compositor_animation_test.cc",
-    "animation/compositor_animation_timeline_test.cc",
     "animation/timing_function_test.cc",
     "audio/audio_destination_test.cc",
     "audio/push_pull_fifo_multithread_test.cc",
@@ -2023,6 +2048,7 @@ jumbo_source_set("blink_platform_unittests_sources") {
     "fonts/font_cache_test.cc",
     "fonts/font_description_test.cc",
     "fonts/font_family_test.cc",
+    "fonts/font_global_context_test.cc",
     "fonts/font_palette_test.cc",
     "fonts/font_platform_data_test.cc",
     "fonts/font_selection_types_test.cc",
@@ -2128,6 +2154,7 @@ jumbo_source_set("blink_platform_unittests_sources") {
     "mediastream/media_stream_audio_processor_options_test.cc",
     "mediastream/media_stream_audio_test.cc",
     "mediastream/media_stream_source_test.cc",
+    "mediastream/transferred_media_stream_component_test.cc",
     "mediastream/webrtc_uma_histograms_test.cc",
     "mhtml/mhtml_parser_test.cc",
     "mojo/big_string_mojom_traits_test.cc",
@@ -2146,8 +2173,8 @@ jumbo_source_set("blink_platform_unittests_sources") {
     "p2p/ipc_network_manager_test.cc",
     "peerconnection/coalesced_tasks_test.cc",
     "peerconnection/linear_histogram_test.cc",
+    "peerconnection/low_precision_timer_test.cc",
     "peerconnection/metronome_source_test.cc",
-    "peerconnection/metronome_task_queue_factory_test.cc",
     "peerconnection/rtc_encoded_audio_stream_transformer_test.cc",
     "peerconnection/rtc_encoded_video_stream_transformer_test.cc",
     "peerconnection/rtc_rtp_source_test.cc",
@@ -2164,7 +2191,6 @@ jumbo_source_set("blink_platform_unittests_sources") {
     "peerconnection/webrtc_audio_sink_test.cc",
     "peerconnection/webrtc_decoding_info_handler_test.cc",
     "peerconnection/webrtc_encoding_info_handler_test.cc",
-    "peerconnection/webrtc_timer_test.cc",
     "peerconnection/webrtc_video_track_source_test.cc",
     "region_capture_crop_id_test.cc",
     "runtime_enabled_features_test.cc",
@@ -2193,7 +2219,6 @@ jumbo_source_set("blink_platform_unittests_sources") {
     "transforms/rotation_test.cc",
     "transforms/transform_operations_test.cc",
     "transforms/transformation_matrix_test.cc",
-    "transforms/transformation_matrix_test_helpers.h",
     "video_capture/gpu_memory_buffer_test_support.cc",
     "video_capture/gpu_memory_buffer_test_support.h",
     "video_capture/video_capture_impl_test.cc",
@@ -2204,6 +2229,7 @@ jumbo_source_set("blink_platform_unittests_sources") {
     "weborigin/security_policy_test.cc",
     "webrtc/convert_to_webrtc_video_frame_buffer_test.cc",
     "webrtc/webrtc_video_frame_adapter_test.cc",
+    "widget/compositing/categorized_worker_pool_unittest.cc",
     "widget/compositing/layer_tree_settings_unittest.cc",
     "widget/compositing/layer_tree_view_unittest.cc",
     "widget/compositing/render_frame_metadata_observer_impl_unittest.cc",
@@ -2261,6 +2287,7 @@ jumbo_source_set("blink_platform_unittests_sources") {
     "//build:chromeos_buildflags",
     "//cc",
     "//cc:test_support",
+    "//gin:gin",
     "//media:test_support",
     "//media/capture/mojom:video_capture",
     "//mojo/core/embedder",
@@ -2271,7 +2298,6 @@ jumbo_source_set("blink_platform_unittests_sources") {
     "//services/viz/public/mojom",
     "//skia",
     "//skia:skcms",
-    "//skia:test_fonts",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party:freetype_harfbuzz",
@@ -2307,6 +2333,12 @@ jumbo_source_set("blink_platform_unittests_sources") {
   defines = [ "INSIDE_BLINK" ]
   if (use_minikin_hyphenation) {
     defines += [ "USE_MINIKIN_HYPHENATION" ]
+  }
+
+  if (is_fuchsia) {
+    deps += [ "//skia:test_fonts_cfv2" ]
+  } else {
+    deps += [ "//skia:test_fonts" ]
   }
 }
 
@@ -2370,6 +2402,7 @@ test("blink_platform_perftests") {
     ":test_support",
     "//base",
     "//base/test:test_support",
+    "//gin:gin",
     "//mojo/public/cpp/bindings/tests:for_blink_tests",
     "//mojo/public/cpp/test_support:test_utils",
     "//mojo/public/interfaces/bindings/tests:test_interfaces_blink",
@@ -2420,17 +2453,28 @@ test("blink_fuzzer_unittests") {
   deps = [
     ":test_support",
     "//base/test:test_support",
+    "//gin:gin",
     "//mojo/core/embedder:embedder",
-    "//skia:test_fonts",
     "//third_party/blink/public:test_support",
   ]
 
   sources = [ "testing/run_all_tests.cc" ]
 
-  if (is_linux || is_chromeos) {
+  if (is_linux || is_chromeos || is_fuchsia) {
     deps += [
       "//third_party/blink/renderer/platform/scheduler:scheduler_fuzzer_tests",
     ]
+  }
+
+  if (is_fuchsia) {
+    deps += [ "//skia:test_fonts_cfv2" ]
+    test_runner_shard = "//build/config/fuchsia/test/elf_test_ambient_exec_runner.shard.test-cml"
+    additional_manifest_fragments = [
+      "//build/config/fuchsia/test/test_fonts.shard.test-cml",
+      "//build/config/fuchsia/test/mark_vmo_executable.shard.test-cml",
+    ]
+  } else {
+    deps += [ "//skia:test_fonts" ]
   }
 }
 
@@ -2449,6 +2493,54 @@ jumbo_source_set("blink_fuzzer_test_support") {
     ":platform",
     "//base/test:test_config",
     "//content/test:test_support",
+  ]
+}
+
+# Fuzzer for WTF::unicode::MathVariant.
+fuzzer_test("math_transform_fuzzer") {
+  sources = [ "math_transform_fuzzer.cc" ]
+  deps = [
+    ":blink_fuzzer_test_support",
+    ":platform",
+  ]
+  libfuzzer_options = [ "max_len=10" ]
+  dict = "//testing/libfuzzer/fuzzers/dicts/math_transform.dict"
+}
+
+# Fuzzer for blink::FindCategory.
+fuzzer_test("mathml_operator_dictionary_fuzzer") {
+  sources = [ "text/mathml_operator_dictionary_fuzzer.cc" ]
+  deps = [
+    ":blink_fuzzer_test_support",
+    ":platform",
+  ]
+  libfuzzer_options = [ "max_len=10" ]
+  dict = "//testing/libfuzzer/fuzzers/dicts/mathml_operator_dictionary.dict"
+}
+
+# Fuzzer for blink::OpenTypeMathSupportTest.
+fuzzer_test("open_type_math_support_fuzzer") {
+  sources = [ "fonts/opentype/open_type_math_support_fuzzer.cc" ]
+  deps = [
+    ":blink_fuzzer_test_support",
+    ":platform",
+  ]
+  seed_corpuses = [
+    "//third_party/blink/web_tests/external/wpt/fonts/math",
+    "//testing/libfuzzer/fuzzers/woff2_corpus",
+  ]
+}
+
+# Fuzzer for blink::StretchyOperatorShaper
+fuzzer_test("stretchy_operator_shaper_fuzzer") {
+  sources = [ "fonts/shaping/stretchy_operator_shaper_fuzzer.cc" ]
+  deps = [
+    ":blink_fuzzer_test_support",
+    ":platform",
+  ]
+  seed_corpuses = [
+    "//third_party/blink/web_tests/external/wpt/fonts/math",
+    "//testing/libfuzzer/fuzzers/woff2_corpus",
   ]
 }
 
@@ -2586,6 +2678,7 @@ jumbo_source_set("unit_tests") {
     "graphics/gpu/drawing_buffer_software_rendering_test.cc",
     "graphics/image_decoding_store_test.cc",
     "graphics/image_frame_generator_test.cc",
+    "graphics/offscreen_canvas_placeholder_test.cc",
     "graphics/paint_worklet_paint_dispatcher_test.cc",
     "graphics/test/stub_image.h",
 

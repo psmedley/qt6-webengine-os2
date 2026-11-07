@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -201,7 +201,7 @@ function createBrowserApiForMimeHandlerView(): Promise<BrowserApi> {
             chrome.tabs.setZoomSettings(
                 streamInfo.tabId, {
                   mode: chrome.tabs.ZoomSettingsMode.MANUAL,
-                  scope: chrome.tabs.ZoomSettingsScope.PER_TAB
+                  scope: chrome.tabs.ZoomSettingsScope.PER_TAB,
                 },
                 resolve);
           }));

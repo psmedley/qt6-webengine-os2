@@ -7,7 +7,7 @@
 
 #include "src/sksl/codegen/SkSLPipelineStageCodeGenerator.h"
 
-#if defined(SKSL_STANDALONE) || SK_SUPPORT_GPU || SK_GRAPHITE_ENABLED
+#if defined(SKSL_STANDALONE) || SK_SUPPORT_GPU || defined(SK_GRAPHITE_ENABLED)
 
 #include "include/core/SkSpan.h"
 #include "include/core/SkTypes.h"
@@ -21,7 +21,9 @@
 #include "include/private/SkTArray.h"
 #include "include/private/SkTHash.h"
 #include "include/sksl/SkSLOperator.h"
+#include "src/sksl/SkSLBuiltinTypes.h"
 #include "src/sksl/SkSLCompiler.h"
+#include "src/sksl/SkSLIntrinsicList.h"
 #include "src/sksl/SkSLProgramSettings.h"
 #include "src/sksl/SkSLStringStream.h"
 #include "src/sksl/ir/SkSLBinaryExpression.h"
@@ -51,8 +53,10 @@
 #include "src/sksl/ir/SkSLVarDeclarations.h"
 #include "src/sksl/ir/SkSLVariable.h"
 #include "src/sksl/ir/SkSLVariableReference.h"
+
 #include <memory>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -75,7 +79,7 @@ public:
     void generateCode();
 
 private:
-    using Precedence = Operator::Precedence;
+    using Precedence = OperatorPrecedence;
 
     void write(std::string_view s);
     void writeLine(std::string_view s = std::string_view());
@@ -355,6 +359,11 @@ std::string PipelineStageCodeGenerator::functionName(const FunctionDeclaration& 
 }
 
 void PipelineStageCodeGenerator::writeFunction(const FunctionDefinition& f) {
+    if (f.declaration().isBuiltin()) {
+        // Don't re-emit builtin functions.
+        return;
+    }
+
     AutoOutputBuffer body(this);
 
     // We allow public SkSL's main() to return half4 -or- float4 (ie vec4). When we emit
@@ -364,8 +373,8 @@ void PipelineStageCodeGenerator::writeFunction(const FunctionDefinition& f) {
     // obscure bug.
     const FunctionDeclaration& decl = f.declaration();
     if (decl.isMain() &&
-        fProgram.fConfig->fKind != SkSL::ProgramKind::kCustomMeshVertex &&
-        fProgram.fConfig->fKind != SkSL::ProgramKind::kCustomMeshFragment) {
+        fProgram.fConfig->fKind != SkSL::ProgramKind::kMeshVertex &&
+        fProgram.fConfig->fKind != SkSL::ProgramKind::kMeshFragment) {
         fCastReturnsToHalf = true;
     }
 
@@ -404,7 +413,7 @@ std::string PipelineStageCodeGenerator::functionDeclaration(const FunctionDeclar
 }
 
 void PipelineStageCodeGenerator::writeFunctionDeclaration(const FunctionDeclaration& decl) {
-    if (!decl.isMain()) {
+    if (!decl.isMain() && !decl.isBuiltin()) {
         fCallbacks->declareFunction(this->functionDeclaration(decl).c_str());
     }
 }
@@ -719,7 +728,6 @@ void PipelineStageCodeGenerator::writeStatement(const Statement& s) {
         case Statement::Kind::kDiscard:
             SkDEBUGFAIL("Unsupported control flow");
             break;
-        case Statement::Kind::kInlineMarker:
         case Statement::Kind::kNop:
             this->write(";");
             break;

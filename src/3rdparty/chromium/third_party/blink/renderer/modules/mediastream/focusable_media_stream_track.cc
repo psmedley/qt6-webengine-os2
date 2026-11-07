@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/modules/imagecapture/image_capture.h"
 #include "third_party/blink/renderer/modules/mediastream/user_media_client.h"
-#include "third_party/blink/renderer/modules/mediastream/user_media_controller.h"
 
 namespace blink {
 
@@ -20,7 +19,7 @@ FocusableMediaStreamTrack::FocusableMediaStreamTrack(
     bool is_clone)
     : FocusableMediaStreamTrack(execution_context,
                                 component,
-                                component->Source()->GetReadyState(),
+                                component->GetReadyState(),
                                 std::move(callback),
                                 descriptor_id,
                                 is_clone) {}
@@ -44,7 +43,7 @@ FocusableMediaStreamTrack::FocusableMediaStreamTrack(
 
 #if !BUILDFLAG(IS_ANDROID)
 void FocusableMediaStreamTrack::CloseFocusWindowOfOpportunity() {
-  promise_settled_ = true;
+  focus_window_of_opportunity_is_open_ = false;
 }
 #endif
 
@@ -53,14 +52,8 @@ void FocusableMediaStreamTrack::focus(
     V8CaptureStartFocusBehavior focus_behavior,
     ExceptionState& exception_state) {
 #if !BUILDFLAG(IS_ANDROID)
-  UserMediaController* const controller =
-      UserMediaController::From(To<LocalDOMWindow>(execution_context));
-  if (!controller) {
-    DLOG(ERROR) << "UserMediaController missing.";
-    return;
-  }
-
-  UserMediaClient* const client = controller->Client();
+  UserMediaClient* const client =
+      UserMediaClient::From(To<LocalDOMWindow>(execution_context));
   if (!client) {
     DLOG(ERROR) << "UserMediaClient missing.";
     return;
@@ -79,10 +72,10 @@ void FocusableMediaStreamTrack::focus(
   }
   focus_called_ = true;
 
-  if (promise_settled_) {
+  if (!focus_window_of_opportunity_is_open_) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidStateError,
-        "The microtask on which the Promise was settled has terminated.");
+        "The window of opportunity for focus-decision is closed.");
     return;
   }
 
@@ -94,11 +87,11 @@ void FocusableMediaStreamTrack::focus(
 }
 
 FocusableMediaStreamTrack* FocusableMediaStreamTrack::clone(
-    ScriptState* script_state) {
+    ExecutionContext* execution_context) {
   // Instantiate the clone.
   FocusableMediaStreamTrack* cloned_track =
       MakeGarbageCollected<FocusableMediaStreamTrack>(
-          ExecutionContext::From(script_state), Component()->Clone(),
+          execution_context, Component()->Clone(ClonePlatformTrack()),
           GetReadyState(), base::DoNothing(), descriptor_id_,
           /*is_clone=*/true);
 
@@ -117,7 +110,8 @@ void FocusableMediaStreamTrack::CloneInternal(
 #if !BUILDFLAG(IS_ANDROID)
   // Copied for completeness, but should never be read on clones.
   cloned_track->focus_called_ = focus_called_;
-  cloned_track->promise_settled_ = promise_settled_;
+  cloned_track->focus_window_of_opportunity_is_open_ =
+        focus_window_of_opportunity_is_open_;
 #endif
 }
 

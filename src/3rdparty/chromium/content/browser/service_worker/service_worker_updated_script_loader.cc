@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,6 @@
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/cert/cert_status_flags.h"
-#include "services/network/public/cpp/features.h"
 #include "services/network/public/mojom/early_hints.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "third_party/blink/public/common/loader/throttling_url_loader.h"
@@ -164,7 +163,8 @@ void ServiceWorkerUpdatedScriptLoader::OnReceiveEarlyHints(
 
 void ServiceWorkerUpdatedScriptLoader::OnReceiveResponse(
     network::mojom::URLResponseHeadPtr response_head,
-    mojo::ScopedDataPipeConsumerHandle body) {
+    mojo::ScopedDataPipeConsumerHandle body,
+    absl::optional<mojo_base::BigBuffer> cached_metadata) {
   NOTREACHED();
 }
 
@@ -181,19 +181,9 @@ void ServiceWorkerUpdatedScriptLoader::OnUploadProgress(
   NOTREACHED();
 }
 
-void ServiceWorkerUpdatedScriptLoader::OnReceiveCachedMetadata(
-    mojo_base::BigBuffer data) {
-  client_->OnReceiveCachedMetadata(std::move(data));
-}
-
 void ServiceWorkerUpdatedScriptLoader::OnTransferSizeUpdated(
     int32_t transfer_size_diff) {
   client_->OnTransferSizeUpdated(transfer_size_diff);
-}
-
-void ServiceWorkerUpdatedScriptLoader::OnStartLoadingResponseBody(
-    mojo::ScopedDataPipeConsumerHandle consumer) {
-  NOTREACHED();
 }
 
 void ServiceWorkerUpdatedScriptLoader::OnComplete(
@@ -253,14 +243,8 @@ int ServiceWorkerUpdatedScriptLoader::WillWriteResponseHead(
   }
 
   // Pass the consumer handle to the client.
-  if (base::FeatureList::IsEnabled(network::features::kCombineResponseBody)) {
-    client_->OnReceiveResponse(std::move(client_response),
-                               std::move(client_consumer));
-  } else {
-    client_->OnReceiveResponse(std::move(client_response),
-                               mojo::ScopedDataPipeConsumerHandle());
-    client_->OnStartLoadingResponseBody(std::move(client_consumer));
-  }
+  client_->OnReceiveResponse(std::move(client_response),
+                             std::move(client_consumer), absl::nullopt);
 
   client_producer_watcher_.Watch(
       client_producer_.get(), MOJO_HANDLE_SIGNAL_WRITABLE,

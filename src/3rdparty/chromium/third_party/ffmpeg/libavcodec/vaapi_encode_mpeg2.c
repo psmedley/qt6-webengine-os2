@@ -623,9 +623,6 @@ static av_cold int vaapi_encode_mpeg2_init(AVCodecContext *avctx)
     ctx->desired_packed_headers = VA_ENC_PACKED_HEADER_SEQUENCE |
                                   VA_ENC_PACKED_HEADER_PICTURE;
 
-    ctx->surface_width  = FFALIGN(avctx->width,  16);
-    ctx->surface_height = FFALIGN(avctx->height, 16);
-
     return ff_vaapi_encode_init(avctx);
 }
 
@@ -692,17 +689,18 @@ static const AVClass vaapi_encode_mpeg2_class = {
 
 const FFCodec ff_mpeg2_vaapi_encoder = {
     .p.name         = "mpeg2_vaapi",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("MPEG-2 (VAAPI)"),
+    CODEC_LONG_NAME("MPEG-2 (VAAPI)"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_MPEG2VIDEO,
     .priv_data_size = sizeof(VAAPIEncodeMPEG2Context),
     .init           = &vaapi_encode_mpeg2_init,
-    .receive_packet = &ff_vaapi_encode_receive_packet,
+    FF_CODEC_RECEIVE_PACKET_CB(&ff_vaapi_encode_receive_packet),
     .close          = &vaapi_encode_mpeg2_close,
     .p.priv_class   = &vaapi_encode_mpeg2_class,
     .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_HARDWARE |
                       AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE |
+                      FF_CODEC_CAP_INIT_CLEANUP,
     .defaults       = vaapi_encode_mpeg2_defaults,
     .p.pix_fmts = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_VAAPI,

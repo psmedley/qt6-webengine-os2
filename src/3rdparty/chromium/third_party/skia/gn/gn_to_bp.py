@@ -11,6 +11,7 @@ from __future__ import print_function
 
 import os
 import pprint
+import shutil
 import string
 import subprocess
 import tempfile
@@ -76,14 +77,10 @@ cc_defaults {
     name: "skia_arch_defaults",
     arch: {
         arm: {
-            srcs: [
-                $arm_srcs
-            ],
+            srcs: [],
 
             neon: {
-                srcs: [
-                    $arm_neon_srcs
-                ],
+                srcs: [],
             },
         },
 
@@ -113,6 +110,7 @@ cc_defaults {
         ],
         local_include_dirs: [
           "third_party/vulkanmemoryallocator/",
+          "vma_android/include",
         ],
       },
     },
@@ -265,6 +263,14 @@ cc_defaults {
         "libpiex",
         "libexpat",
         "libft2",
+        // Required by Skottie
+        "libicu",
+        "libharfbuzz_ng",
+    ],
+    // Required by Skottie
+    cflags: [
+        "-DSK_SHAPER_HARFBUZZ_AVAILABLE",
+        "-DSK_UNICODE_AVAILABLE",
     ],
     static_libs: [
         "libwebp-decode",
@@ -490,6 +496,8 @@ def generate_args(target_os, enable_gpu, renderengine = False):
     'skia_enable_fontmgr_win_gdi':          'false',
     'skia_use_fonthost_mac':                'false',
 
+    'skia_use_system_harfbuzz':             'false',
+
     # enable features used in skia_nanobench
     'skia_tools_require_resources':         'true',
 
@@ -497,6 +505,7 @@ def generate_args(target_os, enable_gpu, renderengine = False):
     'skia_include_multiframe_procs':        'false',
     # Required for some SKSL tests
     'skia_enable_sksl_tracing':             'true',
+    'skia_use_perfetto':                    'false'
   }
   d['target_os'] = target_os
   if target_os == '"android"':
@@ -531,7 +540,7 @@ def generate_args(target_os, enable_gpu, renderengine = False):
     d['skia_use_libjpeg_turbo_encode'] = 'false'
     d['skia_use_libwebp_decode'] = 'false'
     d['skia_use_libwebp_encode'] = 'false'
-    d['skia_use_libgifcodec'] = 'false'
+    d['skia_use_wuffs'] = 'false'
     d['skia_enable_pdf'] = 'false'
     d['skia_use_freetype'] = 'false'
     d['skia_use_fixed_gamma_text'] = 'false'
@@ -543,6 +552,7 @@ def generate_args(target_os, enable_gpu, renderengine = False):
     d['skia_use_fixed_gamma_text'] = 'true'
     d['skia_enable_fontmgr_custom_empty'] = 'true'
     d['skia_use_wuffs'] = 'true'
+    d['skia_enable_skottie'] = 'true'
 
   return d
 
@@ -562,6 +572,17 @@ cflags          = strip_slashes(js['targets']['//:skia']['cflags'])
 cflags_cc       = strip_slashes(js['targets']['//:skia']['cflags_cc'])
 local_includes  = strip_slashes(js['targets']['//:skia']['include_dirs'])
 export_includes = strip_slashes(js['targets']['//:public']['include_dirs'])
+
+if (gn_args['skia_enable_skottie']):
+  # Skottie sits on top of skia, so we need to specify these sources to be built
+  # Python sets handle duplicate flags, source files, and includes for us
+  android_srcs.update(strip_slashes(js['targets']['//modules/skottie:skottie']['sources']))
+  gn_to_bp_utils.GrabDependentValues(js, '//modules/skottie:skottie', 'sources',
+                                     android_srcs, '//:skia')
+
+  local_includes.update(strip_slashes(js['targets']['//modules/skottie:skottie']['include_dirs']))
+  gn_to_bp_utils.GrabDependentValues(js, '//modules/skottie:skottie', 'include_dirs',
+                                     local_includes, '//:skia')
 
 gm_srcs         = strip_slashes(js['targets']['//:gm']['sources'])
 gm_includes     = strip_slashes(js['targets']['//:gm']['include_dirs'])
@@ -585,8 +606,8 @@ gn_to_bp_utils.GrabDependentValues(js, '//:nanobench', 'sources',
                                    nanobench_srcs, ['//:skia', '//:gm'])
 
 # skcms is a little special, kind of a second-party library.
-local_includes.add("include/third_party/skcms")
-gm_includes   .add("include/third_party/skcms")
+local_includes.add("modules/skcms")
+gm_includes   .add("modules/skcms")
 
 # Android's build will choke if we list headers.
 def strip_headers(sources):
@@ -654,8 +675,11 @@ skqp_includes.update(strip_slashes(js_skqp['targets']['//:public']['include_dirs
 
 gn_to_bp_utils.GrabDependentValues(js_skqp, '//:libskqp_app', 'sources',
                                    skqp_srcs, None)
+# We are exlcuding gpu here to get rid of the includes that are being added from
+# vulkanmemoryallocator. This does not seem to remove any other incldues from gpu so things
+# should work out fine for now
 gn_to_bp_utils.GrabDependentValues(js_skqp, '//:libskqp_app', 'include_dirs',
-                                   skqp_includes, ['//:gif'])
+                                   skqp_includes, ['//:gif', '//:gpu'])
 gn_to_bp_utils.GrabDependentValues(js_skqp, '//:libskqp_app', 'cflags',
                                    skqp_cflags, None)
 gn_to_bp_utils.GrabDependentValues(js_skqp, '//:libskqp_app', 'cflags_cc',
@@ -692,6 +716,11 @@ mkdir_if_not_exists('mac/include/config/')
 mkdir_if_not_exists('win/include/config/')
 mkdir_if_not_exists('renderengine/include/config/')
 mkdir_if_not_exists('skqp/include/config/')
+mkdir_if_not_exists('vma_android/include')
+
+shutil.copy('third_party/externals/vulkanmemoryallocator/include/vk_mem_alloc.h',
+            'vma_android/include')
+shutil.copy('third_party/externals/vulkanmemoryallocator/LICENSE.txt', 'vma_android/')
 
 platforms = { 'IOS', 'MAC', 'WIN', 'ANDROID', 'UNIX' }
 
@@ -761,13 +790,8 @@ with open('Android.bp', 'w') as Android_bp:
     'cflags':          bpfmt(8, cflags, False),
     'cflags_cc':       bpfmt(8, cflags_cc),
 
-    'arm_srcs':      bpfmt(16, strip_headers(defs['armv7'])),
-    'arm_neon_srcs': bpfmt(20, strip_headers(defs['neon'])),
-    'arm64_srcs':    bpfmt(16, strip_headers(defs['arm64'] +
-                                             defs['crc32'])),
-    'x86_srcs':      bpfmt(16, strip_headers(defs['sse2'] +
-                                             defs['ssse3'] +
-                                             defs['sse41'] +
+    'arm64_srcs':    bpfmt(16, strip_headers(defs['crc32'])),
+    'x86_srcs':      bpfmt(16, strip_headers(defs['ssse3'] +
                                              defs['sse42'] +
                                              defs['avx'  ] +
                                              defs['hsw'  ] +

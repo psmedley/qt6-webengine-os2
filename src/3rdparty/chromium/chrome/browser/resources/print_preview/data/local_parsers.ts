@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,30 +6,30 @@ import {assertNotReached} from 'chrome://resources/js/assert_ts.js';
 import {isChromeOS, isLacros} from 'chrome://resources/js/cr.m.js';
 
 import {Destination, DestinationOptionalParams, DestinationOrigin, PrinterType} from './destination.js';
-// <if expr="chromeos_ash or chromeos_lacros">
+// <if expr="is_chromeos">
 import {DestinationProvisionalType} from './destination.js';
 // </if>
 
-type ObjectMap = {
-  [k: string]: any,
-};
+interface ObjectMap {
+  [k: string]: any;
+}
 
-export type LocalDestinationInfo = {
-  deviceName: string,
-  printerName: string,
-  printerDescription?: string,
-  cupsEnterprisePrinter?: boolean,
-  printerOptions?: ObjectMap,
-};
+export interface LocalDestinationInfo {
+  deviceName: string;
+  printerName: string;
+  printerDescription?: string;
+  cupsEnterprisePrinter?: boolean;
+  printerOptions?: ObjectMap;
+}
 
-export type ExtensionDestinationInfo = {
-  extensionId: string,
-  extensionName: string,
-  id: string,
-  name: string,
-  description?: string,
-  provisional?: boolean,
-};
+export interface ExtensionDestinationInfo {
+  extensionId: string;
+  extensionName: string;
+  id: string;
+  name: string;
+  description?: string;
+  provisional?: boolean;
+}
 
 /**
  * @param type The type of printer to parse.
@@ -84,7 +84,7 @@ function parseLocalDestination(destinationInfo: LocalDestinationInfo):
  */
 export function parseExtensionDestination(
     destinationInfo: ExtensionDestinationInfo): Destination {
-  // <if expr="chromeos_ash or chromeos_lacros">
+  // <if expr="is_chromeos">
   const provisionalType = destinationInfo.provisional ?
       DestinationProvisionalType.NEEDS_USB_PERMISSION :
       DestinationProvisionalType.NONE;
@@ -95,7 +95,7 @@ export function parseExtensionDestination(
         description: destinationInfo.description || '',
         extensionId: destinationInfo.extensionId,
         extensionName: destinationInfo.extensionName || '',
-        // <if expr="chromeos_ash or chromeos_lacros">
+        // <if expr="is_chromeos">
         provisionalType: provisionalType,
         // </if>
       });

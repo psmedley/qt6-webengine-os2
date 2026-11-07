@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -212,7 +213,7 @@ class FileSystemURLLoaderFactoryTest
         base::BindOnce(
             &FileSystemContext::OpenFileSystem, file_system_context_,
             blink::StorageKey::CreateFromStringForTesting("http://remote/"),
-            storage::kFileSystemTypeTemporary,
+            /*bucket=*/absl::nullopt, storage::kFileSystemTypeTemporary,
             storage::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
             base::BindOnce(&FileSystemURLLoaderFactoryTest::OnOpenFileSystem,
                            loop.QuitClosure())));
@@ -437,7 +438,7 @@ class FileSystemURLLoaderFactoryTest
 
  private:
   static void OnOpenFileSystem(base::OnceClosure done_closure,
-                               const GURL& root_url,
+                               const FileSystemURL& root_url,
                                const std::string& name,
                                base::File::Error result) {
     ASSERT_EQ(base::File::FILE_OK, result);
@@ -470,7 +471,7 @@ class FileSystemURLLoaderFactoryTest
   }
 
   RenderFrameHost* render_frame_host() const {
-    return shell()->web_contents()->GetMainFrame();
+    return shell()->web_contents()->GetPrimaryMainFrame();
   }
 
   std::unique_ptr<network::TestURLLoaderClient> TestLoadHelper(
@@ -505,7 +506,7 @@ class FileSystemURLLoaderFactoryTest
   scoped_refptr<storage::MockQuotaManager> quota_manager_;
   scoped_refptr<storage::MockQuotaManagerProxy> quota_manager_proxy_;
   // Owned by `file_system_context_` and only usable on `blocking_task_runner_`.
-  raw_ptr<storage::FileSystemFileUtil> file_util_ = nullptr;
+  raw_ptr<storage::FileSystemFileUtil, DanglingUntriaged> file_util_ = nullptr;
 };
 
 INSTANTIATE_TEST_SUITE_P(All,

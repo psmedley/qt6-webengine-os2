@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -38,6 +38,8 @@ source_set("quick_answers") {
     "utils/quick_answers_metrics.h",
     "utils/quick_answers_utils.cc",
     "utils/quick_answers_utils.h",
+    "utils/spell_check_language.cc",
+    "utils/spell_check_language.h",
     "utils/spell_checker.cc",
     "utils/spell_checker.h",
     "utils/unit_conversion_constants.cc",
@@ -57,11 +59,13 @@ source_set("quick_answers") {
     "//chromeos/services/machine_learning/public/mojom",
     "//chromeos/strings:strings_grit",
     "//components/account_id",
+    "//components/language/core/browser",
     "//components/prefs:prefs",
     "//components/signin/public/base",
     "//components/signin/public/identity_manager",
     "//components/spellcheck/common",
     "//content/public/browser",
+    "//google_apis",
     "//net:net",
     "//services/data_decoder/public/cpp",
     "//services/network/public/cpp:cpp",
@@ -92,6 +96,7 @@ source_set("unit_tests") {
     "translation_result_loader_unittest.cc",
     "understanding/intent_generator_unittest.cc",
     "utils/language_detector_unittest.cc",
+    "utils/spell_checker_unittest.cc",
     "utils/unit_converter_unittest.cc",
   ]
 
@@ -105,6 +110,7 @@ source_set("unit_tests") {
     "//chromeos/services/assistant/public/shared",
     "//chromeos/services/machine_learning/public/cpp:stub",
     "//chromeos/services/machine_learning/public/mojom",
+    "//google_apis",
     "//services/data_decoder/public/cpp:test_support",
     "//services/network:test_support",
     "//testing/gmock",

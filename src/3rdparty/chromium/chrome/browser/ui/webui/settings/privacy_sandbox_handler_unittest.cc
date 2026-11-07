@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,26 +59,6 @@ std::unique_ptr<KeyedService> BuildMockPrivacySandboxService(
   return std::make_unique<::testing::StrictMock<MockPrivacySandboxService>>();
 }
 
-// Confirms that the |floc_id| dictionary provided matches the current FLoC
-// information for |profile|.
-void ValidateFlocId(const base::Value* floc_id, Profile* profile) {
-  auto* privacy_sandbox_service =
-      PrivacySandboxServiceFactory::GetForProfile(profile);
-
-  ASSERT_TRUE(floc_id->is_dict());
-  EXPECT_EQ(
-      base::UTF16ToUTF8(privacy_sandbox_service->GetFlocStatusForDisplay()),
-      *floc_id->FindStringPath("trialStatus"));
-  EXPECT_EQ(base::UTF16ToUTF8(privacy_sandbox_service->GetFlocIdForDisplay()),
-            *floc_id->FindStringPath("cohort"));
-  EXPECT_EQ(
-      base::UTF16ToUTF8(privacy_sandbox_service->GetFlocIdNextUpdateForDisplay(
-          base::Time::Now())),
-      *floc_id->FindStringPath("nextUpdate"));
-  EXPECT_EQ(privacy_sandbox_service->IsFlocIdResettable(),
-            floc_id->FindBoolPath("canReset"));
-}
-
 void ValidateFledgeInfo(content::TestWebUI* web_ui,
                         std::string expected_callback_id,
                         std::vector<std::string> expected_joining_sites,
@@ -91,26 +71,24 @@ void ValidateFledgeInfo(content::TestWebUI* web_ui,
 
   auto* blocked_sites = data.arg3()->FindListKey("blockedSites");
   ASSERT_TRUE(blocked_sites);
-  ASSERT_EQ(expected_blocked_sites.size(),
-            blocked_sites->GetListDeprecated().size());
+  ASSERT_EQ(expected_blocked_sites.size(), blocked_sites->GetList().size());
   for (size_t i = 0; i < expected_blocked_sites.size(); i++) {
     EXPECT_EQ(expected_blocked_sites[i],
-              blocked_sites->GetListDeprecated()[i].GetString());
+              blocked_sites->GetList()[i].GetString());
   }
 
   auto* joining_sites = data.arg3()->FindListKey("joiningSites");
   ASSERT_TRUE(joining_sites);
-  ASSERT_EQ(expected_joining_sites.size(),
-            joining_sites->GetListDeprecated().size());
+  ASSERT_EQ(expected_joining_sites.size(), joining_sites->GetList().size());
   for (size_t i = 0; i < expected_joining_sites.size(); i++) {
     EXPECT_EQ(expected_joining_sites[i],
-              joining_sites->GetListDeprecated()[i].GetString());
+              joining_sites->GetList()[i].GetString());
   }
 }
 
 void ValidateTopicsInfo(
     std::vector<privacy_sandbox::CanonicalTopic> expected_topics,
-    base::Value::ConstListView actual_topics) {
+    const base::Value::List& actual_topics) {
   ASSERT_EQ(expected_topics.size(), actual_topics.size());
   for (size_t i = 0; i < expected_topics.size(); i++) {
     const auto& actual_topic = actual_topics[i];
@@ -166,29 +144,6 @@ class PrivacySandboxHandlerTest : public testing::Test {
   std::unique_ptr<content::TestWebUI> web_ui_;
   std::unique_ptr<PrivacySandboxHandler> handler_;
 };
-
-TEST_F(PrivacySandboxHandlerTest, GetFlocId) {
-  base::Value args(base::Value::Type::LIST);
-  args.Append(kCallbackId1);
-  handler()->HandleGetFlocId(args.GetList());
-
-  const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
-  EXPECT_EQ(kCallbackId1, data.arg1()->GetString());
-  EXPECT_EQ("cr.webUIResponse", data.function_name());
-  ASSERT_TRUE(data.arg2()->GetBool());
-  ValidateFlocId(data.arg3(), profile());
-}
-
-TEST_F(PrivacySandboxHandlerTest, ResetFlocId) {
-  base::Value args(base::Value::Type::LIST);
-  handler()->HandleResetFlocId(args.GetList());
-
-  // Resetting the FLoC ID should fire the appropriate WebUI listener.
-  const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
-  EXPECT_EQ("cr.webUIListenerCallback", data.function_name());
-  EXPECT_EQ("floc-id-changed", data.arg1()->GetString());
-  ValidateFlocId(data.arg2(), profile());
-}
 
 class PrivacySandboxHandlerTestMockService : public PrivacySandboxHandlerTest {
  public:
@@ -305,11 +260,10 @@ TEST_F(PrivacySandboxHandlerTestMockService, GetTopicsState) {
   ASSERT_TRUE(data.arg2()->GetBool());
   ASSERT_TRUE(data.arg3()->is_dict());
 
-  ValidateTopicsInfo(
-      kTopTopics, data.arg3()->FindListKey("topTopics")->GetListDeprecated());
-  ValidateTopicsInfo(
-      kBlockedTopics,
-      data.arg3()->FindListKey("blockedTopics")->GetListDeprecated());
+  ValidateTopicsInfo(kTopTopics,
+                     data.arg3()->FindListKey("topTopics")->GetList());
+  ValidateTopicsInfo(kBlockedTopics,
+                     data.arg3()->FindListKey("blockedTopics")->GetList());
 }
 
 }  // namespace settings

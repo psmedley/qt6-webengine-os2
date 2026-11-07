@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -196,6 +196,10 @@ class MEDIA_EXPORT RendererImpl final : public Renderer {
 
   // Callback executed when a runtime error happens.
   void OnError(PipelineStatus error);
+
+  // Callback executed when there is a fallback somewhere in the pipeline which
+  // should be recorded for metrics analysis.
+  void OnFallback(PipelineStatus fallback);
 
   void OnWaiting(WaitingReason reason);
   void OnVideoNaturalSizeChange(const gfx::Size& size);

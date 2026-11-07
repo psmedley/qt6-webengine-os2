@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,6 +33,7 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/process/environment_internal.h"
@@ -45,13 +46,12 @@
 #include "base/time/time.h"
 #include "base/trace_event/base_tracing.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_AIX)
 #include <sys/prctl.h>
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
 #include <sys/ioctl.h>
 #endif
 
@@ -128,16 +128,19 @@ typedef uint64_t kernel_sigset_t;
 // This is what struct sigaction looks like to the kernel at least on X86 and
 // ARM. MIPS, for instance, is very different.
 struct kernel_sigaction {
-  void* k_sa_handler;  // For this usage it only needs to be a generic pointer.
+  raw_ptr<void>
+      k_sa_handler;  // For this usage it only needs to be a generic pointer.
   unsigned long k_sa_flags;
-  void* k_sa_restorer;  // For this usage it only needs to be a generic pointer.
+  raw_ptr<void>
+      k_sa_restorer;  // For this usage it only needs to be a generic pointer.
   kernel_sigset_t k_sa_mask;
 };
 
 // glibc's sigaction() will prevent access to sa_restorer, so we need to roll
 // our own.
-int sys_rt_sigaction(int sig, const struct kernel_sigaction* act,
-                     struct kernel_sigaction* oact) {
+long sys_rt_sigaction(int sig,
+                      const struct kernel_sigaction* act,
+                      struct kernel_sigaction* oact) {
   return syscall(SYS_rt_sigaction, sig, act, oact, sizeof(kernel_sigset_t));
 }
 
@@ -149,7 +152,7 @@ int sys_rt_sigaction(int sig, const struct kernel_sigaction* act,
 void ResetChildSignalHandlersToDefaults(void) {
   for (int signum = 1; ; ++signum) {
     struct kernel_sigaction act = {nullptr};
-    int sigaction_get_ret = sys_rt_sigaction(signum, nullptr, &act);
+    long sigaction_get_ret = sys_rt_sigaction(signum, nullptr, &act);
     if (sigaction_get_ret && errno == EINVAL) {
 #if !defined(NDEBUG)
       // Linux supports 32 real-time signals from 33 to 64.
@@ -248,8 +251,10 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
     char *endptr;
     errno = 0;
     const long int fd = strtol(fd_dir.name(), &endptr, 10);
-    if (fd_dir.name()[0] == 0 || *endptr || fd < 0 || errno)
+    if (fd_dir.name()[0] == 0 || *endptr || fd < 0 || errno ||
+        !IsValueInRangeForNumericType<int>(fd)) {
       continue;
+    }
     if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)
       continue;
     // Cannot use STL iterators here, since debug iterators use locks.
@@ -263,7 +268,7 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
     if (fd == dir_fd)
       continue;
 
-    int ret = IGNORE_EINTR(close(fd));
+    int ret = IGNORE_EINTR(close(static_cast<int>(fd)));
     DPCHECK(ret == 0);
   }
 }
@@ -415,7 +420,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
     memset(reinterpret_cast<void*>(malloc), 0xff, 8);
 #endif  // 0
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
     if (options.ctrl_terminal_fd >= 0) {
       // Set process' controlling terminal.
       if (HANDLE_EINTR(setsid()) != -1) {
@@ -427,7 +432,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
         RAW_LOG(WARNING, "setsid failed, ctrl terminal not set");
       }
     }
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
     // Cannot use STL iterators here, since debug iterators use locks.
     // NOLINTNEXTLINE(modernize-loop-convert)
@@ -618,7 +623,7 @@ static bool GetAppOutputInternal(
             HANDLE_EINTR(read(pipe_fd[0], buffer, sizeof(buffer)));
         if (bytes_read <= 0)
           break;
-        output->append(buffer, bytes_read);
+        output->append(buffer, static_cast<size_t>(bytes_read));
       }
       close(pipe_fd[0]);
 
@@ -695,10 +700,8 @@ int CloneHelper(void* arg) {
 // new stack pointers and print a warning that may confuse the user.
 __attribute__((no_sanitize_address))
 #endif
-NOINLINE pid_t CloneAndLongjmpInChild(unsigned long flags,
-                                      pid_t* ptid,
-                                      pid_t* ctid,
-                                      jmp_buf* env) {
+NOINLINE pid_t
+CloneAndLongjmpInChild(int flags, pid_t* ptid, pid_t* ctid, jmp_buf* env) {
   // We use the libc clone wrapper instead of making the syscall
   // directly because making the syscall may fail to update the libc's
   // internal pid cache. The libc interface unfortunately requires
@@ -707,7 +710,8 @@ NOINLINE pid_t CloneAndLongjmpInChild(unsigned long flags,
   alignas(16) char stack_buf[PTHREAD_STACK_MIN];
 #if defined(ARCH_CPU_X86_FAMILY) || defined(ARCH_CPU_ARM_FAMILY) ||   \
     defined(ARCH_CPU_MIPS_FAMILY) || defined(ARCH_CPU_S390_FAMILY) || \
-    defined(ARCH_CPU_PPC64_FAMILY)
+    defined(ARCH_CPU_PPC64_FAMILY) || defined(ARCH_CPU_LOONG_FAMILY) || \
+    defined(ARCH_CPU_RISCV_FAMILY)
   // The stack grows downward.
   void* stack = stack_buf + sizeof(stack_buf);
 #else
@@ -718,7 +722,7 @@ NOINLINE pid_t CloneAndLongjmpInChild(unsigned long flags,
 
 }  // anonymous namespace
 
-pid_t ForkWithFlags(unsigned long flags, pid_t* ptid, pid_t* ctid) {
+pid_t ForkWithFlags(int flags, pid_t* ptid, pid_t* ctid) {
   const bool clone_tls_used = flags & CLONE_SETTLS;
   const bool invalid_ctid =
       (flags & (CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID)) && !ctid;

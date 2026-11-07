@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -27,6 +27,8 @@ try_.defaults.set(
     service_account = "chromium-try-gpu-builder@chops-service-accounts.iam.gserviceaccount.com",
     subproject_list_view = "luci.chromium.try",
     task_template_canary_percentage = 5,
+    # TODO(crbug.com/1362440): remove this.
+    omit_python2 = False,
 )
 
 # Builders appear after the function used to define them, with all builders
@@ -54,31 +56,55 @@ def gpu_android_builder(*, name, **kwargs):
 gpu_android_builder(
     name = "gpu-fyi-try-android-l-nexus-5-32",
     pool = "luci.chromium.gpu.android.nexus5.try",
+    mirrors = [
+        "ci/GPU FYI Android arm Builder",
+        "ci/Android FYI Release (Nexus 5)",
+    ],
 )
 
 gpu_android_builder(
     name = "gpu-fyi-try-android-m-nexus-5x-64",
     pool = "luci.chromium.gpu.android.nexus5x.try",
+    mirrors = [
+        "ci/GPU FYI Android arm64 Builder",
+        "ci/Android FYI Release (Nexus 5X)",
+    ],
 )
 
 gpu_android_builder(
     name = "gpu-fyi-try-android-nvidia-shield-tv",
     pool = "luci.chromium.gpu.android.nvidia.shield.tv.try",
+    mirrors = [
+        "ci/GPU FYI Android arm Builder",
+        "ci/Android FYI Release (NVIDIA Shield TV)",
+    ],
 )
 
 gpu_android_builder(
     name = "gpu-fyi-try-android-p-pixel-2-32",
     pool = "luci.chromium.gpu.android.pixel2.chromium.try",
+    mirrors = [
+        "ci/GPU FYI Android arm Builder",
+        "ci/Android FYI Release (Pixel 2)",
+    ],
 )
 
 gpu_android_builder(
     name = "gpu-fyi-try-android-r-pixel-4-32",
     pool = "luci.chromium.gpu.android.pixel4.try",
+    mirrors = [
+        "ci/GPU FYI Android arm Builder",
+        "ci/Android FYI Release (Pixel 4)",
+    ],
 )
 
 gpu_android_builder(
     name = "gpu-fyi-try-android-pixel-6-64",
     pool = "luci.chromium.gpu.android.pixel6.try",
+    mirrors = [
+        "ci/GPU FYI Android arm64 Builder",
+        "ci/Android FYI Release (Pixel 6)",
+    ],
 )
 
 gpu_android_builder(
@@ -147,6 +173,10 @@ gpu_linux_builder(
 
 gpu_linux_builder(
     name = "gpu-fyi-try-linux-amd-rel",
+    mirrors = [
+        "ci/GPU FYI Linux Builder",
+        "ci/Linux FYI Release (AMD RX 5500 XT)",
+    ],
     pool = "luci.chromium.gpu.linux.amd.try",
 )
 
@@ -175,11 +205,19 @@ gpu_linux_builder(
 
 gpu_linux_builder(
     name = "gpu-fyi-try-linux-nvidia-exp",
+    mirrors = [
+        "ci/GPU FYI Linux Builder",
+        "ci/Linux FYI Experimental Release (NVIDIA)",
+    ],
     pool = "luci.chromium.gpu.linux.nvidia.try",
 )
 
 gpu_linux_builder(
     name = "gpu-fyi-try-linux-nvidia-rel",
+    mirrors = [
+        "ci/GPU FYI Linux Builder",
+        "ci/Linux FYI Release (NVIDIA)",
+    ],
     pool = "luci.chromium.gpu.linux.nvidia.try",
 )
 
@@ -240,7 +278,20 @@ gpu_mac_builder(
 )
 
 gpu_mac_builder(
+    name = "gpu-fyi-try-mac-arm64-apple-m1-exp",
+    mirrors = [
+        "ci/GPU FYI Mac arm64 Builder",
+        "ci/Mac FYI Experimental Release (Apple M1)",
+    ],
+    pool = "luci.chromium.gpu.mac.arm64.apple.m1.try",
+)
+
+gpu_mac_builder(
     name = "gpu-fyi-try-mac-arm64-apple-m1-rel",
+    mirrors = [
+        "ci/GPU FYI Mac arm64 Builder",
+        "ci/Mac FYI Release (Apple M1)",
+    ],
     pool = "luci.chromium.gpu.mac.arm64.apple.m1.try",
 )
 
@@ -347,21 +398,6 @@ gpu_win_builder(
 gpu_win_builder(
     name = "gpu-fyi-try-win10-nvidia-rel-64",
     pool = "luci.chromium.gpu.win10.nvidia.try",
-)
-
-gpu_win_builder(
-    name = "gpu-fyi-try-win7-amd-rel-32",
-    pool = "luci.chromium.gpu.win7.amd.try",
-)
-
-gpu_win_builder(
-    name = "gpu-fyi-try-win7-nvidia-rel-32",
-    pool = "luci.chromium.gpu.win7.nvidia.try",
-)
-
-gpu_win_builder(
-    name = "gpu-fyi-try-win7-nvidia-rel-64",
-    pool = "luci.chromium.gpu.win7.nvidia.try",
 )
 
 gpu_win_builder(

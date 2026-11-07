@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "components/arc/common/intent_helper/arc_icon_cache_delegate.h"
@@ -73,7 +74,7 @@ class LinkHandlerModel {
   // Otherwise, returns the original |url| as-us.
   static GURL RewriteUrlFromQueryIfAvailable(const GURL& url);
 
-  content::BrowserContext* context_ = nullptr;
+  raw_ptr<content::BrowserContext> context_ = nullptr;
 
   GURL url_;
 

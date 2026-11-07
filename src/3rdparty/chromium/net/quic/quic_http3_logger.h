@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,6 @@ class NET_EXPORT_PRIVATE QuicHttp3Logger : public quic::Http3DebugVisitor {
   void OnSettingsFrameReceived(const quic::SettingsFrame& frame) override;
   void OnSettingsFrameResumed(const quic::SettingsFrame& frame) override;
   void OnGoAwayFrameReceived(const quic::GoAwayFrame& frame) override;
-  void OnMaxPushIdFrameReceived(const quic::MaxPushIdFrame& frame) override;
   void OnPriorityUpdateFrameReceived(
       const quic::PriorityUpdateFrame& frame) override;
 

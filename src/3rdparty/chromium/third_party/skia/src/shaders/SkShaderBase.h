@@ -12,19 +12,16 @@
 #include "include/core/SkPaint.h"
 #include "include/core/SkSamplingOptions.h"
 #include "include/core/SkShader.h"
+#include "include/core/SkSurfaceProps.h"
 #include "include/private/SkNoncopyable.h"
 #include "src/core/SkEffectPriv.h"
 #include "src/core/SkMask.h"
 #include "src/core/SkTLazy.h"
 #include "src/core/SkVM_fwd.h"
 
-#if SK_SUPPORT_GPU
-#include "src/gpu/ganesh/GrFPArgs.h"
-#endif
-
 class GrFragmentProcessor;
+struct GrFPArgs;
 class SkArenaAlloc;
-enum class SkBackend : uint8_t;
 class SkColorSpace;
 class SkImage;
 struct SkImageInfo;
@@ -51,7 +48,20 @@ public:
      */
     virtual bool isConstant() const { return false; }
 
-    const SkMatrix& getLocalMatrix() const { return fLocalMatrix; }
+    using GradientInfo = SkShader::GradientInfo;
+    enum class GradientType {
+        kNone    = kNone_GradientType,
+        kColor   = kColor_GradientType,
+        kLinear  = kLinear_GradientType,
+        kRadial  = kRadial_GradientType,
+        kSweep   = kSweep_GradientType,
+        kConical = kConical_GradientType,
+    };
+
+    virtual GradientType asGradient(GradientInfo* info    = nullptr,
+                                    SkMatrix* localMatrix = nullptr) const {
+        return GradientType::kNone;
+    }
 
     enum Flags {
         //!< set if all of the colors will be opaque
@@ -74,11 +84,12 @@ public:
      */
     struct ContextRec {
         ContextRec(const SkPaint& paint, const SkMatrix& matrix, const SkMatrix* localM,
-                   SkColorType dstColorType, SkColorSpace* dstColorSpace)
+                   SkColorType dstColorType, SkColorSpace* dstColorSpace, SkSurfaceProps props)
             : fMatrix(&matrix)
             , fLocalMatrix(localM)
             , fDstColorType(dstColorType)
-            , fDstColorSpace(dstColorSpace) {
+            , fDstColorSpace(dstColorSpace)
+            , fProps(props) {
                 fPaintAlpha = paint.getAlpha();
                 fPaintDither = paint.isDither();
             }
@@ -87,6 +98,7 @@ public:
         const SkMatrix* fLocalMatrix;      // optional local matrix
         SkColorType     fDstColorType;     // the color type of the dest surface
         SkColorSpace*   fDstColorSpace;    // the color space of the dest surface (if any)
+        SkSurfaceProps  fProps;            // props of the dest surface
         SkAlpha         fPaintAlpha;
         bool            fPaintDither;
 
@@ -170,14 +182,8 @@ public:
     bool appendStages(const SkStageRec&) const;
 
     bool SK_WARN_UNUSED_RESULT computeTotalInverse(const SkMatrix& ctm,
-                                                   const SkMatrix* outerLocalMatrix,
+                                                   const SkMatrix* localMatrix,
                                                    SkMatrix* totalInverse) const;
-
-    // Returns the total local matrix for this shader:
-    //
-    //   M = postLocalMatrix x shaderLocalMatrix x preLocalMatrix
-    //
-    SkTCopyOnFirstWrite<SkMatrix> totalLocalMatrix(const SkMatrix* preLocalMatrix) const;
 
     virtual SkImage* onIsAImage(SkMatrix*, SkTileMode[2]) const {
         return nullptr;
@@ -228,8 +234,12 @@ public:
                           SkPipelineDataGatherer* gatherer) const;
 #endif
 
+    static SkMatrix ConcatLocalMatrices(const SkMatrix& parentLM, const SkMatrix& childLM) {
+        return SkMatrix::Concat(childLM, parentLM);
+    }
+
 protected:
-    SkShaderBase(const SkMatrix* localMatrix = nullptr);
+    SkShaderBase();
 
     void flatten(SkWriteBuffer&) const override;
 
@@ -256,9 +266,6 @@ protected:
     static skvm::Coord ApplyMatrix(skvm::Builder*, const SkMatrix&, skvm::Coord, skvm::Uniforms*);
 
 private:
-    // This is essentially const, but not officially so it can be modified in constructors.
-    SkMatrix fLocalMatrix;
-
     virtual skvm::Color onProgram(skvm::Builder*,
                                   skvm::Coord device, skvm::Coord local, skvm::Color paint,
                                   const SkMatrixProvider&, const SkMatrix* localM,
@@ -303,5 +310,10 @@ inline const SkShaderBase* as_SB(const SkShader* shader) {
 inline const SkShaderBase* as_SB(const sk_sp<SkShader>& shader) {
     return static_cast<SkShaderBase*>(shader.get());
 }
+
+void SkRegisterColor4ShaderFlattenable();
+void SkRegisterColorShaderFlattenable();
+void SkRegisterComposeShaderFlattenable();
+void SkRegisterEmptyShaderFlattenable();
 
 #endif // SkShaderBase_DEFINED

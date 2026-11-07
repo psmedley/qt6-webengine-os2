@@ -1,3 +1,7 @@
+// Copyright 2022 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #ifndef CRDTP_CHROMIUM_PROTOCOL_TYPE_TRAITS_H_
 #define CRDTP_CHROMIUM_PROTOCOL_TYPE_TRAITS_H_
 
@@ -24,8 +28,8 @@ namespace traits {
 // to specify the type mapping to the rest of the generated code.
 using String = std::string;
 using Value = base::Value;
-using DictionaryValue = base::flat_map<std::string, base::Value>;
-using ListValue = std::vector<base::Value>;
+using DictionaryValue = base::Value::Dict;
+using ListValue = base::Value::List;
 
 }  // namespace traits
 
@@ -46,6 +50,13 @@ struct CRDTP_EXPORT ProtocolTypeTraits<traits::DictionaryValue> {
   static bool Deserialize(DeserializerState* state,
                           traits::DictionaryValue* value);
   static void Serialize(const traits::DictionaryValue& value,
+                        std::vector<uint8_t>* bytes);
+};
+
+template <>
+struct CRDTP_EXPORT ProtocolTypeTraits<traits::ListValue> {
+  static bool Deserialize(DeserializerState* state, traits::ListValue* value);
+  static void Serialize(const traits::ListValue& value,
                         std::vector<uint8_t>* bytes);
 };
 

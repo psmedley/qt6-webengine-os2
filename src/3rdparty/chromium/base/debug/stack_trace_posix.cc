@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,7 @@
 #include <tuple>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 
 #if !defined(USE_SYMBOLIZE)
@@ -156,13 +157,13 @@ void OutputPointer(void* pointer, BacktraceOutputHandler* handler) {
 }
 
 #if defined(USE_SYMBOLIZE)
-void OutputFrameId(intptr_t frame_id, BacktraceOutputHandler* handler) {
+void OutputFrameId(size_t frame_id, BacktraceOutputHandler* handler) {
   // Max unsigned 64-bit number in decimal has 20 digits (18446744073709551615).
   // Hence, 30 digits should be more than enough to represent it in decimal
   // (including the null-terminator).
   char buf[30] = { '\0' };
   handler->HandleOutput("#");
-  internal::itoa_r(frame_id, buf, sizeof(buf), 10, 1);
+  internal::itoa_r(static_cast<intptr_t>(frame_id), buf, sizeof(buf), 10, 1);
   handler->HandleOutput(buf);
 }
 #endif  // defined(USE_SYMBOLIZE)
@@ -218,9 +219,9 @@ void ProcessBacktrace(void* const* trace,
 
   // Below part is async-signal unsafe (uses malloc), so execute it only
   // when we are not executing the signal handler.
-  if (in_signal_handler == 0) {
+  if (in_signal_handler == 0 && IsValueInRangeForNumericType<int>(size)) {
     std::unique_ptr<char*, FreeDeleter> trace_symbols(
-        backtrace_symbols(trace, size));
+        backtrace_symbols(trace, static_cast<int>(size)));
     if (trace_symbols.get()) {
       for (size_t i = 0; i < size; ++i) {
         std::string trace_symbol = trace_symbols.get()[i];
@@ -270,7 +271,7 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
     // installed. Thus, we reinstall ourselves before returning.
     struct sigaction action;
     memset(&action, 0, sizeof(action));
-    action.sa_flags = SA_RESETHAND | SA_SIGINFO;
+    action.sa_flags = static_cast<int>(SA_RESETHAND | SA_SIGINFO);
     action.sa_sigaction = &StackDumpSignalHandler;
     sigemptyset(&action.sa_mask);
 
@@ -491,7 +492,7 @@ class StreamBacktraceOutputHandler : public BacktraceOutputHandler {
   void HandleOutput(const char* output) override { (*os_) << output; }
 
  private:
-  std::ostream* os_;
+  raw_ptr<std::ostream> os_;
 };
 
 void WarmUpBacktrace() {
@@ -605,9 +606,11 @@ class SandboxSymbolizeHelper {
   // (including the null terminator).
   // IMPORTANT: This function must be async-signal-safe because it can be
   // called from a signal handler (symbolizing stack frames for a crash).
-  static int OpenObjectFileContainingPc(uint64_t pc, uint64_t& start_address,
-                                        uint64_t& base_address, char* file_path,
-                                        int file_path_size) {
+  static int OpenObjectFileContainingPc(uint64_t pc,
+                                        uint64_t& start_address,
+                                        uint64_t& base_address,
+                                        char* file_path,
+                                        size_t file_path_size) {
     // This method can only be called after the singleton is instantiated.
     // This is ensured by the following facts:
     // * This is the only static method in this class, it is private, and
@@ -646,7 +649,8 @@ class SandboxSymbolizeHelper {
       return;
 
     auto safe_memcpy = [&mem_fd](void* dst, uintptr_t src, size_t size) {
-      return HANDLE_EINTR(pread(mem_fd.get(), dst, size, src)) == ssize_t(size);
+      return HANDLE_EINTR(pread(mem_fd.get(), dst, size,
+                                static_cast<off_t>(src))) == ssize_t(size);
     };
 
     uintptr_t cur_base = 0;
@@ -820,7 +824,7 @@ bool EnableInProcessStackDumping() {
 
   struct sigaction action;
   memset(&action, 0, sizeof(action));
-  action.sa_flags = SA_RESETHAND | SA_SIGINFO;
+  action.sa_flags = static_cast<int>(SA_RESETHAND | SA_SIGINFO);
   action.sa_sigaction = &StackDumpSignalHandler;
   sigemptyset(&action.sa_mask);
 
@@ -871,7 +875,8 @@ size_t CollectStackTrace(void** trace, size_t count) {
 #elif !defined(__UCLIBC__) && !defined(_AIX)
   // Though the backtrace API man page does not list any possible negative
   // return values, we take no chance.
-  return base::saturated_cast<size_t>(backtrace(trace, count));
+  return base::saturated_cast<size_t>(
+      backtrace(trace, base::saturated_cast<int>(count)));
 #else
   return 0;
 #endif
@@ -911,7 +916,7 @@ char* itoa_r(intptr_t i, char* buf, size_t sz, int base, size_t padding) {
 
   char* start = buf;
 
-  uintptr_t j = i;
+  uintptr_t j = static_cast<uintptr_t>(i);
 
   // Handle negative numbers (only for base 10).
   if (i < 0 && base == 10) {
@@ -937,8 +942,8 @@ char* itoa_r(intptr_t i, char* buf, size_t sz, int base, size_t padding) {
     }
 
     // Output the next digit.
-    *ptr++ = "0123456789abcdef"[j % base];
-    j /= base;
+    *ptr++ = "0123456789abcdef"[j % static_cast<uintptr_t>(base)];
+    j /= static_cast<uintptr_t>(base);
 
     if (padding > 0)
       padding--;

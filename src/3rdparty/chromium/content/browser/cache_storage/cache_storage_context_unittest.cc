@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "components/services/storage/public/cpp/buckets/bucket_info.h"
+#include "components/services/storage/public/cpp/buckets/bucket_locator.h"
 #include "components/services/storage/public/cpp/buckets/constants.h"
 #include "components/services/storage/public/cpp/quota_error_or.h"
 #include "components/services/storage/public/mojom/storage_usage_info.mojom.h"
@@ -60,7 +61,8 @@ class CacheStorageContextTest : public testing::Test {
       const blink::StorageKey& storage_key) {
     network::CrossOriginEmbedderPolicy cross_origin_embedder_policy;
     cache_storage_context_->AddReceiver(
-        cross_origin_embedder_policy, mojo::NullRemote(), storage_key,
+        cross_origin_embedder_policy, mojo::NullRemote(),
+        storage::BucketLocator::ForDefaultBucket(storage_key),
         storage::mojom::CacheStorageOwner::kCacheAPI,
         std::move(cache_storage_receiver));
   }
@@ -131,6 +133,77 @@ TEST_F(CacheStorageContextTest, DefaultBucketCreatedOnAddReceiver) {
   EXPECT_EQ(result->storage_key,
             blink::StorageKey::CreateFromStringForTesting(kGoogleStorageKey));
   EXPECT_GT(result->id.value(), 0);
+}
+
+TEST_F(CacheStorageContextTest, GetDefaultBucketError) {
+  // Disable database so it will return errors when getting the default bucket.
+  quota_manager_->SetDisableDatabase(true);
+
+  mojo::Remote<blink::mojom::CacheStorage> example_remote;
+  AddReceiver(
+      example_remote.BindNewPipeAndPassReceiver(),
+      blink::StorageKey::CreateFromStringForTesting(kExampleStorageKey));
+
+  storage::QuotaManagerProxySync quota_manager_proxy_sync(
+      quota_manager_proxy());
+
+  // CacheStorage::Has
+  base::RunLoop loop_1;
+  example_remote->Has(
+      u"cache_name", /*trace_id=*/0,
+      base::BindLambdaForTesting([&](blink::mojom::CacheStorageError error) {
+        EXPECT_EQ(error, blink::mojom::CacheStorageError::kErrorStorage);
+        loop_1.Quit();
+      }));
+  loop_1.Run();
+
+  // CacheStorage::Delete
+  base::RunLoop loop_2;
+  example_remote->Delete(
+      u"cache_name", /*trace_id=*/0,
+      base::BindLambdaForTesting([&](blink::mojom::CacheStorageError error) {
+        EXPECT_EQ(error, blink::mojom::CacheStorageError::kErrorStorage);
+        loop_2.Quit();
+      }));
+  loop_2.Run();
+
+  // CacheStorage::Keys
+  base::RunLoop loop_3;
+  example_remote->Keys(
+      /*trace_id=*/0,
+      base::BindLambdaForTesting([&](const std::vector<std::u16string>& keys) {
+        EXPECT_EQ(keys, std::vector<std::u16string>());
+        loop_3.Quit();
+      }));
+  loop_3.Run();
+
+  // CacheStorage::Match
+  auto options = blink::mojom::MultiCacheQueryOptions::New();
+  options->query_options = blink::mojom::CacheQueryOptions::New();
+  options->cache_name = u"cache_name";
+
+  base::RunLoop loop_4;
+  example_remote->Match(
+      blink::mojom::FetchAPIRequest::New(), std::move(options),
+      /*in_related_fetch_event=*/false, /*in_range_fetch_event=*/false,
+      /*trace_id=*/0,
+      base::BindLambdaForTesting([&](blink::mojom::MatchResultPtr result) {
+        EXPECT_EQ(result->get_status(),
+                  blink::mojom::CacheStorageError::kErrorStorage);
+        loop_4.Quit();
+      }));
+  loop_4.Run();
+
+  // CacheStorage::Open
+  base::RunLoop loop_5;
+  example_remote->Open(
+      u"cache_name", /*trace_id=*/0,
+      base::BindLambdaForTesting([&](blink::mojom::OpenResultPtr result) {
+        EXPECT_EQ(result->get_status(),
+                  blink::mojom::CacheStorageError::kErrorStorage);
+        loop_5.Quit();
+      }));
+  loop_5.Run();
 }
 
 }  // namespace content

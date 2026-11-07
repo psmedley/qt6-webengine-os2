@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,6 +77,10 @@ void ReceiverMediaToMojoAdapter::OnError(media::VideoCaptureError error) {
 void ReceiverMediaToMojoAdapter::OnFrameDropped(
     media::VideoCaptureFrameDropReason reason) {
   receiver_->OnFrameDropped(reason);
+}
+
+void ReceiverMediaToMojoAdapter::OnNewCropVersion(uint32_t crop_version) {
+  receiver_->OnNewCropVersion(crop_version);
 }
 
 void ReceiverMediaToMojoAdapter::OnFrameWithEmptyRegionCapture() {

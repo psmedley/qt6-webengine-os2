@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "extensions/common/value_builder.h"
 #include "extensions/renderer/bindings/api_binding_test_util.h"
 #include "extensions/renderer/bindings/api_binding_types.h"
+#include "extensions/renderer/bindings/api_response_validator.h"
 #include "extensions/renderer/message_target.h"
 #include "extensions/renderer/messaging_util.h"
 #include "extensions/renderer/native_extension_bindings_system.h"
@@ -25,6 +26,40 @@
 #include "extensions/renderer/script_context_set.h"
 
 namespace extensions {
+
+namespace {
+
+// Unfortunately, we have a layering violation in the runtime API. The runtime
+// API is defined at the //extensions layer, but the `MessageSender` type has an
+// optional `tabs.Tab` property. This causes issues in type validation because
+// when we try to look up the `tabs.Tab` property, it fails (since it's only
+// defined in //chrome). This is a "real bug" in that it's a layering violation,
+// but it doesn't have real-world implications since right now the only consumer
+// of //extensions is //chrome (and thus, the tabs API will always be defined).
+// Ignore validation for the affected runtime message-related events.
+class RuntimeMessageValidationIgnorer {
+ public:
+  RuntimeMessageValidationIgnorer()
+      : test_handler_(base::BindRepeating(
+            &RuntimeMessageValidationIgnorer::HardValidationFailure)) {
+    test_handler_.IgnoreSignature("runtime.onMessage");
+    test_handler_.IgnoreSignature("runtime.onMessageExternal");
+    test_handler_.IgnoreSignature("runtime.onConnect");
+  }
+  ~RuntimeMessageValidationIgnorer() = default;
+
+ private:
+  // Hard-fail on any unexpected validation errors.
+  static void HardValidationFailure(const std::string& name,
+                                    const std::string& failure) {
+    NOTREACHED() << "Unexpected validation failure: " << name << ", "
+                 << failure;
+  }
+
+  APIResponseValidator::TestHandler test_handler_;
+};
+
+}  // namespace
 
 class NativeRendererMessagingServiceTest
     : public NativeExtensionBindingsSystemUnittest {
@@ -101,6 +136,8 @@ TEST_F(NativeRendererMessagingServiceTest, ValidateMessagePort) {
 }
 
 TEST_F(NativeRendererMessagingServiceTest, OpenMessagePort) {
+  RuntimeMessageValidationIgnorer message_validation_ignorer;
+
   v8::HandleScope handle_scope(isolate());
   v8::Local<v8::Context> context = MainContext();
 
@@ -114,8 +151,8 @@ TEST_F(NativeRendererMessagingServiceTest, OpenMessagePort) {
   tab_connection_info.frame_id = 0;
   const int tab_id = 10;
   GURL source_url("http://example.com");
-  tab_connection_info.tab.Swap(
-      DictionaryBuilder().Set("tabId", tab_id).Build().get());
+  tab_connection_info.tab =
+      std::move(DictionaryBuilder().Set("tabId", tab_id).Build()->GetDict());
   ExtensionMsg_ExternalConnectionInfo external_connection_info;
   external_connection_info.target_id = extension()->id();
   external_connection_info.source_endpoint =
@@ -435,6 +472,8 @@ TEST_F(NativeRendererMessagingServiceTest, SendOneTimeMessageWithPromise) {
 // this is more thoroughly tested in the OneTimeMessageHandler tests; this is
 // just to ensure NativeRendererMessagingService correctly forwards the calls.
 TEST_F(NativeRendererMessagingServiceTest, ReceiveOneTimeMessage) {
+  RuntimeMessageValidationIgnorer message_validation_ignorer;
+
   v8::HandleScope handle_scope(isolate());
   v8::Local<v8::Context> context = MainContext();
 
@@ -458,8 +497,8 @@ TEST_F(NativeRendererMessagingServiceTest, ReceiveOneTimeMessage) {
   tab_connection_info.frame_id = 0;
   const int tab_id = 10;
   GURL source_url("http://example.com");
-  tab_connection_info.tab.Swap(
-      DictionaryBuilder().Set("tabId", tab_id).Build().get());
+  tab_connection_info.tab =
+      std::move(DictionaryBuilder().Set("tabId", tab_id).Build()->GetDict());
   ExtensionMsg_ExternalConnectionInfo external_connection_info;
   external_connection_info.target_id = extension()->id();
   external_connection_info.source_endpoint =
@@ -498,6 +537,8 @@ TEST_F(NativeRendererMessagingServiceTest, ReceiveOneTimeMessage) {
 // Test sending a one-time message from an external source (e.g., a different
 // extension). This shouldn't conflict with messages sent from the same source.
 TEST_F(NativeRendererMessagingServiceTest, TestExternalOneTimeMessages) {
+  RuntimeMessageValidationIgnorer message_validation_ignorer;
+
   v8::HandleScope handle_scope(isolate());
   v8::Local<v8::Context> context = MainContext();
 
@@ -529,8 +570,8 @@ TEST_F(NativeRendererMessagingServiceTest, TestExternalOneTimeMessages) {
     tab_connection_info.frame_id = 0;
     const int tab_id = 10;
     GURL source_url("http://example.com");
-    tab_connection_info.tab.Swap(
-        DictionaryBuilder().Set("tabId", tab_id).Build().get());
+    tab_connection_info.tab =
+        std::move(DictionaryBuilder().Set("tabId", tab_id).Build()->GetDict());
 
     ExtensionMsg_ExternalConnectionInfo external_connection_info;
     external_connection_info.target_id = extension()->id();

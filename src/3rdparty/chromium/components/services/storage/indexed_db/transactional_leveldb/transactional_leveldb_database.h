@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,7 +50,7 @@ class LevelDBSnapshot {
   const leveldb::Snapshot* snapshot() const { return snapshot_; }
 
  private:
-  raw_ptr<leveldb::DB> db_;
+  raw_ptr<leveldb::DB, DanglingUntriaged> db_;
   raw_ptr<const leveldb::Snapshot> snapshot_;
 };
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "gpu/vulkan/buildflags.h"
 #include "ui/gfx/native_pixmap.h"
+#include "ui/gl/gl_implementation.h"
 #include "ui/ozone/public/overlay_surface.h"
 #include "ui/ozone/public/platform_window_surface.h"
 #include "ui/ozone/public/surface_ozone_canvas.h"
@@ -32,6 +33,10 @@ SurfaceFactoryOzone::GetAllowedGLImplementations() {
 GLOzone* SurfaceFactoryOzone::GetGLOzone(
     const gl::GLImplementationParts& implementation) {
   return nullptr;
+}
+
+GLOzone* SurfaceFactoryOzone::GetCurrentGLOzone() {
+  return GetGLOzone(gl::GetGLImplementationParts());
 }
 
 #if BUILDFLAG(ENABLE_VULKAN)
@@ -73,7 +78,7 @@ std::unique_ptr<SurfaceOzoneCanvas> SurfaceFactoryOzone::CreateCanvasForWidget(
 
 scoped_refptr<gfx::NativePixmap> SurfaceFactoryOzone::CreateNativePixmap(
     gfx::AcceleratedWidget widget,
-    VkDevice vk_device,
+    gpu::VulkanDeviceQueue* device_queue,
     gfx::Size size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage,
@@ -81,9 +86,16 @@ scoped_refptr<gfx::NativePixmap> SurfaceFactoryOzone::CreateNativePixmap(
   return nullptr;
 }
 
+bool SurfaceFactoryOzone::CanCreateNativePixmapForFormat(
+    gfx::BufferFormat format) {
+  // It's up to specific implementations of this method to report an inability
+  // to create native pixmap handles for a specific format.
+  return true;
+}
+
 void SurfaceFactoryOzone::CreateNativePixmapAsync(
     gfx::AcceleratedWidget widget,
-    VkDevice vk_device,
+    gpu::VulkanDeviceQueue* device_queue,
     gfx::Size size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage,

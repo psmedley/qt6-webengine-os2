@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -91,10 +91,9 @@ content::BrowserContext* ShellContentBrowserClient::GetBrowserContext() {
 }
 
 std::unique_ptr<content::BrowserMainParts>
-ShellContentBrowserClient::CreateBrowserMainParts(
-    content::MainFunctionParams parameters) {
-  auto browser_main_parts = CreateShellBrowserMainParts(std::move(parameters),
-                                                        browser_main_delegate_);
+ShellContentBrowserClient::CreateBrowserMainParts(bool is_integration_test) {
+  auto browser_main_parts =
+      CreateShellBrowserMainParts(browser_main_delegate_, is_integration_test);
 
   browser_main_parts_ = browser_main_parts.get();
 
@@ -229,26 +228,29 @@ void ShellContentBrowserClient::ExposeInterfacesToRenderer(
     service_manager::BinderRegistry* registry,
     blink::AssociatedInterfaceRegistry* associated_registry,
     content::RenderProcessHost* render_process_host) {
-  associated_registry->AddInterface(base::BindRepeating(
+  associated_registry->AddInterface<mojom::EventRouter>(base::BindRepeating(
       &EventRouter::BindForRenderer, render_process_host->GetID()));
-  associated_registry->AddInterface(base::BindRepeating(
-      &ExtensionsGuestView::CreateForComponents, render_process_host->GetID()));
-  associated_registry->AddInterface(base::BindRepeating(
-      &ExtensionsGuestView::CreateForExtensions, render_process_host->GetID()));
+  associated_registry->AddInterface<guest_view::mojom::GuestViewHost>(
+      base::BindRepeating(&ExtensionsGuestView::CreateForComponents,
+                          render_process_host->GetID()));
+  associated_registry->AddInterface<extensions::mojom::GuestView>(
+      base::BindRepeating(&ExtensionsGuestView::CreateForExtensions,
+                          render_process_host->GetID()));
 }
 
 void ShellContentBrowserClient::
     RegisterAssociatedInterfaceBindersForRenderFrameHost(
         content::RenderFrameHost& render_frame_host,
         blink::AssociatedInterfaceRegistry& associated_registry) {
-  associated_registry.AddInterface(base::BindRepeating(
-      [](content::RenderFrameHost* render_frame_host,
-         mojo::PendingAssociatedReceiver<extensions::mojom::LocalFrameHost>
-             receiver) {
-        ExtensionWebContentsObserver::BindLocalFrameHost(std::move(receiver),
-                                                         render_frame_host);
-      },
-      &render_frame_host));
+  associated_registry.AddInterface<extensions::mojom::LocalFrameHost>(
+      base::BindRepeating(
+          [](content::RenderFrameHost* render_frame_host,
+             mojo::PendingAssociatedReceiver<extensions::mojom::LocalFrameHost>
+                 receiver) {
+            ExtensionWebContentsObserver::BindLocalFrameHost(
+                std::move(receiver), render_frame_host);
+          },
+          &render_frame_host));
 }
 
 std::vector<std::unique_ptr<content::NavigationThrottle>>
@@ -382,10 +384,10 @@ std::string ShellContentBrowserClient::GetUserAgent() {
 
 std::unique_ptr<ShellBrowserMainParts>
 ShellContentBrowserClient::CreateShellBrowserMainParts(
-    content::MainFunctionParams parameters,
-    ShellBrowserMainDelegate* browser_main_delegate) {
-  return std::make_unique<ShellBrowserMainParts>(std::move(parameters),
-                                                 browser_main_delegate);
+    ShellBrowserMainDelegate* browser_main_delegate,
+    bool is_integration_test) {
+  return std::make_unique<ShellBrowserMainParts>(browser_main_delegate,
+                                                 is_integration_test);
 }
 
 void ShellContentBrowserClient::AppendRendererSwitches(

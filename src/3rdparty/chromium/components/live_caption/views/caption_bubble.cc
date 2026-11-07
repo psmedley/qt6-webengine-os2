@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,8 @@
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "components/live_caption/caption_bubble_context.h"
+#include "components/live_caption/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
 #include "third_party/re2/src/re2/re2.h"
@@ -29,6 +31,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/color/color_id.h"
+#include "ui/events/event.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/paint_vector_icon.h"
@@ -52,6 +55,7 @@
 #include "ui/views/layout/layout_provider.h"
 #include "ui/views/layout/layout_types.h"
 #include "ui/views/style/typography.h"
+#include "ui/views/vector_icons.h"
 #include "ui/views/view_class_properties.h"
 #include "ui/views/widget/widget.h"
 
@@ -89,23 +93,6 @@ static constexpr double kDefaultRatioInParentY = 1;
 static constexpr int kErrorImageSizeDip = 20;
 static constexpr int kErrorMessageBetweenChildSpacingDip = 16;
 static constexpr int kNoActivityIntervalSeconds = 5;
-
-// These values are persisted to logs. Entries should not be renumbered and
-// numeric values should never be reused. These should be the same as
-// LiveCaptionSessionEvent in enums.xml.
-enum class SessionEvent {
-  // We began showing captions for an audio stream.
-  kStreamStarted = 0,
-  // The audio stream ended and the caption bubble closes.
-  kStreamEnded = 1,
-  // The close button was clicked, so we stopped listening to an audio stream.
-  kCloseButtonClicked = 2,
-  kMaxValue = kCloseButtonClicked,
-};
-
-void LogSessionEvent(SessionEvent event) {
-  base::UmaHistogramEnumeration("Accessibility.LiveCaption.Session", event);
-}
 
 std::unique_ptr<views::ImageButton> BuildImageButton(
     views::Button::PressedCallback callback,
@@ -195,7 +182,7 @@ class MediaFoundationRendererErrorMessageView : public views::StyledLabel {
   }
 
  private:
-  CaptionBubble* const caption_bubble_;  // Not owned.
+  const raw_ptr<CaptionBubble> caption_bubble_;  // Not owned.
 };
 #endif
 
@@ -204,12 +191,14 @@ class MediaFoundationRendererErrorMessageView : public views::StyledLabel {
 class CaptionBubbleFrameView : public views::BubbleFrameView {
  public:
   METADATA_HEADER(CaptionBubbleFrameView);
-  explicit CaptionBubbleFrameView(std::vector<views::View*> buttons)
+  explicit CaptionBubbleFrameView(
+      std::vector<views::View*> buttons,
+      ResetInactivityTimerCallback reset_inactivity_timer_cb)
       : views::BubbleFrameView(gfx::Insets(), gfx::Insets()),
-        buttons_(buttons) {
+        buttons_(buttons),
+        reset_inactivity_timer_cb_(std::move(reset_inactivity_timer_cb)) {
     auto border = std::make_unique<views::BubbleBorder>(
-        views::BubbleBorder::FLOAT, views::BubbleBorder::DIALOG_SHADOW,
-        gfx::kPlaceholderColor);
+        views::BubbleBorder::FLOAT, views::BubbleBorder::DIALOG_SHADOW);
     border->SetCornerRadius(kCornerRadiusDip);
     views::BubbleFrameView::SetBubbleBorder(std::move(border));
   }
@@ -217,6 +206,10 @@ class CaptionBubbleFrameView : public views::BubbleFrameView {
   ~CaptionBubbleFrameView() override = default;
   CaptionBubbleFrameView(const CaptionBubbleFrameView&) = delete;
   CaptionBubbleFrameView& operator=(const CaptionBubbleFrameView&) = delete;
+
+  void OnMouseExited(const ui::MouseEvent& event) override {
+    reset_inactivity_timer_cb_.Run();
+  }
 
   // TODO(crbug.com/1055150): This does not work on Linux because the bubble is
   // not a top-level view, so it doesn't receive events. See crbug.com/1074054
@@ -252,6 +245,7 @@ class CaptionBubbleFrameView : public views::BubbleFrameView {
 
  private:
   std::vector<views::View*> buttons_;
+  ResetInactivityTimerCallback reset_inactivity_timer_cb_;
 };
 
 BEGIN_METADATA(CaptionBubbleFrameView, views::BubbleFrameView)
@@ -362,7 +356,7 @@ class CaptionBubbleLabel : public views::Label {
     ui::AXNodeData& ax_node_data = ax_lines[line_index]->GetCustomData();
     if (base::UTF8ToUTF16(ax_node_data.GetStringAttribute(
             ax::mojom::StringAttribute::kName)) != line_text) {
-      ax_node_data.SetName(line_text);
+      ax_node_data.SetNameChecked(line_text);
       std::vector<gfx::Rect> bounds = GetSubstringBounds(text_range);
       ax_node_data.relative_bounds.bounds = gfx::RectF(bounds[0]);
       ax_lines[line_index]->NotifyAccessibilityEvent(
@@ -410,10 +404,13 @@ class CaptionBubbleLabelAXModeObserver : public ui::AXModeObserver {
 };
 #endif
 
-CaptionBubble::CaptionBubble(base::OnceClosure destroyed_callback,
-                             bool hide_on_inactivity)
-    : destroyed_callback_(std::move(destroyed_callback)),
-      hide_on_inactivity_(hide_on_inactivity),
+CaptionBubble::CaptionBubble(PrefService* profile_prefs,
+                             base::OnceClosure destroyed_callback)
+    : profile_prefs_(profile_prefs),
+      destroyed_callback_(std::move(destroyed_callback)),
+      is_expanded_(
+          profile_prefs_->GetBoolean(prefs::kLiveCaptionBubbleExpanded)),
+      is_pinned_(profile_prefs_->GetBoolean(prefs::kLiveCaptionBubblePinned)),
       tick_clock_(base::DefaultTickClock::GetInstance()) {
   // Bubbles that use transparent colors should not paint their ClientViews to a
   // layer as doing so could result in visual artifacts.
@@ -424,10 +421,6 @@ CaptionBubble::CaptionBubble(base::OnceClosure destroyed_callback,
   SetShowTitle(false);
   SetTitle(IDS_LIVE_CAPTION_BUBBLE_TITLE);
   set_has_parent(false);
-
-  // No need to set up timer if the bubble is not hidden on inactivity.
-  if (!hide_on_inactivity_)
-    return;
 
   inactivity_timer_ = std::make_unique<base::RetainingOneShotTimer>(
       FROM_HERE, base::Seconds(kNoActivityIntervalSeconds),
@@ -577,6 +570,18 @@ void CaptionBubble::Init() {
                                            base::Unretained(this)),
                        IDS_LIVE_CAPTION_BUBBLE_CLOSE);
 
+  views::Button::PressedCallback pin_or_unpin_callback = base::BindRepeating(
+      &CaptionBubble::PinOrUnpinButtonPressed, base::Unretained(this));
+  auto pin_button =
+      BuildImageButton(pin_or_unpin_callback, IDS_LIVE_CAPTION_BUBBLE_PIN);
+  pin_button->SetVisible(!is_pinned_);
+  pin_button_ = header_container->AddChildView(std::move(pin_button));
+
+  auto unpin_button = BuildImageButton(std::move(pin_or_unpin_callback),
+                                       IDS_LIVE_CAPTION_BUBBLE_UNPIN);
+  unpin_button->SetVisible(is_pinned_);
+  unpin_button_ = header_container->AddChildView(std::move(unpin_button));
+
   back_to_tab_button_ =
       header_container->AddChildView(std::move(back_to_tab_button));
   close_button_ = header_container->AddChildView(std::move(close_button));
@@ -618,7 +623,6 @@ void CaptionBubble::Init() {
   AddChildView(std::move(header_container));
   AddChildView(std::move(content_container));
 
-  SetCaptionBubbleStyle();
   UpdateContentSize();
 }
 
@@ -639,8 +643,11 @@ bool CaptionBubble::ShouldShowCloseButton() const {
 std::unique_ptr<views::NonClientFrameView>
 CaptionBubble::CreateNonClientFrameView(views::Widget* widget) {
   std::vector<views::View*> buttons = {back_to_tab_button_, close_button_,
-                                       expand_button_, collapse_button_};
-  auto frame = std::make_unique<CaptionBubbleFrameView>(buttons);
+                                       expand_button_,      collapse_button_,
+                                       pin_button_,         unpin_button_};
+  auto frame = std::make_unique<CaptionBubbleFrameView>(
+      buttons, base::BindRepeating(&CaptionBubble::ResetInactivityTimer,
+                                   base::Unretained(this)));
   frame_ = frame.get();
   return frame;
 }
@@ -648,31 +655,23 @@ CaptionBubble::CreateNonClientFrameView(views::Widget* widget) {
 void CaptionBubble::OnWidgetBoundsChanged(views::Widget* widget,
                                           const gfx::Rect& new_bounds) {
   DCHECK_EQ(widget, GetWidget());
-  if (!hide_on_inactivity_)
-    return;
 
   // If the widget is visible and unfocused, probably due to a mouse drag, reset
   // the inactivity timer.
   if (GetWidget()->IsVisible() && !HasFocus())
-    inactivity_timer_->Reset();
+    ResetInactivityTimer();
 }
 
 void CaptionBubble::OnWidgetActivationChanged(views::Widget* widget,
                                               bool active) {
   DCHECK_EQ(widget, GetWidget());
-  if (!hide_on_inactivity_)
-    return;
 
-  if (active) {
-    inactivity_timer_->Stop();
-  } else {
-    inactivity_timer_->Reset();
-  }
+  ResetInactivityTimer();
 }
 
 void CaptionBubble::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->role = ax::mojom::Role::kDialog;
-  node_data->SetName(title_->GetText());
+  node_data->SetNameChecked(title_->GetText());
 }
 
 std::u16string CaptionBubble::GetAccessibleWindowTitle() const {
@@ -680,7 +679,9 @@ std::u16string CaptionBubble::GetAccessibleWindowTitle() const {
 }
 
 void CaptionBubble::OnThemeChanged() {
-  SetCaptionBubbleStyle();
+  if (ThemeColorsChanged()) {
+    SetCaptionBubbleStyle();
+  }
 
   // Call this after SetCaptionButtonStyle(), not before, since
   // SetCaptionButtonStyle() calls set_color(), which OnThemeChanged() will
@@ -702,19 +703,37 @@ void CaptionBubble::CloseButtonPressed() {
 
 void CaptionBubble::ExpandOrCollapseButtonPressed() {
   is_expanded_ = !is_expanded_;
+  profile_prefs_->SetBoolean(prefs::kLiveCaptionBubbleExpanded, is_expanded_);
   base::UmaHistogramBoolean("Accessibility.LiveCaption.ExpandBubble",
                             is_expanded_);
-  views::Button *old_button = collapse_button_, *new_button = expand_button_;
-  if (is_expanded_)
-    std::swap(old_button, new_button);
-  bool button_had_focus = old_button->HasFocus();
-  OnIsExpandedChanged();
-  // TODO(crbug.com/1055150): Ensure that the button keeps focus on mac.
-  if (button_had_focus)
-    new_button->RequestFocus();
 
-  if (hide_on_inactivity_)
-    inactivity_timer_->Reset();
+  SwapButtons(collapse_button_, expand_button_, is_expanded_);
+
+  // The change of expanded state may cause the title to change visibility, and
+  // it surely causes the content height to change, so redraw the bubble.
+  Redraw();
+}
+
+void CaptionBubble::PinOrUnpinButtonPressed() {
+  is_pinned_ = !is_pinned_;
+  profile_prefs_->SetBoolean(prefs::kLiveCaptionBubblePinned, is_pinned_);
+  base::UmaHistogramBoolean("Accessibility.LiveCaption.PinBubble", is_pinned_);
+
+  SwapButtons(unpin_button_, pin_button_, is_pinned_);
+}
+
+void CaptionBubble::SwapButtons(views::Button* first_button,
+                                views::Button* second_button,
+                                bool show_first_button) {
+  if (!show_first_button)
+    std::swap(first_button, second_button);
+
+  second_button->SetVisible(false);
+  first_button->SetVisible(true);
+  ResetInactivityTimer();
+
+  if (!first_button->HasFocus())
+    first_button->RequestFocus();
 }
 
 void CaptionBubble::SetModel(CaptionBubbleModel* model) {
@@ -735,8 +754,39 @@ void CaptionBubble::OnTextChanged() {
   label_->SetText(base::UTF8ToUTF16(text));
   UpdateBubbleAndTitleVisibility();
 
-  if (hide_on_inactivity_ && GetWidget()->IsVisible())
-    inactivity_timer_->Reset();
+  if (GetWidget()->IsVisible())
+    ResetInactivityTimer();
+}
+
+bool CaptionBubble::ThemeColorsChanged() {
+  const auto* const color_provider = GetColorProvider();
+  SkColor text_color =
+      color_provider->GetColor(ui::kColorLiveCaptionBubbleForegroundDefault);
+  SkColor icon_color =
+      color_provider->GetColor(ui::kColorLiveCaptionBubbleButtonIcon);
+  SkColor icon_disabled_color =
+      color_provider->GetColor(ui::kColorLiveCaptionBubbleButtonIconDisabled);
+  SkColor link_color =
+      color_provider->GetColor(ui::kColorLiveCaptionBubbleLink);
+  SkColor checkbox_color =
+      color_provider->GetColor(ui::kColorLiveCaptionBubbleCheckbox);
+  SkColor background_color =
+      color_provider->GetColor(ui::kColorLiveCaptionBubbleBackgroundDefault);
+
+  bool theme_colors_changed =
+      text_color != text_color_ || icon_color != icon_color_ ||
+      icon_disabled_color != icon_disabled_color_ ||
+      link_color != link_color_ || checkbox_color != checkbox_color_ ||
+      background_color != background_color_;
+
+  text_color_ = text_color;
+  icon_color_ = icon_color;
+  icon_disabled_color_ = icon_disabled_color;
+  link_color_ = link_color;
+  checkbox_color_ = checkbox_color;
+  background_color_ = background_color;
+
+  return theme_colors_changed;
 }
 
 void CaptionBubble::OnErrorChanged(
@@ -753,7 +803,7 @@ void CaptionBubble::OnErrorChanged(
 
 #if BUILDFLAG(IS_WIN)
   if (error_type ==
-      CaptionBubbleErrorType::MEDIA_FOUNDATION_RENDERER_UNSUPPORTED) {
+      CaptionBubbleErrorType::kMediaFoundationRendererUnsupported) {
     media_foundation_renderer_error_message_->SetVisible(has_error);
     generic_error_message_->SetVisible(false);
   } else {
@@ -774,15 +824,6 @@ void CaptionBubble::OnContentSettingsLinkClicked() {
   }
 }
 #endif
-
-void CaptionBubble::OnIsExpandedChanged() {
-  expand_button_->SetVisible(!is_expanded_);
-  collapse_button_->SetVisible(is_expanded_);
-
-  // The change of expanded state may cause the title to change visibility, and
-  // it surely causes the content height to change, so redraw the bubble.
-  Redraw();
-}
 
 void CaptionBubble::UpdateBubbleAndTitleVisibility() {
   // Show the title if there is room for it and no error.
@@ -836,14 +877,6 @@ size_t CaptionBubble::GetNumLinesInLabel() const {
 
 int CaptionBubble::GetNumLinesVisible() {
   return is_expanded_ ? kNumLinesExpanded : kNumLinesCollapsed;
-}
-
-void CaptionBubble::SetCaptionBubbleStyle() {
-  SetTextSizeAndFontFamily();
-  if (GetWidget()) {
-    SetTextColor();
-    SetBackgroundColor();
-  }
 }
 
 double CaptionBubble::GetTextScaleFactor() {
@@ -953,9 +986,9 @@ void CaptionBubble::SetTextColor() {
   media_foundation_renderer_error_checkbox_->SetCheckedIconImageColor(
       color_provider->GetColor(ui::kColorLiveCaptionBubbleCheckbox));
 #endif
-  views::SetImageFromVectorIconWithColor(back_to_tab_button_,
-                                         vector_icons::kLaunchIcon, kButtonDip,
-                                         icon_color, icon_disabled_color);
+  views::SetImageFromVectorIconWithColor(
+      back_to_tab_button_, vector_icons::kBackToTabIcon, kButtonDip, icon_color,
+      icon_disabled_color);
   views::SetImageFromVectorIconWithColor(
       close_button_, vector_icons::kCloseRoundedIcon, kButtonDip, icon_color,
       icon_disabled_color);
@@ -965,6 +998,12 @@ void CaptionBubble::SetTextColor() {
   views::SetImageFromVectorIconWithColor(collapse_button_,
                                          vector_icons::kCaretUpIcon, kButtonDip,
                                          icon_color, icon_disabled_color);
+  views::SetImageFromVectorIconWithColor(pin_button_, views::kPinIcon,
+                                         kButtonDip, icon_color,
+                                         icon_disabled_color);
+  views::SetImageFromVectorIconWithColor(unpin_button_, views::kUnpinIcon,
+                                         kButtonDip, icon_color,
+                                         icon_disabled_color);
 }
 
 void CaptionBubble::SetBackgroundColor() {
@@ -994,9 +1033,7 @@ void CaptionBubble::UpdateContentSize() {
 #if BUILDFLAG(IS_WIN)
   // The Media Foundation renderer error message should not scale with the
   // user's caption style preference.
-  if (model_ && model_->HasError() &&
-      model_->ErrorType() ==
-          CaptionBubbleErrorType::MEDIA_FOUNDATION_RENDERER_UNSUPPORTED) {
+  if (HasMediaFoundationError()) {
     width = kMaxWidthDip;
     content_height =
         media_foundation_renderer_error_message_->GetPreferredSize().height();
@@ -1071,7 +1108,9 @@ void CaptionBubble::Hide() {
 }
 
 void CaptionBubble::OnInactivityTimeout() {
-  Hide();
+  if (HasMediaFoundationError() || IsMouseHovered() || is_pinned_ ||
+      GetWidget()->IsActive())
+    return;
 
   // Clear the partial and final text in the caption bubble model and the label.
   // Does not affect the speech service. The speech service will emit a final
@@ -1082,24 +1121,51 @@ void CaptionBubble::OnInactivityTimeout() {
   // contain text cleared by the UI.
   if (model_)
     model_->ClearText();
+
+  Hide();
+}
+
+void CaptionBubble::ResetInactivityTimer() {
+  inactivity_timer_->Reset();
 }
 
 void CaptionBubble::MediaFoundationErrorCheckboxPressed() {
 #if BUILDFLAG(IS_WIN)
   error_silenced_callback_.Run(
-      CaptionBubbleErrorType::MEDIA_FOUNDATION_RENDERER_UNSUPPORTED,
+      CaptionBubbleErrorType::kMediaFoundationRendererUnsupported,
       media_foundation_renderer_error_checkbox_->GetChecked());
 #endif
+}
+
+bool CaptionBubble::HasMediaFoundationError() {
+  return (model_ && model_->HasError() &&
+          model_->ErrorType() ==
+              CaptionBubbleErrorType::kMediaFoundationRendererUnsupported);
+}
+
+void CaptionBubble::LogSessionEvent(SessionEvent event) {
+  if (model_ && !model_->HasError()) {
+    base::UmaHistogramEnumeration("Accessibility.LiveCaption.Session2", event);
+  }
 }
 
 bool CaptionBubble::HasActivity() {
   return model_ &&
          ((inactivity_timer_ && inactivity_timer_->IsRunning()) || HasFocus() ||
-          !model_->GetFullText().empty() || model_->HasError());
+          !model_->GetFullText().empty() || model_->HasError() || is_pinned_);
 }
 
 views::Label* CaptionBubble::GetLabelForTesting() {
   return static_cast<views::Label*>(label_);
+}
+
+void CaptionBubble::SetCaptionBubbleStyle() {
+  SetTextSizeAndFontFamily();
+  if (GetWidget()) {
+    SetTextColor();
+    SetBackgroundColor();
+    GetWidget()->ThemeChanged();
+  }
 }
 
 base::RetainingOneShotTimer* CaptionBubble::GetInactivityTimerForTesting() {

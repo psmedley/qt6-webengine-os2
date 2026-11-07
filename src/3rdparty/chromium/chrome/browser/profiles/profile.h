@@ -39,6 +39,10 @@ class Profile : public content::BrowserContext {
   // Returns whether it's a regular profile.
   bool IsRegularProfile() const;
 
+  // Returns whether it is an Incognito profile. An Incognito profile is an
+  // off-the-record profile that is used for incognito mode.
+  bool IsIncognitoProfile() const;
+
   // Returns whether it is a system profile.
   bool IsSystemProfile() const;
 
@@ -46,9 +50,6 @@ class Profile : public content::BrowserContext {
   // off-the-record profiles of a Guest session.
   virtual bool IsGuestSession() const;
 
-#ifdef TOOLKIT_QT
-  virtual std::string GetPushMessagingEndpoint() const;
-#endif
 };
 
 #endif  // CHROME_BROWSER_PROFILES_PROFILE_H_

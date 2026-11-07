@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,10 @@
 // Please run the closure compiler before committing changes.
 // See https://chromium.googlesource.com/chromium/src/+/main/docs/closure_compilation.md
 
-/** @fileoverview Externs generated from namespace: accessibilityPrivate */
+/**
+ * @fileoverview Externs generated from namespace: accessibilityPrivate
+ * @externs
+ */
 
 /** @const */
 chrome.accessibilityPrivate = {};
@@ -260,9 +263,8 @@ chrome.accessibilityPrivate.AcceleratorAction = {
  */
 chrome.accessibilityPrivate.AccessibilityFeature = {
   ENHANCED_NETWORK_VOICES: 'enhancedNetworkVoices',
-  DICTATION_COMMANDS: 'dictationCommands',
-  DICTATION_HINTS: 'dictationHints',
   GOOGLE_TTS_LANGUAGE_PACKS: 'googleTtsLanguagePacks',
+  DICTATION_PUMPKIN_PARSING: 'dictationPumpkinParsing',
 };
 
 /**
@@ -287,6 +289,7 @@ chrome.accessibilityPrivate.SetNativeChromeVoxResponse = {
   TALKBACK_NOT_INSTALLED: 'talkbackNotInstalled',
   WINDOW_NOT_FOUND: 'windowNotFound',
   FAILURE: 'failure',
+  NEED_DEPRECATION_CONFIRMATION: 'needDeprecationConfirmation',
 };
 
 /**
@@ -324,6 +327,32 @@ chrome.accessibilityPrivate.DictationBubbleHintType = {
 chrome.accessibilityPrivate.DictationBubbleProperties;
 
 /**
+ * @enum {string}
+ */
+chrome.accessibilityPrivate.DlcType = {
+  TTS_ES_US: 'ttsEsUs',
+};
+
+/**
+ * @typedef {{
+ *   js_pumpkin_tagger_bin_js: ArrayBuffer,
+ *   tagger_wasm_main_js: ArrayBuffer,
+ *   tagger_wasm_main_wasm: ArrayBuffer,
+ *   en_us_action_config_binarypb: ArrayBuffer,
+ *   en_us_pumpkin_config_binarypb: ArrayBuffer,
+ *   fr_fr_action_config_binarypb: ArrayBuffer,
+ *   fr_fr_pumpkin_config_binarypb: ArrayBuffer,
+ *   it_it_action_config_binarypb: ArrayBuffer,
+ *   it_it_pumpkin_config_binarypb: ArrayBuffer,
+ *   de_de_action_config_binarypb: ArrayBuffer,
+ *   de_de_pumpkin_config_binarypb: ArrayBuffer,
+ *   es_es_action_config_binarypb: ArrayBuffer,
+ *   es_es_pumpkin_config_binarypb: ArrayBuffer
+ * }}
+ */
+chrome.accessibilityPrivate.PumpkinData;
+
+/**
  * Property to indicate whether event source should default to touch.
  * @type {number}
  */
@@ -344,6 +373,13 @@ chrome.accessibilityPrivate.getDisplayNameForLocale = function(localeCodeToTrans
  *     string.
  */
 chrome.accessibilityPrivate.getBatteryDescription = function(callback) {};
+
+/**
+ * Called to request an install of the Pumpkin semantic parser for Dictation.
+ * @param {function(!chrome.accessibilityPrivate.PumpkinData): void} callback
+ *     Runs when Pumpkin download finishes.
+ */
+chrome.accessibilityPrivate.installPumpkinForDictation = function(callback) {};
 
 /**
  * Enables or disables native accessibility support. Once disabled, it is up to
@@ -548,6 +584,19 @@ chrome.accessibilityPrivate.getLocalizedDomKeyStringForKeyCode = function(keyCod
  *     Properties for the updated Dictation bubble UI.
  */
 chrome.accessibilityPrivate.updateDictationBubble = function(properties) {};
+
+/**
+ * Cancels the current and queued speech from ChromeVox.
+ */
+chrome.accessibilityPrivate.silenceSpokenFeedback = function() {};
+
+/**
+ * Returns the contents of a DLC.
+ * @param {!chrome.accessibilityPrivate.DlcType} dlc The DLC of interest.
+ * @param {function(ArrayBuffer): void} callback A callback that is run when the
+ *     contents are returned.
+ */
+chrome.accessibilityPrivate.getDlcContents = function(dlc, callback) {};
 
 /**
  * Fired whenever ChromeVox should output introduction.

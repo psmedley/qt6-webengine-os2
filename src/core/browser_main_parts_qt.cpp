@@ -31,6 +31,7 @@
 #include "select_file_dialog_factory_qt.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/service.h"
+#include "type_conversion.h"
 #include "ui/display/screen.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -49,7 +50,9 @@
 #include "web_engine_context.h"
 #include "web_usb_detector_qt.h"
 
+#include <QDeadlineTimer>
 #include <QtGui/qtgui-config.h>
+#include <QStandardPaths>
 
 #if QT_CONFIG(opengl)
 #include "ui/gl/gl_context.h"
@@ -68,6 +71,10 @@
 #include "desktop_screen_qt.h"
 #endif
 
+#if defined(Q_OS_LINUX)
+#include "components/os_crypt/key_storage_config_linux.h"
+#include "components/os_crypt/os_crypt.h"
+#endif
 
 namespace QtWebEngineCore {
 
@@ -114,7 +121,7 @@ public:
     {
         // NOTE: This method may called from any thread at any time.
         ensureDelegate();
-        m_scheduler.scheduleWork();
+        m_scheduler.scheduleImmediateWork();
     }
 
     void ScheduleDelayedWork(const Delegate::NextWorkInfo &next_work_info) override
@@ -187,13 +194,16 @@ private:
     {
         ScopedGLContextChecker glContextChecker;
 
+        QDeadlineTimer timer(std::chrono::milliseconds(2));
         base::MessagePump::Delegate::NextWorkInfo more_work_info = m_delegate->DoWork();
+        while (more_work_info.is_immediate() && !timer.hasExpired())
+            more_work_info = m_delegate->DoWork();
 
         if (more_work_info.is_immediate())
-            return ScheduleWork();
+            return m_scheduler.scheduleImmediateWork();
 
         if (m_delegate->DoIdleWork())
-            return ScheduleWork();
+            return m_scheduler.scheduleIdleWork();
 
         ScheduleDelayedWork(more_work_info.delayed_run_time);
     }
@@ -252,6 +262,15 @@ void BrowserMainPartsQt::PostCreateMainMessageLoop()
 {
     if (!device_event_log::IsInitialized())
         device_event_log::Initialize(0 /* default max entries */);
+
+#if defined(Q_OS_LINUX)
+    std::unique_ptr<os_crypt::Config> config = std::make_unique<os_crypt::Config>();
+    config->product_name = "Qt WebEngine";
+    config->main_thread_runner = content::GetUIThreadTaskRunner({});
+    config->should_use_preference = false;
+    config->user_data_path = toFilePath(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+    OSCrypt::SetConfig(std::move(config));
+#endif
 }
 
 int BrowserMainPartsQt::PreMainMessageLoopRun()

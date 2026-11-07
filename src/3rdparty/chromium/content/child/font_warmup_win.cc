@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,9 +29,9 @@
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/ports/SkTypeface_win.h"
 
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PPAPI)
 #include "ppapi/shared_impl/proxy_lock.h"
-#endif  // BUILDFLAG(ENABLE_PLUGINS)
+#endif  // BUILDFLAG(ENABLE_PPAPI)
 
 namespace content {
 
@@ -206,9 +206,9 @@ sk_sp<SkTypeface> GetTypefaceFromLOGFONT(const LOGFONTW* log_font) {
                                        : SkFontStyle::kUpright_Slant);
 
   std::string family_name = base::WideToUTF8(log_font->lfFaceName);
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PPAPI)
   ppapi::ProxyAutoLock lock;  // Needed for DirectWrite font proxy.
-#endif                        // BUILDFLAG(ENABLE_PLUGINS)
+#endif                        // BUILDFLAG(ENABLE_PPAPI)
   return sk_sp<SkTypeface>(
       g_warmup_fontmgr->matchFamilyStyle(family_name.c_str(), style));
 }

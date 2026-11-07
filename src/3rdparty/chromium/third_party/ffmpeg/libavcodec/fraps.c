@@ -133,14 +133,12 @@ static int fraps2_decode_plane(FrapsContext *s, uint8_t *dst, int stride, int w,
     return 0;
 }
 
-static int decode_frame(AVCodecContext *avctx,
-                        void *data, int *got_frame,
-                        AVPacket *avpkt)
+static int decode_frame(AVCodecContext *avctx, AVFrame *f,
+                        int *got_frame, AVPacket *avpkt)
 {
     FrapsContext * const s = avctx->priv_data;
     const uint8_t *buf     = avpkt->data;
     int buf_size           = avpkt->size;
-    AVFrame * const f = data;
     uint32_t header;
     unsigned int version,header_size;
     unsigned int x, y;
@@ -343,13 +341,12 @@ static av_cold int decode_end(AVCodecContext *avctx)
 
 const FFCodec ff_fraps_decoder = {
     .p.name         = "fraps",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Fraps"),
+    CODEC_LONG_NAME("Fraps"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_FRAPS,
     .priv_data_size = sizeof(FrapsContext),
     .init           = decode_init,
     .close          = decode_end,
-    .decode         = decode_frame,
+    FF_CODEC_DECODE_CB(decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };

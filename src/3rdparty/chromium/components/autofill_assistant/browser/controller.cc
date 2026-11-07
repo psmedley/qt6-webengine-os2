@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/no_destructor.h"
 #include "base/ranges/algorithm.h"
@@ -21,6 +22,7 @@
 #include "components/autofill_assistant/browser/metrics.h"
 #include "components/autofill_assistant/browser/protocol_utils.h"
 #include "components/autofill_assistant/browser/service/service_impl.h"
+#include "components/autofill_assistant/browser/switches.h"
 #include "components/autofill_assistant/browser/trigger_context.h"
 #include "components/autofill_assistant/browser/url_utils.h"
 #include "components/autofill_assistant/browser/user_data.h"
@@ -29,7 +31,6 @@
 #include "components/google/core/common/google_util.h"
 #include "components/password_manager/core/browser/password_change_success_tracker_impl.h"
 #include "components/strings/grit/components_strings.h"
-#include "components/ukm/content/source_url_recorder.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
@@ -43,20 +44,14 @@
 namespace autofill_assistant {
 namespace {
 
-bool ShouldSuppressKeyboardForState(AutofillAssistantState state) {
-  switch (state) {
-    case AutofillAssistantState::STARTING:
-    case AutofillAssistantState::RUNNING:
-      return true;
-
-    case AutofillAssistantState::PROMPT:
-    case AutofillAssistantState::BROWSE:
-    case AutofillAssistantState::MODAL_DIALOG:
-    case AutofillAssistantState::STOPPED:
-    case AutofillAssistantState::TRACKING:
-    case AutofillAssistantState::INACTIVE:
-      return false;
-  }
+bool ShouldSendModelVersionInContext(const TriggerContext& trigger_context) {
+  return base::FeatureList::IsEnabled(
+             autofill_assistant::features::
+                 kAutofillAssistantSendModelVersionInClientContext) ||
+         trigger_context.GetScriptParameters()
+             .GetSendAnnotateDomModelVersion() ||
+         base::CommandLine::ForCurrentProcess()->HasSwitch(
+             switches::kAutofillAssistantAnnotateDom);
 }
 
 }  // namespace
@@ -66,6 +61,7 @@ Controller::Controller(content::WebContents* web_contents,
                        const base::TickClock* tick_clock,
                        base::WeakPtr<RuntimeManager> runtime_manager,
                        std::unique_ptr<Service> service,
+                       std::unique_ptr<WebController> web_controller,
                        ukm::UkmRecorder* ukm_recorder,
                        AnnotateDomModelService* annotate_dom_model_service)
     : content::WebContentsObserver(web_contents),
@@ -75,11 +71,15 @@ Controller::Controller(content::WebContents* web_contents,
       service_(service ? std::move(service)
                        : ServiceImpl::Create(web_contents->GetBrowserContext(),
                                              client_)),
+      web_controller_(std::move(web_controller)),
       navigating_to_new_document_(web_contents->IsWaitingForResponse()),
       ukm_recorder_(ukm_recorder),
       annotate_dom_model_service_(annotate_dom_model_service) {}
 
-Controller::~Controller() {}
+Controller::~Controller() {
+  // Record failure, iff an earlier call didn't already record.
+  MaybeRecordFlowFinishedMetrics(Metrics::FlowFinishedState::DESTROYED);
+}
 
 const ClientSettings& Controller::GetSettings() {
   return settings_;
@@ -139,6 +139,28 @@ content::WebContents* Controller::GetWebContents() {
   return web_contents();
 }
 
+const std::string Controller::GetLocale() {
+  return client_->GetLocale();
+}
+
+void Controller::SetJsFlowLibrary(const std::string& js_flow_library) {
+  if (js_flow_library.empty()) {
+    return;
+  }
+
+  GetJsFlowDevtoolsWrapper()->SetJsFlowLibrary(js_flow_library);
+  GetService()->UpdateJsFlowLibraryLoaded(!js_flow_library.empty());
+}
+
+JsFlowDevtoolsWrapper* Controller::GetJsFlowDevtoolsWrapper() {
+  if (!js_flow_devtools_wrapper_) {
+    js_flow_devtools_wrapper_ = std::make_unique<JsFlowDevtoolsWrapper>(
+        GetWebContents()->GetBrowserContext());
+  }
+
+  return js_flow_devtools_wrapper_.get();
+}
+
 std::string Controller::GetEmailAddressForAccessTokenAccount() {
   return client_->GetEmailAddressForAccessTokenAccount();
 }
@@ -172,9 +194,23 @@ void Controller::RequireUI() {
 }
 
 void Controller::SetUiShown(bool shown) {
+  if (trigger_context_ && trigger_context_->GetIsExternallyTriggered()) {
+    // UIState can only be modified by non-headless runs. For headless runs, the
+    // client is in charge of keeping the UIState value updated.
+    return;
+  }
   ui_shown_ = shown;
   if (runtime_manager_) {
-    runtime_manager_->SetUIState(shown ? UIState::kShown : UIState::kNotShown);
+    // By default, browsing features are suppressed during `UIState::kShown`.
+    // Therefore set a special state if no suppression is desired.
+    if (shown && trigger_context_ &&
+        !trigger_context_->GetSuppressBrowsingFeatures()) {
+      runtime_manager_->SetUIState(
+          UIState::kShownWithoutBrowsingFeatureSuppression);
+    } else {
+      runtime_manager_->SetUIState(shown ? UIState::kShown
+                                         : UIState::kNotShown);
+    }
   }
 
   for (ControllerObserver& observer : observers_) {
@@ -193,6 +229,20 @@ bool Controller::ShouldShowWarning() {
 
 ProcessedActionStatusDetailsProto& Controller::GetLogInfo() {
   return log_info_;
+}
+
+bool Controller::MustUseBackendData() const {
+  return client_->MustUseBackendData();
+}
+
+bool Controller::IsXmlSigned(const std::string& xml_string) const {
+  return client_->IsXmlSigned(xml_string);
+}
+
+const std::vector<std::string> Controller::ExtractValuesFromSingleTagXml(
+    const std::string& xml_string,
+    const std::vector<std::string>& keys) const {
+  return client_->ExtractValuesFromSingleTagXml(xml_string, keys);
 }
 
 void Controller::AddNavigationListener(
@@ -331,6 +381,9 @@ void Controller::EnterStoppedState() {
     script_tracker_->StopScript();
   SetStoppedUI();
   EnterState(AutofillAssistantState::STOPPED);
+
+  // Record failure, iff an earlier call didn't already record.
+  MaybeRecordFlowFinishedMetrics(Metrics::FlowFinishedState::FAILURE);
 }
 
 void Controller::SetStoppedUI() {
@@ -351,7 +404,7 @@ bool Controller::EnterState(AutofillAssistantState state) {
          (state == AutofillAssistantState::TRACKING && tracking_));
   state_ = state;
 
-  bool should_suppress_keyboard = ShouldSuppressKeyboardForState(state_);
+  bool should_suppress_keyboard = ShouldSuppressKeyboard();
   SuppressKeyboard(should_suppress_keyboard);
   for (ControllerObserver& observer : observers_) {
     observer.OnKeyboardSuppressionStateChanged(should_suppress_keyboard);
@@ -409,14 +462,40 @@ void Controller::GetOrCheckScripts() {
 #else
     VLOG(2) << "GetScripts for " << script_url_.host();
 #endif
-
-    GetService()->GetScriptsForUrl(
-        url, *trigger_context_,
-        base::BindOnce(&Controller::OnGetScripts, base::Unretained(this), url));
+    MaybeUpdateClientContextAndGetScriptsForUrl(url);
   } else {
     script_tracker()->CheckScripts();
     StartPeriodicScriptChecks();
   }
+}
+
+void Controller::MaybeUpdateClientContextAndGetScriptsForUrl(const GURL& url) {
+  DCHECK(trigger_context_);
+  if (!ShouldSendModelVersionInContext(*trigger_context_)) {
+    GetScriptsForUrl(url);
+    return;
+  }
+
+  DCHECK(client_);
+  client_->GetAnnotateDomModelVersion(
+      base::BindOnce(&Controller::OnGetAnnotateDomModelVersionForGetScripts,
+                     weak_ptr_factory_.GetWeakPtr(), url));
+}
+
+void Controller::OnGetAnnotateDomModelVersionForGetScripts(
+    const GURL& url,
+    absl::optional<int64_t> model_version) {
+  if (model_version) {
+    GetService()->UpdateAnnotateDomModelContext(*model_version);
+  }
+  GetScriptsForUrl(url);
+}
+
+void Controller::GetScriptsForUrl(const GURL& url) {
+  GetService()->GetScriptsForUrl(
+      url, *trigger_context_,
+      base::BindOnce(&Controller::OnGetScripts, weak_ptr_factory_.GetWeakPtr(),
+                     url));
 }
 
 void Controller::StartPeriodicScriptChecks() {
@@ -442,9 +521,14 @@ void Controller::OnPeriodicScriptCheck() {
     periodic_script_check_count_--;
   }
 
-  if (periodic_script_check_count_ <= 0 && !allow_autostart()) {
+  if (periodic_script_check_count_ <= 0 &&
+      (!allow_autostart() || autostart_timeout_script_path_.empty())) {
     DCHECK_EQ(0, periodic_script_check_count_);
     periodic_script_check_scheduled_ = false;
+
+    if (allow_autostart()) {
+      OnNoRunnableScriptsForPage();
+    }
     return;
   }
 
@@ -506,6 +590,14 @@ void Controller::OnGetScripts(
         GetDisplayStringUTF8(ClientSettingsProto::DEFAULT_ERROR, GetSettings()),
         Metrics::DropOutReason::GET_SCRIPTS_UNPARSABLE);
     return;
+  }
+
+  if (response_proto.has_semantic_selector_policy()) {
+    // TODO(b/228987849): A semantic policy is set unconditionally. It may be
+    // more appropriate to only set one if there are actual eligible scripts for
+    // the given domain.
+    SetSemanticSelectorPolicy(
+        std::move(response_proto.semantic_selector_policy()));
   }
   if (response_proto.has_client_settings()) {
     SetClientSettings(response_proto.client_settings());
@@ -605,6 +697,10 @@ void Controller::ExecuteScript(const std::string& script_path,
 void Controller::OnScriptExecuted(const std::string& script_path,
                                   AutofillAssistantState end_state,
                                   const ScriptExecutor::Result& result) {
+  MaybeRecordFlowFinishedMetrics(result.success
+                                     ? Metrics::FlowFinishedState::SUCCESS
+                                     : Metrics::FlowFinishedState::FAILURE);
+
   if (!result.success) {
 #ifdef NDEBUG
     VLOG(1) << "Failed to execute script";
@@ -737,14 +833,27 @@ void Controller::InitFromParameters() {
     DCHECK(GetDeeplinkURL().is_valid());  // |deeplink_url_| must be set.
     user_data_.selected_login_.emplace(
         GetDeeplinkURL().DeprecatedGetOriginAsURL(), *password_change_username);
-    GetPasswordChangeSuccessTracker()->OnChangePasswordFlowStarted(
-        user_data_.selected_login_->origin,
-        user_data_.selected_login_->username,
-        password_manager::PasswordChangeSuccessTracker::StartEvent::
-            kAutomatedFlow);
+
+    // We only start password change success tracking here if the run was
+    // started from the Google Password Manager. The other cases are
+    // handled directly in the UI.
+    if (trigger_context_->GetScriptParameters().GetCaller().value_or(0) ==
+        static_cast<int>(
+            Metrics::AutofillAssistantCaller::GOOGLE_PASSWORD_MANAGER)) {
+      GetPasswordChangeSuccessTracker()->OnChangePasswordFlowStarted(
+          user_data_.selected_login_->origin,
+          user_data_.selected_login_->username,
+          password_manager::PasswordChangeSuccessTracker::StartEvent::
+              kAutomatedFlow,
+          password_manager::PasswordChangeSuccessTracker::EntryPoint::
+              kLeakCheckInSettings);
+    }
   }
 
   user_model_.SetCurrentURL(GetCurrentURL());
+
+  GetService()->SetDisableRpcSigning(
+      trigger_context_->GetScriptParameters().GetDisableRpcSigning());
 }
 
 void Controller::Track(std::unique_ptr<TriggerContext> trigger_context,
@@ -809,9 +918,6 @@ void Controller::ShowFirstMessageAndStart() {
 }
 
 void Controller::Shutdown(Metrics::DropOutReason reason) {
-  for (ControllerObserver& observer : observers_) {
-    observer.OnShutdown(reason);
-  }
   client_->Shutdown(reason);
 }
 
@@ -820,33 +926,41 @@ AutofillAssistantState Controller::GetState() const {
 }
 
 bool Controller::ShouldSuppressKeyboard() const {
-  return ShouldSuppressKeyboardForState(state_);
-}
-void Controller::OnScriptSelected(const ScriptHandle& handle,
-                                  std::unique_ptr<TriggerContext> context) {
-  ExecuteScript(handle.path, handle.start_message, handle.needs_ui,
-                std::move(context),
-                state_ == AutofillAssistantState::TRACKING
-                    ? AutofillAssistantState::TRACKING
-                    : AutofillAssistantState::PROMPT);
+  // Return early if keyboard suppression is turned off.
+  if (trigger_context_ && !trigger_context_->GetSuppressBrowsingFeatures()) {
+    return false;
+  }
+
+  switch (state_) {
+    case AutofillAssistantState::STARTING:
+    case AutofillAssistantState::RUNNING:
+      return true;
+    case AutofillAssistantState::PROMPT:
+    case AutofillAssistantState::BROWSE:
+    case AutofillAssistantState::MODAL_DIALOG:
+    case AutofillAssistantState::STOPPED:
+    case AutofillAssistantState::TRACKING:
+    case AutofillAssistantState::INACTIVE:
+      return false;
+  }
 }
 
 base::Value Controller::GetDebugContext() {
-  base::Value dict(base::Value::Type::DICTIONARY);
+  base::Value::Dict dict;
 
   if (trigger_context_) {
-    std::vector<base::Value> parameters_js;
+    base::Value::List parameters_js;
     for (const auto& parameter :
          trigger_context_->GetScriptParameters().ToProto()) {
-      base::Value parameter_js = base::Value(base::Value::Type::DICTIONARY);
-      parameter_js.SetKey(parameter.name(), base::Value(parameter.value()));
-      parameters_js.push_back(std::move(parameter_js));
+      base::Value::Dict parameter_js;
+      parameter_js.Set(parameter.name(), parameter.value());
+      parameters_js.Append(std::move(parameter_js));
     }
-    dict.SetKey("parameters", base::Value(parameters_js));
+    dict.Set("parameters", std::move(parameters_js));
   }
-  dict.SetKey("scripts", script_tracker()->GetDebugContext());
+  dict.Set("scripts", script_tracker()->GetDebugContext());
 
-  return dict;
+  return base::Value(std::move(dict));
 }
 
 void Controller::GetTouchableArea(std::vector<RectF>* area) const {
@@ -984,6 +1098,13 @@ void Controller::SetDirectActionScripts(
       continue;
 
     direct_action_scripts_.push_back(script);
+  }
+}
+
+void Controller::SetSemanticSelectorPolicy(SemanticSelectorPolicy policy) {
+  DCHECK(annotate_dom_model_service_);
+  if (!annotate_dom_model_service_->SetOverridesPolicy(std::move(policy))) {
+    NOTREACHED() << "Setting overrides policy failed!";
   }
 }
 
@@ -1184,6 +1305,8 @@ void Controller::OnWebContentsFocused(
 
 void Controller::WebContentsDestroyed() {
   suppress_keyboard_raii_.reset();
+  // Record failure, iff an earlier call didn't already record.
+  MaybeRecordFlowFinishedMetrics(Metrics::FlowFinishedState::DESTROYED);
 }
 
 void Controller::SuppressKeyboard(bool suppress) {
@@ -1262,6 +1385,38 @@ ScriptTracker* Controller::script_tracker() {
         /* listener= */ this);
   }
   return script_tracker_.get();
+}
+
+void Controller::OnActionsResponseReceived(
+    const RoundtripNetworkStats& network_stats) {
+  accumulated_network_stats_.set_num_roundtrips(
+      accumulated_network_stats_.num_roundtrips() +
+      network_stats.num_roundtrips());
+  accumulated_network_stats_.set_roundtrip_encoded_body_size_bytes(
+      accumulated_network_stats_.roundtrip_encoded_body_size_bytes() +
+      network_stats.roundtrip_encoded_body_size_bytes());
+  accumulated_network_stats_.set_roundtrip_decoded_body_size_bytes(
+      accumulated_network_stats_.roundtrip_decoded_body_size_bytes() +
+      network_stats.roundtrip_decoded_body_size_bytes());
+  for (const auto& action_network_stats : network_stats.action_stats()) {
+    *accumulated_network_stats_.add_action_stats() = action_network_stats;
+  }
+}
+
+void Controller::MaybeRecordFlowFinishedMetrics(
+    Metrics::FlowFinishedState state) {
+  if (accumulated_network_stats_.num_roundtrips() == 0 || !web_contents()) {
+    return;
+  }
+
+  Metrics::RecordFlowFinished(
+      ukm_recorder_,
+      web_contents()->GetPrimaryMainFrame()->GetPageUkmSourceId(), state,
+      accumulated_network_stats_);
+
+  // Reset network stats. Subsequent calls to this method should be ignored,
+  // unless a new run was started in the meantime.
+  accumulated_network_stats_ = RoundtripNetworkStats();
 }
 
 }  // namespace autofill_assistant

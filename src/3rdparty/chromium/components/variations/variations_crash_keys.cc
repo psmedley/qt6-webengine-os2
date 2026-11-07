@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,7 @@ namespace {
 #if BUILDFLAG(LARGE_VARIATION_KEY_SIZE)
 constexpr size_t kVariationsKeySize = 8192;
 #else
-constexpr size_t kVariationsKeySize = 4096;
+constexpr size_t kVariationsKeySize = 6144;
 #endif
 
 // Crash key reporting the number of experiments. 8 is the size of the crash key
@@ -206,7 +206,7 @@ void VariationsCrashKeys::OnSyntheticTrialsChanged(
   // not be too many synthetic trials, this is not too big of an issue.
   synthetic_trials_string_.clear();
   for (const auto& synthetic_trial : synthetic_trials) {
-    synthetic_trials_string_ += ActiveGroupToString(synthetic_trial.id);
+    synthetic_trials_string_ += ActiveGroupToString(synthetic_trial.id());
   }
   num_synthetic_trials_ = synthetic_trials.size();
 

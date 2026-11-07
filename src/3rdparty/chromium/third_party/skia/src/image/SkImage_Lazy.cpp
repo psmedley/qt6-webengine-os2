@@ -24,6 +24,7 @@
 #include "src/gpu/ResourceKey.h"
 #include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrColorSpaceXform.h"
+#include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "src/gpu/ganesh/GrGpuResourcePriv.h"
 #include "src/gpu/ganesh/GrPaint.h"
 #include "src/gpu/ganesh/GrProxyProvider.h"
@@ -33,6 +34,10 @@
 #include "src/gpu/ganesh/SkGr.h"
 #include "src/gpu/ganesh/SurfaceFillContext.h"
 #include "src/gpu/ganesh/effects/GrYUVtoRGBEffect.h"
+#endif
+
+#ifdef SK_GRAPHITE_ENABLED
+#include "src/gpu/graphite/TextureUtils.h"
 #endif
 
 // Ref-counted tuple(SkImageGenerator, SkMutex) which allows sharing one generator among N images
@@ -128,7 +133,7 @@ SkImage_Lazy::SkImage_Lazy(Validator* validator)
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
-bool SkImage_Lazy::getROPixels(GrDirectContext*, SkBitmap* bitmap,
+bool SkImage_Lazy::getROPixels(GrDirectContext* ctx, SkBitmap* bitmap,
                                SkImage::CachingHint chint) const {
     auto check_output_bitmap = [bitmap]() {
         SkASSERT(bitmap->isImmutable());
@@ -145,21 +150,59 @@ bool SkImage_Lazy::getROPixels(GrDirectContext*, SkBitmap* bitmap,
     if (SkImage::kAllow_CachingHint == chint) {
         SkPixmap pmap;
         SkBitmapCache::RecPtr cacheRec = SkBitmapCache::Alloc(desc, this->imageInfo(), &pmap);
-        if (!cacheRec || !ScopedGenerator(fSharedGenerator)->getPixels(pmap)) {
+        if (!cacheRec) {
+            return false;
+        }
+        bool success = false;
+        {   // make sure ScopedGenerator goes out of scope before we try readPixelsProxy
+            success = ScopedGenerator(fSharedGenerator)->getPixels(pmap);
+        }
+        if (!success && !this->readPixelsProxy(ctx, pmap)) {
             return false;
         }
         SkBitmapCache::Add(std::move(cacheRec), bitmap);
         this->notifyAddedToRasterCache();
     } else {
-        if (!bitmap->tryAllocPixels(this->imageInfo()) ||
-            !ScopedGenerator(fSharedGenerator)->getPixels(bitmap->pixmap())) {
+        if (!bitmap->tryAllocPixels(this->imageInfo())) {
+            return false;
+        }
+        bool success = false;
+        {   // make sure ScopedGenerator goes out of scope before we try readPixelsProxy
+            success = ScopedGenerator(fSharedGenerator)->getPixels(bitmap->pixmap());
+        }
+        if (!success && !this->readPixelsProxy(ctx, bitmap->pixmap())) {
             return false;
         }
         bitmap->setImmutable();
     }
-
     check_output_bitmap();
     return true;
+}
+
+bool SkImage_Lazy::readPixelsProxy(GrDirectContext* ctx, const SkPixmap& pixmap) const {
+#if SK_SUPPORT_GPU
+    if (!ctx) {
+        return false;
+    }
+    GrSurfaceProxyView view = this->lockTextureProxyView(ctx,
+                                                         GrImageTexGenPolicy::kDraw,
+                                                         GrMipmapped::kNo);
+
+    if (!view) {
+        return false;
+    }
+
+    GrColorType ct = this->colorTypeOfLockTextureProxy(ctx->priv().caps());
+    GrColorInfo colorInfo(ct, this->alphaType(), this->refColorSpace());
+    auto sContext = ctx->priv().makeSC(std::move(view), colorInfo);
+    if (!sContext) {
+        return false;
+    }
+    size_t rowBytes = this->imageInfo().minRowBytes();
+    return sContext->readPixels(ctx, {this->imageInfo(), pixmap.writable_addr(), rowBytes}, {0, 0});
+#else
+    return false;
+#endif // SK_SUPPORT_GPU
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -334,6 +377,7 @@ GrSurfaceProxyView SkImage_Lazy::textureProxyViewFromPlanes(GrRecordingContext* 
                      this->dimensions());
 
     auto sfc = ctx->priv().makeSFC(info,
+                                   "ImageLazy_TextureProxyViewFromPlanes",
                                    SkBackingFit::kExact,
                                    1,
                                    GrMipmapped::kNo,
@@ -479,7 +523,6 @@ GrSurfaceProxyView SkImage_Lazy::lockTextureProxyView(GrRecordingContext* rConte
         ScopedGenerator generator(fSharedGenerator);
         if (auto view = generator->generateTexture(rContext,
                                                    this->imageInfo(),
-                                                   {0,0},
                                                    mipmapped,
                                                    texGenPolicy)) {
             installKey(view);
@@ -536,5 +579,48 @@ GrColorType SkImage_Lazy::colorTypeOfLockTextureProxy(const GrCaps* caps) const 
 
 void SkImage_Lazy::addUniqueIDListener(sk_sp<SkIDChangeListener> listener) const {
     fUniqueIDListeners.add(std::move(listener));
+}
+#endif // SK_SUPPORT_GPU
+
+#ifdef SK_GRAPHITE_ENABLED
+
+/*
+ *  We only have 2 ways to create a Graphite-backed image.
+ *
+ *  1. Ask the generator to natively create one
+ *  2. Ask the generator to return RGB(A) data, which the GPU can convert
+ */
+sk_sp<SkImage> SkImage_Lazy::onMakeTextureImage(skgpu::graphite::Recorder* recorder,
+                                                RequiredImageProperties requiredProps) const {
+    using namespace skgpu::graphite;
+
+    // 1. Ask the generator to natively create one.
+    {
+        // Disable mipmaps here bc Graphite doesn't currently support mipmap regeneration
+        // In this case, we would allocate the mipmaps and fill in the base layer but the mipmap
+        // levels would never be filled out - yielding incorrect draws. Please see: b/238754357.
+        requiredProps.fMipmapped = Mipmapped::kNo;
+
+        ScopedGenerator generator(fSharedGenerator);
+        sk_sp<SkImage> newImage = generator->makeTextureImage(recorder,
+                                                              this->imageInfo(),
+                                                              requiredProps.fMipmapped);
+        if (newImage) {
+            SkASSERT(as_IB(newImage)->isGraphiteBacked());
+            return newImage;
+        }
+    }
+
+    // 2. Ask the generator to return a bitmap, which the GPU can convert.
+    if (SkBitmap bitmap; this->getROPixels(nullptr, &bitmap, CachingHint::kDisallow_CachingHint)) {
+        return skgpu::graphite::MakeFromBitmap(recorder,
+                                               this->imageInfo().colorInfo(),
+                                               bitmap,
+                                               nullptr,
+                                               SkBudgeted::kNo,
+                                               requiredProps);
+    }
+
+    return nullptr;
 }
 #endif

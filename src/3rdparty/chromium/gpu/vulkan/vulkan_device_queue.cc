@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "gpu/config/gpu_info.h"  // nogncheck
@@ -42,11 +43,14 @@ bool VulkanDeviceQueue::Initialize(
     const std::vector<const char*>& optional_extensions,
     bool allow_protected_memory,
     const GetPresentationSupportCallback& get_presentation_support,
-    uint32_t heap_memory_limit) {
+    uint32_t heap_memory_limit,
+    const bool is_thread_safe) {
   DCHECK_EQ(static_cast<VkPhysicalDevice>(VK_NULL_HANDLE), vk_physical_device_);
   DCHECK_EQ(static_cast<VkDevice>(VK_NULL_HANDLE), owned_vk_device_);
   DCHECK_EQ(static_cast<VkDevice>(VK_NULL_HANDLE), vk_device_);
   DCHECK_EQ(static_cast<VkQueue>(VK_NULL_HANDLE), vk_queue_);
+  DCHECK_EQ(static_cast<VmaAllocator>(VK_NULL_HANDLE), owned_vma_allocator_);
+  DCHECK_EQ(static_cast<VmaAllocator>(VK_NULL_HANDLE), vma_allocator_);
 
   if (VK_NULL_HANDLE == vk_instance_)
     return false;
@@ -159,13 +163,11 @@ bool VulkanDeviceQueue::Initialize(
 
   std::vector<const char*> enabled_extensions;
   for (const char* extension : required_extensions) {
-    const auto it =
-        std::find_if(physical_device_info.extensions.begin(),
-                     physical_device_info.extensions.end(),
-                     [extension](const VkExtensionProperties& p) {
-                       return std::strcmp(extension, p.extensionName) == 0;
-                     });
-    if (it == physical_device_info.extensions.end()) {
+    if (base::ranges::none_of(physical_device_info.extensions,
+                              [extension](const VkExtensionProperties& p) {
+                                return std::strcmp(extension,
+                                                   p.extensionName) == 0;
+                              })) {
       // On Fuchsia, some device extensions are provided by layers.
       // TODO(penghuang): checking extensions against layer device extensions
       // too.
@@ -179,13 +181,11 @@ bool VulkanDeviceQueue::Initialize(
   }
 
   for (const char* extension : optional_extensions) {
-    const auto it =
-        std::find_if(physical_device_info.extensions.begin(),
-                     physical_device_info.extensions.end(),
-                     [extension](const VkExtensionProperties& p) {
-                       return std::strcmp(extension, p.extensionName) == 0;
-                     });
-    if (it == physical_device_info.extensions.end()) {
+    if (base::ranges::none_of(physical_device_info.extensions,
+                              [extension](const VkExtensionProperties& p) {
+                                return std::strcmp(extension,
+                                                   p.extensionName) == 0;
+                              })) {
       DLOG(ERROR) << "Optional Vulkan extension " << extension
                   << " is not supported.";
     } else {
@@ -302,7 +302,10 @@ bool VulkanDeviceQueue::Initialize(
       VK_MAX_MEMORY_HEAPS,
       heap_memory_limit ? heap_memory_limit : VK_WHOLE_SIZE);
   vma::CreateAllocator(vk_physical_device_, vk_device_, vk_instance_,
-                       heap_size_limit.data(), &vma_allocator_);
+                       heap_size_limit.data(), is_thread_safe,
+                       &owned_vma_allocator_);
+  vma_allocator_ = owned_vma_allocator_;
+
   cleanup_helper_ = std::make_unique<VulkanFenceHelper>(this);
 
   allow_protected_memory_ = allow_protected_memory;
@@ -318,6 +321,7 @@ bool VulkanDeviceQueue::InitCommon(VkPhysicalDevice vk_physical_device,
   DCHECK_EQ(static_cast<VkDevice>(VK_NULL_HANDLE), owned_vk_device_);
   DCHECK_EQ(static_cast<VkDevice>(VK_NULL_HANDLE), vk_device_);
   DCHECK_EQ(static_cast<VkQueue>(VK_NULL_HANDLE), vk_queue_);
+  DCHECK_EQ(static_cast<VmaAllocator>(VK_NULL_HANDLE), owned_vma_allocator_);
 
   vk_physical_device_ = vk_physical_device;
   vk_device_ = vk_device;
@@ -325,8 +329,11 @@ bool VulkanDeviceQueue::InitCommon(VkPhysicalDevice vk_physical_device,
   vk_queue_index_ = vk_queue_index;
   enabled_extensions_ = std::move(enabled_extensions);
 
-  vma::CreateAllocator(vk_physical_device_, vk_device_, vk_instance_, nullptr,
-                       &vma_allocator_);
+  if (vma_allocator_ == VK_NULL_HANDLE) {
+    vma::CreateAllocator(vk_physical_device_, vk_device_, vk_instance_, nullptr,
+                         /*is_thread_safe =*/false, &owned_vma_allocator_);
+    vma_allocator_ = owned_vma_allocator_;
+  }
 
   cleanup_helper_ = std::make_unique<VulkanFenceHelper>(this);
   return true;
@@ -391,7 +398,8 @@ bool VulkanDeviceQueue::InitializeForCompositorGpuThread(
     VkQueue vk_queue,
     uint32_t vk_queue_index,
     gfx::ExtensionSet enabled_extensions,
-    const VkPhysicalDeviceFeatures2& vk_physical_device_features2) {
+    const VkPhysicalDeviceFeatures2& vk_physical_device_features2,
+    VmaAllocator vma_allocator) {
   // Currently VulkanDeviceQueue for drdc thread(aka CompositorGpuThread) uses
   // the same vulkan queue as the gpu main thread. Now since both gpu main and
   // drdc threads would be accessing/submitting work to the same queue, all the
@@ -407,6 +415,9 @@ bool VulkanDeviceQueue::InitializeForCompositorGpuThread(
   GetVulkanFunctionPointers()->per_queue_lock_map[vk_queue] =
       std::make_unique<base::Lock>();
   enabled_device_features_2_ = vk_physical_device_features2;
+
+  // Note that CompositorGpuThread uses same vma allocator as gpu main thread.
+  vma_allocator_ = vma_allocator;
   return InitCommon(vk_physical_device, vk_device, vk_queue, vk_queue_index,
                     enabled_extensions);
 }
@@ -417,12 +428,12 @@ void VulkanDeviceQueue::Destroy() {
     cleanup_helper_.reset();
   }
 
-  if (vma_allocator_ != VK_NULL_HANDLE) {
-    vma::DestroyAllocator(vma_allocator_);
-    vma_allocator_ = VK_NULL_HANDLE;
+  if (owned_vma_allocator_ != VK_NULL_HANDLE) {
+    vma::DestroyAllocator(owned_vma_allocator_);
+    owned_vma_allocator_ = VK_NULL_HANDLE;
   }
 
-  if (VK_NULL_HANDLE != owned_vk_device_) {
+  if (owned_vk_device_ != VK_NULL_HANDLE) {
     vkDestroyDevice(owned_vk_device_, nullptr);
     owned_vk_device_ = VK_NULL_HANDLE;
 
@@ -439,6 +450,7 @@ void VulkanDeviceQueue::Destroy() {
   vk_queue_ = VK_NULL_HANDLE;
   vk_queue_index_ = 0;
   vk_physical_device_ = VK_NULL_HANDLE;
+  vma_allocator_ = VK_NULL_HANDLE;
 }
 
 std::unique_ptr<VulkanCommandPool> VulkanDeviceQueue::CreateCommandPool() {

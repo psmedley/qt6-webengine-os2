@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -23,11 +23,26 @@ load("./builders.star", "builders", "os", "os_category")
 load("./orchestrator.star", "register_compilator", "register_orchestrator")
 load("//project.star", "settings")
 
-DEFAULT_EXCLUDE_REGEXPS = [
+DEFAULT_EXCLUDE_LOCATION_FILTERS = [
     # Contains documentation that doesn't affect the outputs
-    ".+/[+]/docs/.+",
+    cq.location_filter(path_regexp = "docs/.+", exclude = True),
     # Contains configuration files that aren't active until after committed
-    ".+/[+]/infra/config/.+",
+    cq.location_filter(path_regexp = "infra/config/.+", exclude = True),
+]
+
+# Intended to be used for the `caches` builder arg when no source checkout is
+# required.
+#
+# Setting a cache with a "builder" path prevents buildbucket from automatically
+# creating a regular builder cache with a 4 minute wait_for_warm_cache.
+# `wait_for_warm_cache = None` ensures that swarming will not look for a bot
+# with a builder cache.
+SOURCELESS_BUILDER_CACHES = [
+    swarming.cache(
+        name = "unused_builder_cache",
+        path = "builder",
+        wait_for_warm_cache = None,
+    ),
 ]
 
 defaults = args.defaults(
@@ -43,6 +58,7 @@ defaults = args.defaults(
     # to the standard default.
     compilator_cores = args.DEFAULT,
     compilator_goma_jobs = args.DEFAULT,
+    compilator_reclient_jobs = args.DEFAULT,
     orchestrator_cores = args.DEFAULT,
 )
 
@@ -50,8 +66,7 @@ def tryjob(
         *,
         disable_reuse = None,
         experiment_percentage = None,
-        location_regexp = None,
-        location_regexp_exclude = None,
+        location_filters = None,
         cancel_stale = None,
         add_default_excludes = True):
     """Specifies the details of a tryjob verifier.
@@ -59,22 +74,37 @@ def tryjob(
     See https://chromium.googlesource.com/infra/luci/luci-go/+/HEAD/lucicfg/doc/README.md#luci.cq_tryjob_verifier
     for details on the most of the arguments.
 
-    Arguments:
-      add_default_excludes - A bool indicating whether to add exclude regexps
+    Args:
+      disable_reuse: See cq.tryjob_verifier.
+      experiment_percentage: See cq.tryjob_verifier.
+      location_filters: A list of cq.location_filter objects and/or strings.
+        This is the same as the location_filters value of cq.tryjob_verifier
+        except that strings can be provided, which will be converted to a
+        cq.location_filter with path_regexp set to the provided string.
+      cancel_stale: See cq.tryjob_verifier.
+      add_default_excludes: A bool indicating whether to add exclude filters
         for certain directories that would have no impact when building chromium
         with the patch applied (docs, config files that don't take effect until
-        landing, etc., see DEFAULT_EXCLUDE_REGEXPS).
+        landing, etc., see DEFAULT_EXCLUDE_LOCATION_FILTERS).
 
     Returns:
       A struct that can be passed to the `tryjob` argument of `try_.builder` to
       enable the builder for CQ.
     """
+
+    def normalize_location_filter(f):
+        if type(f) == type(""):
+            return cq.location_filter(path_regexp = f)
+        return f
+
+    if location_filters:
+        location_filters = [normalize_location_filter(f) for f in location_filters]
+
     return struct(
         disable_reuse = disable_reuse,
         experiment_percentage = experiment_percentage,
         add_default_excludes = add_default_excludes,
-        location_regexp = location_regexp,
-        location_regexp_exclude = location_regexp_exclude,
+        location_filters = location_filters,
         cancel_stale = cancel_stale,
     )
 
@@ -128,6 +158,15 @@ def try_builder(
 
     experiments = experiments or {}
 
+    # TODO(crbug.com/1346781): Enable everywhere.
+    experiments.setdefault("chromium_swarming.expose_merge_script_failures", 20)
+
+    # TODO(crbug.com/1314194): Enable weetbix everywhere. Remove once chromium
+    # recipe is updated to use this by default.
+    experiments.setdefault("weetbix.enable_weetbix_exonerations", 100)
+    experiments.setdefault("weetbix.retry_weak_exonerations", 100)
+    experiments.setdefault("enable_weetbix_queries", 100)
+
     merged_resultdb_bigquery_exports = [
         resultdb.export_test_results(
             bq_table = "chrome-luci-data.chromium.try_test_results",
@@ -146,7 +185,7 @@ def try_builder(
             predicate = resultdb.test_result_predicate(
                 # Match the "blink_web_tests" target and all of its
                 # flag-specific versions, e.g. "vulkan_swiftshader_blink_web_tests".
-                test_id_regexp = "ninja://[^/]*blink_web_tests/.+",
+                test_id_regexp = "(ninja://[^/]*blink_web_tests/.+)|(ninja://[^/]*blink_wpt_tests/.+)",
             ),
         ),
     ]
@@ -207,17 +246,16 @@ def try_builder(
     builder = "{}/{}".format(bucket, name)
     cq_group = defaults.get_value("cq_group", cq_group)
     if tryjob != None:
-        location_regexp_exclude = tryjob.location_regexp_exclude
+        location_filters = tryjob.location_filters
         if tryjob.add_default_excludes:
-            location_regexp_exclude = DEFAULT_EXCLUDE_REGEXPS + (location_regexp_exclude or [])
+            location_filters = (location_filters or []) + DEFAULT_EXCLUDE_LOCATION_FILTERS
 
         luci.cq_tryjob_verifier(
             builder = builder,
             cq_group = cq_group,
             disable_reuse = tryjob.disable_reuse,
             experiment_percentage = tryjob.experiment_percentage,
-            location_regexp = tryjob.location_regexp,
-            location_regexp_exclude = location_regexp_exclude,
+            location_filters = location_filters,
             cancel_stale = tryjob.cancel_stale,
         )
     else:
@@ -232,6 +270,7 @@ def _orchestrator_builder(
         *,
         name,
         compilator,
+        use_orchestrator_pool = False,
         **kwargs):
     """Define an orchestrator builder.
 
@@ -252,6 +291,9 @@ def _orchestrator_builder(
       name: The name of the orchestrator.
       compilator: A string identifying the associated compilator. Compilators
         can be defined using try_.compilator_builder.
+      use_orchestrator_pool: Whether to use the bots in
+        luci.chromium.try.orchestrator pool. This kwarg should be taken out
+        once all CQ builders are migrated to be srcless (crbug/1287228)
       **kwargs: Additional kwargs to be forwarded to try_.builder.
         The following kwargs will have defaults applied if not set:
         * builderless: True on branches, False on main
@@ -265,11 +307,23 @@ def _orchestrator_builder(
     if not builder_group:
         fail("builder_group must be specified")
 
-    kwargs.setdefault("builderless", not settings.is_main)
+    # TODO(crbug/1287228): Make this the default once all CQ builders are
+    # migrated to be srcless
+    if use_orchestrator_pool:
+        kwargs.setdefault("pool", "luci.chromium.try.orchestrator")
+        kwargs.setdefault("builderless", None)
+
+        # Orchestrator builders that don't use a src checkout don't need a
+        # builder cache.
+        kwargs.setdefault("caches", SOURCELESS_BUILDER_CACHES)
+    else:
+        kwargs.setdefault("builderless", not settings.is_main)
+
     kwargs.setdefault("cores", defaults.orchestrator_cores.get())
     kwargs.setdefault("executable", "recipe:chromium/orchestrator")
 
     kwargs.setdefault("goma_backend", None)
+    kwargs.setdefault("reclient_instance", None)
     kwargs.setdefault("os", os.LINUX_DEFAULT)
     kwargs.setdefault("service_account", "chromium-orchestrator@chops-service-accounts.iam.gserviceaccount.com")
     kwargs.setdefault("ssd", None)
@@ -304,6 +358,7 @@ def _compilator_builder(*, name, **kwargs):
         * builderless: True on branches, False on main
         * cores: The compilator_cores module-level default.
         * goma_jobs: The compilator_goma_jobs module-level default.
+        * reclient_jobs: The compilator_reclient_jobs module-level default.
         * executable: "recipe:chromium/compilator"
         * ssd: True
     """
@@ -315,6 +370,7 @@ def _compilator_builder(*, name, **kwargs):
     kwargs.setdefault("cores", defaults.compilator_cores.get())
     kwargs.setdefault("executable", "recipe:chromium/compilator")
     kwargs.setdefault("goma_jobs", defaults.compilator_goma_jobs.get())
+    kwargs.setdefault("reclient_jobs", defaults.compilator_reclient_jobs.get())
     kwargs.setdefault("ssd", True)
 
     ret = try_.builder(name = name, **kwargs)

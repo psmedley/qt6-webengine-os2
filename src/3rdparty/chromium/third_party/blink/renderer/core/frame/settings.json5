@@ -726,7 +726,7 @@
     {
       name: "viewportStyle",
       initial: "mojom::blink::ViewportStyle::kDefault",
-      invalidate: ["ViewportRule"],
+      invalidate: ["ViewportStyle"],
       type: "mojom::blink::ViewportStyle",
     },
 
@@ -770,10 +770,6 @@
     },
     {
       name: "textTrackWindowColor",
-      type: "String",
-    },
-    {
-      name: "textTrackWindowPadding",
       type: "String",
     },
     {
@@ -1053,12 +1049,6 @@
       name: "WebXRImmersiveArAllowed",
       initial: true,
       type: "bool",
-    },
-    // LitePage origin the subresources such as images should be redirected to
-    // when the kSubresourceRedirect feature is enabled.
-    {
-      name: "LitePageSubresourceRedirectOrigin",
-      type: "String",
     },
   ],
 }

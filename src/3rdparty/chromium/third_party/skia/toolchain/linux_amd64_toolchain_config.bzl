@@ -2,7 +2,7 @@
 This file specifies a clang toolchain that can run on a Linux host which doesn't depend on any
 installed packages from the host machine.
 
-See build_toolchain.bzl for more details on the creation of the toolchain.
+See download_linux_amd64_toolchain.bzl for more details on the creation of the toolchain.
 
 It uses the usr subfolder of the built toolchain as a sysroot
 
@@ -15,12 +15,13 @@ load(
     "@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl",
     "action_config",
     "feature",
-    "feature_set",
     "flag_group",
     "flag_set",
     "tool",
     "variable_with_value",
 )
+
+# https://github.com/bazelbuild/bazel/blob/master/tools/build_defs/cc/action_names.bzl
 load("@bazel_tools//tools/build_defs/cc:action_names.bzl", "ACTION_NAMES")
 
 # The location of the created clang toolchain.
@@ -33,14 +34,12 @@ def _linux_amd64_toolchain_info(ctx):
     features += _make_diagnostic_flags()
     features += _make_iwyu_flags()
 
-    # https://docs.bazel.build/versions/main/skylark/lib/cc_common.html#create_cc_toolchain_config_info
+    # https://bazel.build/rules/lib/cc_common#create_cc_toolchain_config_info
     # Note, this rule is defined in Java code, not Starlark
     # https://cs.opensource.google/bazel/bazel/+/master:src/main/java/com/google/devtools/build/lib/starlarkbuildapi/cpp/CcModuleApi.java
     return cc_common.create_cc_toolchain_config_info(
         ctx = ctx,
         features = features,
-        abi_libc_version = "unknown",
-        abi_version = "unknown",
         action_configs = action_configs,
         # This is important because the linker will complain if the libc shared libraries are not
         # under this directory. Because we extract the libc libraries to
@@ -50,13 +49,12 @@ def _linux_amd64_toolchain_info(ctx):
         # is just a text file that refers to "/lib/x86_64-linux-gnu/libc.so.6" and
         # "/lib64/ld-linux-x86-64.so.2" which will use the sysroot as the root).
         builtin_sysroot = EXTERNAL_TOOLCHAIN,
-        compiler = "clang",
-        host_system_name = "local",
-        target_cpu = "k8",
-        # It is unclear if target_libc matters.
-        target_libc = "glibc-2.31",
-        target_system_name = "local",
-        toolchain_identifier = "clang-toolchain",
+        # These are required, but do nothing
+        compiler = "",
+        target_cpu = "",
+        target_libc = "",
+        target_system_name = "",
+        toolchain_identifier = "",
     )
 
 provide_linux_amd64_toolchain_config = rule(
@@ -80,9 +78,9 @@ def _make_action_configs():
     """
 
     # https://cs.opensource.google/bazel/bazel/+/master:tools/cpp/cc_toolchain_config_lib.bzl;l=435;drc=3b9e6f201a9a3465720aad8712ab7bcdeaf2e5da
-    clang_tool = tool(path = "clang_trampoline.sh")
-    lld_tool = tool(path = "lld_trampoline.sh")
-    ar_tool = tool(path = "ar_trampoline.sh")
+    clang_tool = tool(path = "linux_trampolines/clang_trampoline_linux.sh")
+    lld_tool = tool(path = "linux_trampolines/lld_trampoline_linux.sh")
+    ar_tool = tool(path = "linux_trampolines/ar_trampoline_linux.sh")
 
     # https://cs.opensource.google/bazel/bazel/+/master:tools/cpp/cc_toolchain_config_lib.bzl;l=488;drc=3b9e6f201a9a3465720aad8712ab7bcdeaf2e5da
     assemble_action = action_config(
@@ -195,7 +193,15 @@ def _make_action_configs():
     return action_configs
 
 def _make_default_flags():
-    """Here we define the flags for certain actions that are always applied."""
+    """Here we define the flags for certain actions that are always applied.
+
+    For any flag that might be conditionally applied, it should be defined in //bazel/copts.bzl.
+
+    Flags that are set here will be unconditionally applied to everything we compile with
+    this toolchain, even third_party deps.
+    """
+
+    # Note: These values must be kept in sync with those defined in cmake_exporter.go.
     cxx_compile_includes = flag_set(
         actions = [
             ACTION_NAMES.c_compile,
@@ -224,7 +230,7 @@ def _make_default_flags():
         ],
     )
 
-    cpp_compile_includes = flag_set(
+    cpp_compile_flags = flag_set(
         actions = [
             ACTION_NAMES.cpp_compile,
         ],
@@ -232,7 +238,7 @@ def _make_default_flags():
             flag_group(
                 flags = [
                     "-std=c++17",
-                    "-Wno-psabi",  # noisy
+                    "-stdlib=libc++",
                 ],
             ),
         ],
@@ -248,6 +254,7 @@ def _make_default_flags():
                     # included in the clang binary
                     "--rtlib=compiler-rt",
                     "-std=c++17",
+                    "-stdlib=libc++",
                     # We statically include these libc++ libraries so they do not need to be
                     # on a developer's machine (they can be tricky to get).
                     EXTERNAL_TOOLCHAIN + "/lib/libc++.a",
@@ -266,7 +273,7 @@ def _make_default_flags():
         enabled = True,
         flag_sets = [
             cxx_compile_includes,
-            cpp_compile_includes,
+            cpp_compile_flags,
             link_exe_flags,
         ],
     )]
@@ -321,6 +328,13 @@ def _make_diagnostic_flags():
                 link_diagnostic,
             ],
         ),
+        feature(
+            "diagnostic_link",
+            enabled = False,
+            flag_sets = [
+                link_diagnostic,
+            ],
+        ),
         # Running a Bazel command with --features print_search_dirs will cause the link to fail
         # but directories searched for libraries, etc will be displayed.
         feature(
@@ -345,10 +359,13 @@ def _make_iwyu_flags():
             flag_group(
                 flags = [
                     # This define does not impact compilation, but it acts as a signal to the
-                    # clang_trampoline.sh whether check the file with include-what-you-use
+                    # clang_trampoline.sh whether to maybe check the file with include-what-you-use
                     # A define was chosen because it is ignored by clang and IWYU, but can be
                     # easily found with bash.
-                    "-DSKIA_ENFORCE_IWYU_FOR_THIS_FILE",
+                    # The clang_trampoline.sh file has a list of allowed subdirectories for which
+                    # IWYU should be enforced, allowing us to slowly opt more and more directories
+                    # in over time.
+                    "-DSKIA_ENFORCE_IWYU",
                 ],
             ),
         ],
@@ -356,24 +373,10 @@ def _make_iwyu_flags():
 
     return [
         feature(
-            # The IWYU checks can add some overhead to the build (1-5 seconds per file), so we only
-            # want to run them sometimes. By adding --feature skia_enforce_iwyu to the Bazel
-            # command, this will turn on the checking (for all files that have not been opted-out).
             "skia_enforce_iwyu",
-            enabled = False,
-        ),
-        feature(
-            "skia_opt_file_into_iwyu",
             enabled = False,
             flag_sets = [
                 opt_file_into_iwyu,
-            ],
-            # If the skia_enforce_iwyu features is not enabled (e.g. globally via a CLI flag), we
-            # will not run the IWYU analysis on any files.
-            requires = [
-                feature_set(features = [
-                    "skia_enforce_iwyu",
-                ]),
             ],
         ),
     ]

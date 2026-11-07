@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -101,6 +101,7 @@ def _CreateSourcesJsonFile(source_dirs, input_path, sources_json_file,
   data = {}
   data['source_dirs'] = relative_sources
   data['input_path'] = []
+  data['output_dir'] = src_root
   if input_path:
     data['input_path'].append(os.path.abspath(input_path))
   with open(sources_json_file, 'w') as f:

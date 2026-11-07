@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,8 +18,7 @@ class RequestHandlerForPsmAutoEnrollment
     kPirResponseHasNoMembership = 2,
   };
 
-  RequestHandlerForPsmAutoEnrollment(ClientStorage* client_storage,
-                                     PolicyStorage* policy_storage);
+  explicit RequestHandlerForPsmAutoEnrollment(EmbeddedPolicyTestServer* parent);
   RequestHandlerForPsmAutoEnrollment(
       RequestHandlerForPsmAutoEnrollment&& handler) = delete;
   RequestHandlerForPsmAutoEnrollment& operator=(

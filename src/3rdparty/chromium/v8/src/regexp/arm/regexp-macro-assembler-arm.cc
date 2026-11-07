@@ -529,8 +529,8 @@ void RegExpMacroAssemblerARM::CheckBitInTable(
   BranchOrBacktrack(ne, on_bit_set);
 }
 
-bool RegExpMacroAssemblerARM::CheckSpecialCharacterClass(
-    StandardCharacterSet type, Label* on_no_match) {
+bool RegExpMacroAssemblerARM::CheckSpecialClassRanges(StandardCharacterSet type,
+                                                      Label* on_no_match) {
   // Range checks (c in min..max) are generally implemented by an unsigned
   // (c - min) <= (max - min) check
   // TODO(jgruber): No custom implementation (yet): s(UC16), S(UC16).
@@ -709,21 +709,21 @@ Handle<HeapObject> RegExpMacroAssemblerARM::GetCode(Handle<String> source) {
   // from generated code.
   __ add(frame_pointer(), sp, Operand(4 * kPointerSize));
 
-  STATIC_ASSERT(kSuccessfulCaptures == kInputString - kSystemPointerSize);
+  static_assert(kSuccessfulCaptures == kInputString - kSystemPointerSize);
   __ mov(r0, Operand::Zero());
   __ push(r0);  // Make room for success counter and initialize it to 0.
-  STATIC_ASSERT(kStringStartMinusOne ==
+  static_assert(kStringStartMinusOne ==
                 kSuccessfulCaptures - kSystemPointerSize);
   __ push(r0);  // Make room for "string start - 1" constant.
-  STATIC_ASSERT(kBacktrackCount == kStringStartMinusOne - kSystemPointerSize);
+  static_assert(kBacktrackCount == kStringStartMinusOne - kSystemPointerSize);
   __ push(r0);  // The backtrack counter.
-  STATIC_ASSERT(kRegExpStackBasePointer ==
+  static_assert(kRegExpStackBasePointer ==
                 kBacktrackCount - kSystemPointerSize);
   __ push(r0);  // The regexp stack base ptr.
 
   // Initialize backtrack stack pointer. It must not be clobbered from here on.
   // Note the backtrack_stackpointer is callee-saved.
-  STATIC_ASSERT(backtrack_stackpointer() == r8);
+  static_assert(backtrack_stackpointer() == r8);
   LoadRegExpStackPointerFromMemory(backtrack_stackpointer());
 
   // Store the regexp base pointer - we'll later restore it / write it to
@@ -739,11 +739,13 @@ Handle<HeapObject> RegExpMacroAssemblerARM::GetCode(Handle<String> source) {
     __ mov(r0, Operand(stack_limit));
     __ ldr(r0, MemOperand(r0));
     __ sub(r0, sp, r0, SetCC);
+    Operand extra_space_for_variables(num_registers_ * kPointerSize);
+
     // Handle it if the stack pointer is already below the stack limit.
     __ b(ls, &stack_limit_hit);
     // Check if there is room for the variable number of registers above
     // the stack limit.
-    __ cmp(r0, Operand(num_registers_ * kPointerSize));
+    __ cmp(r0, extra_space_for_variables);
     __ b(hs, &stack_ok);
     // Exit with OutOfMemory exception. There is not enough space on the stack
     // for our working registers.
@@ -751,7 +753,7 @@ Handle<HeapObject> RegExpMacroAssemblerARM::GetCode(Handle<String> source) {
     __ jmp(&return_r0);
 
     __ bind(&stack_limit_hit);
-    CallCheckStackGuardState();
+    CallCheckStackGuardState(extra_space_for_variables);
     __ cmp(r0, Operand::Zero());
     // If returned value is non-zero, we exit with the returned value as result.
     __ b(ne, &return_r0);
@@ -877,19 +879,18 @@ Handle<HeapObject> RegExpMacroAssemblerARM::GetCode(Handle<String> source) {
       __ add(r2, r2, Operand(num_saved_registers_ * kPointerSize));
       __ str(r2, MemOperand(frame_pointer(), kRegisterOutput));
 
-      // Prepare r0 to initialize registers with its value in the next run.
-      __ ldr(r0, MemOperand(frame_pointer(), kStringStartMinusOne));
-
       // Restore the original regexp stack pointer value (effectively, pop the
       // stored base pointer).
       PopRegExpBasePointer(backtrack_stackpointer(), r2);
+
+      Label reload_string_start_minus_one;
 
       if (global_with_zero_length_check()) {
         // Special case for zero-length matches.
         // r4: capture start index
         __ cmp(current_input_offset(), r4);
         // Not a zero-length match, restart.
-        __ b(ne, &load_char_start_regexp);
+        __ b(ne, &reload_string_start_minus_one);
         // Offset from the end is zero if we already reached the end.
         __ cmp(current_input_offset(), Operand::Zero());
         __ b(eq, &exit_label_);
@@ -900,6 +901,11 @@ Handle<HeapObject> RegExpMacroAssemblerARM::GetCode(Handle<String> source) {
                Operand((mode_ == UC16) ? 2 : 1));
         if (global_unicode()) CheckNotInSurrogatePair(0, &advance);
       }
+
+      __ bind(&reload_string_start_minus_one);
+      // Prepare r0 to initialize registers with its value in the next run.
+      // Must be immediately before the jump to avoid clobbering.
+      __ ldr(r0, MemOperand(frame_pointer(), kStringStartMinusOne));
 
       __ b(&load_char_start_regexp);
     } else {
@@ -1137,16 +1143,18 @@ void RegExpMacroAssemblerARM::ClearRegisters(int reg_from, int reg_to) {
 
 // Private methods:
 
-void RegExpMacroAssemblerARM::CallCheckStackGuardState() {
+void RegExpMacroAssemblerARM::CallCheckStackGuardState(Operand extra_space) {
   DCHECK(!isolate()->IsGeneratingEmbeddedBuiltins());
   DCHECK(!masm_->options().isolate_independent_code);
 
-  __ PrepareCallCFunction(3);
+  __ PrepareCallCFunction(4);
 
+  // Extra space for variables to consider in stack check.
+  __ mov(arg_reg_4, extra_space);
   // RegExp code frame pointer.
-  __ mov(r2, frame_pointer());
+  __ mov(arg_reg_3, frame_pointer());
   // Code of self.
-  __ mov(r1, Operand(masm_->CodeObject()));
+  __ mov(arg_reg_2, Operand(masm_->CodeObject()));
 
   // We need to make room for the return address on the stack.
   int stack_alignment = base::OS::ActivationFrameAlignment();
@@ -1174,7 +1182,6 @@ void RegExpMacroAssemblerARM::CallCheckStackGuardState() {
   __ mov(code_pointer(), Operand(masm_->CodeObject()));
 }
 
-
 // Helper function for reading a value out of a stack frame.
 template <typename T>
 static T& frame_entry(Address re_frame, int frame_offset) {
@@ -1189,7 +1196,8 @@ static T* frame_entry_address(Address re_frame, int frame_offset) {
 
 int RegExpMacroAssemblerARM::CheckStackGuardState(Address* return_address,
                                                   Address raw_code,
-                                                  Address re_frame) {
+                                                  Address re_frame,
+                                                  uintptr_t extra_space) {
   Code re_code = Code::cast(Object(raw_code));
   return NativeRegExpMacroAssembler::CheckStackGuardState(
       frame_entry<Isolate*>(re_frame, kIsolate),
@@ -1198,7 +1206,8 @@ int RegExpMacroAssemblerARM::CheckStackGuardState(Address* return_address,
       return_address, re_code,
       frame_entry_address<Address>(re_frame, kInputString),
       frame_entry_address<const byte*>(re_frame, kInputStart),
-      frame_entry_address<const byte*>(re_frame, kInputEnd));
+      frame_entry_address<const byte*>(re_frame, kInputEnd),
+      extra_space);
 }
 
 

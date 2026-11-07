@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -1947,8 +1947,8 @@ TEST_F(TextfieldModelTest, UndoRedo_CompositionText) {
   EXPECT_EQ(u"ABCDEabc", model.text());
 
   // Confirm the composition.
-  uint32_t composition_text_length = model.ConfirmCompositionText();
-  EXPECT_EQ(composition_text_length, static_cast<uint32_t>(3));
+  size_t composition_text_length = model.ConfirmCompositionText();
+  EXPECT_EQ(composition_text_length, 3u);
   EXPECT_EQ(u"ABCDEabc", model.text());
   EXPECT_TRUE(model.Undo());
   EXPECT_EQ(u"ABCDE", model.text());

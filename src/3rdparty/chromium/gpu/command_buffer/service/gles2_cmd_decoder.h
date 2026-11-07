@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,7 +46,6 @@ class CopyTexImageResourceManager;
 class CopyTextureCHROMIUMResourceManager;
 class FramebufferManager;
 class GLES2Util;
-class ImageManager;
 class Logger;
 class Outputter;
 class ShaderTranslatorInterface;
@@ -183,9 +182,6 @@ class GPU_GLES2_EXPORT GLES2Decoder : public CommonDecoder,
 
   // Gets the VertexArrayManager for this context.
   virtual VertexArrayManager* GetVertexArrayManager() = 0;
-
-  // Gets the ImageManager for this context.
-  virtual ImageManager* GetImageManagerForTest() = 0;
 
   // Get the service texture ID corresponding to a client texture ID.
   // If no such record is found then return false.

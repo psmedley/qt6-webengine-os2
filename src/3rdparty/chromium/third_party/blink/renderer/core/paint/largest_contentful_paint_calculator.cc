@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,6 +80,7 @@ void LargestContentfulPaintCalculator::UpdateLargestContentfulImage(
       image_node->IsInShadowTree() ? nullptr : To<Element>(image_node);
   const AtomicString& image_id =
       image_element ? image_element->GetIdAttribute() : AtomicString();
+
   window_performance_->OnLargestContentfulPaintUpdated(
       expose_paint_time_to_api ? largest_image->paint_time : base::TimeTicks(),
       largest_image->first_size, largest_image->load_time,
@@ -89,6 +90,11 @@ void LargestContentfulPaintCalculator::UpdateLargestContentfulImage(
 
   // TODO: update trace value with animated frame data
   if (LocalDOMWindow* window = window_performance_->DomWindow()) {
+    if (!largest_image->origin_clean) {
+      UseCounter::Count(window->document(),
+                        WebFeature::kLCPCandidateImageFromOriginDirtyStyle);
+    }
+
     TRACE_EVENT_MARK_WITH_TIMESTAMP2(kTraceCategories, kLCPCandidate,
                                      largest_image->paint_time, "data",
                                      ImageCandidateTraceData(largest_image),
@@ -137,6 +143,8 @@ LargestContentfulPaintCalculator::TextCandidateTraceData(
   value->SetInteger("size", static_cast<int>(largest_text.first_size));
   value->SetInteger("candidateIndex", ++count_candidates_);
   auto* window = window_performance_->DomWindow();
+  value->SetBoolean("isOutermostMainFrame",
+                    window->GetFrame()->IsOutermostMainFrame());
   value->SetBoolean("isMainFrame", window->GetFrame()->IsMainFrame());
   value->SetString("navigationId",
                    IdentifiersFactory::LoaderId(window->document()->Loader()));
@@ -152,6 +160,8 @@ LargestContentfulPaintCalculator::ImageCandidateTraceData(
   value->SetInteger("size", static_cast<int>(largest_image->first_size));
   value->SetInteger("candidateIndex", ++count_candidates_);
   auto* window = window_performance_->DomWindow();
+  value->SetBoolean("isOutermostMainFrame",
+                    window->GetFrame()->IsOutermostMainFrame());
   value->SetBoolean("isMainFrame", window->GetFrame()->IsMainFrame());
   value->SetString("navigationId",
                    IdentifiersFactory::LoaderId(window->document()->Loader()));

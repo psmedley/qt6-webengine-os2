@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,7 +69,7 @@ std::string GetOSType() {
   return "iOS";
 #elif BUILDFLAG(IS_MAC)
   return "Mac OS X";
-#elif BUILDFLAG(IS_CHROMEOS_ASH)
+#elif BUILDFLAG(IS_CHROMEOS)
 # if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   return "ChromeOS";
 # else
@@ -77,7 +77,7 @@ std::string GetOSType() {
 # endif
 #elif BUILDFLAG(IS_ANDROID)
   return "Android";
-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#elif BUILDFLAG(IS_LINUX)
   return "Linux";
 #elif BUILDFLAG(IS_FREEBSD)
   return "FreeBSD";

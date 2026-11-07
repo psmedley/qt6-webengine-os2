@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -107,7 +107,7 @@ void HttpsOnlyModeBlockingPage::CommandReceived(const std::string& command) {
 }
 
 void HttpsOnlyModeBlockingPage::PopulateInterstitialStrings(
-    base::Value* load_time_data) {
+    base::Value::Dict& load_time_data) {
   PopulateHttpsOnlyModeStringsForSharedHTML(load_time_data);
   PopulateHttpsOnlyModeStringsForBlockingPage(load_time_data, request_url());
 }

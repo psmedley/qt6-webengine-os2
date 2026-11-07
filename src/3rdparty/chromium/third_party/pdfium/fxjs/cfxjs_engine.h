@@ -17,6 +17,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "core/fxcrt/widestring.h"
@@ -53,14 +54,19 @@ class FXJS_PerIsolateData {
   uint32_t CurrentMaxObjDefinitionID() const;
   CFXJS_ObjDefinition* ObjDefinitionForID(uint32_t id) const;
   uint32_t AssignIDForObjDefinition(std::unique_ptr<CFXJS_ObjDefinition> pDefn);
+  V8TemplateMap* GetDynamicObjsMap() { return m_pDynamicObjsMap.get(); }
+  ExtensionIface* GetExtension() { return m_pExtension.get(); }
+  void SetExtension(std::unique_ptr<ExtensionIface> extension) {
+    m_pExtension = std::move(extension);
+  }
+
+ private:
+  explicit FXJS_PerIsolateData(v8::Isolate* pIsolate);
 
   const wchar_t* const m_Tag;  // Raw, always a literal.
   std::vector<std::unique_ptr<CFXJS_ObjDefinition>> m_ObjectDefnArray;
   std::unique_ptr<V8TemplateMap> m_pDynamicObjsMap;
-  std::unique_ptr<ExtensionIface> m_pFXJSERuntimeData;
-
- protected:
-  explicit FXJS_PerIsolateData(v8::Isolate* pIsolate);
+  std::unique_ptr<ExtensionIface> m_pExtension;
 };
 
 void FXJS_Initialize(unsigned int embedderDataSlot, v8::Isolate* pIsolate);
@@ -79,8 +85,9 @@ class CFXJS_Engine : public CFX_V8 {
   explicit CFXJS_Engine(v8::Isolate* pIsolate);
   ~CFXJS_Engine() override;
 
-  using Constructor =
-      std::function<void(CFXJS_Engine* pEngine, v8::Local<v8::Object> obj)>;
+  using Constructor = std::function<void(CFXJS_Engine* pEngine,
+                                         v8::Local<v8::Object> obj,
+                                         v8::Local<v8::Object> proxy)>;
   using Destructor = std::function<void(v8::Local<v8::Object> obj)>;
 
   static uint32_t GetObjDefnID(v8::Local<v8::Object> pObj);
@@ -103,11 +110,13 @@ class CFXJS_Engine : public CFX_V8 {
                          const char* sPropName,
                          v8::AccessorGetterCallback pPropGet,
                          v8::AccessorSetterCallback pPropPut);
-  void DefineObjAllProperties(uint32_t nObjDefnID,
-                              v8::GenericNamedPropertyQueryCallback pPropQurey,
-                              v8::GenericNamedPropertyGetterCallback pPropGet,
-                              v8::GenericNamedPropertySetterCallback pPropPut,
-                              v8::GenericNamedPropertyDeleterCallback pPropDel);
+  void DefineObjAllProperties(
+      uint32_t nObjDefnID,
+      v8::GenericNamedPropertyQueryCallback pPropQurey,
+      v8::GenericNamedPropertyGetterCallback pPropGet,
+      v8::GenericNamedPropertySetterCallback pPropPut,
+      v8::GenericNamedPropertyDeleterCallback pPropDel,
+      v8::GenericNamedPropertyEnumeratorCallback pPropEnum);
   void DefineObjConst(uint32_t nObjDefnID,
                       const char* sConstName,
                       v8::Local<v8::Value> pDefault);

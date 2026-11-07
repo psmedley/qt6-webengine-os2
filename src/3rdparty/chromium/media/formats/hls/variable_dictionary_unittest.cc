@@ -1,22 +1,23 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/formats/hls/variable_dictionary.h"
 
+#include <utility>
+
 #include "base/location.h"
+#include "base/strings/string_piece.h"
+#include "media/formats/hls/parse_status.h"
 #include "media/formats/hls/source_string.h"
+#include "media/formats/hls/test_util.h"
 #include "media/formats/hls/types.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media::hls {
 
 namespace {
-
-types::VariableName CreateVarName(base::StringPiece name) {
-  return types::VariableName::Parse(SourceString::CreateForTesting(name))
-      .value();
-}
 
 VariableDictionary CreateBasicDictionary(
     const base::Location& from = base::Location::Current()) {
@@ -32,12 +33,17 @@ VariableDictionary CreateBasicDictionary(
 void OkTest(const VariableDictionary& dict,
             base::StringPiece in,
             base::StringPiece expected_out,
+            bool substitutions_expected,
             const base::Location& from = base::Location::Current()) {
   const auto source_str = SourceString::CreateForTesting(in);
+  EXPECT_FALSE(source_str.ContainsSubstitutions()) << from.ToString();
   VariableDictionary::SubstitutionBuffer buffer;
   auto result = dict.Resolve(source_str, buffer);
   ASSERT_TRUE(result.has_value()) << from.ToString();
-  EXPECT_EQ(std::move(result).value(), expected_out) << from.ToString();
+  auto result_str = std::move(result).value();
+  EXPECT_EQ(result_str.Str(), expected_out) << from.ToString();
+  EXPECT_EQ(result_str.ContainsSubstitutions(), substitutions_expected)
+      << from.ToString();
 }
 
 void ErrorTest(const VariableDictionary& dict,
@@ -51,17 +57,23 @@ void ErrorTest(const VariableDictionary& dict,
   EXPECT_EQ(std::move(result).error(), expected_error) << from.ToString();
 }
 
-}  // namespace
-
-TEST(HlsVariableDictionary, BasicSubstitution) {
-  VariableDictionary dict = CreateBasicDictionary();
-  OkTest(dict, "The NAME's {$NAME}, {$_0THER-1dent} {$NAME}. Agent {$IDENT}",
-         "The NAME's bond, {$james} bond. Agent 007");
-  OkTest(dict, "This $tring {has} ${no} v{}{}ar}}s",
-         "This $tring {has} ${no} v{}{}ar}}s");
+// Helper for cases where no substitutions should occur
+void NopTest(const VariableDictionary& dict,
+             base::StringPiece in,
+             const base::Location& from = base::Location::Current()) {
+  OkTest(dict, in, in, false, from);
 }
 
-TEST(HlsVariableDictionary, VariableUndefined) {
+}  // namespace
+
+TEST(HlsVariableDictionaryTest, BasicSubstitution) {
+  VariableDictionary dict = CreateBasicDictionary();
+  OkTest(dict, "The NAME's {$NAME}, {$_0THER-1dent} {$NAME}. Agent {$IDENT}",
+         "The NAME's bond, {$james} bond. Agent 007", true);
+  NopTest(dict, "This $tring {has} ${no} v{}{}ar}}s");
+}
+
+TEST(HlsVariableDictionaryTest, VariableUndefined) {
   VariableDictionary dict;
 
   // Names are case-sensitive
@@ -71,12 +83,12 @@ TEST(HlsVariableDictionary, VariableUndefined) {
   EXPECT_EQ(dict.Find(CreateVarName("test")), absl::nullopt);
 
   ErrorTest(dict, "Hello {$test}", ParseStatusCode::kVariableUndefined);
-  OkTest(dict, "Hello {$TEST}", "Hello FOO");
+  OkTest(dict, "Hello {$TEST}", "Hello FOO", true);
   ErrorTest(dict, "Hello {$TEST} {$TEST1}",
             ParseStatusCode::kVariableUndefined);
 }
 
-TEST(HlsVariableDictionary, RedefinitionNotAllowed) {
+TEST(HlsVariableDictionaryTest, RedefinitionNotAllowed) {
   VariableDictionary dict;
   EXPECT_TRUE(dict.Insert(CreateVarName("TEST"), "FOO"));
   EXPECT_EQ(dict.Find(CreateVarName("TEST")),
@@ -104,43 +116,44 @@ TEST(HlsVariableDictionary, RedefinitionNotAllowed) {
             absl::make_optional<base::StringPiece>("FOO"));
 }
 
-TEST(HlsVariableDictionary, IgnoreInvalidRefSequence) {
+TEST(HlsVariableDictionaryTest, IgnoreInvalidRefSequence) {
   auto dict = CreateBasicDictionary();
 
   // Variable refs with invalid variable names are ignored
-  OkTest(dict, "http://{$}.com", "http://{$}.com");
-  OkTest(dict, "http://{$ NAME}.com", "http://{$ NAME}.com");
-  OkTest(dict, "http://{$NAME }.com", "http://{$NAME }.com");
-  OkTest(dict, "http://{$:NAME}.com", "http://{$:NAME}.com");
+  NopTest(dict, "http://{$}.com");
+  NopTest(dict, "http://{$ NAME}.com");
+  NopTest(dict, "http://{$NAME }.com");
+  NopTest(dict, "http://{$:NAME}.com");
 
   // Incomplete variable ref sequences are ignored
-  OkTest(dict, "http://{$NAME", "http://{$NAME");
-  OkTest(dict, "http://{NAME}.com", "http://{NAME}.com");
-  OkTest(dict, "http://${NAME}.com", "http://${NAME}.com");
-  OkTest(dict, "http://$NAME.com", "http://$NAME.com");
+  NopTest(dict, "http://{$NAME");
+  NopTest(dict, "http://{NAME}.com");
+  NopTest(dict, "http://${NAME}.com");
+  NopTest(dict, "http://$NAME.com");
 
   // Valid ref sequences surrounded by invalid ref sequences should *not* be
   // ignored
   OkTest(dict, "http://{$}{$ NAME}{$NAME}}{$NAME }.com",
-         "http://{$}{$ NAME}bond}{$NAME }.com");
+         "http://{$}{$ NAME}bond}{$NAME }.com", true);
 
   // Valid ref sequences nested within invalid ref sequences should *not* be
   // ignored
-  OkTest(dict, "http://{$ {$NAME}}.com", "http://{$ bond}.com");
+  OkTest(dict, "http://{$ {$NAME}}.com", "http://{$ bond}.com", true);
 }
 
-TEST(HlsVariableDictionary, ExplosiveVariableDefs) {
+TEST(HlsVariableDictionaryTest, ExplosiveVariableDefs) {
   // Variable substitution is by design not recursive
   VariableDictionary dict;
   EXPECT_TRUE(dict.Insert(CreateVarName("LOL1"), "LOLLOLLOL"));
   EXPECT_TRUE(dict.Insert(CreateVarName("LOL2"), "{$LOL1}{$LOL1}{$LOL1}"));
   EXPECT_TRUE(dict.Insert(CreateVarName("LOL3"), "{$LOL2}{$LOL2}{$LOL2}"));
   OkTest(dict, "{$LOL3}{$LOL3}{$LOL3}",
-         "{$LOL2}{$LOL2}{$LOL2}{$LOL2}{$LOL2}{$LOL2}{$LOL2}{$LOL2}{$LOL2}");
+         "{$LOL2}{$LOL2}{$LOL2}{$LOL2}{$LOL2}{$LOL2}{$LOL2}{$LOL2}{$LOL2}",
+         true);
 
   // Variable substitution is by design not cyclical
   EXPECT_TRUE(dict.Insert(CreateVarName("CYCLE"), "{$CYCLE}"));
-  OkTest(dict, "{$CYCLE}", "{$CYCLE}");
+  OkTest(dict, "{$CYCLE}", "{$CYCLE}", true);
 }
 
 }  // namespace media::hls

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,12 +98,11 @@ void DefaultBrowserHandler::OnDefaultBrowserWorkerFinished(
     ResetDefaultBrowserPrompt(Profile::FromWebUI(web_ui()));
   }
 
-  base::DictionaryValue dict;
-  dict.SetBoolKey("isDefault", state == shell_integration::IS_DEFAULT);
-  dict.SetBoolKey("canBeDefault", shell_integration::CanSetAsDefaultBrowser());
-  dict.SetBoolKey("isUnknownError",
-                  state == shell_integration::UNKNOWN_DEFAULT);
-  dict.SetBoolKey("isDisabledByPolicy", DefaultBrowserIsDisabledByPolicy());
+  base::Value::Dict dict;
+  dict.Set("isDefault", state == shell_integration::IS_DEFAULT);
+  dict.Set("canBeDefault", shell_integration::CanSetAsDefaultBrowser());
+  dict.Set("isUnknownError", state == shell_integration::UNKNOWN_DEFAULT);
+  dict.Set("isDisabledByPolicy", DefaultBrowserIsDisabledByPolicy());
 
   if (!check_default_callback_id_.empty()) {
     ResolveJavascriptCallback(base::Value(check_default_callback_id_), dict);

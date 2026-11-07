@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,6 +40,14 @@ ScriptPromise SyncManager::registerFunction(ScriptState* script_state,
     return ScriptPromise();
   }
 
+  ExecutionContext* execution_context = ExecutionContext::From(script_state);
+  if (execution_context->IsInFencedFrame()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNotAllowedError,
+        "Background Sync is not allowed in fenced frames.");
+    return ScriptPromise();
+  }
+
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
@@ -50,19 +58,27 @@ ScriptPromise SyncManager::registerFunction(ScriptState* script_state,
   background_sync_service_->Register(
       std::move(sync_registration), registration_->RegistrationId(),
       resolver->WrapCallbackInScriptScope(
-          WTF::Bind(&SyncManager::RegisterCallback, WrapPersistent(this))));
+          WTF::BindOnce(&SyncManager::RegisterCallback, WrapPersistent(this))));
 
   return promise;
 }
 
 ScriptPromise SyncManager::getTags(ScriptState* script_state) {
+  ExecutionContext* execution_context = ExecutionContext::From(script_state);
+  if (execution_context->IsInFencedFrame()) {
+    return ScriptPromise::RejectWithDOMException(
+        script_state, MakeGarbageCollected<DOMException>(
+                          DOMExceptionCode::kNotAllowedError,
+                          "Background Sync is not allowed in fenced frames."));
+  }
+
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
   background_sync_service_->GetRegistrations(
       registration_->RegistrationId(),
       resolver->WrapCallbackInScriptScope(
-          WTF::Bind(&SyncManager::GetRegistrationsCallback)));
+          WTF::BindOnce(&SyncManager::GetRegistrationsCallback)));
 
   return promise;
 }

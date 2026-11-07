@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,7 +53,8 @@ bool EventsInOrder(const absl::optional<base::TimeDelta>& first,
 }
 
 internal::PageLoadTimingStatus IsValidPageLoadTiming(
-    const mojom::PageLoadTiming& timing) {
+    const mojom::PageLoadTiming& timing,
+    bool is_prerendered) {
   if (page_load_metrics::IsEmpty(timing))
     return internal::INVALID_EMPTY_TIMING;
 
@@ -150,11 +151,30 @@ internal::PageLoadTimingStatus IsValidPageLoadTiming(
     return internal::INVALID_ORDER_DOM_CONTENT_LOADED_LOAD;
   }
 
-  if (!EventsInOrder(timing.parse_timing->parse_start,
-                     timing.paint_timing->first_paint)) {
-    LOG(ERROR) << "Invalid parse_start " << timing.parse_timing->parse_start
-               << " for first_paint " << timing.paint_timing->first_paint;
-    return internal::INVALID_ORDER_PARSE_START_FIRST_PAINT;
+  // If the page is prerendered, `parse_start <= activation_start <=
+  // first_paint`.
+  // If the page is non prerendered, `parse_start <= first_paint`.
+  if (is_prerendered) {
+    if (!EventsInOrder(timing.parse_timing->parse_start,
+                       timing.activation_start)) {
+      LOG(ERROR) << "Invalid parse_start " << timing.parse_timing->parse_start
+                 << " for activation_start " << timing.activation_start;
+      return internal::INVALID_ORDER_PARSE_START_ACTIVATION_START;
+    }
+
+    if (!EventsInOrder(timing.activation_start,
+                       timing.paint_timing->first_paint)) {
+      LOG(ERROR) << "Invalid activation_start " << timing.activation_start
+                 << " for first_paint " << timing.paint_timing->first_paint;
+      return internal::INVALID_ORDER_ACTIVATION_START_FIRST_PAINT;
+    }
+  } else {
+    if (!EventsInOrder(timing.parse_timing->parse_start,
+                       timing.paint_timing->first_paint)) {
+      LOG(ERROR) << "Invalid parse_start " << timing.parse_timing->parse_start
+                 << " for first_paint " << timing.paint_timing->first_paint;
+      return internal::INVALID_ORDER_PARSE_START_FIRST_PAINT;
+    }
   }
 
   if (!EventsInOrder(timing.paint_timing->first_paint,
@@ -428,8 +448,6 @@ PageLoadMetricsUpdateDispatcher::PageLoadMetricsUpdateDispatcher(
       page_input_timing_(mojom::InputTiming::New()),
       mobile_friendliness_(blink::MobileFriendliness()),
       is_prerendered_page_load_(navigation_handle->IsInPrerenderedMainFrame()) {
-  page_input_timing_->max_event_durations =
-      mojom::UserInteractionLatencies::New();
 }
 
 PageLoadMetricsUpdateDispatcher::~PageLoadMetricsUpdateDispatcher() {
@@ -458,7 +476,8 @@ void PageLoadMetricsUpdateDispatcher::UpdateMetrics(
     mojom::FrameRenderDataUpdatePtr render_data,
     mojom::CpuTimingPtr new_cpu_timing,
     mojom::InputTimingPtr input_timing_delta,
-    const absl::optional<blink::MobileFriendliness>& mobile_friendliness) {
+    const absl::optional<blink::MobileFriendliness>& mobile_friendliness,
+    uint32_t soft_navigation_count) {
   if (embedder_interface_->IsExtensionUrl(
           render_frame_host->GetLastCommittedURL())) {
     // Extensions can inject child frames into a page. We don't want to track
@@ -479,8 +498,10 @@ void PageLoadMetricsUpdateDispatcher::UpdateMetrics(
     UpdateMainFrameMetadata(render_frame_host, std::move(new_metadata));
     UpdateMainFrameTiming(std::move(new_timing));
     UpdateMainFrameRenderData(*render_data);
-    if (mobile_friendliness.has_value())
+    if (mobile_friendliness.has_value()) {
       UpdateMainFrameMobileFriendliness(*mobile_friendliness);
+    }
+    UpdateSoftNavigationCount(soft_navigation_count);
   } else {
     UpdateSubFrameMetadata(render_frame_host, std::move(new_metadata));
     UpdateSubFrameTiming(render_frame_host, std::move(new_timing));
@@ -607,12 +628,18 @@ void PageLoadMetricsUpdateDispatcher::UpdateFrameCpuTiming(
 void PageLoadMetricsUpdateDispatcher::UpdateSubFrameMetadata(
     content::RenderFrameHost* render_frame_host,
     mojom::FrameMetadataPtr subframe_metadata) {
+  if (subframe_metadata->main_frame_viewport_rect) {
+    mojo::ReportBadMessage(
+        "Unexpected main_frame_viewport_rect set for a subframe.");
+    return;
+  }
+
   // Merge the subframe loading behavior flags with any we've already observed,
   // possibly from other subframes.
   subframe_metadata_->behavior_flags |= subframe_metadata->behavior_flags;
   client_->OnSubframeMetadataChanged(render_frame_host, *subframe_metadata);
 
-  MaybeUpdateFrameIntersection(render_frame_host, subframe_metadata);
+  MaybeUpdateMainFrameIntersectionRect(render_frame_host, subframe_metadata);
 }
 
 void PageLoadMetricsUpdateDispatcher::UpdateMainFrameMobileFriendliness(
@@ -625,11 +652,15 @@ void PageLoadMetricsUpdateDispatcher::UpdateSubFrameMobileFriendliness(
   client_->OnSubFrameMobileFriendlinessChanged(mobile_friendliness);
 }
 
-void PageLoadMetricsUpdateDispatcher::MaybeUpdateFrameIntersection(
+void PageLoadMetricsUpdateDispatcher::UpdateSoftNavigationCount(
+    uint32_t soft_navigation_count) {
+  client_->OnSoftNavigationCountChanged(soft_navigation_count);
+}
+void PageLoadMetricsUpdateDispatcher::MaybeUpdateMainFrameIntersectionRect(
     content::RenderFrameHost* render_frame_host,
     const mojom::FrameMetadataPtr& frame_metadata) {
   // Handle intersection updates if included in the metadata.
-  if (frame_metadata->intersection_update.is_null())
+  if (!frame_metadata->main_frame_intersection_rect)
     return;
 
   // Do not notify intersections for untracked loads,
@@ -645,18 +676,31 @@ void PageLoadMetricsUpdateDispatcher::MaybeUpdateFrameIntersection(
   }
 
   auto existing_intersection_it =
-      frame_intersection_updates_.find(frame_tree_node_id);
+      main_frame_intersection_rects_.find(frame_tree_node_id);
 
-  // Check if we already have a frame intersection update for the frame,
-  // dispatch updates for the first frame intersection update or if
-  // the intersection has changed.
-  if (existing_intersection_it == frame_intersection_updates_.end() ||
-      !existing_intersection_it->second.Equals(
-          *frame_metadata->intersection_update)) {
-    frame_intersection_updates_[frame_tree_node_id] =
-        *frame_metadata->intersection_update;
-    client_->OnFrameIntersectionUpdate(render_frame_host,
-                                       *frame_metadata->intersection_update);
+  // Check if we already have a frame intersection rect for the frame, dispatch
+  // updates for the first frame intersection rect or if the intersection has
+  // changed.
+  if (existing_intersection_it == main_frame_intersection_rects_.end() ||
+      existing_intersection_it->second !=
+          *frame_metadata->main_frame_intersection_rect) {
+    main_frame_intersection_rects_[frame_tree_node_id] =
+        *frame_metadata->main_frame_intersection_rect;
+    client_->OnMainFrameIntersectionRectChanged(
+        render_frame_host, *frame_metadata->main_frame_intersection_rect);
+  }
+}
+
+void PageLoadMetricsUpdateDispatcher::MaybeUpdateMainFrameViewportRect(
+    const mojom::FrameMetadataPtr& frame_metadata) {
+  // Handle viewport updates if included in the metadata.
+  if (!frame_metadata->main_frame_viewport_rect)
+    return;
+
+  if (!main_frame_viewport_rect_ ||
+      *frame_metadata->main_frame_viewport_rect != *main_frame_viewport_rect_) {
+    main_frame_viewport_rect_ = *frame_metadata->main_frame_viewport_rect;
+    client_->OnMainFrameViewportRectChanged(*main_frame_viewport_rect_);
   }
 }
 
@@ -675,7 +719,10 @@ void PageLoadMetricsUpdateDispatcher::UpdateMainFrameTiming(
     return;
   }
 
-  internal::PageLoadTimingStatus status = IsValidPageLoadTiming(*new_timing);
+  const bool is_prerendered =
+      (client_->GetPrerenderingState() != PrerenderingState::kNoPrerendering);
+  internal::PageLoadTimingStatus status =
+      IsValidPageLoadTiming(*new_timing, is_prerendered);
   UMA_HISTOGRAM_ENUMERATION(internal::kPageLoadTimingStatus, status,
                             internal::LAST_PAGE_LOAD_TIMING_STATUS);
   if (status != internal::VALID) {
@@ -720,8 +767,11 @@ void PageLoadMetricsUpdateDispatcher::UpdateMainFrameMetadata(
   main_frame_metadata_ = std::move(new_metadata);
   client_->OnMainFrameMetadataChanged();
 
-  if (!main_frame_metadata_.is_null())
-    MaybeUpdateFrameIntersection(render_frame_host, main_frame_metadata_);
+  if (!main_frame_metadata_.is_null()) {
+    MaybeUpdateMainFrameIntersectionRect(render_frame_host,
+                                         main_frame_metadata_);
+    MaybeUpdateMainFrameViewportRect(main_frame_metadata_);
+  }
 }
 
 void PageLoadMetricsUpdateDispatcher::UpdatePageInputTiming(
@@ -741,6 +791,8 @@ void PageLoadMetricsUpdateDispatcher::UpdatePageInputTiming(
         input_timing_delta.num_interactions,
         *(input_timing_delta.max_event_durations));
   }
+  if (page_input_timing_->num_input_events > 0)
+    client_->OnPageInputTimingChanged(page_input_timing_->num_input_events);
 }
 
 void PageLoadMetricsUpdateDispatcher::UpdatePageRenderData(
@@ -848,8 +900,10 @@ void PageLoadMetricsUpdateDispatcher::DispatchTimingUpdates() {
 
   current_merged_page_timing_ = pending_merged_page_timing_->Clone();
 
+  const bool is_prerendered =
+      (client_->GetPrerenderingState() != PrerenderingState::kNoPrerendering);
   internal::PageLoadTimingStatus status =
-      IsValidPageLoadTiming(*pending_merged_page_timing_);
+      IsValidPageLoadTiming(*pending_merged_page_timing_, is_prerendered);
   UMA_HISTOGRAM_ENUMERATION(internal::kPageLoadTimingDispatchStatus, status,
                             internal::LAST_PAGE_LOAD_TIMING_STATUS);
 

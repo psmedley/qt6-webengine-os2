@@ -95,6 +95,10 @@ FrameId Sender::GetNextFrameId() const {
   return last_enqueued_frame_id_ + 1;
 }
 
+Clock::duration Sender::GetCurrentRoundTripTime() const {
+  return round_trip_time_;
+}
+
 Sender::EnqueueFrameResult Sender::EnqueueFrame(const EncodedFrame& frame) {
   // Assume the fields of the |frame| have all been set correctly, with
   // monotonically increasing timestamps and a valid pointer to the data.
@@ -137,7 +141,7 @@ Sender::EnqueueFrameResult Sender::EnqueueFrame(const EncodedFrame& frame) {
   last_enqueued_frame_id_ = slot->frame->frame_id;
   OSP_DCHECK_LE(num_frames_in_flight_,
                 last_enqueued_frame_id_ - checkpoint_frame_id_);
-  if (slot->frame->dependency == EncodedFrame::KEY_FRAME) {
+  if (slot->frame->dependency == EncodedFrame::Dependency::kKeyFrame) {
     last_enqueued_key_frame_id_ = slot->frame->frame_id;
   }
 

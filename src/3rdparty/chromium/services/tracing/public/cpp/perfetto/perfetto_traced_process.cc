@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "base/trace_event/trace_log.h"
 #include "base/tracing/perfetto_platform.h"
 #include "build/build_config.h"
+#include "services/tracing/public/cpp/perfetto/custom_event_recorder.h"
 #include "services/tracing/public/cpp/perfetto/dummy_producer.h"
 #include "services/tracing/public/cpp/perfetto/perfetto_tracing_backend.h"
 #include "services/tracing/public/cpp/perfetto/producer_client.h"
@@ -26,7 +27,7 @@
 #include "third_party/perfetto/protos/perfetto/trace/track_event/process_descriptor.gen.h"
 #include "third_party/perfetto/protos/perfetto/trace/track_event/thread_descriptor.gen.h"
 
-#if BUILDFLAG(IS_POSIX)
+#if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 // As per 'gn help check':
 /*
   If you have conditional includes, make sure the build conditions and the
@@ -41,26 +42,30 @@
 
 namespace tracing {
 namespace {
-#if BUILDFLAG(IS_POSIX)
+#if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 // Set to use the dummy producer for Chrome OS browser_tests and
 // content_browsertests to keep the system producer from causing flakes.
 static bool g_system_producer_enabled = true;
-#endif
+#endif  // BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 
 std::unique_ptr<SystemProducer> NewSystemProducer(
     base::tracing::PerfettoTaskRunner* runner,
     const char* socket_name) {
-#if BUILDFLAG(IS_POSIX)
+#if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   DCHECK(socket_name);
   if (g_system_producer_enabled)
     return std::make_unique<PosixSystemProducer>(socket_name, runner);
-#endif  // BUILDFLAG(IS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   return std::make_unique<DummyProducer>(runner);
 }
 
 const char* MaybeSocket() {
 #if BUILDFLAG(IS_POSIX)
   return perfetto::GetProducerSocket();
+#elif BUILDFLAG(IS_FUCHSIA)
+  // The socket is connected via a socket pair passed over IPC, which is not
+  // accessible via an address.
+  return "";
 #else
   return nullptr;
 #endif  // BUILDFLAG(IS_POSIX)
@@ -206,13 +211,12 @@ void PerfettoTracedProcess::SetConsumerConnectionFactory(
 
 void PerfettoTracedProcess::ConnectProducer(
     mojo::PendingRemote<mojom::PerfettoService> perfetto_service) {
-  if (base::FeatureList::IsEnabled(
-          features::kEnablePerfettoClientApiProducer)) {
-    DCHECK(pending_producer_callback_);
-    std::move(pending_producer_callback_).Run(std::move(perfetto_service));
-  } else {
-    producer_client_->Connect(std::move(perfetto_service));
-  }
+#if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+  DCHECK(pending_producer_callback_);
+  std::move(pending_producer_callback_).Run(std::move(perfetto_service));
+#else   // !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+  producer_client_->Connect(std::move(perfetto_service));
+#endif  // !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
 }
 
 void PerfettoTracedProcess::ClearDataSourcesForTesting() {
@@ -384,20 +388,38 @@ bool PerfettoTracedProcess::SetupStartupTracing(
   return true;
 }
 
+void PerfettoTracedProcess::RequestStartupTracing(
+    const perfetto::TraceConfig& config,
+    const perfetto::Tracing::SetupStartupTracingOpts& opts) {
+  if (platform_->did_start_task_runner()) {
+    perfetto::Tracing::SetupStartupTracing(config, opts);
+  } else {
+    saved_config_ = config;
+    saved_opts_ = opts;
+    startup_tracing_needed_ = true;
+  }
+}
+
 void PerfettoTracedProcess::SetupClientLibrary(bool enable_consumer) {
   perfetto::TracingInitArgs init_args;
   init_args.platform = platform_.get();
   init_args.custom_backend = tracing_backend_.get();
   init_args.backends |= perfetto::kCustomBackend;
+  init_args.supports_multiple_data_source_instances = false;
 // TODO(eseckler): Not yet supported on Android to avoid binary size regression
 // of the consumer IPC messages. We'll need a way to exclude them.
 #if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID)
-  // We currently only use the client library system backend for the consumer
-  // side, which is only allowed in the browser process. Furthermore, on
-  // non-Android platforms, sandboxed processes need to delegate the socket
-  // connections to the browser, but this delegation hasn't been hooked up in
-  // the client library yet.
+  // In non-SDK build we only use the client library system backend for the
+  // consumer side, which is only allowed in the browser process.
+  // In SDK build we use system backend for producers too, but note that
+  // currently the connection to the service fails from sandboxed processes.
+  // TODO(khokhlov): Delegate socket connections from sandboxed processes
+  // to the browser.
+#if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+  if (ShouldSetupSystemTracing()) {
+#else   // !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
   if (ShouldSetupSystemTracing() && enable_consumer) {
+#endif  // @BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
     init_args.backends |= perfetto::kSystemBackend;
     init_args.tracing_policy = this;
   }
@@ -410,8 +432,15 @@ void PerfettoTracedProcess::SetupClientLibrary(bool enable_consumer) {
 
 #if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
   perfetto::TrackEvent::Register();
+  tracing::TracingSamplerProfiler::RegisterDataSource();
   SetTrackDescriptors();
+  CustomEventRecorder::GetInstance();
 #endif  // BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+
+  if (startup_tracing_needed_) {
+    perfetto::Tracing::SetupStartupTracing(saved_config_, saved_opts_);
+    startup_tracing_needed_ = false;
+  }
 }
 
 void PerfettoTracedProcess::OnThreadPoolAvailable(bool enable_consumer) {

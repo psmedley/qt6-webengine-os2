@@ -78,15 +78,17 @@ action("create_notomono_cpp") {
 
   inputs = [ "fonts/NotoMono-Regular.ttf" ]
 
-  outputs =
-      [ "$root_out_dir/modules/canvaskit/fonts/NotoMono-Regular.ttf.ninja.cpp" ]
+  output_path =
+      "$root_out_dir/modules/canvaskit/fonts/NotoMono-Regular.ttf.ninja.cpp"
+
+  outputs = [ output_path ]
 
   args = [
     "--name=SK_EMBEDDED_FONTS",
     "--input",
     rebase_path("fonts/NotoMono-Regular.ttf"),
     "--output",
-    "modules/canvaskit/fonts/NotoMono-Regular.ttf.ninja.cpp",
+    rebase_path(output_path),
     "--align=4",
   ]
 }
@@ -94,7 +96,10 @@ action("create_notomono_cpp") {
 skia_wasm_lib("canvaskit") {
   deps = [ "../..:skia" ]
   if (skia_canvaskit_enable_paragraph) {
-    deps += [ "../../modules/skparagraph:skparagraph" ]
+    deps += [
+      "../../modules/skparagraph:skparagraph",
+      "../../modules/skunicode:skunicode",
+    ]
   }
   if (skia_canvaskit_enable_skottie) {
     deps += [
@@ -182,13 +187,29 @@ skia_wasm_lib("canvaskit") {
   }
   ldflags += [ "-fno-rtti" ]
 
-  if (skia_enable_gpu) {
+  if (skia_canvaskit_enable_webgpu) {
+    ldflags += [
+      "--pre-js",
+      rebase_path("cpu.js"),
+      "--pre-js",
+      rebase_path("webgpu.js"),
+      "-sUSE_WEBGL2=0",
+      "-sUSE_WEBGPU=1",
+      "-sASYNCIFY",
+
+      # Modules from html5_webgpu for JS<->WASM interop
+      "-sEXPORTED_RUNTIME_METHODS=WebGPU,JsValStore",
+
+      # TODO(skia:13429): The closure compiler doesn't play well with optimized builds and ASYNCIFY.
+      "--closure=0",
+    ]
+  } else if (skia_canvaskit_enable_webgl) {
     ldflags += [
       "-lGL",
       "--pre-js",
       rebase_path("cpu.js"),
       "--pre-js",
-      rebase_path("gpu.js"),
+      rebase_path("webgl.js"),
       "-sUSE_WEBGL2=1",
       "-sMAX_WEBGL_VERSION=2",
     ]
@@ -353,9 +374,20 @@ skia_wasm_lib("canvaskit") {
   if (skia_enable_gpu) {
     defines += [
       "SK_SUPPORT_GPU=1",
-      "SK_GL",
       "SK_DISABLE_LEGACY_SHADERCONTEXT",
     ]
+    if (skia_canvaskit_enable_webgl) {
+      defines += [
+        "SK_GL",
+        "CK_ENABLE_WEBGL",
+      ]
+    }
+    if (skia_canvaskit_enable_webgpu) {
+      defines += [
+        "SK_DAWN",
+        "CK_ENABLE_WEBGPU",
+      ]
+    }
   } else {
     defines += [
       "SK_SUPPORT_GPU=0",
@@ -370,7 +402,7 @@ skia_wasm_lib("canvaskit") {
     defines += [ "CK_INCLUDE_RUNTIME_EFFECT" ]
   }
   if (!skia_canvaskit_enable_alias_font) {
-    defines += [ "CANVASKIT_NO_ALIAS_FONT" ]
+    defines += [ "CK_NO_ALIAS_FONT" ]
   }
   if (skia_canvaskit_legacy_draw_vertices_blend_mode) {
     # https://github.com/flutter/flutter/issues/98531

@@ -86,7 +86,7 @@ config("icu_code") {
     "U_CHARSET_IS_UTF8=1",
   ]
 
-  if (is_win) {
+  if (is_win && !is_mingw) {
     # Disable some compiler warnings.
     cflags += [
       "/wd4005",  # Macro redefinition.
@@ -122,6 +122,10 @@ config("icu_code") {
 
       # putil.cpp contains unused variables when building for iOS simulators.
       "-Wno-unused-variable",
+
+      # ICU has decided not to fix this warning as doing so would break its
+      # stable API.
+      "-Wno-ambiguous-reversed-operator",
     ]
   }
   if (is_clang || is_linux || is_chromeos || is_android || icu_is_in_fuchsia) {
@@ -151,9 +155,14 @@ config("icu_code") {
       # Used for conditional changes to the compilation process that
       # are only needed for the Fuchsia toolchain.
       "-DICU_IS_IN_FUCHSIA",
+
+      # Can be removed after
+      # https://unicode-org.atlassian.net/browse/ICU-22113 is fixed.
+      "-Wno-unknown-warning-option",
+      "-Wno-enum-constexpr-conversion",
     ]
   }
-  if (target_cpu == "wasm") {
+  if (current_cpu == "wasm") {
     # Tell ICU that we are a 32 bit platform, otherwise,
     # double-conversion-utils.h doesn't know how to operate.
     defines += [ "__i386__" ]
@@ -240,7 +249,7 @@ template("generate_icu_component") {
 
       # Make icu into a standalone static library. Currently This is only useful
       # on Chrome OS.
-      if (invoker.check_thin_archive && icu_disable_thin_archive) {
+      if (icu_disable_thin_archive) {
         configs -= [ "//build/config/compiler:thin_archive" ]
         complete_static_lib = true
       }
@@ -249,10 +258,6 @@ template("generate_icu_component") {
 }
 
 template("generate_icui18n") {
-  if (!icu_is_in_fuchsia) {
-    check_thin_archive = true
-  }
-
   generate_icu_component("bundled_" + target_name) {
     assert(defined(invoker.icuuc_deps), "Need the 'icuuc_deps' parameter.")
     icuuc_deps = invoker.icuuc_deps
@@ -274,6 +279,11 @@ template("generate_icui18n") {
 
     defines = [ "U_I18N_IMPLEMENTATION" ]
     deps = icuuc_deps
+
+    # TODO(fxbug.dev/98632): workaround for toolchain issues, see bug
+    if (icu_is_in_fuchsia && is_fuchsia) {
+      deps += [ "//build/config/fuchsia:uses-outline-atomics-fxbug98632" ]
+    }
   }
 }
 
@@ -291,12 +301,7 @@ generate_icui18n("icui18n_hidden_visibility") {
 }
 
 template("generate_icuuc") {
-  if (!icu_is_in_fuchsia) {
-    check_thin_archive = false
-  }
-
   generate_icu_component("bundled_" + target_name) {
-
     fuchsia_output_name_postfix = ""
     if (defined(invoker.fuchsia_output_name_postfix)) {
       fuchsia_output_name_postfix = invoker.fuchsia_output_name_postfix
@@ -324,6 +329,11 @@ template("generate_icuuc") {
     }
 
     defines += [ "U_ICUDATAENTRY_IN_COMMON" ]
+
+    # TODO(fxbug.dev/98632): workaround for toolchain issues, see bug
+    if (icu_is_in_fuchsia && is_fuchsia) {
+      deps += [ "//build/config/fuchsia:uses-outline-atomics-fxbug98632" ]
+    }
   }
 }
 
@@ -376,7 +386,7 @@ if (is_android) {
   data_dir = "ios"
 } else if (is_chromeos) {
   data_dir = "chromeos"
-} else if (target_cpu == "wasm") {
+} else if (current_cpu == "wasm") {
   data_dir = "flutter"
 } else if (icu_is_in_fuchsia && icu_fuchsia_override_data_dir != "") {
   # See //config.gni for details.
@@ -409,19 +419,19 @@ if (icu_use_data_file) {
 
   if (is_chromeos) {
     copy("icudata_hash") {
-      sources = [ "//third_party/icu/chromeos/icudtl.dat.hash" ]
+      sources = [ "chromeos/icudtl.dat.hash" ]
       outputs = [ "$root_out_dir/icudtl.dat.hash" ]
     }
   }
 } else {
-  if (target_cpu == "wasm") {
+  if (current_cpu == "wasm") {
     data_assembly = "$target_gen_dir/${data_bundle_prefix}_dat.cpp"
   } else {
     data_assembly = "$target_gen_dir/${data_bundle_prefix}_dat.S"
   }
   inline_data_assembly = "$target_gen_dir/${data_bundle_prefix}_dat.cc"
   action("make_data_assembly") {
-    if (target_cpu == "wasm") {
+    if (current_cpu == "wasm") {
       # See scripts/make_data_cpp.py for details on building ICU for wasm.
       script = "scripts/make_data_cpp.py"
       inputs = [ "$data_dir/$data_bundle" ]

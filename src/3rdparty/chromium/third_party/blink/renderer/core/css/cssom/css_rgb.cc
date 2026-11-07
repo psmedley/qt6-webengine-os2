@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -113,8 +113,9 @@ void CSSRGB::setAlpha(
 }
 
 Color CSSRGB::ToColor() const {
-  return Color(ComponentToColorInput(r_), ComponentToColorInput(g_),
-               ComponentToColorInput(b_), ComponentToColorInput(alpha_));
+  return Color::FromRGBAFloat(
+      ComponentToColorInput(r_), ComponentToColorInput(g_),
+      ComponentToColorInput(b_), ComponentToColorInput(alpha_));
 }
 
 }  // namespace blink

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,7 @@ GLFenceAndroidNativeFenceSync::~GLFenceAndroidNativeFenceSync() {}
 // static
 std::unique_ptr<GLFenceAndroidNativeFenceSync>
 GLFenceAndroidNativeFenceSync::CreateInternal(EGLenum type, EGLint* attribs) {
-  DCHECK(GLSurfaceEGL::IsAndroidNativeFenceSyncSupported());
+  DCHECK(GLSurfaceEGL::GetGLDisplayEGL()->IsAndroidNativeFenceSyncSupported());
 
   // Can't use MakeUnique, the no-args constructor is private.
   auto fence = base::WrapUnique(new GLFenceAndroidNativeFenceSync());
@@ -58,7 +58,7 @@ GLFenceAndroidNativeFenceSync::CreateFromGpuFence(
 }
 
 std::unique_ptr<gfx::GpuFence> GLFenceAndroidNativeFenceSync::GetGpuFence() {
-  DCHECK(GLSurfaceEGL::IsAndroidNativeFenceSyncSupported());
+  DCHECK(GLSurfaceEGL::GetGLDisplayEGL()->IsAndroidNativeFenceSyncSupported());
 
   const EGLint sync_fd = eglDupNativeFenceFDANDROID(display_, sync_);
   if (sync_fd < 0)

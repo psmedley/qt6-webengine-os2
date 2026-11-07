@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,10 +33,10 @@ void AutofillPolicyHandler::ApplyPolicySettings(
   const base::Value* value =
       policies.GetValue(policy_name(), base::Value::Type::BOOLEAN);
   if (value && !value->GetBool()) {
-    prefs->SetBoolean(autofill::prefs::kAutofillEnabledDeprecated, false);
+    prefs->SetBoolean(prefs::kAutofillEnabledDeprecated, false);
     // Disable the fine-grained prefs if the main pref is disabled by policy.
-    prefs->SetBoolean(autofill::prefs::kAutofillCreditCardEnabled, false);
-    prefs->SetBoolean(autofill::prefs::kAutofillProfileEnabled, false);
+    prefs->SetBoolean(prefs::kAutofillCreditCardEnabled, false);
+    prefs->SetBoolean(prefs::kAutofillProfileEnabled, false);
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -166,8 +166,8 @@ WorkQueueSets::GetRandomQueueAndTaskOrderInSet(size_t set_index) const {
   if (work_queue_heaps_[set_index].empty())
     return absl::nullopt;
   const OldestTaskOrder& chosen =
-      work_queue_heaps_[set_index]
-          .begin()[Random() % work_queue_heaps_[set_index].size()];
+      work_queue_heaps_[set_index].begin()[static_cast<long>(
+          Random() % work_queue_heaps_[set_index].size())];
 #if DCHECK_IS_ON()
   absl::optional<TaskOrder> key = chosen.value->GetFrontTaskOrder();
   DCHECK(key && chosen.key == *key);

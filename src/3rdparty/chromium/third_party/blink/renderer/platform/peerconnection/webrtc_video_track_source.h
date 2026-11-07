@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,6 +61,7 @@ class PLATFORM_EXPORT WebRtcVideoTrackSource
   void OnFrameCaptured(
       scoped_refptr<media::VideoFrame> frame,
       std::vector<scoped_refptr<media::VideoFrame>> scaled_frames);
+  void OnNotifyFrameDropped();
 
   using webrtc::VideoTrackSourceInterface::AddOrUpdateSink;
   using webrtc::VideoTrackSourceInterface::RemoveSink;

@@ -1,10 +1,10 @@
-// Copyright (c) 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/allocator/partition_allocator/page_allocator.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/cpu.h"
 #include "base/allocator/partition_allocator/partition_alloc_notreached.h"
-#include "base/cpu.h"
 
 #include <sys/mman.h>
 
@@ -16,7 +16,7 @@
 namespace partition_alloc::internal {
 
 int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
-  switch (accessibility) {
+  switch (accessibility.permissions) {
     case PageAccessibilityConfiguration::kRead:
       return PROT_READ;
     case PageAccessibilityConfiguration::kReadWriteTagged:

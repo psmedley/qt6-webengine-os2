@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,7 +26,6 @@
 #include "gpu/command_buffer/service/gles2_cmd_decoder_passthrough.h"
 #include "gpu/command_buffer/service/gles2_query_manager.h"
 #include "gpu/command_buffer/service/gpu_tracer.h"
-#include "gpu/command_buffer/service/image_manager.h"
 #include "gpu/command_buffer/service/mailbox_manager_impl.h"
 #include "gpu/command_buffer/service/passthrough_discardable_manager.h"
 #include "gpu/command_buffer/service/program_manager.h"
@@ -34,7 +33,7 @@
 #include "gpu/command_buffer/service/sampler_manager.h"
 #include "gpu/command_buffer/service/service_discardable_manager.h"
 #include "gpu/command_buffer/service/shader_manager.h"
-#include "gpu/command_buffer/service/shared_image_manager.h"
+#include "gpu/command_buffer/service/shared_image/shared_image_manager.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "gpu/command_buffer/service/transform_feedback_manager.h"
@@ -42,6 +41,7 @@
 #include "gpu/config/gpu_driver_bug_workarounds.h"
 #include "gpu/config/gpu_preferences.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gl/gl_display.h"
 #include "ui/gl/gl_mock.h"
 #include "ui/gl/gl_surface_stub.h"
 #include "ui/gl/gl_version_info.h"
@@ -60,7 +60,9 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool>,
   ~GLES2DecoderTestBase() override;
 
   void OnConsoleMessage(int32_t id, const std::string& message) override;
-  void CacheShader(const std::string& key, const std::string& shader) override;
+  void CacheBlob(gpu::GpuDiskCacheType type,
+                 const std::string& key,
+                 const std::string& blob) override;
   void OnFenceSyncRelease(uint64_t release) override;
   void OnDescheduleUntilFinished() override;
   void OnRescheduleAfterFinished() override;
@@ -189,10 +191,6 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool>,
 
   FramebufferManager* GetFramebufferManager() {
     return decoder_->GetFramebufferManager();
-  }
-
-  ImageManager* GetImageManagerForTest() {
-    return decoder_->GetImageManagerForTest();
   }
 
   void DoCreateProgram(GLuint client_id, GLuint service_id);
@@ -343,7 +341,6 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool>,
                               GLint border,
                               GLsizei size,
                               uint32_t bucket_id);
-  void DoBindTexImage2DCHROMIUM(GLenum target, GLint image_id);
   void DoTexImage2D(GLenum target,
                     GLint level,
                     GLenum internal_format,
@@ -703,8 +700,7 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool>,
   std::unique_ptr<MockGLES2Decoder> mock_decoder_;
   std::unique_ptr<GLES2Decoder> decoder_;
   std::unique_ptr<MemoryTracker> memory_tracker_;
-
-  bool surface_supports_draw_rectangle_ = false;
+  raw_ptr<gl::GLDisplay> display_ = nullptr;
 
   GLuint client_buffer_id_;
   GLuint client_framebuffer_id_;
@@ -801,7 +797,6 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool>,
   MailboxManagerImpl mailbox_manager_;
   ShaderTranslatorCache shader_translator_cache_;
   FramebufferCompletenessCache framebuffer_completeness_cache_;
-  ImageManager image_manager_;
   ServiceDiscardableManager discardable_manager_;
   SharedImageManager shared_image_manager_;
   scoped_refptr<ContextGroup> group_;
@@ -843,7 +838,9 @@ class GLES2DecoderPassthroughTestBase : public testing::Test,
   ~GLES2DecoderPassthroughTestBase() override;
 
   void OnConsoleMessage(int32_t id, const std::string& message) override;
-  void CacheShader(const std::string& key, const std::string& shader) override;
+  void CacheBlob(gpu::GpuDiskCacheType type,
+                 const std::string& key,
+                 const std::string& blob) override;
   void OnFenceSyncRelease(uint64_t release) override;
   void OnDescheduleUntilFinished() override;
   void OnRescheduleAfterFinished() override;
@@ -1025,7 +1022,6 @@ class GLES2DecoderPassthroughTestBase : public testing::Test,
   MailboxManagerImpl mailbox_manager_;
   ShaderTranslatorCache shader_translator_cache_;
   FramebufferCompletenessCache framebuffer_completeness_cache_;
-  ImageManager image_manager_;
   ServiceDiscardableManager discardable_manager_;
   PassthroughDiscardableManager passthrough_discardable_manager_;
   SharedImageManager shared_image_manager_;
@@ -1036,6 +1032,7 @@ class GLES2DecoderPassthroughTestBase : public testing::Test,
   TraceOutputter outputter_;
   std::unique_ptr<GLES2DecoderPassthroughImpl> decoder_;
   scoped_refptr<ContextGroup> group_;
+  raw_ptr<gl::GLDisplay> display_ = nullptr;
 };
 
 }  // namespace gles2

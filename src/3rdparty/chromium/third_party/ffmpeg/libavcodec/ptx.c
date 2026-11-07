@@ -21,16 +21,15 @@
 
 #include "libavutil/common.h"
 #include "libavutil/intreadwrite.h"
-#include "libavutil/imgutils.h"
 #include "avcodec.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 
-static int ptx_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
-                            AVPacket *avpkt) {
+static int ptx_decode_frame(AVCodecContext *avctx, AVFrame *p,
+                            int *got_frame, AVPacket *avpkt)
+{
     const uint8_t *buf = avpkt->data;
     const uint8_t *buf_end = avpkt->data + avpkt->size;
-    AVFrame * const p = data;
     unsigned int offset, w, h, y, stride, bytes_per_pixel;
     int ret;
     uint8_t *ptr;
@@ -88,9 +87,9 @@ static int ptx_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
 
 const FFCodec ff_ptx_decoder = {
     .p.name         = "ptx",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("V.Flash PTX image"),
+    CODEC_LONG_NAME("V.Flash PTX image"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_PTX,
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .decode         = ptx_decode_frame,
+    FF_CODEC_DECODE_CB(ptx_decode_frame),
 };

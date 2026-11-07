@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -303,7 +303,7 @@ class MultiplexRouter::MessageWrapper {
  private:
   // `router_` is not a raw_ptr<...> for performance reasons (based on analysis
   // of sampling profiler data and tab_search:top100:2020).
-  MultiplexRouter* router_ = nullptr;
+  RAW_PTR_EXCLUSION MultiplexRouter* router_ = nullptr;
 
   Message value_;
 };

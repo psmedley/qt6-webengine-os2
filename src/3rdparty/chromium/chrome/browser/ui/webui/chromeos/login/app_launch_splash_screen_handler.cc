@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,8 +17,8 @@
 #include "chrome/grit/chrome_unscaled_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/network/network_state.h"
-#include "chromeos/network/network_state_handler.h"
+#include "chromeos/ash/components/network/network_state.h"
+#include "chromeos/ash/components/network/network_state_handler.h"
 #include "components/login/localized_values_builder.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -39,8 +39,6 @@ std::string GetNetworkName(const std::string& service_path) {
 }  // namespace
 
 namespace chromeos {
-
-constexpr StaticOobeScreenId AppLaunchSplashScreenView::kScreenId;
 
 AppLaunchSplashScreenHandler::AppLaunchSplashScreenHandler(
     const scoped_refptr<NetworkStateInformer>& network_state_informer,
@@ -69,19 +67,7 @@ void AppLaunchSplashScreenHandler::DeclareLocalizedValues(
                                           product_os_name));
 }
 
-void AppLaunchSplashScreenHandler::InitializeDeprecated() {
-  if (show_on_init_) {
-    show_on_init_ = false;
-    Show();
-  }
-}
-
 void AppLaunchSplashScreenHandler::Show() {
-  if (!IsJavascriptAllowed()) {
-    show_on_init_ = true;
-    return;
-  }
-
   is_shown_ = true;
 
   base::Value::Dict data;
@@ -105,12 +91,6 @@ void AppLaunchSplashScreenHandler::Show() {
 void AppLaunchSplashScreenHandler::RegisterMessages() {
   AddCallback("configureNetwork",
               &AppLaunchSplashScreenHandler::HandleConfigureNetwork);
-  AddCallback("cancelAppLaunch",
-              &AppLaunchSplashScreenHandler::HandleCancelAppLaunch);
-  AddCallback("continueAppLaunch",
-              &AppLaunchSplashScreenHandler::HandleContinueAppLaunch);
-  AddCallback("networkConfigRequest",
-              &AppLaunchSplashScreenHandler::HandleNetworkConfigRequested);
 }
 
 void AppLaunchSplashScreenHandler::Hide() {
@@ -130,10 +110,7 @@ void AppLaunchSplashScreenHandler::UpdateAppLaunchState(AppLaunchState state) {
     return;
 
   state_ = state;
-  if (IsJavascriptAllowed()) {
-    SetLaunchText(
-        l10n_util::GetStringUTF8(GetProgressMessageFromState(state_)));
-  }
+  SetLaunchText(l10n_util::GetStringUTF8(GetProgressMessageFromState(state_)));
 
   UpdateState(NetworkError::ERROR_REASON_UPDATE);
 }
@@ -249,7 +226,7 @@ void AppLaunchSplashScreenHandler::PopulateAppInfo(
 }
 
 void AppLaunchSplashScreenHandler::SetLaunchText(const std::string& text) {
-  CallJS("login.AppLaunchSplashScreen.updateMessage", text);
+  CallExternalAPI("updateMessage", text);
 }
 
 int AppLaunchSplashScreenHandler::GetProgressMessageFromState(
@@ -281,20 +258,7 @@ void AppLaunchSplashScreenHandler::HandleConfigureNetwork() {
     LOG(WARNING) << "No delegate set to handle network configuration.";
 }
 
-void AppLaunchSplashScreenHandler::HandleCancelAppLaunch() {
-  if (delegate_)
-    delegate_->OnCancelAppLaunch();
-  else
-    LOG(WARNING) << "No delegate set to handle cancel app launch";
-}
-
-void AppLaunchSplashScreenHandler::HandleNetworkConfigRequested() {
-  if (!delegate_)
-    return;
-  delegate_->OnNetworkConfigRequested();
-}
-
-void AppLaunchSplashScreenHandler::HandleContinueAppLaunch() {
+void AppLaunchSplashScreenHandler::ContinueAppLaunch() {
   if (!delegate_)
     return;
 
@@ -304,7 +268,7 @@ void AppLaunchSplashScreenHandler::HandleContinueAppLaunch() {
 }
 
 void AppLaunchSplashScreenHandler::DoToggleNetworkConfig(bool visible) {
-  CallJS("login.AppLaunchSplashScreen.toggleNetworkConfig", visible);
+  CallExternalAPI("toggleNetworkConfig", visible);
 }
 
 }  // namespace chromeos

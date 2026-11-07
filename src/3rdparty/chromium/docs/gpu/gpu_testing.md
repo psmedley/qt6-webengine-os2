@@ -211,10 +211,10 @@ in a non-standard output directory. Thus, `out/Release` or `out/Debug` are
 suggested when testing on Android.
 
 **Note:** The tests require some third-party Python packages. Obtaining these
-packages is handled automatically by `vpython`, and the script's shebang should
-use vpython if running the script directly. If you're used to invoking `python`
-to run a script, simply use `vpython` instead, e.g.
-`vpython run_gpu_integration_test.py ...`.
+packages is handled automatically by `vpython3`, and the script's shebang should
+use vpython if running the script directly. If you're used to invoking `python3`
+to run a script, simply use `vpython3` instead, e.g.
+`vpython3 run_gpu_integration_test.py ...`.
 
 You can run a subset of tests with this harness:
 
@@ -294,17 +294,13 @@ of all suites and resulting step names as of April 15th 2021:
   * `context_lost_passthrough_tests`
   * `context_lost_tests`
   * `context_lost_validating_tests`
-  * `gl_renderer_context_lost_tests`
 * `hardware_accelerated_feature`
-  * `gl_renderer_hardware_accelerated_feature_tests`
   * `hardware_accelerated_feature_tests`
 * `gpu_process`
-  * `gl_renderer_gpu_process_launch_tests`
   * `gpu_process_launch_tests`
 * `info_collection`
   * `info_collection_tests`
 * `maps`
-  * `gl_renderer_maps_pixel_tests`
   * `maps_pixel_passthrough_test`
   * `maps_pixel_test`
   * `maps_pixel_validating_test`
@@ -312,7 +308,6 @@ of all suites and resulting step names as of April 15th 2021:
 * `pixel`
   * `android_webview_pixel_skia_gold_test`
   * `egl_pixel_skia_gold_test`
-  * `gl_renderer_pixel_skia_gold_tests`
   * `pixel_skia_gold_passthrough_test`
   * `pixel_skia_gold_validating_test`
   * `pixel_tests`
@@ -451,6 +446,37 @@ Email kbr@ if you try this and find it doesn't work.
 
 [isolate-server-credentials]: gpu_testing_bot_details.md#Isolate-server-credentials
 
+## Debugging a Specific Subset of Tests on a Specific GPU Bot
+
+When a test exhibits flake on the bots, it can be convenient to run it
+repeatedly with local code modifications on the bot where it is exhibiting
+flake. One way of doing this is via swarming (see the below section). However, a
+lower-overhead alternative that also works in the case where you are looking to
+run on a bot for which you cannot locally build is to locally alter the
+configuration of the bot in question to specify that it should run only the
+tests desired, repeating as many times as desired. Instructions for doing this
+are as follows (see the [example CL] for a concrete instantiation of these
+instructions):
+
+1. In testsuite_exceptions.pyl, find the section for the test suite in question
+   (creating it if it doesn't exist).
+2. Add modifications for the bot in question and specify arguments such that
+   your desired tests are run for the desired number of iterations.
+3. Run testing/buildbot/generate_buildbot_json.py and verify that the JSON file
+   for the bot in question was modified as you would expect.
+4. Upload and run tryjobs on that specific bot via "Choose Tryjobs."
+5. Examine the test results. (You can verify that the tests run were as you
+   expected by examining the test results for individual shards of the run
+   of the test suite in question.)
+6. Add logging/code modifications/etc as desired and go back to step 4,
+   repeating the process until you've uncovered the underlying issue.
+7. Remove the the changes to testsuite_exceptions.pyl and the JSON file if
+   turning the CL into one intended for submission!
+
+Here is an [example CL] that does this.
+
+[example CL]: https://chromium-review.googlesource.com/c/chromium/src/+/3898592/4
+
 ## Running Locally Built Binaries on the GPU Bots
 
 See the [Swarming documentation] for instructions on how to upload your binaries to the isolate server and trigger execution on Swarming.
@@ -468,7 +494,7 @@ the Telemetry-based GPU tests' dependencies, which you can then move
 to another machine for testing:
 
 1. Build Chrome (into `out/Release` in this example).
-1. `vpython tools/mb/mb.py zip out/Release/ telemetry_gpu_integration_test out/telemetry_gpu_integration_test.zip`
+1. `vpython3 tools/mb/mb.py zip out/Release/ telemetry_gpu_integration_test out/telemetry_gpu_integration_test.zip`
 
 Then copy telemetry_gpu_integration_test.zip to another machine. Unzip
 it, and cd into the resulting directory. Invoke

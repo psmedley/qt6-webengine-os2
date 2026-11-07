@@ -1,15 +1,16 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_SCHEDULER_TASK_ATTRIBUTION_TRACKER_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_SCHEDULER_TASK_ATTRIBUTION_TRACKER_IMPL_H_
 
+#include "third_party/blink/public/common/scheduler/task_attribution_id.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/scheduler/public/task_attribution_tracker.h"
-#include "third_party/blink/renderer/platform/scheduler/public/task_id.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
+#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink::scheduler {
@@ -29,13 +30,18 @@ class MODULES_EXPORT TaskAttributionTrackerImpl
  public:
   TaskAttributionTrackerImpl();
 
-  absl::optional<TaskId> RunningTaskId(ScriptState*) const override;
+  absl::optional<TaskAttributionId> RunningTaskAttributionId(
+      ScriptState*) const override;
 
-  AncestorStatus IsAncestor(ScriptState*, TaskId parent_id) override;
+  AncestorStatus IsAncestor(ScriptState*, TaskAttributionId parent_id) override;
+  AncestorStatus HasAncestorInSet(
+      ScriptState*,
+      const WTF::HashSet<scheduler::TaskAttributionIdType>&) override;
 
   std::unique_ptr<TaskScope> CreateTaskScope(
       ScriptState* script_state,
-      absl::optional<TaskId> parent_task_id) override;
+      absl::optional<TaskAttributionId> parent_task_id,
+      TaskScopeType type) override;
 
   // The vector size limits the amount of tasks we keep track of. Setting this
   // value too small can result in calls to `IsAncestor` returning an `Unknown`
@@ -43,68 +49,109 @@ class MODULES_EXPORT TaskAttributionTrackerImpl
   // increase this value (at the expense of memory dedicated to task tracking).
   static constexpr size_t kVectorSize = 1024;
 
-  void SetRunningTaskId(absl::optional<TaskId> id) { running_task_id_ = id; }
+  void SetRunningTaskAttributionId(absl::optional<TaskAttributionId> id) {
+    running_task_id_ = id;
+  }
 
-  void TaskScopeCompleted(ScriptState*, TaskId);
+  void TaskScopeCompleted(ScriptState*, TaskAttributionId);
+
+  void RegisterObserver(TaskAttributionTracker::Observer* observer) override {
+    DCHECK(!observer_ || observer == observer_);
+    observer_ = observer;
+  }
+
+  void UnregisterObserver() override { observer_.Clear(); }
 
  private:
-  struct TaskIdPair {
-    TaskIdPair() = default;
-    TaskIdPair(absl::optional<TaskId> parent_id,
-               absl::optional<TaskId> current_id)
+  struct TaskAttributionIdPair {
+    TaskAttributionIdPair() = default;
+    TaskAttributionIdPair(absl::optional<TaskAttributionId> parent_id,
+                          absl::optional<TaskAttributionId> current_id)
         : parent(parent_id), current(current_id) {}
 
     explicit operator bool() const { return parent.has_value(); }
-    absl::optional<TaskId> parent;
-    absl::optional<TaskId> current;
+    absl::optional<TaskAttributionId> parent;
+    absl::optional<TaskAttributionId> current;
   };
 
+  template <typename F>
+  AncestorStatus IsAncestorInternal(ScriptState*, F callback);
+
+  // The TaskScope class maintains information about a task. The task's lifetime
+  // match those of TaskScope, and the task is considered terminated when
+  // TaskScope is destructed. TaskScope takes in the Task's ID, ScriptState, the
+  // ID of the running task (to restore as the running task once this task is
+  // done), and a continuation task ID (to restore in V8 once the current task
+  // is done).
   class TaskScopeImpl : public TaskScope {
    public:
-    TaskScopeImpl(ScriptState*, TaskAttributionTrackerImpl*, TaskId);
+    TaskScopeImpl(ScriptState*,
+                  TaskAttributionTrackerImpl*,
+                  TaskAttributionId scope_task_id,
+                  absl::optional<TaskAttributionId> running_task_id,
+                  absl::optional<TaskAttributionId> continuation_task_id,
+                  TaskScopeType,
+                  absl::optional<TaskAttributionId> parent_task_id);
     ~TaskScopeImpl() override;
     TaskScopeImpl(const TaskScopeImpl&) = delete;
     TaskScopeImpl& operator=(const TaskScopeImpl&) = delete;
 
+    TaskAttributionId GetTaskId() const { return scope_task_id_; }
+    absl::optional<TaskAttributionId> RunningTaskIdToBeRestored() const {
+      return running_task_id_to_be_restored_;
+    }
+    absl::optional<TaskAttributionId> ContinuationTaskIdToBeRestored() const {
+      return continuation_task_id_to_be_restored_;
+    }
+    ScriptState* GetScriptState() const { return script_state_; }
+
    private:
     TaskAttributionTrackerImpl* task_tracker_;
-    TaskId scope_task_id_;
+    TaskAttributionId scope_task_id_;
+    absl::optional<TaskAttributionId> running_task_id_to_be_restored_;
+    absl::optional<TaskAttributionId> continuation_task_id_to_be_restored_;
     Persistent<ScriptState> script_state_;
   };
 
   class MODULES_EXPORT V8Adapter {
    public:
-    virtual absl::optional<TaskId> GetValue(ScriptState*);
-    virtual void SetValue(ScriptState*, absl::optional<TaskId>);
+    virtual absl::optional<TaskAttributionId> GetValue(ScriptState*);
+    virtual void SetValue(ScriptState*, absl::optional<TaskAttributionId>);
     virtual ~V8Adapter() = default;
   };
 
-  TaskIdPair& GetTaskIdPairFromTaskContainer(TaskId);
-  void InsertTaskIdPair(TaskId task_id, absl::optional<TaskId> parent_task_id);
-  void SaveTaskIdStateInV8(ScriptState*, absl::optional<TaskId>);
+  void TaskScopeCompleted(const TaskScopeImpl&);
+  TaskAttributionIdPair& GetTaskAttributionIdPairFromTaskContainer(
+      TaskAttributionId);
+  void InsertTaskAttributionIdPair(
+      TaskAttributionId task_id,
+      absl::optional<TaskAttributionId> parent_task_id);
+  void SaveTaskIdStateInV8(ScriptState*, absl::optional<TaskAttributionId>);
 
   void SetV8AdapterForTesting(std::unique_ptr<V8Adapter> adapter) {
     v8_adapter_.swap(adapter);
   }
 
-  TaskId next_task_id_;
-  absl::optional<TaskId> running_task_id_;
-  WTF::Vector<TaskId> running_task_ids_;
+  TaskAttributionId next_task_id_;
+  absl::optional<TaskAttributionId> running_task_id_;
 
   std::unique_ptr<V8Adapter> v8_adapter_;
 
-  // The task container is a vector of optional TaskIdPairs where its indexes
-  // are TaskId hashes, and its values are the TaskId of the parent task for the
-  // TaskId that is resulted in the index. We're using this vector as a circular
-  // array, where in order to find if task A is an ancestor of task B, we look
-  // up the value at B's taskId hash position, get its parent, and repeat that
-  // process until we either find A in the ancestor chain, get no parent task
-  // (indicating that a task has no parent, so wasn't initiated by another JS
-  // task), or reach a parent that doesn't have the current ID its child though
-  // it should have, which indicates that the parent was overwritten by a newer
-  // task, indicating that we went "full circle".
-  WTF::Vector<TaskIdPair> task_container_ =
-      WTF::Vector<TaskIdPair>(kVectorSize);
+  // The task container is a vector of optional TaskAttributionIdPairs where its
+  // indexes are TaskAttributionId hashes, and its values are the TaskId of the
+  // parent task for the TaskAttributionId that is resulted in the index. We're
+  // using this vector as a circular array, where in order to find if task A is
+  // an ancestor of task B, we look up the value at B's taskAttributionId hash
+  // position, get its parent, and repeat that process until we either find A in
+  // the ancestor chain, get no parent task (indicating that a task has no
+  // parent, so wasn't initiated by another JS task), or reach a parent that
+  // doesn't have the current ID its child though it should have, which
+  // indicates that the parent was overwritten by a newer task, indicating that
+  // we went "full circle".
+  WTF::Vector<TaskAttributionIdPair> task_container_ =
+      WTF::Vector<TaskAttributionIdPair>(kVectorSize);
+
+  WeakPersistent<TaskAttributionTracker::Observer> observer_;
 };
 
 }  // namespace blink::scheduler

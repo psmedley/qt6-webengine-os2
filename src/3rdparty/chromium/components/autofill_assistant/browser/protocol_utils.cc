@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,20 +17,23 @@
 #include "components/autofill_assistant/browser/actions/collect_user_data_action.h"
 #include "components/autofill_assistant/browser/actions/configure_bottom_sheet_action.h"
 #include "components/autofill_assistant/browser/actions/configure_ui_state_action.h"
-#include "components/autofill_assistant/browser/actions/delete_password_action.h"
 #include "components/autofill_assistant/browser/actions/dispatch_js_event_action.h"
-#include "components/autofill_assistant/browser/actions/edit_password_action.h"
 #include "components/autofill_assistant/browser/actions/execute_js_action.h"
 #include "components/autofill_assistant/browser/actions/expect_navigation_action.h"
+#include "components/autofill_assistant/browser/actions/external_action.h"
 #include "components/autofill_assistant/browser/actions/generate_password_for_form_field_action.h"
 #include "components/autofill_assistant/browser/actions/get_element_status_action.h"
 #include "components/autofill_assistant/browser/actions/js_flow_action.h"
 #include "components/autofill_assistant/browser/actions/navigate_action.h"
+#include "components/autofill_assistant/browser/actions/parse_single_tag_xml_action.h"
 #include "components/autofill_assistant/browser/actions/perform_on_single_element_action.h"
 #include "components/autofill_assistant/browser/actions/popup_message_action.h"
 #include "components/autofill_assistant/browser/actions/presave_generated_password_action.h"
 #include "components/autofill_assistant/browser/actions/prompt_action.h"
+#include "components/autofill_assistant/browser/actions/prompt_qr_code_scan_action.h"
+#include "components/autofill_assistant/browser/actions/register_password_reset_request_action.h"
 #include "components/autofill_assistant/browser/actions/release_elements_action.h"
+#include "components/autofill_assistant/browser/actions/report_progress_action.h"
 #include "components/autofill_assistant/browser/actions/reset_pending_credentials_action.h"
 #include "components/autofill_assistant/browser/actions/save_generated_password_action.h"
 #include "components/autofill_assistant/browser/actions/save_submitted_password_action.h"
@@ -99,6 +102,26 @@ std::string ProtocolUtils::CreateGetScriptsRequest(
 }
 
 // static
+ClientContextProto ProtocolUtils::CreateNonSensitiveContext(
+    const ClientContextProto& client_context) {
+  ClientContextProto non_sensitive_context;
+  if (client_context.has_locale()) {
+    non_sensitive_context.set_locale(client_context.locale());
+  }
+  if (client_context.has_country()) {
+    non_sensitive_context.set_country(client_context.country());
+  }
+  if (client_context.chrome().has_chrome_version()) {
+    non_sensitive_context.mutable_chrome()->set_chrome_version(
+        client_context.chrome().chrome_version());
+  }
+  if (client_context.has_platform_type()) {
+    non_sensitive_context.set_platform_type(client_context.platform_type());
+  }
+  return non_sensitive_context;
+}
+
+// static
 std::string ProtocolUtils::CreateCapabilitiesByHashRequest(
     uint32_t hash_prefix_length,
     const std::vector<uint64_t>& hash_prefix,
@@ -109,6 +132,46 @@ std::string ProtocolUtils::CreateCapabilitiesByHashRequest(
   for (uint64_t prefix : hash_prefix) {
     request.add_hash_prefix(prefix);
   }
+  *request.mutable_script_parameters() =
+      script_parameters.ToProto(/* only_non_sensitive_allowlisted = */ true);
+  *request.mutable_client_context() = CreateNonSensitiveContext(client_context);
+
+  std::string serialized_request;
+  bool success = request.SerializeToString(&serialized_request);
+  DCHECK(success);
+  return serialized_request;
+}
+
+// static
+std::string ProtocolUtils::CreateTriggerScriptsByHashRequest(
+    uint32_t hash_prefix_length,
+    const std::vector<uint64_t>& hash_prefix,
+    const ClientContextProto& client_context,
+    const ScriptParameters& script_parameters) {
+  GetTriggerScriptsByHashPrefixRequestProto request;
+  request.set_hash_prefix_length(hash_prefix_length);
+  for (uint64_t prefix : hash_prefix) {
+    request.add_hash_prefix(prefix);
+  }
+  *request.mutable_script_parameters() =
+      script_parameters.ToProto(/* only_non_sensitive_allowlisted */ true);
+  *request.mutable_client_context() = CreateNonSensitiveContext(client_context);
+
+  std::string serialized_request;
+  bool success = request.SerializeToString(&serialized_request);
+  DCHECK(success);
+  return serialized_request;
+}
+
+// static
+std::string ProtocolUtils::CreateGetNoRoundTripScriptsByHashRequest(
+    const uint32_t hash_prefix_length,
+    const uint64_t hash_prefix,
+    const ClientContextProto& client_context,
+    const ScriptParameters& script_parameters) {
+  GetNoRoundTripScriptsByHashPrefixRequestProto request;
+  request.set_hash_prefix_length(hash_prefix_length);
+  request.set_hash_prefix(hash_prefix);
   *request.mutable_script_parameters() =
       script_parameters.ToProto(/* only_non_sensitive_allowlisted = */ true);
 
@@ -122,6 +185,9 @@ std::string ProtocolUtils::CreateCapabilitiesByHashRequest(
   if (client_context.chrome().has_chrome_version()) {
     non_sensitive_context.mutable_chrome()->set_chrome_version(
         client_context.chrome().chrome_version());
+  }
+  if (client_context.has_platform_type()) {
+    non_sensitive_context.set_platform_type(client_context.platform_type());
   }
   *request.mutable_client_context() = non_sensitive_context;
 
@@ -206,6 +272,7 @@ std::string ProtocolUtils::CreateNextScriptActionsRequest(
   ScriptActionRequestProto request_proto;
   request_proto.set_global_payload(global_payload);
   request_proto.set_script_payload(script_payload);
+
   NextScriptActionsRequestProto* next_request =
       request_proto.mutable_next_request();
   for (const auto& processed_action : processed_actions) {
@@ -436,10 +503,6 @@ std::unique_ptr<Action> ProtocolUtils::CreateAction(ActionDelegate* delegate,
                          action.scroll_container().animation()));
     case ActionProto::ActionInfoCase::kSetTouchableArea:
       return std::make_unique<SetTouchableAreaAction>(delegate, action);
-    case ActionProto::ActionInfoCase::kDeletePassword:
-      return std::make_unique<DeletePasswordAction>(delegate, action);
-    case ActionProto::ActionInfoCase::kEditPassword:
-      return std::make_unique<EditPasswordAction>(delegate, action);
     case ActionProto::ActionInfoCase::kBlurField:
       return PerformOnSingleElementAction::WithClientId(
           delegate, action, action.blur_field().client_id(),
@@ -453,6 +516,31 @@ std::unique_ptr<Action> ProtocolUtils::CreateAction(ActionDelegate* delegate,
       return std::make_unique<ExecuteJsAction>(delegate, action);
     case ActionProto::ActionInfoCase::kJsFlow:
       return std::make_unique<JsFlowAction>(delegate, action);
+    case ActionProto::ActionInfoCase::kExternalAction:
+      return std::make_unique<ExternalAction>(delegate, action);
+    case ActionProto::ActionInfoCase::kRegisterPasswordResetRequest:
+      return std::make_unique<RegisterPasswordResetRequestAction>(delegate,
+                                                                  action);
+    case ActionProto::ActionInfoCase::kSetNativeValue:
+      return PerformOnSingleElementAction::WithClientId(
+          delegate, action, action.set_native_value().client_id(),
+          base::BindOnce(
+              &action_delegate_util::PerformWithTextValue, delegate,
+              action.set_native_value().value(),
+              base::BindOnce(&WebController::SetNativeValue,
+                             delegate->GetWebController()->GetWeakPtr())));
+    case ActionProto::ActionInfoCase::kSetNativeChecked:
+      return PerformOnSingleElementAction::WithClientId(
+          delegate, action, action.set_native_checked().client_id(),
+          base::BindOnce(&WebController::SetNativeChecked,
+                         delegate->GetWebController()->GetWeakPtr(),
+                         action.set_native_checked().checked()));
+    case ActionProto::ActionInfoCase::kPromptQrCodeScan:
+      return std::make_unique<PromptQrCodeScanAction>(delegate, action);
+    case ActionProto::ActionInfoCase::kParseSingleTagXml:
+      return std::make_unique<ParseSingleTagXmlAction>(delegate, action);
+    case ActionProto::ActionInfoCase::kReportProgress:
+      return std::make_unique<ReportProgressAction>(delegate, action);
     case ActionProto::ActionInfoCase::ACTION_INFO_NOT_SET: {
       VLOG(1) << "Encountered action with ACTION_INFO_NOT_SET";
       return std::make_unique<UnsupportedAction>(delegate, action);
@@ -688,14 +776,6 @@ absl::optional<ActionProto> ProtocolUtils::ParseFromString(
       success = ParseActionFromString(action_id, bytes, error_message,
                                       proto.mutable_set_touchable_area());
       break;
-    case ActionProto::ActionInfoCase::kDeletePassword:
-      success = ParseActionFromString(action_id, bytes, error_message,
-                                      proto.mutable_delete_password());
-      break;
-    case ActionProto::ActionInfoCase::kEditPassword:
-      success = ParseActionFromString(action_id, bytes, error_message,
-                                      proto.mutable_edit_password());
-      break;
     case ActionProto::ActionInfoCase::kBlurField:
       success = ParseActionFromString(action_id, bytes, error_message,
                                       proto.mutable_blur_field());
@@ -716,6 +796,35 @@ absl::optional<ActionProto> ProtocolUtils::ParseFromString(
     case ActionProto::ActionInfoCase::kJsFlow:
       success = ParseActionFromString(action_id, bytes, error_message,
                                       proto.mutable_js_flow());
+      break;
+    case ActionProto::ActionInfoCase::kExternalAction:
+      success = ParseActionFromString(action_id, bytes, error_message,
+                                      proto.mutable_external_action());
+      break;
+    case ActionProto::ActionInfoCase::kSetNativeValue:
+      success = ParseActionFromString(action_id, bytes, error_message,
+                                      proto.mutable_set_native_value());
+      break;
+    case ActionProto::ActionInfoCase::kSetNativeChecked:
+      success = ParseActionFromString(action_id, bytes, error_message,
+                                      proto.mutable_set_native_checked());
+      break;
+    case ActionProto::ActionInfoCase::kRegisterPasswordResetRequest:
+      success = ParseActionFromString(
+          action_id, bytes, error_message,
+          proto.mutable_register_password_reset_request());
+      break;
+    case ActionProto::ActionInfoCase::kPromptQrCodeScan:
+      success = ParseActionFromString(action_id, bytes, error_message,
+                                      proto.mutable_prompt_qr_code_scan());
+      break;
+    case ActionProto::ActionInfoCase::kParseSingleTagXml:
+      success = ParseActionFromString(action_id, bytes, error_message,
+                                      proto.mutable_parse_single_tag_xml());
+      break;
+    case ActionProto::ActionInfoCase::kReportProgress:
+      success = ParseActionFromString(action_id, bytes, error_message,
+                                      proto.mutable_report_progress());
       break;
     case ActionProto::ActionInfoCase::ACTION_INFO_NOT_SET:
       // This is an "unknown action", handled as such in CreateAction.
@@ -740,7 +849,9 @@ bool ProtocolUtils::ParseActions(ActionDelegate* delegate,
                                  std::string* return_script_payload,
                                  std::vector<std::unique_ptr<Action>>* actions,
                                  std::vector<std::unique_ptr<Script>>* scripts,
-                                 bool* should_update_scripts) {
+                                 bool* should_update_scripts,
+                                 std::string* js_flow_library,
+                                 std::string* report_token) {
   DCHECK(actions);
   DCHECK(scripts);
 
@@ -758,6 +869,14 @@ bool ProtocolUtils::ParseActions(ActionDelegate* delegate,
   }
   if (return_script_payload) {
     *return_script_payload = response_proto.script_payload();
+  }
+  if (js_flow_library) {
+    *js_flow_library = std::move(*response_proto.mutable_js_flow_library());
+  }
+  // Only set the report token if it's empty; it should only be populated in the
+  // initial response from GetActions beginning the script run.
+  if (report_token && report_token->empty()) {
+    *report_token = response_proto.report_token();
   }
 
   for (const auto& action : response_proto.actions()) {
@@ -801,6 +920,20 @@ std::string ProtocolUtils::CreateGetTriggerScriptsRequest(
   *request_proto.mutable_client_context() = client_context;
   *request_proto.mutable_script_parameters() =
       script_parameters.ToProto(/* only_non_sensitive_allowlisted = */ true);
+
+  std::string serialized_request_proto;
+  bool success = request_proto.SerializeToString(&serialized_request_proto);
+  DCHECK(success);
+  return serialized_request_proto;
+}
+
+// static
+std::string ProtocolUtils::CreateReportProgressRequest(
+    const std::string& token,
+    const std::string& payload) {
+  ReportProgressRequestProto request_proto;
+  *request_proto.mutable_token() = token;
+  *request_proto.mutable_payload() = payload;
 
   std::string serialized_request_proto;
   bool success = request_proto.SerializeToString(&serialized_request_proto);
@@ -869,6 +1002,26 @@ bool ProtocolUtils::ParseTriggerScripts(
     *script_parameters = std::make_unique<ScriptParameters>(
         base::flat_map<std::string, std::string>(std::move(parameters)));
   }
+  return true;
+}
+
+// static
+bool ProtocolUtils::ParseTriggerScriptsByHashPrefix(
+    const std::string& response,
+    std::vector<std::pair<std::string, std::string>>* domainScripts) {
+  DCHECK(domainScripts);
+
+  GetTriggerScriptsByHashPrefixResponseProto response_proto;
+  if (!response_proto.ParseFromString(response)) {
+    LOG(ERROR) << "Failed to parse trigger scripts by hash prefix response";
+    return false;
+  }
+
+  for (const auto& match : response_proto.match_info()) {
+    domainScripts->emplace_back(
+        match.domain(), match.trigger_scripts_response().SerializeAsString());
+  }
+
   return true;
 }
 
@@ -942,15 +1095,23 @@ std::string ProtocolUtils::CreateGetUserDataRequest(
     bool request_email,
     bool request_phone,
     bool request_shipping,
+    const std::vector<std::string>& preexisting_address_ids,
     bool request_payment_methods,
     const std::vector<std::string>& supported_card_networks,
+    const std::vector<std::string>& preexisting_payment_instrument_ids,
     const std::string& client_token) {
   GetUserDataRequestProto request_proto;
   request_proto.set_run_id(run_id);
   request_proto.set_request_name(request_name);
   request_proto.set_request_email(request_email);
   request_proto.set_request_phone(request_phone);
-  request_proto.set_request_addresses(request_shipping);
+
+  if (request_shipping) {
+    auto* address_request = request_proto.mutable_request_shipping_addresses();
+    for (const std::string& id : preexisting_address_ids) {
+      address_request->add_preexisting_ids(id);
+    }
+  }
 
   if (request_payment_methods) {
     auto* payment_methods_request =
@@ -959,6 +1120,9 @@ std::string ProtocolUtils::CreateGetUserDataRequest(
     for (const std::string& supported_card_network : supported_card_networks) {
       payment_methods_request->add_supported_card_networks(
           supported_card_network);
+    }
+    for (const std::string& id : preexisting_payment_instrument_ids) {
+      payment_methods_request->add_preexisting_ids(id);
     }
   }
 
@@ -974,6 +1138,7 @@ RoundtripNetworkStats ProtocolUtils::ComputeNetworkStats(
     const ServiceRequestSender::ResponseInfo& response_info,
     const std::vector<std::unique_ptr<Action>>& actions) {
   RoundtripNetworkStats stats;
+  stats.set_num_roundtrips(1);
   stats.set_roundtrip_decoded_body_size_bytes(response.size());
   stats.set_roundtrip_encoded_body_size_bytes(
       response_info.encoded_body_length);

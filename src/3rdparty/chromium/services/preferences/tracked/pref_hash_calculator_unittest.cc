@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,12 +16,12 @@ TEST(PrefHashCalculatorTest, TestCurrentAlgorithm) {
   base::Value string_value_1("string value 1");
   base::Value string_value_2("string value 2");
   base::DictionaryValue dictionary_value_1;
-  dictionary_value_1.SetInteger("int value", 1);
+  dictionary_value_1.GetDict().Set("int value", 1);
   dictionary_value_1.SetKey("nested empty map", base::DictionaryValue());
   base::DictionaryValue dictionary_value_1_equivalent;
-  dictionary_value_1_equivalent.SetInteger("int value", 1);
+  dictionary_value_1_equivalent.GetDict().Set("int value", 1);
   base::DictionaryValue dictionary_value_2;
-  dictionary_value_2.SetInteger("int value", 2);
+  dictionary_value_2.GetDict().Set("int value", 2);
 
   PrefHashCalculator calc1("seed1", "deviceid", "legacydeviceid");
   PrefHashCalculator calc1_dup("seed1", "deviceid", "legacydeviceid");

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -104,8 +104,8 @@ void CSSHWB::setAlpha(const V8CSSNumberish* alpha,
 }
 
 Color CSSHWB::ToColor() const {
-  // MakeRGBAFromHSLA expects hue in the range [0, 6)
-  return MakeRGBAFromHWBA(
+  // FromHSLA expects hue in the range [0, 6)
+  return Color::FromHWBA(
       h_->to(CSSPrimitiveValue::UnitType::kDegrees)->value() / 60,
       ComponentToColorInput(w_), ComponentToColorInput(b_),
       ComponentToColorInput(alpha_));

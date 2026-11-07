@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,10 +64,11 @@ class CORE_EXPORT DevToolsEmulator final
 
   bool HasViewportOverride() const { return !!viewport_override_; }
 
-  // Notify the DevToolsEmulator about a scroll or scale change of the main
-  // frame. Returns an updated emulation transform for a viewport override, and
-  // should only be called when HasViewportOverride() is true.
-  TransformationMatrix MainFrameScrollOrScaleChanged();
+  // Notify the DevToolsEmulator about a scroll or scale change of the
+  // outermost main frame. Returns an updated emulation transform for a
+  // viewport override, and should only be called when HasViewportOverride() is
+  // true.
+  TransformationMatrix OutermostMainFrameScrollOrScaleChanged();
 
   // Returns the scale used to convert incoming input events while emulating
   // device metics.

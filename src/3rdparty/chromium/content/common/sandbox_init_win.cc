@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/base_switches.h"
+#include "base/command_line.h"
 #include "base/trace_event/trace_event.h"
 #include "base/win/scoped_process_information.h"
 #include "content/public/common/content_switches.h"

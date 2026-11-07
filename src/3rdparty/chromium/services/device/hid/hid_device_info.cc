@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -70,6 +70,8 @@ HidDeviceInfo::HidDeviceInfo(HidPlatformDeviceId platform_device_id,
       HidBlocklist::kReportTypeOutput, vendor_id, product_id, collections);
   auto protected_feature_report_ids = HidBlocklist::Get().GetProtectedReportIds(
       HidBlocklist::kReportTypeFeature, vendor_id, product_id, collections);
+  auto is_excluded_by_blocklist =
+      HidBlocklist::Get().IsVendorProductBlocked(vendor_id, product_id);
 
   std::vector<uint8_t> report_ids;
   if (has_report_id) {
@@ -89,7 +91,7 @@ HidDeviceInfo::HidDeviceInfo(HidPlatformDeviceId platform_device_id,
       std::move(collections), has_report_id, max_input_report_size,
       max_output_report_size, max_feature_report_size, device_node,
       protected_input_report_ids, protected_output_report_ids,
-      protected_feature_report_ids);
+      protected_feature_report_ids, is_excluded_by_blocklist);
 }
 
 HidDeviceInfo::HidDeviceInfo(HidPlatformDeviceId platform_device_id,
@@ -121,6 +123,8 @@ HidDeviceInfo::HidDeviceInfo(HidPlatformDeviceId platform_device_id,
       HidBlocklist::kReportTypeOutput, vendor_id, product_id, collections);
   auto protected_feature_report_ids = HidBlocklist::Get().GetProtectedReportIds(
       HidBlocklist::kReportTypeFeature, vendor_id, product_id, collections);
+  auto is_excluded_by_blocklist =
+      HidBlocklist::Get().IsVendorProductBlocked(vendor_id, product_id);
 
   device_ = mojom::HidDeviceInfo::New(
       base::GenerateGUID(), physical_device_id, vendor_id, product_id,
@@ -128,7 +132,8 @@ HidDeviceInfo::HidDeviceInfo(HidPlatformDeviceId platform_device_id,
       /*report_descriptor=*/std::vector<uint8_t>{}, std::move(collections),
       has_report_id, max_input_report_size, max_output_report_size,
       max_feature_report_size, /*device_node=*/"", protected_input_report_ids,
-      protected_output_report_ids, protected_feature_report_ids);
+      protected_output_report_ids, protected_feature_report_ids,
+      is_excluded_by_blocklist);
 }
 
 HidDeviceInfo::~HidDeviceInfo() = default;
@@ -178,6 +183,10 @@ void HidDeviceInfo::AppendDeviceInfo(scoped_refptr<HidDeviceInfo> device_info) {
       HidBlocklist::Get().GetProtectedReportIds(
           HidBlocklist::kReportTypeFeature, device_->vendor_id,
           device_->product_id, device_->collections);
+
+  device_->is_excluded_by_blocklist =
+      HidBlocklist::Get().IsVendorProductBlocked(device_->vendor_id,
+                                                 device_->product_id);
 }
 
 const mojom::HidCollectionInfo* HidDeviceInfo::FindCollectionWithReport(
@@ -192,8 +201,7 @@ const mojom::HidCollectionInfo* HidDeviceInfo::FindCollectionWithReport(
     // nullptr if there is no report of that type.
     auto find_it = base::ranges::find_if(
         device_->collections, [=](const auto& collection) {
-          const auto& reports = ReportsForType(collection, report_type);
-          return !reports.empty();
+          return !ReportsForType(collection, report_type).empty();
         });
     if (find_it == device_->collections.end())
       return nullptr;
@@ -210,10 +218,9 @@ const mojom::HidCollectionInfo* HidDeviceInfo::FindCollectionWithReport(
   // `report_type`, or nullptr if it is not in any collection.
   auto find_it =
       base::ranges::find_if(device_->collections, [=](const auto& collection) {
-        const auto& reports = ReportsForType(collection, report_type);
-        return base::Contains(reports, report_id, [](const auto& report) {
-          return report->report_id;
-        });
+        return base::Contains(ReportsForType(collection, report_type),
+                              report_id,
+                              &mojom::HidReportDescription::report_id);
       });
   if (find_it == device_->collections.end())
     return nullptr;

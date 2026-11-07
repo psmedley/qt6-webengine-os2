@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,8 +20,9 @@ namespace {
 bool IsFacetValidForAffiliation(const FacetURI& facet) {
   return facet.IsValidAndroidFacetURI() ||
          (facet.IsValidWebFacetURI() &&
-          base::FeatureList::IsEnabled(
-              password_manager::features::kFillingAcrossAffiliatedWebsites));
+          (base::FeatureList::IsEnabled(
+               features::kFillingAcrossAffiliatedWebsites) ||
+           base::FeatureList::IsEnabled(features::kPasswordsGrouping)));
 }
 
 }  // namespace
@@ -168,10 +169,9 @@ void AffiliatedMatchHelper::OnGetPasswordStoreResults(
     FacetURI facet_uri =
         FacetURI::FromPotentiallyInvalidSpec(form->signon_realm);
     if (IsFacetValidForAffiliation(facet_uri))
-      affiliation_service_->Prefetch(facet_uri, base::Time::Max());
-
-    facets.push_back(std::move(facet_uri));
+      facets.push_back(std::move(facet_uri));
   }
+  affiliation_service_->KeepPrefetchForFacets(facets);
   affiliation_service_->TrimUnusedCache(std::move(facets));
 }
 

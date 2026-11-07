@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,12 +24,8 @@
 #include "ui/gl/gl_workarounds.h"
 #include "ui/gl/gpu_preference.h"
 
-namespace gfx {
-class ColorSpace;
-}  // namespace gfx
-
 namespace gl {
-class YUVToRGBConverter;
+class GLDisplayEGL;
 }  // namespace gl
 
 namespace gpu {
@@ -222,11 +218,6 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext>,
   // Returns the GL renderer string. The context must be current.
   virtual std::string GetGLRenderer();
 
-  // Returns a helper structure to convert the YUV color space |color_space|
-  // to its associated full-range RGB color space.
-  virtual YUVToRGBConverter* GetYUVToRGBConverter(
-      const gfx::ColorSpace& color_space);
-
   // Get the CurrentGL object for this context containing the driver, version
   // and API.
   CurrentGL* GetCurrentGL();
@@ -246,6 +237,12 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext>,
   // contexts. Forces full reset from unknown state the next time a virtual
   // context is made current.
   void DirtyVirtualContextState();
+
+#if defined(USE_EGL)
+  // Returns GLDisplayEGL this context belongs to if this context is a
+  // GLContextEGL; returns nullptr otherwise.
+  virtual GLDisplayEGL* GetGLDisplayEGL();
+#endif  // USE_EGL
 
 #if BUILDFLAG(IS_APPLE)
   // Create a fence for all work submitted to this context so far, and return a

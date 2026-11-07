@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 
+#include "base/fuchsia/fuchsia_logging.h"
 #include "base/logging.h"
 #include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
@@ -178,10 +179,11 @@ TouchEvent CreateTouchEventDraft(const fup::TouchEvent& event,
                                 view_parameters.viewport_to_view_transform);
   // TODO(fxbug.dev/88580): Consider setting hover via
   // ui::TouchEvent::set_hovering().
-  return TouchEvent(event_type, gfx::PointF(logical[0], logical[1]),
-                    gfx::PointF(sample.position_in_viewport()[0],
-                                sample.position_in_viewport()[1]),
-                    timestamp, pointer_details);
+  gfx::PointF location(logical[0], logical[1]);
+  gfx::PointF root_location(sample.position_in_viewport()[0],
+                            sample.position_in_viewport()[1]);
+  return TouchEvent(event_type, location, root_location, timestamp,
+                    pointer_details);
 }
 
 // It returns a "draft" because the coordinates are logical. Later,
@@ -233,31 +235,63 @@ std::unique_ptr<MouseEvent> CreateMouseEventDraft(
   if (event_type == ET_MOUSEWHEEL) {
     // TODO(fxbug.dev/92938): Maybe also support ctrl+wheel event here.
 
-    // Fuchsia reports wheel rotated ticks, multiple |kWheelDelta| for pixel
-    // offset.
-    const int offset_x = sample.has_scroll_h()
-                             ? static_cast<int>(sample.scroll_h()) * kWheelDelta
-                             : 0;
-    const int offset_y = sample.has_scroll_v()
-                             ? static_cast<int>(sample.scroll_v()) * kWheelDelta
-                             : 0;
+    const int tick_x_120ths =
+        sample.has_scroll_h()
+            ? static_cast<int>(sample.scroll_h()) * kWheelDelta
+            : 0;
+    const int tick_y_120ths =
+        sample.has_scroll_v()
+            ? static_cast<int>(sample.scroll_v()) * kWheelDelta
+            : 0;
 
-    // TODO(fxbug.dev/85388): If mouse wheel has by detent(tick) scroll offset,
-    // we can fill them into |tick_120ths|.
+    // Fuchsia reports suggested scroll pixel in physical, but for old version,
+    // Fuchsia reports wheel rotated ticks need to multiple |kWheelDelta| for
+    // pixel offset.
+    const float offset_x =
+        sample.has_scroll_h_physical_pixel()
+            ? static_cast<float>(sample.scroll_h_physical_pixel())
+            : static_cast<float>(tick_x_120ths);
+    const float offset_y =
+        sample.has_scroll_v_physical_pixel()
+            ? static_cast<float>(sample.scroll_v_physical_pixel())
+            : static_cast<float>(tick_y_120ths);
+
+    if (sample.has_is_precision_scroll() && sample.is_precision_scroll()) {
+      // For precision scroll device, mostly are touchpads for now, need to use
+      // ScrollEvent instead of MouseWheelEvent to prevent animation
+      // interpolation in smooth scrolling.
+      // Because we only support touchpad as precision scroll device now,
+      // finger_count is 2. Maybe need to use different number when we support
+      // precision wheel mouse.
+      return std::make_unique<ScrollEvent>(
+          ui::ET_SCROLL, location, root_location, timestamp,
+          pressed_buttons_flags, offset_x, offset_y, offset_x, offset_y,
+          /*finger_count=*/2);
+    }
     return std::make_unique<MouseWheelEvent>(
-        gfx::Vector2d(offset_x, offset_y), location, root_location, timestamp,
-        pressed_buttons_flags, changed_buttons_flags);
+        gfx::Vector2d(static_cast<int>(offset_x), static_cast<int>(offset_y)),
+        location, root_location, timestamp, pressed_buttons_flags,
+        changed_buttons_flags, gfx::Vector2d(tick_x_120ths, tick_y_120ths));
   }
-  return std::make_unique<MouseEvent>(event_type, location, root_location,
-                                      timestamp, pressed_buttons_flags,
-                                      changed_buttons_flags, pointer_details);
+  auto mouse_event = std::make_unique<MouseEvent>(
+      event_type, location, root_location, timestamp, pressed_buttons_flags,
+      changed_buttons_flags, pointer_details);
+  mouse_event->InitializeNative();
+  return mouse_event;
 }
 
 }  // namespace
 
 PointerEventsHandler::PointerEventsHandler(fup::TouchSourceHandle touch_source,
                                            fup::MouseSourceHandle mouse_source)
-    : touch_source_(touch_source.Bind()), mouse_source_(mouse_source.Bind()) {}
+    : touch_source_(touch_source.Bind()), mouse_source_(mouse_source.Bind()) {
+  touch_source_.set_error_handler([](zx_status_t status) {
+    ZX_LOG(ERROR, status) << "fuchsia.ui.pointer.TouchSource disconnected.";
+  });
+  mouse_source_.set_error_handler([](zx_status_t status) {
+    ZX_LOG(ERROR, status) << "fuchsia.ui.pointer.MouseSource disconnected.";
+  });
+}
 
 PointerEventsHandler::~PointerEventsHandler() = default;
 
@@ -382,8 +416,10 @@ void PointerEventsHandler::OnMouseSourceWatchResult(
       // Update mouse_down_ for the next Fuchsia event.
       mouse_down_[id] = pressed_buttons;
 
-      const bool is_wheel_event =
-          sample.has_scroll_v() || sample.has_scroll_h();
+      const bool is_wheel_event = sample.has_scroll_v() ||
+                                  sample.has_scroll_h() ||
+                                  sample.has_scroll_h_physical_pixel() ||
+                                  sample.has_scroll_v_physical_pixel();
       // Do not filterout mouse wheel here, because the wheel event may be
       // bundled with button down and button up event. Chromium will need to
       // split it to 2 events.

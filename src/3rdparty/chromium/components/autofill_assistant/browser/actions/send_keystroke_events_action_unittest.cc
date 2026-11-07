@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 #include "components/autofill_assistant/browser/actions/mock_action_delegate.h"
 #include "components/autofill_assistant/browser/client_status.h"
 #include "components/autofill_assistant/browser/dom_action.pb.h"
-#include "components/autofill_assistant/browser/mock_website_login_manager.h"
+#include "components/autofill_assistant/browser/public/password_change/mock_website_login_manager.h"
 #include "components/autofill_assistant/browser/value_util.h"
-#include "components/autofill_assistant/browser/web/element_finder.h"
+#include "components/autofill_assistant/browser/web/element_finder_result.h"
 #include "components/autofill_assistant/browser/web/element_store.h"
 #include "components/autofill_assistant/browser/web/mock_web_controller.h"
 #include "content/public/test/browser_task_environment.h"
@@ -120,7 +120,7 @@ TEST_F(SendKeystrokeEventsActionTest, PasswordTextValueReturnLastTimeUsed) {
   content::WebContentsTester::For(web_contents_.get())
       ->NavigateAndCommit(GURL(kUrl));
   element.SetObjectId("id");
-  element.SetRenderFrameHost(web_contents_->GetMainFrame());
+  element.SetRenderFrameHostForTest(web_contents_->GetPrimaryMainFrame());
   mock_action_delegate_.GetElementStore()->AddElement("e",
                                                       element.dom_object());
 
@@ -161,7 +161,7 @@ TEST_F(SendKeystrokeEventsActionTest,
   content::WebContentsTester::For(web_contents_.get())
       ->NavigateAndCommit(GURL(kUrl));
   element.SetObjectId("id");
-  element.SetRenderFrameHost(web_contents_->GetMainFrame());
+  element.SetRenderFrameHostForTest(web_contents_->GetPrimaryMainFrame());
   mock_action_delegate_.GetElementStore()->AddElement("e",
                                                       element.dom_object());
 

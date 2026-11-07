@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,7 +65,7 @@ void AssociatedInterfacePtrStateBase::Bind(
     std::unique_ptr<MessageReceiver> validator,
     scoped_refptr<base::SequencedTaskRunner> runner,
     const char* interface_name,
-    MessageToStableIPCHashCallback ipc_hash_callback,
+    MessageToMethodInfoCallback method_info_callback,
     MessageToMethodNameCallback method_name_callback) {
   DCHECK(!endpoint_client_);
   DCHECK_EQ(0u, version_);
@@ -78,7 +78,7 @@ void AssociatedInterfacePtrStateBase::Bind(
       std::move(handle), nullptr, std::move(validator),
       /*sync_method_ordinals=*/base::span<const uint32_t>(),
       GetTaskRunnerToUseFromUserProvidedTaskRunner(std::move(runner)), 0u,
-      interface_name, ipc_hash_callback, method_name_callback);
+      interface_name, method_info_callback, method_name_callback);
 }
 
 ScopedInterfaceEndpointHandle AssociatedInterfacePtrStateBase::PassHandle() {

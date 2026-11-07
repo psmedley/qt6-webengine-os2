@@ -23,6 +23,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_SVG_LAYOUT_SVG_ROOT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_SVG_LAYOUT_SVG_ROOT_H_
 
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/layout_replaced.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_content_container.h"
@@ -45,6 +46,9 @@ class CORE_EXPORT LayoutSVGRoot final : public LayoutReplaced {
 
   void IntrinsicSizingInfoChanged();
   void UnscaledIntrinsicSizingInfo(IntrinsicSizingInfo&) const;
+  // This is a special case for SVG documents with percentage dimensions which
+  // would normally not change under zoom. See: https://crbug.com/222786.
+  double LogicalSizeScaleFactorForPercentageLengths() const;
 
   // If you have a LayoutSVGRoot, use firstChild or lastChild instead.
   void SlowFirstChild() const = delete;
@@ -102,8 +106,6 @@ class CORE_EXPORT LayoutSVGRoot final : public LayoutReplaced {
     return local_to_border_box_transform_;
   }
 
-  bool ShouldApplyViewportClip() const;
-
   void RecalcVisualOverflow() override;
 
   bool HasNonIsolatedBlendingDescendants() const final;
@@ -117,12 +119,7 @@ class CORE_EXPORT LayoutSVGRoot final : public LayoutReplaced {
   }
 
  private:
-  OverflowClipAxes ComputeOverflowClipAxes() const override {
-    NOT_DESTROYED();
-    if (ShouldApplyViewportClip())
-      return kOverflowClipBothAxis;
-    return LayoutReplaced::ComputeOverflowClipAxes();
-  }
+  OverflowClipAxes ComputeOverflowClipAxes() const override;
   LayoutRect ComputeContentsVisualOverflow() const;
 
   LayoutObjectChildList* VirtualChildren() override {
@@ -177,7 +174,7 @@ class CORE_EXPORT LayoutSVGRoot final : public LayoutReplaced {
   bool NodeAtPoint(HitTestResult&,
                    const HitTestLocation&,
                    const PhysicalOffset& accumulated_offset,
-                   HitTestAction) override;
+                   HitTestPhase) override;
 
   void MapLocalToAncestor(const LayoutBoxModelObject* ancestor,
                           TransformState&,
@@ -197,10 +194,6 @@ class CORE_EXPORT LayoutSVGRoot final : public LayoutReplaced {
   SVGTransformChange BuildLocalToBorderBoxTransform();
 
   PositionWithAffinity PositionForPoint(const PhysicalOffset&) const final;
-
-  // This is a special case for SVG documents with percentage dimensions which
-  // would normally not change under zoom. See: https://crbug.com/222786.
-  double LogicalSizeScaleFactorForPercentageLengths() const;
 
   PaintLayerType LayerTypeRequired() const override;
 

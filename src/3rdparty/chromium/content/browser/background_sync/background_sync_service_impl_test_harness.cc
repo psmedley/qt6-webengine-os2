@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,13 +14,13 @@
 #include "content/browser/background_sync/background_sync_network_observer.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/permission_type.h"
 #include "content/public/test/background_sync_test_util.h"
 #include "content/public/test/mock_permission_manager.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/test/storage_partition_test_helpers.h"
 #include "content/test/test_background_sync_context.h"
 #include "mojo/public/cpp/system/functions.h"
+#include "third_party/blink/public/common/permissions/permission_utils.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration_options.mojom.h"
@@ -133,10 +133,11 @@ void BackgroundSyncServiceImplTestHarness::CreateTestHelper() {
   std::unique_ptr<MockPermissionManager> mock_permission_manager =
       std::make_unique<testing::NiceMock<MockPermissionManager>>();
   ON_CALL(*mock_permission_manager,
-          GetPermissionStatus(PermissionType::BACKGROUND_SYNC, _, _))
+          GetPermissionStatus(blink::PermissionType::BACKGROUND_SYNC, _, _))
       .WillByDefault(testing::Return(blink::mojom::PermissionStatus::GRANTED));
-  embedded_worker_helper_->browser_context()->SetPermissionControllerDelegate(
-      std::move(mock_permission_manager));
+  TestBrowserContext::FromBrowserContext(
+      embedded_worker_helper_->browser_context())
+      ->SetPermissionControllerDelegate(std::move(mock_permission_manager));
 }
 
 void BackgroundSyncServiceImplTestHarness::CreateStoragePartition() {
@@ -185,7 +186,8 @@ void BackgroundSyncServiceImplTestHarness::CreateServiceWorkerRegistration() {
       blink::mojom::FetchClientSettingsObject::New(),
       base::BindOnce(&RegisterServiceWorkerCallback, &called,
                      &sw_registration_id_),
-      /*requesting_frame_id=*/GlobalRenderFrameHostId());
+      /*requesting_frame_id=*/GlobalRenderFrameHostId(),
+      PolicyContainerPolicies());
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(called);
 

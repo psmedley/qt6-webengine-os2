@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,15 +15,14 @@ namespace {
 
 class DefaultCryptoStreamFactory : public QuicCryptoClientStreamFactory {
  public:
-  quic::QuicCryptoClientStream* CreateQuicCryptoClientStream(
+  std::unique_ptr<quic::QuicCryptoClientStream> CreateQuicCryptoClientStream(
       const quic::QuicServerId& server_id,
       QuicChromiumClientSession* session,
       std::unique_ptr<quic::ProofVerifyContext> proof_verify_context,
       quic::QuicCryptoClientConfig* crypto_config) override {
-    return new quic::QuicCryptoClientStream(server_id, session,
-                                            std::move(proof_verify_context),
-                                            crypto_config, session,
-                                            /*has_application_state = */ true);
+    return std::make_unique<quic::QuicCryptoClientStream>(
+        server_id, session, std::move(proof_verify_context), crypto_config,
+        session, /*has_application_state = */ true);
   }
 };
 

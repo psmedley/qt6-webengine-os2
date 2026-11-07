@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -20,7 +20,7 @@ namespace {
 bool SkipString16(base::PickleIterator* iter) {
   DCHECK(iter);
 
-  int len;
+  size_t len;
   if (!iter->ReadLength(&len))
     return false;
   return iter->SkipBytes(len * sizeof(char16_t));

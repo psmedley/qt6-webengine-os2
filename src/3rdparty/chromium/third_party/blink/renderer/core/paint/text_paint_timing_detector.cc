@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,8 +40,11 @@ void LargestTextPaintManager::PopulateTraceValue(
   value.SetInteger("size", static_cast<int>(first_text_paint.first_size));
   value.SetInteger("candidateIndex", ++count_candidates_);
   value.SetBoolean("isMainFrame", frame_view_->GetFrame().IsMainFrame());
-  value.SetBoolean("isOOPIF",
-                   !frame_view_->GetFrame().LocalFrameRoot().IsMainFrame());
+  value.SetBoolean("isOutermostMainFrame",
+                   frame_view_->GetFrame().IsOutermostMainFrame());
+  value.SetBoolean("isEmbeddedFrame",
+                   !frame_view_->GetFrame().LocalFrameRoot().IsMainFrame() ||
+                       frame_view_->GetFrame().IsInFencedFrameTree());
   if (first_text_paint.lcp_rect_info_) {
     first_text_paint.lcp_rect_info_->OutputToTraceValue(value);
   }
@@ -60,9 +63,11 @@ void LargestTextPaintManager::ReportCandidateToTrace(
 }
 
 TextRecord* LargestTextPaintManager::UpdateCandidate() {
-  const base::TimeTicks time =
-      largest_text_ ? largest_text_->paint_time : base::TimeTicks();
-  const uint64_t size = largest_text_ ? largest_text_->first_size : 0;
+  if (!largest_text_) {
+    return nullptr;
+  }
+  const base::TimeTicks time = largest_text_->paint_time;
+  const uint64_t size = largest_text_->first_size;
   DCHECK(paint_timing_detector_);
   bool changed =
       paint_timing_detector_->NotifyIfChangedLargestTextPaint(time, size);
@@ -86,8 +91,8 @@ void TextPaintTimingDetector::OnPaintFinished() {
   // |WrapCrossThreadWeakPersistent| guarantees that when |this| is killed,
   // the callback function will not be invoked.
   RegisterNotifyPresentationTime(
-      WTF::Bind(&TextPaintTimingDetector::ReportPresentationTime,
-                WrapCrossThreadWeakPersistent(this), frame_index_++));
+      WTF::BindOnce(&TextPaintTimingDetector::ReportPresentationTime,
+                    WrapCrossThreadWeakPersistent(this), frame_index_++));
   added_entry_in_latest_frame_ = false;
 }
 
@@ -115,7 +120,7 @@ void TextPaintTimingDetector::ReportPresentationTime(
     }
   }
   AssignPaintTimeToQueuedRecords(frame_index, timestamp);
-  if (ltp_manager_)
+  if (recording_largest_text_paint_)
     ltp_manager_->UpdateCandidate();
 }
 
@@ -175,7 +180,13 @@ void TextPaintTimingDetector::RecordAggregatedText(
 }
 
 void TextPaintTimingDetector::StopRecordingLargestTextPaint() {
-  ltp_manager_.Clear();
+  recording_largest_text_paint_ = false;
+}
+
+void TextPaintTimingDetector::RestartRecordingLargestTextPaint() {
+  recording_largest_text_paint_ = true;
+  texts_queued_for_paint_time_.clear();
+  ltp_manager_->Clear();
 }
 
 void TextPaintTimingDetector::ReportLargestIgnoredText() {

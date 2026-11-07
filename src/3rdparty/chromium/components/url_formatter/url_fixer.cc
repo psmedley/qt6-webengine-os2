@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,19 +6,18 @@
 
 #include <stddef.h>
 
-#include <algorithm>
-
 #include "base/check_op.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/i18n/char_iterator.h"
 #include "base/ranges/algorithm.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "components/url_formatter/url_formatter.h"
-#include "net/base/escape.h"
 #include "net/base/filename_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "url/third_party/mozilla/url_parse.h"
@@ -195,7 +194,7 @@ std::string FixupPath(const std::string& text) {
   if (file_url.is_valid()) {
     return base::UTF16ToUTF8(url_formatter::FormatUrl(
         file_url, url_formatter::kFormatUrlOmitUsernamePassword,
-        net::UnescapeRule::NORMAL, nullptr, nullptr, nullptr));
+        base::UnescapeRule::NORMAL, nullptr, nullptr, nullptr));
   }
 
   // Invalid file URL, just return the input.
@@ -352,8 +351,7 @@ bool HasPort(const std::string& original_text,
   //
   // https://url.spec.whatwg.org/#url-port-string says that "A URL-port string
   // must be zero or more ASCII digits".
-  if (!std::all_of(port_piece.begin(), port_piece.end(),
-                   base::IsAsciiDigit<char>)) {
+  if (!base::ranges::all_of(port_piece, base::IsAsciiDigit<char>)) {
     return false;
   }
 
@@ -491,10 +489,13 @@ std::string SegmentURLInternal(std::string* text, url::Parsed* parts) {
 
   // We need to add a scheme in order for ParseStandardURL to be happy.
   // Find the first non-whitespace character.
-  std::string::iterator first_nonwhite = text->begin();
-  while ((first_nonwhite != text->end()) &&
-         base::IsUnicodeWhitespace(*first_nonwhite))
-    ++first_nonwhite;
+  std::string::iterator first_nonwhite = text->end();
+  for (base::i18n::UTF8CharIterator iter(*text); !iter.end(); iter.Advance()) {
+    if (!base::IsUnicodeWhitespace(iter.get())) {
+      first_nonwhite = text->begin() + iter.array_pos();
+      break;
+    }
+  }
 
   // Construct the text to parse by inserting the scheme.
   std::string inserted_text(scheme);
@@ -575,7 +576,7 @@ GURL FixupURL(const std::string& text, const std::string& desired_tld) {
 
   // 'about:blank' and 'about:srcdoc' are special-cased in various places in the
   // code and shouldn't use the chrome: scheme.
-  if (base::LowerCaseEqualsASCII(scheme, url::kAboutScheme)) {
+  if (base::EqualsCaseInsensitiveASCII(scheme, url::kAboutScheme)) {
     GURL about_url(base::ToLowerASCII(trimmed));
     if (about_url.IsAboutBlank() || about_url.IsAboutSrcdoc())
       return about_url;
@@ -650,13 +651,12 @@ GURL FixupRelativeFile(const base::FilePath& base_dir,
 // Not a path as entered, try unescaping it in case the user has
 // escaped things. We need to go through 8-bit since the escaped values
 // only represent 8-bit values.
-    std::string unescaped = net::UnescapeURLComponent(
-        trimmed,
-        net::UnescapeRule::SPACES | net::UnescapeRule::PATH_SEPARATORS |
-            net::UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS);
+std::string unescaped = base::UnescapeURLComponent(
+    trimmed, base::UnescapeRule::SPACES | base::UnescapeRule::PATH_SEPARATORS |
+                 base::UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS);
 
-    if (!ValidPathForFile(unescaped, &full_path))
-      is_file = false;
+if (!ValidPathForFile(unescaped, &full_path))
+  is_file = false;
   }
 
   // Put back the current directory if we saved it.
@@ -668,7 +668,7 @@ GURL FixupRelativeFile(const base::FilePath& base_dir,
     if (file_url.is_valid())
       return GURL(base::UTF16ToUTF8(url_formatter::FormatUrl(
           file_url, url_formatter::kFormatUrlOmitUsernamePassword,
-          net::UnescapeRule::NORMAL, nullptr, nullptr, nullptr)));
+          base::UnescapeRule::NORMAL, nullptr, nullptr, nullptr)));
     // Invalid files fall through to regular processing.
   }
 

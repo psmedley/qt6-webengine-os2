@@ -48,13 +48,14 @@ cc_library(
     defines = ["NO_WEBRTC"],
     visibility = [
         "//connections:__subpackages__",
+        "//internal:__pkg__",
         "//internal/analytics:__subpackages__",
         "//internal/platform:__subpackages__",
         "//internal/platform/implementation:__subpackages__",
         "//internal/proto/analytics:__subpackages__",
         "//location/nearby/cpp/sharing:__subpackages__",
+        "//presence:__subpackages__",
         "//third_party/nearby/cpp/cal:__subpackages__",
-        "//third_party/nearby/presence:__subpackages__",
     ],
     deps = [
         "//proto:connections_enums_cc_proto",
@@ -105,8 +106,11 @@ cc_library(
         "//connections:__subpackages__",
         "//googlemac/iPhone/Shared/Nearby/Connections:__subpackages__",
         "//internal/analytics:__subpackages__",
+        "//internal/crypto:__subpackages__",
         "//internal/platform:__subpackages__",
         "//internal/proto/analytics:__subpackages__",
+        "//location/nearby/analytics/cpp:__subpackages__",
+        "//presence:__subpackages__",
     ],
     deps = [
         "//internal/platform/implementation:platform",
@@ -139,6 +143,27 @@ cc_library(
 )
 
 cc_library(
+    name = "connection_info",
+    srcs = [
+        "bluetooth_connection_info.cc",
+    ],
+    hdrs = [
+        "bluetooth_connection_info.h",
+        "connection_info.h",
+    ],
+    defines = ["NO_WEBRTC"],
+    visibility = [
+        "//connections:__subpackages__",
+        "//internal:__pkg__",
+        "//internal/platform/implementation:__subpackages__",
+    ],
+    deps = [
+        "//internal/platform:base",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
     name = "error_code_recorder",
     srcs = [
         "error_code_recorder.cc",
@@ -161,6 +186,27 @@ cc_library(
 )
 
 cc_library(
+    name = "uuid",
+    srcs = [
+        "uuid.cc",
+    ],
+    hdrs = [
+        "uuid.h",
+    ],
+    defines = ["NO_WEBRTC"],
+    visibility = [
+        "//connections/implementation:__subpackages__",
+        "//internal/platform:__pkg__",
+        "//internal/platform/implementation:__subpackages__",
+        "//presence:__subpackages__",
+    ],
+    deps = [
+        "//internal/platform/implementation:types",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
     name = "test_util",
     testonly = True,
     srcs = [
@@ -174,14 +220,18 @@ cc_library(
         "//connections:__subpackages__",
         "//internal/platform:__pkg__",
         "//internal/platform/implementation:__subpackages__",
+        "//presence:__subpackages__",
     ],
     deps = [
         ":base",
         ":logging",
+        ":uuid",
         "//internal/platform:types",
         "//internal/platform/implementation:comm",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
     ],
 )
 
@@ -263,9 +313,9 @@ cc_library(
         "cancelable_alarm.h",
         "cancellable_task.h",
         "condition_variable.h",
-        "core_config.h",
         "count_down_latch.h",
         "crypto.h",
+        "direct_executor.h",
         "file.h",
         "future.h",
         "lockable.h",
@@ -292,6 +342,7 @@ cc_library(
         "//internal/platform/implementation/ios:__subpackages__",
         "//internal/platform/implementation/windows:__subpackages__",
         "//location/nearby/cpp/sharing:__subpackages__",
+        "//presence:__subpackages__",
     ],
     deps = [
         ":base",
@@ -311,17 +362,22 @@ cc_library(
         "ble.cc",
         "ble_v2.cc",
         "bluetooth_classic.cc",
+        "credential_storage_impl.cc",
         "file.cc",
         "wifi_hotspot.cc",
         "wifi_lan.cc",
+        "wifi_utils.cc",
     ],
     hdrs = [
         "ble.h",
         "ble_v2.h",
         "bluetooth_adapter.h",
         "bluetooth_classic.h",
+        "credential_storage_impl.h",
+        "wifi.h",
         "wifi_hotspot.h",
         "wifi_lan.h",
+        "wifi_utils.h",
     ],
     copts = ["-DCORE_ADAPTER_DLL"],
     defines = ["NO_WEBRTC"],
@@ -330,16 +386,20 @@ cc_library(
         "//googlemac/iPhone/Shared/Nearby/Connections:__subpackages__",
         "//internal/analytics:__subpackages__",
         "//internal/platform:__pkg__",
+        "//internal/platform/implementation:__subpackages__",
+        "//presence:__subpackages__",
     ],
     deps = [
         ":logging",
         ":types",
+        ":uuid",
         "//internal/platform:base",
         "//internal/platform:cancellation_flag",
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation:platform",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
     ],
 )
 
@@ -354,10 +414,13 @@ cc_test(
         "ble_v2_test.cc",
         "bluetooth_adapter_test.cc",
         "bluetooth_classic_test.cc",
+        "bluetooth_connection_info_test.cc",
         "cancelable_alarm_test.cc",
         "condition_variable_test.cc",
         "count_down_latch_test.cc",
+        "credential_storage_impl_test.cc",
         "crypto_test.cc",
+        "direct_executor_test.cc",
         "future_test.cc",
         "logging_test.cc",
         "multi_thread_executor_test.cc",
@@ -365,19 +428,26 @@ cc_test(
         "pipe_test.cc",
         "scheduled_executor_test.cc",
         "single_thread_executor_test.cc",
+        "uuid_test.cc",
         "wifi_hotspot_test.cc",
         "wifi_lan_test.cc",
+        "wifi_test.cc",
+        "wifi_utils_test.cc",
     ],
     copts = ["-DCORE_ADAPTER_DLL"],
     defines = ["NO_WEBRTC"],
     shard_count = 16,
     deps = [
+        ":base",
         ":comm",
+        ":connection_info",
         ":logging",
+        ":test_util",
         ":types",
-        "//internal/platform:base",
-        "//internal/platform:test_util",
+        ":uuid",
+        "//internal/platform/implementation:comm",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
+        "//internal/proto:credential_cc_proto",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",

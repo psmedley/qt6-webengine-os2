@@ -34,7 +34,8 @@
 #include "build/build_config.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/clipboard/data_transfer.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -440,7 +441,7 @@ static bool IsSubmitImage(const Node* node) {
 bool EventHandler::UsesHandCursor(const Node* node) {
   if (!node)
     return false;
-  return ((node->IsLink() || IsSubmitImage(node)) && !HasEditableStyle(*node));
+  return ((node->IsLink() || IsSubmitImage(node)) && !IsEditable(*node));
 }
 
 void EventHandler::CursorUpdateTimerFired(TimerBase*) {
@@ -519,7 +520,7 @@ bool EventHandler::ShouldShowIBeamForNode(const Node* node,
   if (node->IsTextNode() && (node->CanStartSelection() || result.IsOverLink()))
     return true;
 
-  return HasEditableStyle(*node);
+  return IsEditable(*node);
 }
 
 absl::optional<ui::Cursor> EventHandler::SelectCursor(
@@ -642,11 +643,10 @@ absl::optional<ui::Cursor> EventHandler::SelectCursor(
                 kTraverseDocumentBoundaries | kApplyRemoteMainFrameTransform) -
             PhysicalOffset(hot_spot);
         PhysicalRect cursor_rect(cursor_offset, LayoutSize(size));
-        if (!PhysicalRect(page->GetVisualViewport().VisibleContentRect())
-                 .Contains(cursor_rect)) {
-          Deprecation::CountDeprecation(
-              node->GetExecutionContext(),
-              WebFeature::kCustomCursorIntersectsViewport);
+        PhysicalRect frame_rect(page->GetVisualViewport().VisibleContentRect());
+        frame_->ContentLayoutObject()->MapToVisualRectInAncestorSpace(
+            nullptr, frame_rect);
+        if (!frame_rect.Contains(cursor_rect)) {
           continue;
         }
       }
@@ -917,9 +917,9 @@ WebInputEventResult EventHandler::HandleMousePressEvent(
        event_result == WebInputEventResult::kNotHandled) ||
       mev.GetScrollbar()) {
     mouse_event_manager_->SetCapturesDragging(true);
-    // Main frames don't implicitly capture mouse input on MouseDown, just
-    // subframes do (regardless of whether local or remote).
-    if (!frame_->IsMainFrame())
+    // Outermost main frames don't implicitly capture mouse input on MouseDown,
+    // all subframes do (regardless of whether local or remote or fenced).
+    if (frame_->IsAttached() && !frame_->IsOutermostMainFrame())
       CaptureMouseEventsToWidget(true);
   } else {
     mouse_event_manager_->SetCapturesDragging(false);
@@ -1132,6 +1132,13 @@ WebInputEventResult EventHandler::HandleMouseMoveOrLeaveEvent(
       // scrollbar hovering.
       scrollbar->MouseMoved(mev.Event());
     }
+
+    // Set Effective pan action before Pointer cursor is updated.
+    const WebPointerEvent web_pointer_event(WebInputEvent::Type::kPointerMove,
+                                            mev.Event());
+    pointer_event_manager_->SendEffectivePanActionAtPointer(web_pointer_event,
+                                                            mev.InnerNode());
+
     LocalFrameView* view = frame_->View();
     if ((!is_remote_frame || is_portal) && view) {
       absl::optional<ui::Cursor> optional_cursor =
@@ -1413,6 +1420,10 @@ Element* EventHandler::EffectiveMouseEventTargetElement(
 
 Element* EventHandler::GetElementUnderMouse() {
   return mouse_event_manager_->GetElementUnderMouse();
+}
+
+Element* EventHandler::CurrentTouchDownElement() {
+  return pointer_event_manager_->CurrentTouchDownElement();
 }
 
 bool EventHandler::IsPointerIdActiveOnFrame(PointerId pointer_id,
@@ -1714,8 +1725,7 @@ bool EventHandler::BestClickableNodeForHitTestResult(
   gfx::Rect touch_rect =
       frame_->View()->ConvertToRootFrame(location.ToEnclosingRect());
 
-  HeapVector<Member<Node>, 11> nodes;
-  CopyToVector(result.ListBasedTestResult(), nodes);
+  HeapVector<Member<Node>, 11> nodes(result.ListBasedTestResult());
 
   // FIXME: the explicit Vector conversion copies into a temporary and is
   // wasteful.
@@ -1734,8 +1744,7 @@ bool EventHandler::BestContextMenuNodeForHitTestResult(
       frame_->View()->ConvertToRootFrame(ToRoundedPoint(location.Point()));
   gfx::Rect touch_rect =
       frame_->View()->ConvertToRootFrame(location.ToEnclosingRect());
-  HeapVector<Member<Node>, 11> nodes;
-  CopyToVector(result.ListBasedTestResult(), nodes);
+  HeapVector<Member<Node>, 11> nodes(result.ListBasedTestResult());
 
   // FIXME: the explicit Vector conversion copies into a temporary and is
   // wasteful.
@@ -2157,7 +2166,7 @@ WebInputEventResult EventHandler::ShowNonLocatedContextMenu(
     }
     // Intersect the selection rect and the visible bounds of focused_element.
     if (focused_element) {
-      gfx::Rect clipped_rect = view->ViewportToFrame(
+      gfx::Rect clipped_rect = view->ConvertFromRootFrame(
           GetFocusedElementRectForNonLocatedContextMenu(focused_element));
       left = std::max(clipped_rect.x(), left);
       top = std::max(clipped_rect.y(), top);
@@ -2177,8 +2186,7 @@ WebInputEventResult EventHandler::ShowNonLocatedContextMenu(
   } else if (focused_element) {
     gfx::Rect clipped_rect =
         GetFocusedElementRectForNonLocatedContextMenu(focused_element);
-    location_in_root_frame =
-        visual_viewport.ViewportToRootFrame(clipped_rect.CenterPoint());
+    location_in_root_frame = clipped_rect.CenterPoint();
   } else {
     // TODO(crbug.com/1274078): Should this use ScrollPosition()?
     location_in_root_frame =
@@ -2187,12 +2195,10 @@ WebInputEventResult EventHandler::ShowNonLocatedContextMenu(
   }
 
   frame_->View()->SetCursor(PointerCursor());
-  gfx::Point location_in_viewport =
-      visual_viewport.RootFrameToViewport(location_in_root_frame);
   gfx::Point global_position =
       view->GetChromeClient()
-          ->ViewportToScreen(gfx::Rect(location_in_viewport, gfx::Size()),
-                             frame_->View())
+          ->LocalRootToScreenDIPs(
+              gfx::Rect(location_in_root_frame, gfx::Size()), frame_->View())
           .origin();
 
   // Use the focused node as the target for hover and active.
@@ -2228,16 +2234,29 @@ WebInputEventResult EventHandler::ShowNonLocatedContextMenu(
 
 gfx::Rect EventHandler::GetFocusedElementRectForNonLocatedContextMenu(
     Element* focused_element) {
-  gfx::Rect clipped_rect = focused_element->VisibleBoundsInVisualViewport();
+  gfx::Rect visible_rect = focused_element->VisibleBoundsInLocalRoot();
+
+  VisualViewport& visual_viewport = frame_->GetPage()->GetVisualViewport();
+
+  // TODO(bokan): This method may not work as expected when the local root
+  // isn't the main frame since the result won't be transformed and clipped by
+  // the visual viewport (which is accessible only from the outermost main
+  // frame).
+  if (frame_->LocalFrameRoot().IsOutermostMainFrame()) {
+    visible_rect = visual_viewport.RootFrameToViewport(visible_rect);
+    visible_rect.Intersect(gfx::Rect(visual_viewport.Size()));
+  }
+
+  gfx::Rect clipped_rect = visible_rect;
   // The bounding rect of multiline elements may include points that are
   // not within the element. Intersect the clipped rect with the first
   // outline rect to ensure that the selection rect only includes visible
   // points within the focused element.
-  Vector<gfx::Rect> outline_rects =
-      focused_element->OutlineRectsInVisualViewport();
+  Vector<gfx::Rect> outline_rects = focused_element->OutlineRectsInWidget();
   if (outline_rects.size() > 1)
     clipped_rect.Intersect(outline_rects[0]);
-  return clipped_rect;
+
+  return visual_viewport.ViewportToRootFrame(clipped_rect);
 }
 
 void EventHandler::ScheduleHoverStateUpdate() {

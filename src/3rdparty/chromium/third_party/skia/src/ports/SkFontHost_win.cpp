@@ -1718,7 +1718,7 @@ std::unique_ptr<SkAdvancedTypefaceMetrics> LogFontTypeface::onGetAdvancedMetrics
     // This probably isn't very good with an italic font.
     min_width = SHRT_MAX;
     info->fStemV = 0;
-    for (size_t i = 0; i < SK_ARRAY_COUNT(stem_chars); i++) {
+    for (size_t i = 0; i < std::size(stem_chars); i++) {
         ABC abcWidths;
         if (GetCharABCWidths(hdc, stem_chars[i], stem_chars[i], &abcWidths)) {
             int16_t width = abcWidths.abcB;
@@ -1735,7 +1735,7 @@ std::unique_ptr<SkAdvancedTypefaceMetrics> LogFontTypeface::onGetAdvancedMetrics
 //Placeholder representation of a Base64 encoded GUID from create_unique_font_name.
 #define BASE64_GUID_ID "XXXXXXXXXXXXXXXXXXXXXXXX"
 //Length of GUID representation from create_id, including nullptr terminator.
-#define BASE64_GUID_ID_LEN SK_ARRAY_COUNT(BASE64_GUID_ID)
+#define BASE64_GUID_ID_LEN std::size(BASE64_GUID_ID)
 
 static_assert(BASE64_GUID_ID_LEN < LF_FACESIZE, "GUID_longer_than_facesize");
 
@@ -1805,7 +1805,7 @@ static sk_sp<SkTypeface> create_from_stream(std::unique_ptr<SkStreamAsset> strea
     // Create a unique and unpredictable font name.
     // Avoids collisions and access from CSS.
     char familyName[BASE64_GUID_ID_LEN];
-    const int familyNameSize = SK_ARRAY_COUNT(familyName);
+    const int familyNameSize = std::size(familyName);
     if (FAILED(create_unique_font_name(familyName, familyNameSize))) {
         return nullptr;
     }
@@ -1839,7 +1839,7 @@ std::unique_ptr<SkStreamAsset> LogFontTypeface::onOpenStream(int* ttcIndex) cons
 
     std::unique_ptr<SkStreamAsset> stream;
     DWORD tables[2] = {kTTCTag, 0};
-    for (size_t i = 0; i < SK_ARRAY_COUNT(tables); i++) {
+    for (size_t i = 0; i < std::size(tables); i++) {
         DWORD bufferSize = GetFontData(hdc, tables[i], 0, nullptr, 0);
         if (bufferSize == GDI_ERROR) {
             call_ensure_accessible(lf);
@@ -2200,7 +2200,7 @@ public:
     }
 
     int count() override {
-        return fArray.count();
+        return fArray.size();
     }
 
     void getStyle(int index, SkFontStyle* fs, SkString* styleName) override {
@@ -2246,16 +2246,16 @@ public:
 
 protected:
     int onCountFamilies() const override {
-        return fLogFontArray.count();
+        return fLogFontArray.size();
     }
 
     void onGetFamilyName(int index, SkString* familyName) const override {
-        SkASSERT((unsigned)index < (unsigned)fLogFontArray.count());
+        SkASSERT(index < fLogFontArray.size());
         tchar_to_skstring(fLogFontArray[index].elfLogFont.lfFaceName, familyName);
     }
 
     SkFontStyleSet* onCreateStyleSet(int index) const override {
-        SkASSERT((unsigned)index < (unsigned)fLogFontArray.count());
+        SkASSERT(index < fLogFontArray.size());
         return new SkFontStyleSetGDI(fLogFontArray[index].elfLogFont.lfFaceName);
     }
 

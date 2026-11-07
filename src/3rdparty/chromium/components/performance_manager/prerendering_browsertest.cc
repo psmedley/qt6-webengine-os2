@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -131,7 +131,7 @@ IN_PROC_BROWSER_TEST_F(PerformanceManagerPrerenderingBrowserTest,
   // Activate the prerendered document. Test that GetMainFrameNode now returns
   // its main frame, and the original frame tree is gone.
   content::RenderFrameDeletedObserver deleted_observer(
-      web_contents()->GetMainFrame());
+      web_contents()->GetPrimaryMainFrame());
   content::test::PrerenderHostObserver prerender_observer(*web_contents(),
                                                           kPrerenderingUrl);
   prerender_helper_.NavigatePrimaryPage(kPrerenderingUrl);

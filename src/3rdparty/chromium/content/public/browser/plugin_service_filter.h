@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@ class FilePath;
 }
 
 namespace content {
+class BrowserContext;
 struct WebPluginInfo;
 
 // Callback class to let the client filter the list of all installed plugins
@@ -23,6 +24,7 @@ class PluginServiceFilter {
   // plugin. The result may be cached, and should be consistent between calls.
   virtual bool IsPluginAvailable(int render_process_id,
                                  int render_frame_id,
+                                 content::BrowserContext* browser_context,
                                  const WebPluginInfo& plugin) = 0;
 
   // Whether the renderer has permission to load available `plugin`.

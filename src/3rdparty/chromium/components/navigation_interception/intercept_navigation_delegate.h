@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,7 +40,7 @@ namespace navigation_interception {
 class InterceptNavigationDelegate : public base::SupportsUserData::Data {
  public:
   // Pass true for |escape_external_handler_value| to have
-  // net::EscapeExternalHandlerValue() invoked on URLs passed to
+  // base::EscapeExternalHandlerValue() invoked on URLs passed to
   // ShouldIgnoreNavigation() before the navigation is processed.
   InterceptNavigationDelegate(JNIEnv* env,
                               jobject jdelegate,
@@ -75,6 +75,10 @@ class InterceptNavigationDelegate : public base::SupportsUserData::Data {
       ui::PageTransition page_transition,
       bool has_user_gesture,
       const absl::optional<url::Origin>& initiating_origin);
+
+  // To be called when a main frame requests a resource with a user gesture (eg.
+  // xrh, fetch, etc.)
+  void OnResourceRequestWithGesture();
 
  private:
   JavaObjectWeakGlobalRef weak_jdelegate_;

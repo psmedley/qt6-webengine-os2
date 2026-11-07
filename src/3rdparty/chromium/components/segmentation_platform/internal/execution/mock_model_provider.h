@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,20 +9,21 @@
 #include <memory>
 #include <vector>
 
+#include "base/containers/flat_set.h"
 #include "base/memory/raw_ptr.h"
 #include "components/segmentation_platform/public/model_provider.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using optimization_guide::proto::OptimizationTarget;
-
 namespace segmentation_platform {
+
+using proto::SegmentId;
 
 // Mock model provider for testing, to be used with TestModelProviderFactory.
 class MockModelProvider : public ModelProvider {
  public:
   MockModelProvider(
-      optimization_guide::proto::OptimizationTarget segment_id,
+      proto::SegmentId segment_id,
       base::RepeatingCallback<void(const ModelProvider::ModelUpdatedCallback&)>
           get_client_callback);
   ~MockModelProvider() override;
@@ -56,21 +57,18 @@ class TestModelProviderFactory : public ModelProviderFactory {
 
     // Map of targets to model providers, added when provider is created. The
     // list is not cleared when providers are destroyed.
-    std::map<optimization_guide::proto::OptimizationTarget, MockModelProvider*>
-        model_providers;
+    std::map<proto::SegmentId, MockModelProvider*> model_providers;
 
     // Map of targets to default model providers, added when provider is
     // created. The list is not cleared when providers are destroyed.
-    std::map<optimization_guide::proto::OptimizationTarget, MockModelProvider*>
-        default_model_providers;
+    std::map<proto::SegmentId, MockModelProvider*> default_model_providers;
 
     // Map from target to updated callback, recorded when InitAndFetchModel()
     // was called on any provider.
-    std::map<optimization_guide::proto::OptimizationTarget,
-             ModelProvider::ModelUpdatedCallback>
+    std::map<proto::SegmentId, ModelProvider::ModelUpdatedCallback>
         model_providers_callbacks;
 
-    std::vector<OptimizationTarget> segments_supporting_default_model;
+    base::flat_set<SegmentId> segments_supporting_default_model;
   };
 
   // Records requests to `data`. `data` is not owned, and the caller must ensure
@@ -81,10 +79,10 @@ class TestModelProviderFactory : public ModelProviderFactory {
   // ModelProviderFactory impl, that keeps track of the created provider and
   // callbacks in |data_|.
   std::unique_ptr<ModelProvider> CreateProvider(
-      optimization_guide::proto::OptimizationTarget segment_id) override;
+      proto::SegmentId segment_id) override;
 
   std::unique_ptr<ModelProvider> CreateDefaultProvider(
-      optimization_guide::proto::OptimizationTarget) override;
+      proto::SegmentId) override;
 
  private:
   raw_ptr<Data> data_;

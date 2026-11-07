@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,11 +81,11 @@ class OriginTrialsComponentInstallerTest : public PlatformTest {
   }
 
   void AddDisabledFeaturesToPrefs(const std::vector<std::string>& features) {
-    base::Value disabled_feature_list(base::Value::Type::LIST);
+    base::Value::List disabled_feature_list;
     for (const std::string& feature : features) {
       disabled_feature_list.Append(feature);
     }
-    ListPrefUpdate update(
+    ScopedListPrefUpdate update(
         local_state(), embedder_support::prefs::kOriginTrialDisabledFeatures);
     *update = std::move(disabled_feature_list);
   }
@@ -96,16 +96,14 @@ class OriginTrialsComponentInstallerTest : public PlatformTest {
     ASSERT_TRUE(local_state()->HasPrefPath(
         embedder_support::prefs::kOriginTrialDisabledFeatures));
 
-    const base::Value* disabled_feature_list = local_state()->GetList(
+    const base::Value::List& disabled_feature_list = local_state()->GetList(
         embedder_support::prefs::kOriginTrialDisabledFeatures);
-    ASSERT_TRUE(disabled_feature_list);
 
-    ASSERT_EQ(features.size(),
-              disabled_feature_list->GetListDeprecated().size());
+    ASSERT_EQ(features.size(), disabled_feature_list.size());
 
     for (size_t i = 0; i < features.size(); ++i) {
       const std::string* disabled_feature =
-          disabled_feature_list->GetListDeprecated()[i].GetIfString();
+          disabled_feature_list[i].GetIfString();
       if (!disabled_feature) {
         ADD_FAILURE() << "Entry not found or not a string at index " << i;
         continue;
@@ -116,12 +114,12 @@ class OriginTrialsComponentInstallerTest : public PlatformTest {
   }
 
   void AddDisabledTokensToPrefs(const std::vector<std::string>& tokens) {
-    base::Value disabled_token_list(base::Value::Type::LIST);
+    base::Value::List disabled_token_list;
     for (const std::string& token : tokens) {
       disabled_token_list.Append(token);
     }
-    ListPrefUpdate update(local_state(),
-                          embedder_support::prefs::kOriginTrialDisabledTokens);
+    ScopedListPrefUpdate update(
+        local_state(), embedder_support::prefs::kOriginTrialDisabledTokens);
     *update = std::move(disabled_token_list);
   }
 
@@ -131,15 +129,13 @@ class OriginTrialsComponentInstallerTest : public PlatformTest {
     ASSERT_TRUE(local_state()->HasPrefPath(
         embedder_support::prefs::kOriginTrialDisabledTokens));
 
-    const base::Value* disabled_token_list = local_state()->GetList(
+    const base::Value::List& disabled_token_list = local_state()->GetList(
         embedder_support::prefs::kOriginTrialDisabledTokens);
-    ASSERT_TRUE(disabled_token_list);
 
-    ASSERT_EQ(tokens.size(), disabled_token_list->GetListDeprecated().size());
+    ASSERT_EQ(tokens.size(), disabled_token_list.size());
 
     for (size_t i = 0; i < tokens.size(); ++i) {
-      const std::string* disabled_token =
-          disabled_token_list->GetListDeprecated()[i].GetIfString();
+      const std::string* disabled_token = disabled_token_list[i].GetIfString();
 
       if (!disabled_token) {
         ADD_FAILURE() << "Entry not found or not a string at index " << i;

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,20 +63,6 @@ BPF_TEST_C(BaselinePolicyAndroid,
   errno = 0;
   BPF_ASSERT_EQ(-1, sched_setaffinity(0, sizeof(set), &set));
   BPF_ASSERT_EQ(EPERM, errno);
-}
-
-class AllowSchedSetaffinityBaselinePoliyAndroid : public BaselinePolicyAndroid {
- public:
-  AllowSchedSetaffinityBaselinePoliyAndroid()
-      : BaselinePolicyAndroid(RuntimeOptions{.allow_sched_affinity = true}) {}
-};
-
-BPF_TEST_C(BaselinePolicyAndroid,
-           SchedAffinity_Allowed,
-           AllowSchedSetaffinityBaselinePoliyAndroid) {
-  cpu_set_t set{};
-  BPF_ASSERT_NE(-1, sched_getaffinity(0, sizeof(set), &set));
-  BPF_ASSERT_NE(-1, sched_setaffinity(0, sizeof(set), &set));
 }
 
 BPF_TEST_C(BaselinePolicyAndroid, Ioctl_Allowed, BaselinePolicyAndroid) {

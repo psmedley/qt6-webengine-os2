@@ -16,8 +16,13 @@
 #define CORE_INTERNAL_ENDPOINT_MANAGER_H_
 
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <utility>
+#include <string>
+#include <vector>
 
+#include "connections/implementation/analytics/packet_meta_data.h"
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -30,10 +35,8 @@
 #include "internal/platform/byte_array.h"
 #include "internal/platform/condition_variable.h"
 #include "internal/platform/count_down_latch.h"
-#include "internal/platform/multi_thread_executor.h"
 #include "internal/platform/runnable.h"
 #include "internal/platform/single_thread_executor.h"
-#include "internal/platform/system_clock.h"
 
 namespace location {
 namespace nearby {
@@ -57,6 +60,8 @@ namespace connections {
 // to PayloadManager::ProcessFrame() (still running on that
 // same dedicated reader thread).
 
+using analytics::PacketMetaData;
+
 class EndpointManager {
  public:
   class FrameProcessor {
@@ -74,7 +79,8 @@ class EndpointManager {
     virtual void OnIncomingFrame(OfflineFrame& offline_frame,
                                  const std::string& from_endpoint_id,
                                  ClientProxy* to_client,
-                                 proto::connections::Medium current_medium) = 0;
+                                 proto::connections::Medium current_medium,
+                                 PacketMetaData& packet_meta_data) = 0;
 
     // Implementations must call barrier.CountDown() once
     // they're done. This parallelizes the disconnection event across all frame
@@ -82,6 +88,7 @@ class EndpointManager {
     //
     // @EndpointManagerThread
     virtual void OnEndpointDisconnect(ClientProxy* client,
+                                      const std::string& service_id,
                                       const std::string& endpoint_id,
                                       CountDownLatch barrier) = 0;
   };
@@ -121,7 +128,8 @@ class EndpointManager {
   std::vector<std::string> SendPayloadChunk(
       const PayloadTransferFrame::PayloadHeader& payload_header,
       const PayloadTransferFrame::PayloadChunk& payload_chunk,
-      const std::vector<std::string>& endpoint_ids);
+      const std::vector<std::string>& endpoint_ids,
+      PacketMetaData& packet_meta_data);
   std::vector<std::string> SendControlMessage(
       const PayloadTransferFrame::PayloadHeader& payload_header,
       const PayloadTransferFrame::ControlMessage& control_message,
@@ -247,15 +255,18 @@ class EndpointManager {
                       bool notify);
 
   void WaitForEndpointDisconnectionProcessing(ClientProxy* client,
+                                              const std::string& service_id,
                                               const std::string& endpoint_id);
 
   CountDownLatch NotifyFrameProcessorsOnEndpointDisconnect(
-      ClientProxy* client, const std::string& endpoint_id);
+      ClientProxy* client, const std::string& service_id,
+      const std::string& endpoint_id);
 
   std::vector<std::string> SendTransferFrameBytes(
       const std::vector<std::string>& endpoint_ids,
       const ByteArray& payload_transfer_frame_bytes, std::int64_t payload_id,
-      std::int64_t offset, const std::string& packet_type);
+      std::int64_t offset, const std::string& packet_type,
+      PacketMetaData& packet_meta_data);
 
   // Executes all jobs sequentially, on a serial_executor_.
   void RunOnEndpointManagerThread(const std::string& name, Runnable runnable);

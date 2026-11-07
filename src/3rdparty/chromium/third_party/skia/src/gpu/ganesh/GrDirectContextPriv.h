@@ -11,7 +11,8 @@
 #include "include/core/SkSpan.h"
 #include "include/core/SkSurface.h"
 #include "include/gpu/GrDirectContext.h"
-#include "src/gpu/ganesh/BaseDevice.h"
+#include "src/gpu/AtlasTypes.h"
+#include "src/gpu/ganesh/Device_v1.h"
 #include "src/gpu/ganesh/GrRecordingContextPriv.h"
 
 class GrAtlasManager;
@@ -35,7 +36,7 @@ public:
     GrDirectContext* context() { return static_cast<GrDirectContext*>(fContext); }
     const GrDirectContext* context() const { return static_cast<const GrDirectContext*>(fContext); }
 
-    GrStrikeCache* getGrStrikeCache() { return this->context()->fStrikeCache.get(); }
+    sktext::gpu::StrikeCache* getStrikeCache() { return this->context()->fStrikeCache.get(); }
 
     /**
      * Finalizes all pending reads and writes to the surfaces and also performs an MSAA resolves
@@ -51,14 +52,14 @@ public:
                 SkSpan<GrSurfaceProxy*>,
                 SkSurface::BackendSurfaceAccess = SkSurface::BackendSurfaceAccess::kNoAccess,
                 const GrFlushInfo& = {},
-                const GrBackendSurfaceMutableState* newState = nullptr);
+                const skgpu::MutableTextureState* newState = nullptr);
 
     /** Version of above that flushes for a single proxy. Null is allowed. */
     GrSemaphoresSubmitted flushSurface(
                 GrSurfaceProxy* proxy,
                 SkSurface::BackendSurfaceAccess access = SkSurface::BackendSurfaceAccess::kNoAccess,
                 const GrFlushInfo& info = {},
-                const GrBackendSurfaceMutableState* newState = nullptr) {
+                const skgpu::MutableTextureState* newState = nullptr) {
         size_t size = proxy ? 1 : 0;
         return this->flushSurfaces({&proxy, size}, access, info, newState);
     }
@@ -111,6 +112,15 @@ public:
         return this->context()->fMappedBufferManager.get();
     }
 
+    void setInsideReleaseProc(bool inside) {
+        if (inside) {
+            this->context()->fInsideReleaseProcCnt++;
+        } else {
+            SkASSERT(this->context()->fInsideReleaseProcCnt > 0);
+            this->context()->fInsideReleaseProcCnt--;
+        }
+    }
+
 #if GR_TEST_UTILS
     /** Reset GPU stats */
     void resetGpuStats() const;
@@ -134,7 +144,7 @@ public:
     /** Get pointer to atlas texture for given mask format. Note that this wraps an
         actively mutating texture in an SkImage. This could yield unexpected results
         if it gets cached or used more generally. */
-    sk_sp<SkImage> testingOnly_getFontAtlasImage(GrMaskFormat format, unsigned int index = 0);
+    sk_sp<SkImage> testingOnly_getFontAtlasImage(skgpu::MaskFormat format, unsigned int index = 0);
 
     void testingOnly_flushAndRemoveOnFlushCallbackObject(GrOnFlushCallbackObject*);
 #endif

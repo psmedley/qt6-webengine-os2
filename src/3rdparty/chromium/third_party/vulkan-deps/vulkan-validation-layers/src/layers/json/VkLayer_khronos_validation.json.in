@@ -282,9 +282,7 @@
                         }
                     ],
                     "default": [
-                        "error",
-                        "warn",
-                        "perf"
+                        "error"
                     ]
                 },
                 {
@@ -411,6 +409,12 @@
                             "platforms": [ "WINDOWS", "LINUX", "MACOS", "ANDROID" ]
                         },
                         {
+                            "key": "VALIDATION_CHECK_ENABLE_SYNCHRONIZATION_VALIDATION_QUEUE_SUBMIT",
+                            "label": "QueueSubmit Synchronization Validation",
+                            "description": "Enable synchronization validation between submitted command buffers when Synchronization Validation is enabled.",
+                            "status": "ALPHA"
+                        },
+                        {
                             "key": "VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT",
                             "label": "Debug Printf",
                             "description": "Enables processing of debug printf instructions in shaders and sending debug strings to the debug callback.",
@@ -533,6 +537,40 @@
                                             }
                                         ]
                                     }
+                                },
+                                {
+                                    "key": "validate_dispatch_indirect",
+                                    "label": "Check Dispatch Indirect group count values",
+                                    "description": "Enable dispatch indirect checking",
+                                    "type": "BOOL",
+                                    "default": true,
+                                    "platforms": [ "WINDOWS", "LINUX" ],
+                                    "dependence": {
+                                        "mode": "ANY",
+                                        "settings": [
+                                            {
+                                                "key": "enables",
+                                                "value": [ "VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT" ]
+                                            }
+                                        ]
+                                    }
+                                },
+                                {
+                                    "key": "vma_linear_output",
+                                    "label": "Use VMA linear memory allocations for GPU-AV output buffers",
+                                    "description": "Use linear allocation algorithm",
+                                    "type": "BOOL",
+                                    "default": true,
+                                    "platforms": [ "WINDOWS", "LINUX" ],
+                                    "dependence": {
+                                        "mode": "ANY",
+                                        "settings": [
+                                            {
+                                                "key": "enables",
+                                                "value": [ "VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT" ]
+                                            }
+                                        ]
+                                    }
                                 }
                             ]
                         },
@@ -560,7 +598,14 @@
                             "label": "AMD-specific best practices",
                             "description": "Adds check for spec-conforming but non-ideal code on AMD GPUs.",
                             "platforms": [ "WINDOWS", "LINUX", "MACOS"]
+                        },
+                        {
+                            "key": "VALIDATION_CHECK_ENABLE_VENDOR_SPECIFIC_NVIDIA",
+                            "label": "NVIDIA-specific best practices",
+                            "description": "Activating this feature enables the output of warnings related to NVIDIA-specific misuse of the API, but which are not explicitly prohibited by the specification.",
+                            "platforms": [ "WINDOWS", "LINUX", "ANDROID" ]
                         }
+
                     ],
                     "default": []
                 },
@@ -568,10 +613,10 @@
                     "key": "fine_grained_locking",
                     "env": "VK_LAYER_FINE_GRAINED_LOCKING",
                     "label": "Fine Grained Locking",
-                    "description": "Enable fine grained locking for Core Validation, which should improve performance in multithreaded applications. This is an experimental feature which may cause stability problems or incorrect errors to be reported.",
-                    "status": "BETA",
+                    "description": "Enable fine grained locking for Core Validation, which should improve performance in multithreaded applications. This setting allows the optimization to be disabled for debugging.",
+                    "status": "STABLE",
                     "type": "BOOL",
-                    "default": false,
+                    "default": true,
                     "platforms": [ "WINDOWS", "LINUX", "MACOS", "ANDROID" ]
                 }
             ]

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,7 +63,7 @@ class CorsOriginPatternSetterBrowserTest : public ContentBrowserTest {
   std::string GetReason() {
     bool executing = true;
     std::string reason;
-    web_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
+    web_contents()->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(
         script_, base::BindOnce(
                      [](bool* flag, std::string* reason, base::Value value) {
                        *flag = false;

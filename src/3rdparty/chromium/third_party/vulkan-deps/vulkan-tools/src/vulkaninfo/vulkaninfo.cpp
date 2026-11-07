@@ -27,6 +27,9 @@
  *
  */
 
+#ifdef _WIN32
+#include <crtdbg.h>
+#endif
 #include "vulkaninfo.hpp"
 
 // =========== Dump Functions ========= //
@@ -868,8 +871,9 @@ const char *help_message_body =
     "                    \"vulkaninfo.html\" in the directory in which the command\n"
     "                    is run.\n"
     "[-j, --json]        Produce a json version of vulkaninfo output conforming to the Vulkan\n"
-    "                    Profiles schema, saved as \"vulkaninfo.json\", of the first gpu in the\n"
-    "                    system.\n"
+    "                    Profiles schema, saved as \n"
+    "                     \"VP_VULKANINFO_[DEVICE_NAME]_[DRIVER_VERSION].json\"\n"
+    "                     of the first gpu in the system.\n"
     "[-j=<gpu-number>, --json=<gpu-number>]\n"
     "                    For a multi-gpu system, a single gpu can be targetted by\n"
     "                    specifying the gpu-number associated with the gpu of \n"
@@ -1063,7 +1067,7 @@ int main(int argc, char **argv) {
     if (!parsing_return) return 1;
     ParsedResults parse_data = parsing_return.value();
 
-#ifdef _WIN32
+#if defined(_WIN32)
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
@@ -1098,7 +1102,12 @@ int main(int argc, char **argv) {
             surface_extension.create_window(instance);
             surface_extension.surface = surface_extension.create_surface(instance);
             for (auto &phys_device : phys_devices) {
-                surfaces.push_back(std::unique_ptr<AppSurface>(new AppSurface(instance, phys_device, surface_extension)));
+                try {
+                    surfaces.push_back(std::unique_ptr<AppSurface>(new AppSurface(instance, phys_device, surface_extension)));
+                } catch (std::exception &e) {
+                    std::cerr << "ERROR while creating surface for extension " << surface_extension.name << " : " << e.what()
+                              << "\n";
+                }
             }
         }
 #endif  // defined(VULKANINFO_WSI_ENABLED)

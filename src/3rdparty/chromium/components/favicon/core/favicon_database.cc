@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,11 +23,13 @@
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "components/database_utils/upper_bound_string.h"
 #include "components/database_utils/url_converter.h"
 #include "sql/recovery.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 #include "third_party/sqlite/sqlite3.h"
+#include "url/origin.h"
 
 #if BUILDFLAG(IS_APPLE)
 #include "base/mac/backup_util.h"
@@ -387,7 +389,7 @@ FaviconDatabase::GetOldOnDemandFavicons(base::Time threshold) {
       "JOIN icon_mapping ON (icon_mapping.icon_id = favicon_bitmaps.icon_id) "
       "WHERE (favicon_bitmaps.last_requested > 0 AND "
       "       favicon_bitmaps.last_requested < ?)"));
-  old_icons.BindInt64(0, threshold.ToDeltaSinceWindowsEpoch().InMicroseconds());
+  old_icons.BindTime(0, threshold);
 
   std::map<favicon_base::FaviconID, IconMappingsForExpiry> icon_mappings;
 
@@ -443,8 +445,7 @@ bool FaviconDatabase::GetFaviconBitmaps(
     FaviconBitmap favicon_bitmap;
     favicon_bitmap.bitmap_id = statement.ColumnInt64(0);
     favicon_bitmap.icon_id = icon_id;
-    favicon_bitmap.last_updated = base::Time::FromDeltaSinceWindowsEpoch(
-        base::Microseconds(statement.ColumnInt64(1)));
+    favicon_bitmap.last_updated = statement.ColumnTime(1);
     std::vector<uint8_t> bitmap_data_blob;
     statement.ColumnBlobAsVector(2, &bitmap_data_blob);
     if (!bitmap_data_blob.empty()) {
@@ -453,8 +454,7 @@ bool FaviconDatabase::GetFaviconBitmaps(
     }
     favicon_bitmap.pixel_size =
         gfx::Size(statement.ColumnInt(3), statement.ColumnInt(4));
-    favicon_bitmap.last_requested = base::Time::FromDeltaSinceWindowsEpoch(
-        base::Microseconds(statement.ColumnInt64(5)));
+    favicon_bitmap.last_requested = statement.ColumnTime(5);
     favicon_bitmaps->push_back(favicon_bitmap);
   }
   return result;
@@ -477,8 +477,7 @@ bool FaviconDatabase::GetFaviconBitmap(
     return false;
 
   if (last_updated) {
-    *last_updated = base::Time::FromDeltaSinceWindowsEpoch(
-        base::Microseconds(statement.ColumnInt64(0)));
+    *last_updated = statement.ColumnTime(0);
   }
 
   if (png_icon_data) {
@@ -493,8 +492,7 @@ bool FaviconDatabase::GetFaviconBitmap(
   }
 
   if (last_requested) {
-    *last_requested = base::Time::FromDeltaSinceWindowsEpoch(
-        base::Microseconds(statement.ColumnInt64(4)));
+    *last_requested = statement.ColumnTime(4);
   }
 
   return true;
@@ -523,16 +521,12 @@ FaviconBitmapID FaviconDatabase::AddFaviconBitmap(
   // On-visit bitmaps:
   //  - keep track of last_updated: last write time is used for expiration;
   //  - always have last_requested==0: no need to keep track of last read time.
-  statement.BindInt64(2, type == ON_VISIT
-                             ? time.ToDeltaSinceWindowsEpoch().InMicroseconds()
-                             : 0);
+  type == ON_VISIT ? statement.BindTime(2, time) : statement.BindInt64(2, 0);
   // On-demand bitmaps:
   //  - always have last_updated==0: last write time is not stored as they are
   //    always expired and thus ready to be replaced by ON_VISIT icons;
   //  - keep track of last_requested: last read time is used for cache eviction.
-  statement.BindInt64(3, type == ON_DEMAND
-                             ? time.ToDeltaSinceWindowsEpoch().InMicroseconds()
-                             : 0);
+  type == ON_DEMAND ? statement.BindTime(3, time) : statement.BindInt64(3, 0);
 
   statement.BindInt(4, pixel_size.width());
   statement.BindInt(5, pixel_size.height());
@@ -559,7 +553,7 @@ bool FaviconDatabase::SetFaviconBitmap(
   } else {
     statement.BindNull(0);
   }
-  statement.BindInt64(1, time.ToDeltaSinceWindowsEpoch().InMicroseconds());
+  statement.BindTime(1, time);
   statement.BindInt64(2, 0);
   statement.BindInt64(3, bitmap_id);
 
@@ -576,7 +570,7 @@ bool FaviconDatabase::SetFaviconBitmapLastUpdateTime(FaviconBitmapID bitmap_id,
       db_.GetCachedStatement(SQL_FROM_HERE,
                              "UPDATE favicon_bitmaps SET last_updated=?, "
                              "last_requested=? WHERE id=?"));
-  statement.BindInt64(0, time.ToDeltaSinceWindowsEpoch().InMicroseconds());
+  statement.BindTime(0, time);
   statement.BindInt64(1, 0);
   statement.BindInt64(2, bitmap_id);
   return statement.Run();
@@ -590,8 +584,8 @@ bool FaviconDatabase::SetFaviconsOutOfDateBetween(base::Time begin,
       db_.GetCachedStatement(SQL_FROM_HERE,
                              "UPDATE favicon_bitmaps SET last_updated=0 "
                              "WHERE last_updated>=? AND last_updated<?"));
-  statement.BindInt64(0, begin.ToDeltaSinceWindowsEpoch().InMicroseconds());
-  statement.BindInt64(1, end.ToDeltaSinceWindowsEpoch().InMicroseconds());
+  statement.BindTime(0, begin);
+  statement.BindTime(1, end);
   return statement.Run();
 }
 
@@ -615,10 +609,9 @@ bool FaviconDatabase::TouchOnDemandFavicon(const GURL& icon_url,
         SQL_FROM_HERE,
         "UPDATE favicon_bitmaps SET last_requested=? WHERE icon_id=? AND "
         "last_requested>0 AND last_requested<=?"));
-    statement.BindInt64(0, time.ToDeltaSinceWindowsEpoch().InMicroseconds());
+    statement.BindTime(0, time);
     statement.BindInt64(1, icon_id);
-    statement.BindInt64(2,
-                        max_time.ToDeltaSinceWindowsEpoch().InMicroseconds());
+    statement.BindTime(2, max_time);
     if (!statement.Run())
       return false;
   }
@@ -657,10 +650,35 @@ bool FaviconDatabase::GetFaviconLastUpdatedTime(favicon_base::FaviconID icon_id,
     return false;
 
   if (last_updated) {
-    *last_updated = base::Time::FromDeltaSinceWindowsEpoch(
-        base::Microseconds(statement.ColumnInt64(0)));
+    *last_updated = statement.ColumnTime(0);
   }
   return true;
+}
+
+favicon_base::FaviconID FaviconDatabase::GetFaviconIDForFaviconURL(
+    const GURL& icon_url,
+    favicon_base::IconType icon_type,
+    const url::Origin& page_origin) {
+  // Look to see if there even is any relevant cached entry.
+  auto const icon_id = GetFaviconIDForFaviconURL(icon_url, icon_type);
+  if (!icon_id) {
+    return icon_id;
+  }
+
+  // Check existing mappings to see if any are for the same origin.
+  sql::Statement statement(db_.GetCachedStatement(
+      SQL_FROM_HERE, "SELECT page_url FROM icon_mapping WHERE icon_id=?"));
+  statement.BindInt64(0, icon_id);
+  while (statement.Step()) {
+    const auto candidate_origin =
+        url::Origin::Create(GURL(statement.ColumnString(0)));
+    if (candidate_origin == page_origin) {
+      return icon_id;
+    }
+  }
+
+  // Act as if there is no entry in the cache if no mapping exists.
+  return 0;
 }
 
 favicon_base::FaviconID FaviconDatabase::GetFaviconIDForFaviconURL(
@@ -798,12 +816,21 @@ absl::optional<GURL> FaviconDatabase::FindFirstPageURLForHost(
                              "FROM icon_mapping "
                              "INNER JOIN favicons "
                              "ON icon_mapping.icon_id = favicons.id "
-                             "WHERE icon_mapping.page_url LIKE ? "
+                             "WHERE (page_url >= ? AND page_url < ?) "
+                             "OR (page_url >= ? AND page_url < ?) "
                              "ORDER BY favicons.icon_type DESC"));
 
-  // Bind the host with a prefix of "://" and suffix of "/" to ensure the entire
-  // host name is matched.
-  statement.BindString(0, base::StringPrintf("%%://%s/%%", url.host().c_str()));
+  // This is an optimization to avoid using the LIKE operator which can be
+  // expensive. This statement finds all rows where page_url starts from either
+  // "http://<host>/" or "https://<host>/".
+  std::string http_prefix =
+      base::StringPrintf("http://%s/", url.host().c_str());
+  statement.BindString(0, http_prefix);
+  statement.BindString(1, database_utils::UpperBoundString(http_prefix));
+  std::string https_prefix =
+      base::StringPrintf("https://%s/", url.host().c_str());
+  statement.BindString(2, https_prefix);
+  statement.BindString(3, database_utils::UpperBoundString(https_prefix));
 
   while (statement.Step()) {
     favicon_base::IconType icon_type =
@@ -872,7 +899,7 @@ FaviconDatabase::GetFaviconsLastUpdatedBefore(base::Time time, int max_count) {
                                                   "WHERE last_updated < ? "
                                                   "ORDER BY last_updated ASC "
                                                   "LIMIT ?"));
-  statement.BindInt64(0, time.ToDeltaSinceWindowsEpoch().InMicroseconds());
+  statement.BindTime(0, time);
   statement.BindInt64(
       1, max_count == 0 ? std::numeric_limits<int64_t>::max() : max_count);
   std::vector<favicon_base::FaviconID> ids;

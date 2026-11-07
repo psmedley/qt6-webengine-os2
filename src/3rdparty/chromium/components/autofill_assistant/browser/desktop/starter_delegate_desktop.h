@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,13 @@
 #include <memory>
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "components/autofill_assistant/browser/common_dependencies.h"
 #include "components/autofill_assistant/browser/metrics.h"
 #include "components/autofill_assistant/browser/onboarding_result.h"
+#include "components/autofill_assistant/browser/platform_dependencies.h"
+#include "components/autofill_assistant/browser/public/password_change/website_login_manager.h"
 #include "components/autofill_assistant/browser/starter_platform_delegate.h"
 #include "components/autofill_assistant/browser/trigger_context.h"
-#include "components/autofill_assistant/browser/website_login_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -58,18 +60,27 @@ class StarterDelegateDesktop
   void HideOnboarding() override;
   bool GetProactiveHelpSettingEnabled() const override;
   void SetProactiveHelpSettingEnabled(bool enabled) override;
-  bool GetMakeSearchesAndBrowsingBetterEnabled() const override;
   bool GetIsLoggedIn() override;
+  bool GetIsSupervisedUser() override;
+  bool GetIsAllowedForMachineLearning() override;
   bool GetIsCustomTab() const override;
   bool GetIsWebLayer() const override;
   bool GetIsTabCreatedByGSA() const override;
   std::unique_ptr<AssistantFieldTrialUtil> CreateFieldTrialUtil() override;
   bool IsAttached() override;
+  const CommonDependencies* GetCommonDependencies() const override;
+  const PlatformDependencies* GetPlatformDependencies() const override;
   base::WeakPtr<StarterPlatformDelegate> GetWeakPtr() override;
 
  private:
   friend class content::WebContentsUserData<StarterDelegateDesktop>;
-  explicit StarterDelegateDesktop(content::WebContents* web_contents);
+  StarterDelegateDesktop(
+      content::WebContents* web_contents,
+      std::unique_ptr<CommonDependencies> common_dependencies,
+      std::unique_ptr<PlatformDependencies> platform_dependencies);
+
+  const std::unique_ptr<CommonDependencies> common_dependencies_;
+  const std::unique_ptr<PlatformDependencies> platform_dependencies_;
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 

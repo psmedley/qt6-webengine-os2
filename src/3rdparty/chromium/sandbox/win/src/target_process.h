@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -125,7 +125,7 @@ class TargetProcess {
   // `base_address_` is not a raw_ptr<void>, because pointer to address in
   // another process could be confused as a pointer to PartitionMalloc memory,
   // causing ref-counting mismatch.  See also https://crbug.com/1173374.
-  void* base_address_;
+  RAW_PTR_EXCLUSION void* base_address_;
   // Full name of the target executable.
   std::unique_ptr<wchar_t, base::FreeDeleter> exe_name_;
   /// List of capability sids for use when impersonating in an AC process.

@@ -21,15 +21,13 @@
  */
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 #include "libavutil/imgutils.h"
 
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include "zlib_wrapper.h"
 
 #include <zlib.h>
@@ -41,13 +39,11 @@ typedef struct WCMVContext {
     uint8_t     block_data[65536*8];
 } WCMVContext;
 
-static int decode_frame(AVCodecContext *avctx,
-                        void *data, int *got_frame,
-                        AVPacket *avpkt)
+static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
+                        int *got_frame, AVPacket *avpkt)
 {
     WCMVContext *s = avctx->priv_data;
     z_stream *const zstream = &s->zstream.zstream;
-    AVFrame *frame = data;
     int skip, blocks, zret, ret, intra = 0, flags = 0, bpp = s->bpp;
     GetByteContext gb;
     uint8_t *dst;
@@ -244,14 +240,13 @@ static av_cold int decode_close(AVCodecContext *avctx)
 
 const FFCodec ff_wcmv_decoder = {
     .p.name           = "wcmv",
-    .p.long_name      = NULL_IF_CONFIG_SMALL("WinCAM Motion Video"),
+    CODEC_LONG_NAME("WinCAM Motion Video"),
     .p.type           = AVMEDIA_TYPE_VIDEO,
     .p.id             = AV_CODEC_ID_WCMV,
     .priv_data_size   = sizeof(WCMVContext),
     .init             = decode_init,
     .close            = decode_close,
-    .decode           = decode_frame,
+    FF_CODEC_DECODE_CB(decode_frame),
     .p.capabilities   = AV_CODEC_CAP_DR1,
-    .caps_internal    = FF_CODEC_CAP_INIT_THREADSAFE |
-                        FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal    = FF_CODEC_CAP_INIT_CLEANUP,
 };

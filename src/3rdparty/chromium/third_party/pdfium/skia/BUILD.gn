@@ -6,7 +6,7 @@ import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//testing/test.gni")
 import("//third_party/skia/gn/shared_sources.gni")
-import("//third_party/skia/third_party/skcms/skcms.gni")
+import("//third_party/skia/modules/skcms/skcms.gni")
 import("features.gni")
 
 if (current_cpu == "arm") {
@@ -157,10 +157,9 @@ source_set("skcms") {
     cflags += [ "-mfp16-format=ieee" ]
   }
 
-  public = [ "//third_party/skia/include/third_party/skcms/skcms.h" ]
-  include_dirs = [ "//third_party/skia/include/third_party/skcms" ]
-  sources =
-      rebase_path(skcms_sources, ".", "//third_party/skia/third_party/skcms")
+  public =
+      rebase_path(skcms_public_headers, ".", "//third_party/skia/modules/skcms")
+  sources = rebase_path(skcms_sources, ".", "//third_party/skia/modules/skcms")
 }
 
 component("skia") {
@@ -191,7 +190,6 @@ component("skia") {
     "//third_party/skia/src/fonts/SkFontMgr_indirect.cpp",
     "//third_party/skia/src/fonts/SkRemotableFontMgr.cpp",
     "//third_party/skia/src/images/SkImageEncoder.cpp",
-    "//third_party/skia/src/ports/SkFontMgr_android_factory.cpp",
     "//third_party/skia/src/ports/SkGlobalInitialization_default.cpp",
     "//third_party/skia/src/ports/SkImageGenerator_none.cpp",
     "//third_party/skia/src/ports/SkOSFile_stdio.cpp",
@@ -200,9 +198,6 @@ component("skia") {
 
     #pdfium
     "//third_party/skia/src/ports/SkDiscardableMemory_none.cpp",
-    "//third_party/skia/src/ports/SkFontMgr_custom.cpp",
-    "//third_party/skia/src/ports/SkFontMgr_custom_empty.cpp",
-    "//third_party/skia/src/ports/SkFontMgr_custom_empty_factory.cpp",
     "//third_party/skia/src/ports/SkMemory_malloc.cpp",
   ]
 
@@ -229,18 +224,6 @@ component("skia") {
     "//third_party/skia/src/utils/SkParsePath.cpp",
   ]
 
-  if (is_win) {
-    sources -= [
-      # Keeping _win.cpp
-      "//third_party/skia/src/utils/SkThreadUtils_pthread.cpp",
-    ]
-  } else {
-    sources -= [
-      # Keeping _pthread.cpp
-      "//third_party/skia/src/utils/SkThreadUtils_win.cpp",
-    ]
-  }
-
   # need separate win section to handle chromes auto gn filter
   # (build/config/BUILDCONFIG.gn)
   if (is_win) {
@@ -266,29 +249,41 @@ component("skia") {
   if (is_win) {
     sources += [
       "//third_party/skia/src/ports/SkFontHost_win.cpp",
+
+      # TODO(crbug.com/pdfium/1830)  Consider using SkFontMgr_win_dw_factory
+      # instead of SkFontMgr_custom_empty (which is what the embedder test
+      # hashes are based upon).
+      "//third_party/skia/src/ports/SkFontMgr_custom.cpp",
+      "//third_party/skia/src/ports/SkFontMgr_custom_empty.cpp",
+      "//third_party/skia/src/ports/SkFontMgr_custom_empty_factory.cpp",
       "//third_party/skia/src/ports/SkFontMgr_win_dw.cpp",
       "//third_party/skia/src/ports/SkOSFile_win.cpp",
       "//third_party/skia/src/ports/SkRemotableFontMgr_win_dw.cpp",
       "//third_party/skia/src/ports/SkScalerContext_win_dw.cpp",
-      "//third_party/skia/src/ports/SkTLS_win.cpp",
       "//third_party/skia/src/ports/SkTypeface_win_dw.cpp",
     ]
   } else {
-    sources += [
-      "//third_party/skia/src/ports/SkOSFile_posix.cpp",
-      "//third_party/skia/src/ports/SkTLS_pthread.cpp",
-    ]
+    sources += [ "//third_party/skia/src/ports/SkOSFile_posix.cpp" ]
   }
 
+  frameworks = []
   if (is_apple) {
     sources += [
-      "//third_party/skia/include/ports/SkFontMgr_mac_ct.h",
-      "//third_party/skia/src/ports/SkFontMgr_mac_ct.cpp",
-      "//third_party/skia/src/ports/SkFontMgr_mac_ct_factory.cpp",
+      # TODO(crbug.com/pdfium/1830)  Consider using SkFontMgr_mac_ct instead of
+      # SkFontMgr_custom_empty (which is what the embedder test hashes are
+      # based upon).
+      "//third_party/skia/src/ports/SkFontMgr_custom.cpp",
+      "//third_party/skia/src/ports/SkFontMgr_custom_empty.cpp",
+      "//third_party/skia/src/ports/SkFontMgr_custom_empty_factory.cpp",
       "//third_party/skia/src/ports/SkScalerContext_mac_ct.cpp",
       "//third_party/skia/src/ports/SkScalerContext_mac_ct.h",
       "//third_party/skia/src/ports/SkTypeface_mac_ct.cpp",
       "//third_party/skia/src/ports/SkTypeface_mac_ct.h",
+    ]
+    frameworks += [
+      "CoreFoundation.framework",
+      "CoreGraphics.framework",
+      "CoreText.framework",
     ]
   }
 
@@ -298,6 +293,9 @@ component("skia") {
       "//third_party/skia/src/ports/SkFontConfigInterface_direct.cpp",
       "//third_party/skia/src/ports/SkFontConfigInterface_direct_factory.cpp",
       "//third_party/skia/src/ports/SkFontMgr_FontConfigInterface.cpp",
+      "//third_party/skia/src/ports/SkFontMgr_custom.cpp",
+      "//third_party/skia/src/ports/SkFontMgr_custom_empty.cpp",
+      "//third_party/skia/src/ports/SkFontMgr_custom_empty_factory.cpp",
     ]
   }
 
@@ -307,6 +305,7 @@ component("skia") {
       # require these files, since PDFium does not perform Android emulation.
       # Note that this requires expat.
       "//third_party/skia/src/ports/SkFontMgr_android.cpp",
+      "//third_party/skia/src/ports/SkFontMgr_android_factory.cpp",
       "//third_party/skia/src/ports/SkFontMgr_android_parser.cpp",
     ]
   }
@@ -343,9 +342,8 @@ component("skia") {
 
   if (is_android) {
     deps += [
-      "//third_party/android_sdk:cpu_features",
+      "//third_party/android_ndk:cpu_features",
       "//third_party/expat",
-      "//third_party/freetype-android:freetype",
     ]
   }
 
@@ -355,7 +353,7 @@ component("skia") {
   }
 
   if (is_ios) {
-    frameworks = [ "ImageIO.framework" ]
+    frameworks += [ "ImageIO.framework" ]
     sources += [ "//third_party/skia/src/utils/mac/SkCreateCGImageRef.cpp" ]
   }
 
@@ -404,7 +402,7 @@ template("skia_source_set") {
 }
 
 skia_source_set("skia_core_and_effects") {
-  defines = skia_core_defines
+  defines = []
   sources = skia_core_sources
   sources += skia_effects_sources
   sources += skia_effects_imagefilter_sources
@@ -421,16 +419,6 @@ if (current_cpu == "x86" || current_cpu == "x64") {
     }
     if (is_win) {
       defines = [ "SK_CPU_SSE_LEVEL=31" ]
-    }
-    visibility = [ ":skia_opts" ]
-  }
-  skia_source_set("skia_opts_sse41") {
-    sources = skia_opts.sse41_sources
-    if (!is_win || is_clang) {
-      cflags = [ "-msse4.1" ]
-    }
-    if (is_win) {
-      defines = [ "SK_CPU_SSE_LEVEL=41" ]
     }
     visibility = [ ":skia_opts" ]
   }
@@ -487,13 +475,11 @@ skia_source_set("skia_opts") {
   defines = []
 
   if (current_cpu == "x86" || current_cpu == "x64") {
-    sources = skia_opts.sse2_sources
     deps = [
       ":skia_opts_avx",
       ":skia_opts_hsw",
       ":skia_opts_skx",
       ":skia_opts_sse3",
-      ":skia_opts_sse41",
       ":skia_opts_sse42",
     ]
   } else if (current_cpu == "arm") {
@@ -502,10 +488,7 @@ skia_source_set("skia_opts") {
     cflags += [ "-fomit-frame-pointer" ]
 
     if (arm_version >= 7) {
-      sources = skia_opts.armv7_sources
       if (arm_use_neon || arm_optionally_use_neon) {
-        sources += skia_opts.neon_sources
-
         # Root build config sets -mfpu=$arm_fpu, which we expect to be neon
         # when running this.
         if (!arm_use_neon) {
@@ -513,24 +496,13 @@ skia_source_set("skia_opts") {
           cflags += [ "-mfpu=neon" ]
         }
       }
-    } else {
-      sources = skia_opts.none_sources
     }
   } else if (current_cpu == "arm64") {
-    sources = skia_opts.arm64_sources
-  } else if (current_cpu == "mipsel") {
+    # Conditional and empty body needed to avoid assert() below.
+  } else if (current_cpu == "mipsel" || current_cpu == "mips64el") {
     cflags += [ "-fomit-frame-pointer" ]
-
-    if (mips_dsp_rev >= 1) {
-      sources = skia_opts.mips_dsp_sources
-    } else {
-      sources = skia_opts.none_sources
-    }
-  } else if (current_cpu == "mips64el") {
-    cflags += [ "-fomit-frame-pointer" ]
-    sources = skia_opts.none_sources
   } else {
-    assert(false, "Need to port cpu specific stuff from gn/BUILDCONFIG.gn")
+    assert(false, "Unsupported target CPU " + current_cpu)
   }
 
   if (is_android && !is_debug) {

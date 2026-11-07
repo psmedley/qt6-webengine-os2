@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -169,6 +169,21 @@ std::ostream& operator<<(std::ostream& out,
       break;
     case ProcessedActionStatusProto::JS_FORCED_ROUNDTRIP:
       out << "JS_FORCED_ROUNDTRIP";
+      break;
+    case ProcessedActionStatusProto::QR_CODE_SCAN_CANCELLED:
+      out << "QR_CODE_SCAN_CANCELLED";
+      break;
+    case ProcessedActionStatusProto::QR_CODE_SCAN_FAILURE:
+      out << "QR_CODE_SCAN_FAILURE";
+      break;
+    case ProcessedActionStatusProto::QR_CODE_SCAN_CAMERA_ERROR:
+      out << "QR_CODE_SCAN_CAMERA_ERROR";
+      break;
+    case ProcessedActionStatusProto::XML_PARSE_INCORRECT_DATA:
+      out << "XML_PARSE_INCORRECT_DATA";
+      break;
+    case ProcessedActionStatusProto::XML_PARSE_SIGNED_DATA:
+      out << "XML_PARSE_SIGNED_DATA";
       break;
 
       // Intentionally no default case to make compilation fail if a new value

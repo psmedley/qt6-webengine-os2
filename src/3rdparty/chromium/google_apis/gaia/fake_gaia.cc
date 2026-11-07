@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -366,10 +367,6 @@ void FakeGaia::Initialize() {
   REGISTER_RESPONSE_HANDLER(
       gaia_urls->ListAccountsURLWithSource(std::string()), HandleListAccounts);
 
-  // Handles /GetUserInfo GAIA call.
-  REGISTER_RESPONSE_HANDLER(
-      gaia_urls->get_user_info_url(), HandleGetUserInfo);
-
   // Handles /oauth2/v1/userinfo call.
   REGISTER_RESPONSE_HANDLER(
       gaia_urls->oauth_user_info_url(), HandleOAuthUserInfo);
@@ -391,8 +388,8 @@ void FakeGaia::Initialize() {
 
 FakeGaia::RequestHandlerMap::iterator FakeGaia::FindHandlerByPathPrefix(
     const std::string& request_path) {
-  return std::find_if(
-      request_handlers_.begin(), request_handlers_.end(),
+  return base::ranges::find_if(
+      request_handlers_,
       [request_path](std::pair<std::string, HttpRequestHandlerCallback> entry) {
         return base::StartsWith(request_path, entry.first,
                                 base::CompareCase::SENSITIVE);
@@ -920,15 +917,6 @@ void FakeGaia::HandleListAccounts(const HttpRequest& request,
   http_response->set_content(
       base::StringPrintf(kListAccountsResponseFormat,
                          base::JoinString(listed_accounts, ",").c_str()));
-  http_response->set_code(net::HTTP_OK);
-}
-
-void FakeGaia::HandleGetUserInfo(const HttpRequest& request,
-                                 BasicHttpResponse* http_response) {
-  http_response->set_content(base::StringPrintf(
-      "email=%s\ndisplayEmail=%s",
-      merge_session_params_.email.c_str(),
-      merge_session_params_.email.c_str()));
   http_response->set_code(net::HTTP_OK);
 }
 

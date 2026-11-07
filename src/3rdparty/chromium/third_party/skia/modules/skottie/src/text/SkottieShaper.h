@@ -8,13 +8,20 @@
 #ifndef SkottieShaper_DEFINED
 #define SkottieShaper_DEFINED
 
+#include "include/core/SkFont.h"
 #include "include/core/SkPoint.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkTextBlob.h"
 #include "include/utils/SkTextUtils.h"
 
 #include <vector>
 
+class SkCanvas;
 class SkFontMgr;
-class SkTextBlob;
+class SkTypeface;
+class SkString;
+
+struct SkRect;
 
 namespace skottie {
 
@@ -22,16 +29,38 @@ namespace skottie {
 
 class Shaper final {
 public:
+    struct RunRec {
+        SkFont fFont;
+        size_t fSize;
+
+        static_assert(::sk_is_trivially_relocatable<decltype(fFont)>::value);
+
+        using sk_is_trivially_relocatable = std::true_type;
+    };
+
+    struct ShapedGlyphs {
+        std::vector<RunRec>    fRuns;
+
+        // Consolidated storage for all runs.
+        std::vector<SkGlyphID> fGlyphIDs;
+        std::vector<SkPoint>   fGlyphPos;
+
+        enum class BoundsType { kConservative, kTight };
+        SkRect computeBounds(BoundsType) const;
+
+        void draw(SkCanvas*, const SkPoint& origin, const SkPaint&) const;
+    };
+
     struct Fragment {
-        sk_sp<SkTextBlob> fBlob;
-        SkPoint           fPos;
+        ShapedGlyphs fGlyphs;
+        SkPoint      fOrigin;
 
         // Only valid for kFragmentGlyphs
-        float             fAdvance,
-                          fAscent;
-        uint32_t          fLineIndex;    // 0-based index for the line this fragment belongs to.
-        bool              fIsWhitespace; // True if the first code point in the corresponding
-                                         // cluster is whitespace.
+        float        fAdvance,
+                     fAscent;
+        uint32_t     fLineIndex;    // 0-based index for the line this fragment belongs to.
+        bool         fIsWhitespace; // True if the first code point in the corresponding
+                                    // cluster is whitespace.
     };
 
     struct Result {

@@ -4,6 +4,8 @@
 
 #include "core/fpdfdoc/cpdf_bafontmap.h"
 
+#include <utility>
+
 #include "build/build_config.h"
 #include "constants/annotation_common.h"
 #include "core/fpdfapi/font/cpdf_font.h"
@@ -24,7 +26,7 @@ TEST_F(BAFontMapTest, DefaultFont) {
   annot_dict->SetNewFor<CPDF_String>("DA", "0 0 0 rg /F1 12 Tf",
                                      /*bHex=*/false);
 
-  CPDF_BAFontMap font_map(&doc, annot_dict.Get(), "N");
+  CPDF_BAFontMap font_map(&doc, std::move(annot_dict), "N");
 #if !BUILDFLAG(IS_WIN)
   // TODO(thestig): Figure out why this does not work on Windows.
   EXPECT_EQ(font_map.GetPDFFontAlias(0), "Helvetica_00");
@@ -38,21 +40,21 @@ TEST_F(BAFontMapTest, DefaultFont) {
 TEST_F(BAFontMapTest, Bug853238) {
   CPDF_TestDocument doc;
   auto root_dict = pdfium::MakeRetain<CPDF_Dictionary>();
-  auto* acroform_dict = root_dict->SetNewFor<CPDF_Dictionary>("AcroForm");
-  auto* annot_dr_dict = acroform_dict->SetNewFor<CPDF_Dictionary>("DR");
-  auto* annot_font_dict = annot_dr_dict->SetNewFor<CPDF_Dictionary>("Font");
-  auto* annot_font_f1_dict = annot_font_dict->SetNewFor<CPDF_Dictionary>("F1");
+  auto acroform_dict = root_dict->SetNewFor<CPDF_Dictionary>("AcroForm");
+  auto annot_dr_dict = acroform_dict->SetNewFor<CPDF_Dictionary>("DR");
+  auto annot_font_dict = annot_dr_dict->SetNewFor<CPDF_Dictionary>("Font");
+  auto annot_font_f1_dict = annot_font_dict->SetNewFor<CPDF_Dictionary>("F1");
   annot_font_f1_dict->SetNewFor<CPDF_Name>("Type", "Font");
   annot_font_f1_dict->SetNewFor<CPDF_Name>("Subtype", "Type1");
   annot_font_f1_dict->SetNewFor<CPDF_Name>("BaseFont", "Times-Roman");
-  doc.SetRoot(root_dict.Get());
+  doc.SetRoot(root_dict);
 
   auto annot_dict = pdfium::MakeRetain<CPDF_Dictionary>();
   annot_dict->SetNewFor<CPDF_Name>(pdfium::annotation::kSubtype, "Widget");
   annot_dict->SetNewFor<CPDF_String>("DA", "0 0 0 rg /F1 12 Tf",
                                      /*bHex=*/false);
 
-  CPDF_BAFontMap font_map(&doc, annot_dict.Get(), "N");
+  CPDF_BAFontMap font_map(&doc, std::move(annot_dict), "N");
   EXPECT_EQ(font_map.GetPDFFontAlias(0), "F1");
   RetainPtr<CPDF_Font> font = font_map.GetPDFFont(0);
   ASSERT_TRUE(font);

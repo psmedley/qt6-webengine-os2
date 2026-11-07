@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,8 +81,7 @@ class MockCertVerifier::MockRequest : public CertVerifier::Request {
   base::WeakPtrFactory<MockRequest> weak_factory_{this};
 };
 
-MockCertVerifier::MockCertVerifier()
-    : default_result_(ERR_CERT_INVALID), async_(false) {}
+MockCertVerifier::MockCertVerifier() = default;
 
 MockCertVerifier::~MockCertVerifier() {
   // Reset the callbacks for any outstanding MockRequests to fulfill the

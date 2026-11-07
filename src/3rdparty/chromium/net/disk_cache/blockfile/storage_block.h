@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,7 @@ class StorageBlock : public FileBlock {
   StorageBlock(const StorageBlock&) = delete;
   StorageBlock& operator=(const StorageBlock&) = delete;
 
-  virtual ~StorageBlock();
+  ~StorageBlock() override;
 
   // Deeps copies from another block. Neither this nor |other| should be
   // |modified|.
@@ -94,12 +94,13 @@ class StorageBlock : public FileBlock {
   void DeleteData();
   uint32_t CalculateHash() const;
 
-  raw_ptr<T> data_;
+  raw_ptr<T> data_ = nullptr;
   raw_ptr<MappedFile> file_;
   Addr address_;
-  bool modified_;
-  bool own_data_;  // Is data_ owned by this object or shared with someone else.
-  bool extended_;  // Used to store an entry of more than one block.
+  bool modified_ = false;
+  // Is data_ owned by this object or shared with someone else.
+  bool own_data_ = false;
+  bool extended_ = false;  // Used to store an entry of more than one block.
 };
 
 }  // namespace disk_cache

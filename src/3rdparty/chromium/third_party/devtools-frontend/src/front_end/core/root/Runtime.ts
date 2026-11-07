@@ -120,18 +120,21 @@ export class ExperimentsSupport {
   #enabledTransiently: Set<string>;
   readonly #enabledByDefault: Set<string>;
   readonly #serverEnabled: Set<string>;
+  // Experiments in this set won't be shown to the user
+  readonly #nonConfigurable: Set<string>;
   constructor() {
     this.#experiments = [];
     this.#experimentNames = new Set();
     this.#enabledTransiently = new Set();
     this.#enabledByDefault = new Set();
     this.#serverEnabled = new Set();
+    this.#nonConfigurable = new Set();
   }
 
   allConfigurableExperiments(): Experiment[] {
     const result = [];
     for (const experiment of this.#experiments) {
-      if (!this.#enabledTransiently.has(experiment.name)) {
+      if (!this.#enabledTransiently.has(experiment.name) && !this.#nonConfigurable.has(experiment.name)) {
         result.push(experiment);
       }
     }
@@ -149,11 +152,16 @@ export class ExperimentsSupport {
     self.localStorage['experiments'] = JSON.stringify(value);
   }
 
-  register(experimentName: string, experimentTitle: string, unstable?: boolean, docLink?: string): void {
+  register(
+      experimentName: string, experimentTitle: string, unstable?: boolean, docLink?: string,
+      feedbackLink?: string): void {
     Platform.DCHECK(
         () => !this.#experimentNames.has(experimentName), 'Duplicate registration of experiment ' + experimentName);
     this.#experimentNames.add(experimentName);
-    this.#experiments.push(new Experiment(this, experimentName, experimentTitle, Boolean(unstable), docLink ?? ''));
+    this.#experiments.push(new Experiment(
+        this, experimentName, experimentTitle, Boolean(unstable),
+        docLink as Platform.DevToolsPath.UrlString ?? Platform.DevToolsPath.EmptyUrlString,
+        feedbackLink as Platform.DevToolsPath.UrlString ?? Platform.DevToolsPath.EmptyUrlString));
   }
 
   isEnabled(experimentName: string): boolean {
@@ -201,9 +209,21 @@ export class ExperimentsSupport {
     }
   }
 
+  setNonConfigurableExperiments(experimentNames: string[]): void {
+    for (const experiment of experimentNames) {
+      this.checkExperiment(experiment);
+      this.#nonConfigurable.add(experiment);
+    }
+  }
+
   enableForTest(experimentName: string): void {
     this.checkExperiment(experimentName);
     this.#enabledTransiently.add(experimentName);
+  }
+
+  disableForTest(experimentName: string): void {
+    this.checkExperiment(experimentName);
+    this.#enabledTransiently.delete(experimentName);
   }
 
   clearForTest(): void {
@@ -239,13 +259,17 @@ export class Experiment {
   name: string;
   title: string;
   unstable: boolean;
-  docLink?: string;
+  docLink?: Platform.DevToolsPath.UrlString;
+  readonly feedbackLink?: Platform.DevToolsPath.UrlString;
   readonly #experiments: ExperimentsSupport;
-  constructor(experiments: ExperimentsSupport, name: string, title: string, unstable: boolean, docLink: string) {
+  constructor(
+      experiments: ExperimentsSupport, name: string, title: string, unstable: boolean,
+      docLink: Platform.DevToolsPath.UrlString, feedbackLink: Platform.DevToolsPath.UrlString) {
     this.name = name;
     this.title = title;
     this.unstable = unstable;
     this.docLink = docLink;
+    this.feedbackLink = feedbackLink;
     this.#experiments = experiments;
   }
 
@@ -274,13 +298,17 @@ export enum ExperimentName {
   ALL = '*',
   PROTOCOL_MONITOR = 'protocolMonitor',
   WEBAUTHN_PANE = 'webauthnPane',
-  SYNC_SETTINGS = 'syncSettings',
   FULL_ACCESSIBILITY_TREE = 'fullAccessibilityTree',
   PRECISE_CHANGES = 'preciseChanges',
   STYLES_PANE_CSS_CHANGES = 'stylesPaneCSSChanges',
   HEADER_OVERRIDES = 'headerOverrides',
-  CSS_LAYERS = 'cssLayers',
   EYEDROPPER_COLOR_PICKER = 'eyedropperColorPicker',
+  INSTRUMENTATION_BREAKPOINTS = 'instrumentationBreakpoints',
+  CSS_AUTHORING_HINTS = 'cssAuthoringHints',
+  AUTHORED_DEPLOYED_GROUPING = 'authoredDeployedGrouping',
+  IMPORTANT_DOM_PROPERTIES = 'importantDOMProperties',
+  JUST_MY_CODE = 'justMyCode',
+  BREAKPOINT_VIEW = 'breakpointView',
 }
 
 // TODO(crbug.com/1167717): Make this a const enum again

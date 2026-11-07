@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -100,6 +100,9 @@ class ServiceWorkerContextAdapter
   const base::flat_map<int64_t /* version_id */,
                        content::ServiceWorkerRunningInfo>&
   GetRunningServiceWorkerInfos() override;
+  bool IsLiveRunningServiceWorker(int64_t service_worker_version_id) override;
+  service_manager::InterfaceProvider& GetRemoteInterfaces(
+      int64_t service_worker_version_id) override;
 
   // content::ServiceWorkerContextObserver:
   void OnRegistrationCompleted(const GURL& scope) override;

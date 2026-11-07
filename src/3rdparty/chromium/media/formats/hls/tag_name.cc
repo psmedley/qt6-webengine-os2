@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,24 +50,44 @@ constexpr std::pair<base::StringPiece, TagName> TagNameEntry(
 // Mapping of tag names to their constants. This must remain sorted by the
 // string value.
 constexpr auto kTagNames = base::MakeFixedFlatMap({
+    TagNameEntry("EXT-X-BITRATE", MediaPlaylistTagName::kXBitrate),
+    TagNameEntry("EXT-X-BYTERANGE", MediaPlaylistTagName::kXByteRange),
     TagNameEntry("EXT-X-CONTENT-STEERING",
                  MultivariantPlaylistTagName::kXContentSteering),
+    TagNameEntry("EXT-X-DATERANGE", MediaPlaylistTagName::kXDateRange),
     TagNameEntry("EXT-X-DEFINE", CommonTagName::kXDefine),
     TagNameEntry("EXT-X-DISCONTINUITY", MediaPlaylistTagName::kXDiscontinuity),
-    TagNameEntry("EXT-X-END-LIST", MediaPlaylistTagName::kXEndList),
+    TagNameEntry("EXT-X-DISCONTINUITY-SEQUENCE",
+                 MediaPlaylistTagName::kXDiscontinuitySequence),
+    TagNameEntry("EXT-X-ENDLIST", MediaPlaylistTagName::kXEndList),
     TagNameEntry("EXT-X-GAP", MediaPlaylistTagName::kXGap),
     TagNameEntry("EXT-X-I-FRAME-STREAM-INF",
                  MultivariantPlaylistTagName::kXIFrameStreamInf),
     TagNameEntry("EXT-X-I-FRAMES-ONLY", MediaPlaylistTagName::kXIFramesOnly),
     TagNameEntry("EXT-X-INDEPENDENT-SEGMENTS",
                  CommonTagName::kXIndependentSegments),
+    TagNameEntry("EXT-X-KEY", MediaPlaylistTagName::kXKey),
+    TagNameEntry("EXT-X-MAP", MediaPlaylistTagName::kXMap),
     TagNameEntry("EXT-X-MEDIA", MultivariantPlaylistTagName::kXMedia),
+    TagNameEntry("EXT-X-MEDIA-SEQUENCE", MediaPlaylistTagName::kXMediaSequence),
+    TagNameEntry("EXT-X-PART", MediaPlaylistTagName::kXPart),
+    TagNameEntry("EXT-X-PART-INF", MediaPlaylistTagName::kXPartInf),
     TagNameEntry("EXT-X-PLAYLIST-TYPE", MediaPlaylistTagName::kXPlaylistType),
+    TagNameEntry("EXT-X-PRELOAD-HINT", MediaPlaylistTagName::kXPreloadHint),
+    TagNameEntry("EXT-X-PROGRAM-DATE-TIME",
+                 MediaPlaylistTagName::kXProgramDateTime),
+    TagNameEntry("EXT-X-RENDITION-REPORT",
+                 MediaPlaylistTagName::kXRenditionReport),
+    TagNameEntry("EXT-X-SERVER-CONTROL", MediaPlaylistTagName::kXServerControl),
     TagNameEntry("EXT-X-SESSION-DATA",
                  MultivariantPlaylistTagName::kXSessionData),
     TagNameEntry("EXT-X-SESSION-KEY",
                  MultivariantPlaylistTagName::kXSessionKey),
+    TagNameEntry("EXT-X-SKIP", MediaPlaylistTagName::kXSkip),
+    TagNameEntry("EXT-X-START", CommonTagName::kXStart),
     TagNameEntry("EXT-X-STREAM-INF", MultivariantPlaylistTagName::kXStreamInf),
+    TagNameEntry("EXT-X-TARGETDURATION",
+                 MediaPlaylistTagName::kXTargetDuration),
     TagNameEntry("EXT-X-VERSION", CommonTagName::kXVersion),
     TagNameEntry("EXTINF", MediaPlaylistTagName::kInf),
     TagNameEntry("EXTM3U", CommonTagName::kM3u),

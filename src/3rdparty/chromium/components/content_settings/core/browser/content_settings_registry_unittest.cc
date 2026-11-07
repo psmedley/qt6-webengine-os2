@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -166,7 +166,7 @@ TEST_F(ContentSettingsRegistryTest, IsDefaultSettingValid) {
   EXPECT_FALSE(info->IsDefaultSettingValid(CONTENT_SETTING_ALLOW));
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   info = registry()->Get(ContentSettingsType::PROTECTED_MEDIA_IDENTIFIER);
   EXPECT_TRUE(info->IsDefaultSettingValid(CONTENT_SETTING_ALLOW));
 #endif

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/core/animation/element_animations.h"
 #include "third_party/blink/renderer/core/css/active_style_sheets.h"
 #include "third_party/blink/renderer/core/css/css_custom_property_declaration.h"
+#include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_initial_color_value.h"
 #include "third_party/blink/renderer/core/css/css_pending_substitution_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
@@ -40,6 +41,7 @@
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
+#include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/style_property_shorthand.h"
@@ -2815,6 +2817,110 @@ TEST_F(StyleCascadeTest, WebkitBorderImageMixedOrder) {
   EXPECT_EQ("space", cascade.ComputedValue("border-image-repeat"));
 }
 
+TEST_F(StyleCascadeTest, WebkitPerspectiveOriginCascadeOrder) {
+  TestCascade cascade(GetDocument());
+  cascade.Add("-webkit-perspective-origin-x:10px");
+  cascade.Add("-webkit-perspective-origin-y:20px");
+  cascade.Add("perspective-origin:30px 40px");
+  cascade.Apply();
+
+  EXPECT_EQ("30px 40px", cascade.ComputedValue("perspective-origin"));
+
+  // The -webkit-perspective-origin-x/y properties are not "computable".
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-perspective-origin-x"));
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-perspective-origin-y"));
+}
+
+TEST_F(StyleCascadeTest, WebkitPerspectiveOriginReverseCascadeOrder) {
+  TestCascade cascade(GetDocument());
+  cascade.Add("perspective-origin:30px 40px");
+  cascade.Add("-webkit-perspective-origin-x:10px");
+  cascade.Add("-webkit-perspective-origin-y:20px");
+  cascade.Apply();
+
+  EXPECT_EQ("10px 20px", cascade.ComputedValue("perspective-origin"));
+
+  // The -webkit-perspective-origin-x/y properties are not "computable".
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-perspective-origin-x"));
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-perspective-origin-y"));
+}
+
+TEST_F(StyleCascadeTest, WebkitPerspectiveOriginMixedCascadeOrder) {
+  TestCascade cascade(GetDocument());
+  cascade.Add("-webkit-perspective-origin-x:10px");
+  cascade.Add("perspective-origin:30px 40px");
+  cascade.Add("-webkit-perspective-origin-y:20px");
+  cascade.Apply();
+
+  EXPECT_EQ("30px 20px", cascade.ComputedValue("perspective-origin"));
+
+  // The -webkit-perspective-origin-x/y properties are not "computable".
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-perspective-origin-x"));
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-perspective-origin-y"));
+}
+
+TEST_F(StyleCascadeTest, WebkitPerspectiveOriginRevert) {
+  TestCascade cascade(GetDocument());
+  cascade.Add("-webkit-perspective-origin-x:10px");
+  cascade.Add("perspective-origin:30px 40px");
+  cascade.Add("-webkit-perspective-origin-y:20px");
+  cascade.Apply();
+
+  EXPECT_EQ("30px 20px", cascade.ComputedValue("perspective-origin"));
+
+  // The -webkit-perspective-origin-x/y properties are not "computable".
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-perspective-origin-x"));
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-perspective-origin-y"));
+}
+
+TEST_F(StyleCascadeTest, WebkitTransformOriginCascadeOrder) {
+  TestCascade cascade(GetDocument());
+  cascade.Add("-webkit-transform-origin-x:10px");
+  cascade.Add("-webkit-transform-origin-y:20px");
+  cascade.Add("-webkit-transform-origin-z:30px");
+  cascade.Add("transform-origin:40px 50px 60px");
+  cascade.Apply();
+
+  EXPECT_EQ("40px 50px 60px", cascade.ComputedValue("transform-origin"));
+
+  // The -webkit-transform-origin-x/y/z properties are not "computable".
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-transform-origin-x"));
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-transform-origin-y"));
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-transform-origin-z"));
+}
+
+TEST_F(StyleCascadeTest, WebkitTransformOriginReverseCascadeOrder) {
+  TestCascade cascade(GetDocument());
+  cascade.Add("transform-origin:40px 50px 60px");
+  cascade.Add("-webkit-transform-origin-x:10px");
+  cascade.Add("-webkit-transform-origin-y:20px");
+  cascade.Add("-webkit-transform-origin-z:30px");
+  cascade.Apply();
+
+  EXPECT_EQ("10px 20px 30px", cascade.ComputedValue("transform-origin"));
+
+  // The -webkit-transform-origin-x/y/z properties are not "computable".
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-transform-origin-x"));
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-transform-origin-y"));
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-transform-origin-z"));
+}
+
+TEST_F(StyleCascadeTest, WebkitTransformOriginMixedCascadeOrder) {
+  TestCascade cascade(GetDocument());
+  cascade.Add("-webkit-transform-origin-x:10px");
+  cascade.Add("transform-origin:40px 50px 60px");
+  cascade.Add("-webkit-transform-origin-y:20px");
+  cascade.Add("-webkit-transform-origin-z:30px");
+  cascade.Apply();
+
+  EXPECT_EQ("40px 20px 30px", cascade.ComputedValue("transform-origin"));
+
+  // The -webkit-transform-origin-x/y/z properties are not "computable".
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-transform-origin-x"));
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-transform-origin-y"));
+  EXPECT_EQ(nullptr, cascade.ComputedValue("-webkit-transform-origin-z"));
+}
+
 TEST_F(StyleCascadeTest, InitialDirection) {
   TestCascade cascade(GetDocument());
   cascade.Add("margin-inline-start:10px");
@@ -3002,6 +3108,37 @@ TEST_F(StyleCascadeTest, ApplyWithFilter) {
   EXPECT_EQ("rgb(0, 128, 0)", cascade.ComputedValue("color"));
   EXPECT_EQ("rgb(0, 128, 0)", cascade.ComputedValue("background-color"));
   EXPECT_EQ("inline", cascade.ComputedValue("display"));
+}
+
+TEST_F(StyleCascadeTest, FilterWebkitBorderImage) {
+  TestCascade cascade(GetDocument());
+  cascade.Add("border-image:linear-gradient(green, red) 1 / 2 / 3 round",
+              Origin::kAuthor);
+  cascade.Add(
+      "-webkit-border-image:linear-gradient(green, red) 4 / 5 / 6 round",
+      Origin::kAuthor);
+  cascade.Apply(CascadeFilter(CSSProperty::kLegacyOverlapping, true));
+  EXPECT_EQ("linear-gradient(rgb(0, 128, 0), rgb(255, 0, 0)) 1 / 2 / 3 round",
+            cascade.ComputedValue("-webkit-border-image"));
+}
+
+TEST_F(StyleCascadeTest, FilterPerspectiveOrigin) {
+  TestCascade cascade(GetDocument());
+  cascade.Add("-webkit-perspective-origin-x:10px");
+  cascade.Add("-webkit-perspective-origin-y:20px");
+  cascade.Add("perspective-origin:30px 40px");
+  cascade.Apply(CascadeFilter(CSSProperty::kLegacyOverlapping, false));
+  EXPECT_EQ("10px 20px", cascade.ComputedValue("perspective-origin"));
+}
+
+TEST_F(StyleCascadeTest, FilterTransformOrigin) {
+  TestCascade cascade(GetDocument());
+  cascade.Add("-webkit-transform-origin-x:10px");
+  cascade.Add("-webkit-transform-origin-y:20px");
+  cascade.Add("-webkit-transform-origin-z:30px");
+  cascade.Add("transform-origin:40px 50px 60px");
+  cascade.Apply(CascadeFilter(CSSProperty::kLegacyOverlapping, false));
+  EXPECT_EQ("10px 20px 30px", cascade.ComputedValue("transform-origin"));
 }
 
 TEST_F(StyleCascadeTest, HasAuthorBackground) {
@@ -3509,6 +3646,31 @@ TEST_F(StyleCascadeTest, InlineStyleLostCascade) {
               /*is_inline_style=*/true);
   cascade.Apply();
   EXPECT_TRUE(cascade.InlineStyleLostCascade());
+}
+
+TEST_F(StyleCascadeTest, LhUnitCycle) {
+  RegisterProperty(GetDocument(), "--x", "<length>", "0px", false);
+
+  TestCascade cascade(GetDocument());
+  cascade.Add("line-height", "var(--x)");
+  cascade.Add("--x", "10lh");
+  cascade.Apply();
+
+  EXPECT_EQ("0px", cascade.ComputedValue("--x"));
+}
+
+TEST_F(StyleCascadeTest, SubstitutingLhCycles) {
+  RegisterProperty(GetDocument(), "--x", "<length>", "0px", false);
+
+  TestCascade cascade(GetDocument());
+  cascade.Add("line-height", "var(--x)");
+  cascade.Add("--x", "10lh");
+  cascade.Add("--y", "var(--x)");
+  cascade.Add("--z", "var(--x,1px)");
+  cascade.Apply();
+
+  EXPECT_EQ("0px", cascade.ComputedValue("--y"));
+  EXPECT_EQ("0px", cascade.ComputedValue("--z"));
 }
 
 }  // namespace blink

@@ -13,14 +13,13 @@
 #include "core/fpdfapi/parser/cpdf_linearized_header.h"
 #include "core/fpdfapi/parser/cpdf_object.h"
 #include "core/fpdfapi/parser/cpdf_syntax_parser.h"
-#include "core/fxcrt/cfx_readonlymemorystream.h"
+#include "core/fxcrt/cfx_read_only_span_stream.h"
 #include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/fx_stream.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/utils/path_service.h"
-#include "third_party/base/cxx17_backports.h"
 
 using testing::Return;
 
@@ -39,7 +38,7 @@ class TestObjectsHolder final : public CPDF_Parser::ParsedObjectsHolder {
 
   // CPDF_Parser::ParsedObjectsHolder:
   bool TryInit() override { return true; }
-  MOCK_METHOD1(GetOrParseIndirectObject, CPDF_Object*(uint32_t objnum));
+  MOCK_METHOD1(ParseIndirectObject, RetainPtr<CPDF_Object>(uint32_t objnum));
 };
 
 }  // namespace
@@ -66,7 +65,7 @@ class CPDF_TestParser final : public CPDF_Parser {
   bool InitTestFromBufferWithOffset(pdfium::span<const uint8_t> buffer,
                                     FX_FILESIZE header_offset) {
     SetSyntaxParserForTesting(CPDF_SyntaxParser::CreateForTesting(
-        pdfium::MakeRetain<CFX_ReadOnlyMemoryStream>(buffer), header_offset));
+        pdfium::MakeRetain<CFX_ReadOnlySpanStream>(buffer), header_offset));
     return true;
   }
 
@@ -97,9 +96,9 @@ TEST(ParserTest, RebuildCrossRefCorrectly) {
   ASSERT_TRUE(parser.RebuildCrossRef());
   const FX_FILESIZE offsets[] = {0, 15, 61, 154, 296, 374, 450};
   const uint16_t versions[] = {0, 0, 2, 4, 6, 8, 0};
-  for (size_t i = 0; i < pdfium::size(offsets); ++i)
+  for (size_t i = 0; i < std::size(offsets); ++i)
     EXPECT_EQ(offsets[i], GetObjInfo(parser, i).pos);
-  for (size_t i = 0; i < pdfium::size(versions); ++i)
+  for (size_t i = 0; i < std::size(versions); ++i)
     EXPECT_EQ(versions[i], GetObjInfo(parser, i).gennum);
 }
 
@@ -137,9 +136,9 @@ TEST(ParserTest, LoadCrossRefV4) {
         CPDF_TestParser::ObjectType::kFree,
         CPDF_TestParser::ObjectType::kNotCompressed,
         CPDF_TestParser::ObjectType::kNotCompressed};
-    static_assert(pdfium::size(kOffsets) == pdfium::size(kTypes),
+    static_assert(std::size(kOffsets) == std::size(kTypes),
                   "kOffsets / kTypes size mismatch");
-    for (size_t i = 0; i < pdfium::size(kOffsets); ++i) {
+    for (size_t i = 0; i < std::size(kOffsets); ++i) {
       EXPECT_EQ(kOffsets[i], GetObjInfo(parser, i).pos);
       EXPECT_EQ(kTypes[i], GetObjInfo(parser, i).type);
     }
@@ -177,9 +176,9 @@ TEST(ParserTest, LoadCrossRefV4) {
         CPDF_TestParser::ObjectType::kFree,
         CPDF_TestParser::ObjectType::kFree,
         CPDF_TestParser::ObjectType::kNotCompressed};
-    static_assert(pdfium::size(kOffsets) == pdfium::size(kTypes),
+    static_assert(std::size(kOffsets) == std::size(kTypes),
                   "kOffsets / kTypes size mismatch");
-    for (size_t i = 0; i < pdfium::size(kOffsets); ++i) {
+    for (size_t i = 0; i < std::size(kOffsets); ++i) {
       EXPECT_EQ(kOffsets[i], GetObjInfo(parser, i).pos);
       EXPECT_EQ(kTypes[i], GetObjInfo(parser, i).type);
     }
@@ -217,9 +216,9 @@ TEST(ParserTest, LoadCrossRefV4) {
         CPDF_TestParser::ObjectType::kFree,
         CPDF_TestParser::ObjectType::kFree,
         CPDF_TestParser::ObjectType::kNotCompressed};
-    static_assert(pdfium::size(kOffsets) == pdfium::size(kTypes),
+    static_assert(std::size(kOffsets) == std::size(kTypes),
                   "kOffsets / kTypes size mismatch");
-    for (size_t i = 0; i < pdfium::size(kOffsets); ++i) {
+    for (size_t i = 0; i < std::size(kOffsets); ++i) {
       EXPECT_EQ(kOffsets[i], GetObjInfo(parser, i).pos);
       EXPECT_EQ(kTypes[i], GetObjInfo(parser, i).type);
     }
@@ -249,9 +248,9 @@ TEST(ParserTest, LoadCrossRefV4) {
         CPDF_TestParser::ObjectType::kFree,
         CPDF_TestParser::ObjectType::kNotCompressed,
         CPDF_TestParser::ObjectType::kNotCompressed};
-    static_assert(pdfium::size(kOffsets) == pdfium::size(kTypes),
+    static_assert(std::size(kOffsets) == std::size(kTypes),
                   "kOffsets / kTypes size mismatch");
-    for (size_t i = 0; i < pdfium::size(kOffsets); ++i) {
+    for (size_t i = 0; i < std::size(kOffsets); ++i) {
       EXPECT_EQ(kOffsets[i], GetObjInfo(parser, i).pos);
       EXPECT_EQ(kTypes[i], GetObjInfo(parser, i).type);
     }
@@ -358,8 +357,8 @@ TEST(ParserTest, XrefObjectIndicesTooBig) {
   // Satisfy CPDF_Parser's checks, so the test data below can concentrate on the
   // /XRef stream and avoid also providing other valid dictionaries.
   auto dummy_root = pdfium::MakeRetain<CPDF_Dictionary>();
-  EXPECT_CALL(parser.object_holder(), GetOrParseIndirectObject)
-      .WillRepeatedly(Return(dummy_root.Get()));
+  EXPECT_CALL(parser.object_holder(), ParseIndirectObject)
+      .WillRepeatedly(Return(dummy_root));
 
   // Since /Index starts at 4194303, the object number will go past
   // `kMaxObjectNumber`.
@@ -410,8 +409,8 @@ TEST(ParserTest, XrefHasInvalidArchiveObjectNumber) {
   // Satisfy CPDF_Parser's checks, so the test data below can concentrate on the
   // /XRef stream and avoid also providing other valid dictionaries.
   auto dummy_root = pdfium::MakeRetain<CPDF_Dictionary>();
-  EXPECT_CALL(parser.object_holder(), GetOrParseIndirectObject)
-      .WillRepeatedly(Return(dummy_root.Get()));
+  EXPECT_CALL(parser.object_holder(), ParseIndirectObject)
+      .WillRepeatedly(Return(dummy_root));
 
   // 0xFF in the first object in the xref object stream is invalid.
   const unsigned char kData[] =

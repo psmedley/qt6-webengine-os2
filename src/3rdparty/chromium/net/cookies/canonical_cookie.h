@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,11 @@
 #include <tuple>
 #include <vector>
 
+#include "base/feature_list.h"
 #include "base/gtest_prod_util.h"
 #include "base/strings/string_piece.h"
 #include "base/time/time.h"
+#include "net/base/features.h"
 #include "net/base/net_export.h"
 #include "net/cookies/cookie_access_result.h"
 #include "net/cookies/cookie_constants.h"
@@ -139,6 +141,7 @@ class NET_EXPORT CanonicalCookie {
       base::Time creation,
       base::Time expiration,
       base::Time last_access,
+      base::Time last_update,
       bool secure,
       bool httponly,
       CookieSameSite same_site,
@@ -158,6 +161,7 @@ class NET_EXPORT CanonicalCookie {
       const base::Time& creation,
       const base::Time& expiration,
       const base::Time& last_access,
+      const base::Time& last_update,
       bool secure,
       bool httponly,
       CookieSameSite same_site,
@@ -182,9 +186,10 @@ class NET_EXPORT CanonicalCookie {
   const std::string& Domain() const { return domain_; }
   const std::string& Path() const { return path_; }
   const base::Time& CreationDate() const { return creation_date_; }
-  const base::Time& LastAccessDate() const { return last_access_date_; }
-  bool IsPersistent() const { return !expiry_date_.is_null(); }
   const base::Time& ExpiryDate() const { return expiry_date_; }
+  const base::Time& LastAccessDate() const { return last_access_date_; }
+  const base::Time& LastUpdateDate() const { return last_update_date_; }
+  bool IsPersistent() const { return !expiry_date_.is_null(); }
   bool IsSecure() const { return secure_; }
   bool IsHttpOnly() const { return httponly_; }
   CookieSameSite SameSite() const { return same_site_; }
@@ -287,7 +292,7 @@ class NET_EXPORT CanonicalCookie {
            priority_ == other.priority_ && same_party_ == other.same_party_ &&
            partition_key_ == other.partition_key_ && name_ == other.name_ &&
            value_ == other.value_ && domain_ == other.domain_ &&
-           path_ == other.path_;
+           path_ == other.path_ && last_update_date_ == other.last_update_date_;
   }
 
   void SetSourceScheme(CookieSourceScheme source_scheme) {
@@ -365,6 +370,12 @@ class NET_EXPORT CanonicalCookie {
                                     const base::Time& current,
                                     const base::Time& server_time);
 
+  // Per rfc6265bis the maximum expiry date is no further than 400 days in the
+  // future. Clamping only occurs when kClampCookieExpiryTo400Days is enabled.
+  static base::Time ValidateAndAdjustExpiryDate(
+      const base::Time& expiry_date,
+      const base::Time& creation_date);
+
   // Cookie ordering methods.
 
   // Returns true if the cookie is less than |other|, considering only name,
@@ -420,6 +431,11 @@ class NET_EXPORT CanonicalCookie {
   // (ignores the access result).
   static std::string BuildCookieLine(const CookieAccessResultList& cookies);
 
+  // Takes a single CanonicalCookie and returns a cookie line containing the
+  // attributes of |cookie| formatted like a http set cookie header.
+  // (e.g. "cookie1=value1; domain=abc.com; path=/; secure").
+  static std::string BuildCookieAttributesLine(const CanonicalCookie& cookie);
+
  private:
   FRIEND_TEST_ALL_PREFIXES(CanonicalCookieTest, TestPrefixHistograms);
   FRIEND_TEST_ALL_PREFIXES(CanonicalCookieTest, TestHasHiddenPrefixName);
@@ -437,6 +453,7 @@ class NET_EXPORT CanonicalCookie {
                   base::Time creation,
                   base::Time expiration,
                   base::Time last_access,
+                  base::Time last_update,
                   bool secure,
                   bool httponly,
                   CookieSameSite same_site,
@@ -459,11 +476,22 @@ class NET_EXPORT CanonicalCookie {
 
   // Returns the CookiePrefix (or COOKIE_PREFIX_NONE if none) that
   // applies to the given cookie |name|.
-  static CookiePrefix GetCookiePrefix(const std::string& name);
+  static CookiePrefix GetCookiePrefix(const std::string& name) {
+    return GetCookiePrefix(name,
+                           base::FeatureList::IsEnabled(
+                               net::features::kCaseInsensitiveCookiePrefix));
+  }
+
+  // Returns the CookiePrefix (or COOKIE_PREFIX_NONE if none) that
+  // applies to the given cookie |name|. If `check_insensitively` is true then
+  // the string comparison will be performed case insensitively.
+  static CookiePrefix GetCookiePrefix(const std::string& name,
+                                      bool check_insensitively);
   // Records histograms to measure how often cookie prefixes appear in
   // the wild and how often they would be blocked.
-  static void RecordCookiePrefixMetrics(CookiePrefix prefix,
-                                        bool is_cookie_valid);
+  static void RecordCookiePrefixMetrics(CookiePrefix prefix_case_sensitive,
+                                        CookiePrefix prefix_case_insensitive,
+                                        bool is_insensitive_prefix_valid);
   // Returns true if a prefixed cookie does not violate any of the rules
   // for that cookie.
   static bool IsCookiePrefixValid(CookiePrefix prefix,
@@ -502,17 +530,13 @@ class NET_EXPORT CanonicalCookie {
 
   // Returns true iff the cookie is a partitioned cookie with a nonce or that
   // does not violate the semantics of the Partitioned attribute:
-  // - Must have the Secure and Path=/ attributes
-  // - Must not have the Domain or SameParty attributes
+  // - Must have the Secure attribute OR the cookie partition contains a nonce.
   static bool IsCookiePartitionedValid(const GURL& url,
                                        const ParsedCookie& parsed_cookie,
                                        bool partition_has_nonce);
   static bool IsCookiePartitionedValid(const GURL& url,
                                        bool secure,
-                                       const std::string& domain,
-                                       const std::string& path,
                                        bool is_partitioned,
-                                       bool is_same_party,
                                        bool partition_has_nonce);
 
   // Keep defaults here in sync with
@@ -524,6 +548,7 @@ class NET_EXPORT CanonicalCookie {
   base::Time creation_date_;
   base::Time expiry_date_;
   base::Time last_access_date_;
+  base::Time last_update_date_;
   bool secure_{false};
   bool httponly_{false};
   CookieSameSite same_site_{CookieSameSite::NO_RESTRICTION};

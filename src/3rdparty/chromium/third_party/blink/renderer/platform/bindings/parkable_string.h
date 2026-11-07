@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/check_op.h"
 #include "base/dcheck_is_on.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_refptr.h"
@@ -29,8 +30,8 @@
 // As a consequence, the inner pointer should never be cached, and only touched
 // through a string returned by the |ToString()| method.
 //
-// As with WTF::AtomicString, this class is *not* thread-safe, and strings
-// created on a thread must always be used on the same thread.
+// This class is *not* thread-safe, and strings created on a thread must always
+// be used on the same thread.
 
 namespace blink {
 
@@ -56,6 +57,9 @@ class PLATFORM_EXPORT ParkableStringImpl final
   constexpr static size_t kDigestSize = 32;  // SHA256.
   using SecureDigest = Vector<uint8_t, kDigestSize>;
   // Computes a secure hash of a |string|, to be passed to |MakeParkable()|.
+  //
+  // TODO(lizeb): This is the "right" way of hashing a string. Move this code
+  // into WTF, and make sure it's the only way that is used.
   static std::unique_ptr<SecureDigest> HashString(StringImpl* string);
 
   // Not all ParkableStringImpls are actually parkable.
@@ -297,6 +301,8 @@ class PLATFORM_EXPORT ParkableString final {
  public:
   ParkableString() : impl_(nullptr) {}
   explicit ParkableString(scoped_refptr<StringImpl>&& impl);
+  ParkableString(scoped_refptr<StringImpl>&& impl,
+                 std::unique_ptr<ParkableStringImpl::SecureDigest> digest);
   ParkableString(const ParkableString& rhs) : impl_(rhs.impl_) {}
   ~ParkableString();
 

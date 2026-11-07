@@ -1,11 +1,11 @@
-// Copyright (c) 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/allocator/partition_allocator/starscan/scan_loop.h"
 
+#include "base/allocator/partition_allocator/partition_alloc_base/cpu.h"
 #include "base/allocator/partition_allocator/partition_alloc_config.h"
-#include "base/cpu.h"
 #include "build/build_config.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
@@ -27,19 +27,19 @@ class TestScanLoop final : public ScanLoop<TestScanLoop> {
   void Reset() { visited_ = 0; }
 
  private:
-  static constexpr uintptr_t kCageMask = 0xffffff0000000000;
-  static constexpr uintptr_t kBasePtr = 0x1234560000000000;
+  static constexpr uintptr_t kRegularPoolMask = 0xffffff0000000000;
+  static constexpr uintptr_t kBasePtr = 0x0000560000000000;
 
-  static uintptr_t CageBase() { return kBasePtr; }
-  static uintptr_t CageMask() { return kCageMask; }
+  static uintptr_t RegularPoolBase() { return kBasePtr; }
+  static uintptr_t RegularPoolMask() { return kRegularPoolMask; }
 
   void CheckPointer(uintptr_t maybe_ptr) { ++visited_; }
 
   size_t visited_ = 0;
 };
 
-static constexpr uintptr_t kValidPtr = 0x123456789abcdef0;
-static constexpr uintptr_t kInvalidPtr = 0xaaaaaaaaaaaaaaaa;
+static constexpr uintptr_t kValidPtr = 0x000056789abcdef0;
+static constexpr uintptr_t kInvalidPtr = 0x0000aaaaaaaaaaaa;
 static constexpr uintptr_t kZeroPtr = 0x0;
 
 // Tests all possible compbinations of incoming args.
@@ -59,7 +59,7 @@ void TestOnRangeWithAlignment(TestScanLoop& sl,
 
 }  // namespace
 
-TEST(PartitionAllocScanLoopTest, UnvectorizedWithCage) {
+TEST(PartitionAllocScanLoopTest, UnvectorizedWithRegularPool) {
   {
     TestScanLoop sl(SimdSupport::kUnvectorized);
     TestOnRangeWithAlignment<8>(sl, 0u, kInvalidPtr, kInvalidPtr, kInvalidPtr);

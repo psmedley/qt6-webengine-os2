@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -119,7 +119,7 @@ void NtpBackgroundHandler::HandleGetBackgrounds(const base::Value::List& args) {
     list_value.Append(std::move(element));
   }
 
-  ResolveJavascriptCallback(callback_id, base::Value(std::move(list_value)));
+  ResolveJavascriptCallback(callback_id, list_value);
 }
 
 void NtpBackgroundHandler::HandleSetBackground(const base::Value::List& args) {
@@ -135,7 +135,7 @@ void NtpBackgroundHandler::HandleSetBackground(const base::Value::List& args) {
       service->SetCustomBackgroundInfo(
           NtpBackgrounds[background_index], "Universe Cosmic Vacum",
           "Philipp Rietz — Walli",
-          GURL("https://walli.shanga.co/image/view/?id=370"), "");
+          GURL(), "");
       break;
     case static_cast<int>(NtpBackgrounds::kCityscape):
       service->SetCustomBackgroundInfo(
@@ -158,7 +158,7 @@ void NtpBackgroundHandler::HandleSetBackground(const base::Value::List& args) {
       service->SetCustomBackgroundInfo(
           NtpBackgrounds[background_index], "Tessellation 15",
           "Justin Prno — Walli",
-          GURL("https://walli.shanga.co/image/view/?id=1375"), "");
+          GURL(), "");
       break;
     case static_cast<int>(NtpBackgrounds::kLandscape):
       service->SetCustomBackgroundInfo(

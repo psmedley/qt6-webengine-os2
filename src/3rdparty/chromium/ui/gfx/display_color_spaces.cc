@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,13 +58,14 @@ DisplayColorSpaces::DisplayColorSpaces(const gfx::ColorSpace& c)
     : DisplayColorSpaces() {
   if (!c.IsValid())
     return;
+  primaries_ = c.GetPrimaries();
   for (size_t i = 0; i < kConfigCount; i++)  // NOLINT (modernize-loop-convert)
     color_spaces_[i] = c;
 }
 
-DisplayColorSpaces::DisplayColorSpaces(const ColorSpace& c, BufferFormat f) {
+DisplayColorSpaces::DisplayColorSpaces(const ColorSpace& c, BufferFormat f)
+    : DisplayColorSpaces(c) {
   for (size_t i = 0; i < kConfigCount; i++) {
-    color_spaces_[i] = c.IsValid() ? c : gfx::ColorSpace::CreateSRGB();
     buffer_formats_[i] = f;
   }
 }
@@ -190,6 +191,8 @@ bool DisplayColorSpaces::operator==(const DisplayColorSpaces& other) const {
     if (buffer_formats_[i] != other.buffer_formats_[i])
       return false;
   }
+  if (primaries_ != other.primaries_)
+    return false;
   if (sdr_max_luminance_nits_ != other.sdr_max_luminance_nits_)
     return false;
   if (hdr_max_luminance_relative_ != other.hdr_max_luminance_relative_)

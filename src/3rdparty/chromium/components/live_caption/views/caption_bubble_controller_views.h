@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,8 @@
 #include "base/memory/raw_ptr.h"
 #include "components/live_caption/caption_bubble_controller.h"
 #include "components/live_caption/views/caption_bubble.h"
+#include "components/prefs/pref_service.h"
+#include "media/mojo/mojom/speech_recognition.mojom.h"
 
 namespace views {
 class Widget;
@@ -29,7 +31,7 @@ class CaptionBubbleModel;
 //
 class CaptionBubbleControllerViews : public CaptionBubbleController {
  public:
-  explicit CaptionBubbleControllerViews();
+  explicit CaptionBubbleControllerViews(PrefService* profile_prefs);
   ~CaptionBubbleControllerViews() override;
   CaptionBubbleControllerViews(const CaptionBubbleControllerViews&) = delete;
   CaptionBubbleControllerViews& operator=(const CaptionBubbleControllerViews&) =
@@ -57,6 +59,7 @@ class CaptionBubbleControllerViews : public CaptionBubbleController {
 
  private:
   friend class CaptionBubbleControllerViewsTest;
+  friend class LiveCaptionUnavailabilityNotifierTest;
 
   // A callback passed to the CaptionBubble which is called when the
   // CaptionBubble is destroyed.

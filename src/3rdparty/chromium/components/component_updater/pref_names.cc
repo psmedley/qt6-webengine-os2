@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,6 +33,15 @@ const char kSwReporterLastTimeSentReport[] =
 
 // Enable running the SwReporter.
 const char kSwReporterEnabled[] = "software_reporter.enabled";
+
+// Which cohort of the SwReporter should be downloaded, unless overridden by the
+// safe_browsing::kReporterDistributionTagParam feature parameter.
+const char kSwReporterCohort[] = "software_reporter.cohort";
+
+// The time when kSwReporterCohort was last changed. Used to periodically
+// re-randomize which cohort users fall into.
+const char kSwReporterCohortSelectionTime[] =
+    "software_reporter.cohort_selection_time";
 
 // Control whether SwReporter and Chrome Cleanup results are reported to Google.
 const char kSwReporterReportingEnabled[] = "software_reporter.reporting";

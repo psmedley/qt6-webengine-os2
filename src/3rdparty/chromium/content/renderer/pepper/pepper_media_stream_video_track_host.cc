@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -369,11 +369,11 @@ void PepperMediaStreamVideoTrackHost::OnVideoFrame(
     int ret = libyuv::NV12ToI420(
         static_cast<const uint8_t*>(gmb->memory(0)), gmb->stride(0),
         static_cast<const uint8_t*>(gmb->memory(1)), gmb->stride(1),
-        frame->data(media::VideoFrame::kYPlane),
+        frame->writable_data(media::VideoFrame::kYPlane),
         frame->stride(media::VideoFrame::kYPlane),
-        frame->data(media::VideoFrame::kUPlane),
+        frame->writable_data(media::VideoFrame::kUPlane),
         frame->stride(media::VideoFrame::kUPlane),
-        frame->data(media::VideoFrame::kVPlane),
+        frame->writable_data(media::VideoFrame::kVPlane),
         frame->stride(media::VideoFrame::kVPlane),
         video_frame->coded_size().width(), video_frame->coded_size().height());
     gmb->Unmap();
@@ -431,7 +431,8 @@ class PepperMediaStreamVideoTrackHost::VideoSource final
 
   void StartSourceImpl(
       blink::VideoCaptureDeliverFrameCB frame_callback,
-      blink::EncodedVideoFrameCB encoded_frame_callback) final {
+      blink::EncodedVideoFrameCB encoded_frame_callback,
+      blink::VideoCaptureCropVersionCB crop_version_callback) final {
     if (host_) {
       host_->frame_deliverer_ =
           new FrameDeliverer(io_task_runner(), std::move(frame_callback));
@@ -443,7 +444,7 @@ class PepperMediaStreamVideoTrackHost::VideoSource final
       host_->frame_deliverer_ = nullptr;
   }
 
-  base::WeakPtr<MediaStreamVideoSource> GetWeakPtr() const final {
+  base::WeakPtr<MediaStreamVideoSource> GetWeakPtr() final {
     return weak_factory_.GetWeakPtr();
   }
 

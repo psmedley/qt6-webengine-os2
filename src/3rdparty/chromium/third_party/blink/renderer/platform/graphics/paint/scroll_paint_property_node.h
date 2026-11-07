@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,12 +14,15 @@
 #include "cc/input/scroll_snap_data.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/platform/graphics/compositor_element_id.h"
+#include "third_party/blink/renderer/platform/graphics/paint/clip_paint_property_node.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_property_node.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace blink {
+
+class ClipPaintPropertyNode;
 
 using MainThreadScrollingReasons = uint32_t;
 
@@ -42,8 +45,12 @@ class PLATFORM_EXPORT ScrollPaintPropertyNode
   // To make it less verbose and more readable to construct and update a node,
   // a struct with default values is used to represent the state.
   struct PLATFORM_EXPORT State {
+    DISALLOW_NEW();
+
+   public:
     gfx::Rect container_rect;
     gfx::Size contents_size;
+    scoped_refptr<const ClipPaintPropertyNode> overflow_clip_node;
     bool user_scrollable_horizontal = false;
     bool user_scrollable_vertical = false;
 
@@ -86,7 +93,9 @@ class PLATFORM_EXPORT ScrollPaintPropertyNode
 
   // The empty AnimationState struct is to meet the requirement of
   // ObjectPaintProperties.
-  struct AnimationState {};
+  struct AnimationState {
+    STACK_ALLOCATED();
+  };
   PaintPropertyChangeType Update(const ScrollPaintPropertyNode& parent,
                                  State&& state,
                                  const AnimationState& = AnimationState()) {
@@ -125,6 +134,10 @@ class PLATFORM_EXPORT ScrollPaintPropertyNode
   // same origin as ContainerRect().
   gfx::Rect ContentsRect() const {
     return gfx::Rect(state_.container_rect.origin(), state_.contents_size);
+  }
+
+  const ClipPaintPropertyNode* OverflowClipNode() const {
+    return state_.overflow_clip_node.get();
   }
 
   bool UserScrollableHorizontal() const {

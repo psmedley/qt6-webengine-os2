@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,8 @@
 
 #include <vector>
 
-#include "content/browser/attribution_reporting/attribution_aggregatable_trigger.h"
+#include "content/browser/attribution_reporting/attribution_aggregatable_trigger_data.h"
+#include "content/browser/attribution_reporting/attribution_aggregatable_values.h"
 #include "content/browser/attribution_reporting/attribution_filter_data.h"
 #include "content/common/content_export.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -41,7 +42,8 @@ class CONTENT_EXPORT AttributionTrigger {
     kExcessiveReportingOrigins = 9,
     kNoMatchingSourceFilterData = 10,
     kProhibitedByBrowserPolicy = 11,
-    kMaxValue = kProhibitedByBrowserPolicy,
+    kNoMatchingConfigurations = 12,
+    kMaxValue = kNoMatchingConfigurations,
   };
 
   // Represents the potential aggregatable outcomes from attempting to register
@@ -61,7 +63,8 @@ class CONTENT_EXPORT AttributionTrigger {
     kNoMatchingSourceFilterData = 8,
     kNotRegistered = 9,
     kProhibitedByBrowserPolicy = 10,
-    kMaxValue = kProhibitedByBrowserPolicy,
+    kDeduplicated = 11,
+    kMaxValue = kDeduplicated,
   };
 
   struct CONTENT_EXPORT EventTriggerData {
@@ -98,33 +101,21 @@ class CONTENT_EXPORT AttributionTrigger {
   // Should only be created with values that the browser process has already
   // validated. |conversion_destination| should be filled by a navigation origin
   // known by the browser process.
-  AttributionTrigger(url::Origin destination_origin,
-                     url::Origin reporting_origin,
-                     AttributionFilterData filters,
-                     absl::optional<uint64_t> debug_key,
-                     std::vector<EventTriggerData> event_triggers,
-                     AttributionAggregatableTrigger aggregatable_trigger);
+  AttributionTrigger(
+      url::Origin destination_origin,
+      url::Origin reporting_origin,
+      AttributionFilterData filters,
+      AttributionFilterData not_filters,
+      absl::optional<uint64_t> debug_key,
+      absl::optional<uint64_t> aggregatable_dedup_key,
+      std::vector<EventTriggerData> event_triggers,
+      std::vector<AttributionAggregatableTriggerData> aggregatable_trigger_data,
+      AttributionAggregatableValues aggregatable_values);
 
-  // Should only be created with values that the browser process has already
-  // validated. |trigger_data| and |event_source_trigger_data| will be sanitized
-  // to a lower entropy by the `AttributionStorageDelegate` before storage.
-  // |conversion_destination| should be filled by a navigation origin known by
-  // the browser process.
-  //
-  // TODO(apaseltiner): Remove this constructor once the old
-  // trigger-registration API surface is removed.
-  AttributionTrigger(uint64_t trigger_data,
-                     url::Origin destination_origin,
-                     url::Origin reporting_origin,
-                     uint64_t event_source_trigger_data,
-                     int64_t priority,
-                     absl::optional<uint64_t> dedup_key,
-                     absl::optional<uint64_t> debug_key,
-                     AttributionAggregatableTrigger aggregatable_trigger);
-  AttributionTrigger(const AttributionTrigger& other);
-  AttributionTrigger& operator=(const AttributionTrigger& other);
-  AttributionTrigger(AttributionTrigger&& other);
-  AttributionTrigger& operator=(AttributionTrigger&& other);
+  AttributionTrigger(const AttributionTrigger&);
+  AttributionTrigger& operator=(const AttributionTrigger&);
+  AttributionTrigger(AttributionTrigger&&);
+  AttributionTrigger& operator=(AttributionTrigger&&);
   ~AttributionTrigger();
 
   const url::Origin& destination_origin() const { return destination_origin_; }
@@ -133,16 +124,27 @@ class CONTENT_EXPORT AttributionTrigger {
 
   const AttributionFilterData& filters() const { return filters_; }
 
+  const AttributionFilterData& not_filters() const { return not_filters_; }
+
   absl::optional<uint64_t> debug_key() const { return debug_key_; }
 
-  const AttributionAggregatableTrigger& aggregatable_trigger() const {
-    return aggregatable_trigger_;
+  absl::optional<uint64_t> aggregatable_dedup_key() const {
+    return aggregatable_dedup_key_;
   }
 
   void ClearDebugKey() { debug_key_ = absl::nullopt; }
 
   const std::vector<EventTriggerData>& event_triggers() const {
     return event_triggers_;
+  }
+
+  const std::vector<AttributionAggregatableTriggerData>&
+  aggregatable_trigger_data() const {
+    return aggregatable_trigger_data_;
+  }
+
+  const AttributionAggregatableValues& aggregatable_values() const {
+    return aggregatable_values_;
   }
 
  private:
@@ -155,11 +157,18 @@ class CONTENT_EXPORT AttributionTrigger {
 
   AttributionFilterData filters_;
 
+  AttributionFilterData not_filters_;
+
   absl::optional<uint64_t> debug_key_;
+
+  // Key specified for deduplication against existing aggregatable reports with
+  // the same source. If absent, no deduplication is performed.
+  absl::optional<uint64_t> aggregatable_dedup_key_;
 
   std::vector<EventTriggerData> event_triggers_;
 
-  AttributionAggregatableTrigger aggregatable_trigger_;
+  std::vector<AttributionAggregatableTriggerData> aggregatable_trigger_data_;
+  AttributionAggregatableValues aggregatable_values_;
 };
 
 }  // namespace content

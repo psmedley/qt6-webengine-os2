@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "components/services/app_service/public/cpp/macros.h"
 #include "components/services/app_service/public/mojom/types.mojom.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
 
 namespace apps {
 
@@ -24,7 +25,8 @@ ENUM(PermissionType,
      kNotifications,
      kContacts,
      kStorage,
-     kPrinting)
+     kPrinting,
+     kFileHandling)
 
 ENUM(TriState, kAllow, kBlock, kAsk)
 
@@ -44,8 +46,7 @@ struct COMPONENT_EXPORT(APP_TYPES) PermissionValue {
   // Allow represent permission enabled.
   bool IsPermissionEnabled() const;
 
-  absl::optional<bool> bool_value;
-  absl::optional<TriState> tristate_value;
+  absl::variant<bool, TriState> value;
 };
 
 using PermissionValuePtr = std::unique_ptr<PermissionValue>;

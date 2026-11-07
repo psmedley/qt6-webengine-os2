@@ -12,19 +12,20 @@
 
 #include <array>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "core/fpdfapi/page/cpdf_pattern.h"
+#include "core/fpdfapi/parser/cpdf_array.h"
+#include "core/fpdfapi/parser/cpdf_object.h"
 #include "core/fxcrt/bytestring.h"
 #include "core/fxcrt/observed_ptr.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "third_party/base/span.h"
 
-class CPDF_Array;
 class CPDF_Document;
 class CPDF_IndexedCS;
-class CPDF_Object;
 class CPDF_PatternCS;
 
 constexpr size_t kMaxPatternColorComps = 16;
@@ -41,9 +42,9 @@ class PatternValue {
     return {m_Comps.data(), m_Comps.size()};
   }
 
-  CPDF_Pattern* GetPattern() const { return m_pRetainedPattern.Get(); }
-  void SetPattern(const RetainPtr<CPDF_Pattern>& pPattern) {
-    m_pRetainedPattern = pPattern;
+  RetainPtr<CPDF_Pattern> GetPattern() const { return m_pRetainedPattern; }
+  void SetPattern(RetainPtr<CPDF_Pattern> pPattern) {
+    m_pRetainedPattern = std::move(pPattern);
   }
 
  private:
@@ -81,8 +82,6 @@ class CPDF_ColorSpace : public Retainable, public Observable {
 
   static uint32_t ComponentsForFamily(Family family);
   static bool IsValidIccComponents(int components);
-
-  const CPDF_Array* GetArray() const { return m_pArray.Get(); }
 
   // Should only be called if this colorspace is not a pattern.
   std::vector<float> CreateBufAndSetDefaultColor() const;
@@ -135,9 +134,7 @@ class CPDF_ColorSpace : public Retainable, public Observable {
   void SetComponentsForStockCS(uint32_t nComponents);
 
   bool IsStdConversionEnabled() const { return m_dwStdConversion != 0; }
-
-  RetainPtr<const CPDF_Array> m_pArray;
-  const Family m_Family;
+  bool HasSameArray(const CPDF_Object* pObj) const { return m_pArray == pObj; }
 
  private:
   friend class CPDF_CalGray_TranslateImageLine_Test;
@@ -146,8 +143,10 @@ class CPDF_ColorSpace : public Retainable, public Observable {
   static RetainPtr<CPDF_ColorSpace> AllocateColorSpace(
       ByteStringView bsFamilyName);
 
+  const Family m_Family;
   uint32_t m_dwStdConversion = 0;
   uint32_t m_nComponents = 0;
+  RetainPtr<const CPDF_Array> m_pArray;
 };
 
 #endif  // CORE_FPDFAPI_PAGE_CPDF_COLORSPACE_H_

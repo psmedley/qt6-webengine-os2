@@ -19,6 +19,7 @@
 #include "core/fxcrt/unowned_ptr.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
+class CPDF_Array;
 class CPDF_Dictionary;
 class CPDF_Document;
 class CPDF_Image;
@@ -26,8 +27,11 @@ class CPDF_Object;
 
 class CPDF_Page final : public IPDF_Page, public CPDF_PageObjectHolder {
  public:
-  // Caller implements as desired, empty here due to layering.
-  class View : public Observable {};
+  // Caller implements as desired, exists here due to layering.
+  class View : public Observable {
+   public:
+    virtual void ClearPage(CPDF_Page* pPage) = 0;
+  };
 
   // Data for the render layer to attach to this page.
   class RenderContextIface {
@@ -39,7 +43,7 @@ class CPDF_Page final : public IPDF_Page, public CPDF_PageObjectHolder {
   class RenderCacheIface {
    public:
     virtual ~RenderCacheIface() = default;
-    virtual void ResetBitmapForImage(const RetainPtr<CPDF_Image>& pImage) = 0;
+    virtual void ResetBitmapForImage(RetainPtr<CPDF_Image> pImage) = 0;
   };
 
   class RenderContextClearer {
@@ -77,6 +81,11 @@ class CPDF_Page final : public IPDF_Page, public CPDF_PageObjectHolder {
   const CFX_SizeF& GetPageSize() const { return m_PageSize; }
   const CFX_Matrix& GetPageMatrix() const { return m_PageMatrix; }
   int GetPageRotation() const;
+
+  RetainPtr<CPDF_Array> GetOrCreateAnnotsArray();
+  RetainPtr<CPDF_Array> GetMutableAnnotsArray();
+  RetainPtr<const CPDF_Array> GetAnnotsArray() const;
+
   RenderCacheIface* GetRenderCache() const { return m_pRenderCache.get(); }
   void SetRenderCache(std::unique_ptr<RenderCacheIface> pCache) {
     m_pRenderCache = std::move(pCache);
@@ -92,16 +101,16 @@ class CPDF_Page final : public IPDF_Page, public CPDF_PageObjectHolder {
   void SetRenderContext(std::unique_ptr<RenderContextIface> pContext);
   void ClearRenderContext();
 
-  CPDF_Document* GetPDFDocument() const { return m_pPDFDocument.Get(); }
-  View* GetView() const { return m_pView.Get(); }
   void SetView(View* pView) { m_pView.Reset(pView); }
+  void ClearView();
   void UpdateDimensions();
 
  private:
-  CPDF_Page(CPDF_Document* pDocument, CPDF_Dictionary* pPageDict);
+  CPDF_Page(CPDF_Document* pDocument, RetainPtr<CPDF_Dictionary> pPageDict);
   ~CPDF_Page() override;
 
-  CPDF_Object* GetPageAttr(const ByteString& name) const;
+  RetainPtr<CPDF_Object> GetMutablePageAttr(const ByteString& name);
+  RetainPtr<const CPDF_Object> GetPageAttr(const ByteString& name) const;
   CFX_FloatRect GetBox(const ByteString& name) const;
 
   CFX_SizeF m_PageSize;

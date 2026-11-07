@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -138,8 +138,8 @@ class BASE_EXPORT ThreadLocalStorage {
     void Initialize(TLSDestructorFunc destructor);
     void Free();
 
-    static constexpr int kInvalidSlotValue = -1;
-    int slot_ = kInvalidSlotValue;
+    static constexpr size_t kInvalidSlotValue = static_cast<size_t>(-1);
+    size_t slot_ = kInvalidSlotValue;
     uint32_t version_ = 0;
   };
 

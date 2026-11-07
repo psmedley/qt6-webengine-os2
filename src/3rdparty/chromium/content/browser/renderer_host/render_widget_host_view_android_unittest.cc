@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -175,7 +175,7 @@ void RenderWidgetHostViewAndroidTest::SetUp() {
       browser_context_.get(), web_contents_.get(), web_contents_.get(),
       web_contents_.get(), web_contents_.get(), web_contents_.get(),
       web_contents_.get(), web_contents_.get(), web_contents_.get(),
-      FrameTree::Type::kPrimary);
+      FrameTree::Type::kPrimary, base::UnguessableToken::Create());
 
   delegate_ = std::make_unique<MockRenderWidgetHostDelegate>();
   process_ = std::make_unique<MockRenderProcessHost>(browser_context_.get());
@@ -188,9 +188,10 @@ void RenderWidgetHostViewAndroidTest::SetUp() {
                                    process_->GetNextRoutingID());
   host_ = mock_host.get();
   render_view_host_ = new TestRenderViewHost(
-      frame_tree_.get(), site_instance_.get(), std::move(mock_host),
+      frame_tree_.get(), site_instance_group_.get(),
+      site_instance_->GetStoragePartitionConfig(), std::move(mock_host),
       web_contents_.get(), process_->GetNextRoutingID(),
-      process_->GetNextRoutingID(), false, nullptr);
+      process_->GetNextRoutingID(), nullptr);
   parent_layer_ = cc::Layer::Create();
   parent_view_.SetLayer(parent_layer_);
   layer_ = cc::Layer::Create();

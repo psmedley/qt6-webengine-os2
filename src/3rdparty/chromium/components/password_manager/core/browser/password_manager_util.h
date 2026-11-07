@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,18 +53,6 @@ enum class GetLoginMatchType {
   kPSL,
 };
 
-// Checks if saving passwords is enabled. On Android, it ensures that the
-// correct pref is checked on Android, which depends on the unified password
-// manager status.
-bool IsSavingPasswordsEnabled(const PrefService* pref_service,
-                              const syncer::SyncService* sync_service);
-
-// Checks if auto sign in is enabled. On Android, it ensures that the
-// correct pref is checked on Android, which depends on the unified password
-// manager status.
-bool IsAutoSignInEnabled(const PrefService* pref_service,
-                         const syncer::SyncService* sync_service);
-
 // Update |credential| to reflect usage.
 void UpdateMetadataForUsage(password_manager::PasswordForm* credential);
 
@@ -83,7 +71,7 @@ void TrimUsernameOnlyCredentials(
 // and that that LogManager returns true for IsLoggingActive. This function can
 // be removed once PasswordManagerClient::GetLogManager is implemented on iOS
 // and required to always return non-null.
-bool IsLoggingActive(const password_manager::PasswordManagerClient* client);
+bool IsLoggingActive(password_manager::PasswordManagerClient* client);
 
 // True iff the manual password generation is enabled for the current site.
 bool ManualPasswordGenerationEnabled(
@@ -178,9 +166,21 @@ const password_manager::PasswordForm* GetMatchForUpdating(
 password_manager::PasswordForm MakeNormalizedBlocklistedForm(
     password_manager::PasswordFormDigest digest);
 
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+bool IsBiometricAuthenticationForFillingEnabled(
+    password_manager::PasswordManagerClient* client);
+
+bool ShouldBiometricAuthenticationForFillingToggleBeVisible(
+    const PrefService* local_state);
+
+bool ShouldShowBiometricAuthenticationBeforeFillingPromo(
+    password_manager::PasswordManagerClient* client);
+#endif
+
 // Helper which checks if biometric authentication is available.
 bool CanUseBiometricAuth(device_reauth::BiometricAuthenticator* authenticator,
-                         device_reauth::BiometricAuthRequester requester);
+                         device_reauth::BiometricAuthRequester requester,
+                         password_manager::PasswordManagerClient* client);
 
 // Strips any authentication data, as well as query and ref portions of URL.
 GURL StripAuthAndParams(const GURL& gurl);
@@ -201,6 +201,16 @@ std::string GetSignonRealm(const GURL& url);
 // in the password manager UI. Branded name is always used in Chrome builds
 // and only when user |is_syncing| in Chromium builds.
 bool UsesPasswordManagerGoogleBranding(bool is_syncing);
+
+#if BUILDFLAG(IS_IOS)
+// Returns a boolean indicating whether the user had enabled the credential
+// provider in their iOS settings at startup.
+bool IsCredentialProviderEnabledOnStartup(const PrefService* prefs);
+
+// Sets the boolean indicating whether the user had enabled the credential
+// provider in their iOS settings at startup.
+void SetCredentialProviderEnabledOnStartup(PrefService* prefs, bool enabled);
+#endif
 
 }  // namespace password_manager_util
 

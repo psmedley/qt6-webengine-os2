@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,7 +55,19 @@ class Service {
   // Get user data.
   virtual void GetUserData(const CollectUserDataOptions& options,
                            uint64_t run_id,
+                           const UserData* user_data,
                            ServiceRequestSender::ResponseCallback callback) = 0;
+
+  virtual void SetDisableRpcSigning(bool disable_rpc_signing) {}
+
+  virtual void UpdateAnnotateDomModelContext(int64_t model_version) {}
+
+  virtual void UpdateJsFlowLibraryLoaded(bool js_flow_library_loaded) {}
+
+  virtual void ReportProgress(
+      const std::string& token,
+      const std::string& payload,
+      ServiceRequestSender::ResponseCallback callback) = 0;
 
  protected:
   Service() = default;

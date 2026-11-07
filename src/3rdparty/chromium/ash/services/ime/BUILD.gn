@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -35,8 +35,6 @@ source_set("decoder") {
 
 source_set("lib") {
   sources = [
-    "associated_rule_based_engine.cc",
-    "associated_rule_based_engine.h",
     "connection_factory.cc",
     "connection_factory.h",
     "decoder/decoder_engine.cc",
@@ -97,7 +95,6 @@ source_set("services_unittests") {
   ]
   sources = [
     "decoder/system_engine_unittest.cc",
-    "ime_service_associated_unittest.cc",
     "ime_service_unittest.cc",
   ]
 }

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,19 +8,20 @@
 #include <memory>
 #include <string>
 
+#include "base/containers/circular_deque.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
-#include "components/optimization_guide/proto/models.pb.h"
 #include "components/segmentation_platform/internal/database/storage_service.h"
 #include "components/segmentation_platform/internal/execution/model_execution_manager.h"
 #include "components/segmentation_platform/internal/platform_options.h"
 #include "components/segmentation_platform/internal/scheduler/execution_service.h"
 #include "components/segmentation_platform/internal/service_proxy_impl.h"
 #include "components/segmentation_platform/internal/signals/signal_handler.h"
+#include "components/segmentation_platform/public/proto/segmentation_platform.pb.h"
 #include "components/segmentation_platform/public/segmentation_platform_service.h"
 
 namespace base {
@@ -41,7 +42,12 @@ class PrefService;
 
 namespace segmentation_platform {
 
+namespace processing {
+class InputDelegateHolder;
+}
+
 struct Config;
+class FieldTrialRegister;
 class ModelProviderFactory;
 class SegmentSelectorImpl;
 class SegmentScoreProvider;
@@ -50,26 +56,36 @@ class UkmDataManager;
 // The internal implementation of the SegmentationPlatformService.
 class SegmentationPlatformServiceImpl : public SegmentationPlatformService {
  public:
-  SegmentationPlatformServiceImpl(
-      std::unique_ptr<ModelProviderFactory> model_provider,
-      leveldb_proto::ProtoDatabaseProvider* db_provider,
-      const base::FilePath& storage_dir,
-      UkmDataManager* ukm_data_manager,
-      PrefService* pref_service,
-      history::HistoryService* history_service,
-      const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-      base::Clock* clock,
-      std::vector<std::unique_ptr<Config>> configs);
+  struct InitParams {
+    InitParams();
+    ~InitParams();
 
-  // For testing only.
-  SegmentationPlatformServiceImpl(
-      std::unique_ptr<StorageService> storage_service,
-      std::unique_ptr<ModelProviderFactory> model_provider,
-      PrefService* pref_service,
-      history::HistoryService* history_service,
-      const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-      base::Clock* clock,
-      std::vector<std::unique_ptr<Config>> configs);
+    bool IsValid();
+
+    // Profile data:
+    raw_ptr<leveldb_proto::ProtoDatabaseProvider> db_provider = nullptr;
+    raw_ptr<history::HistoryService> history_service = nullptr;
+    base::FilePath storage_dir;
+    raw_ptr<PrefService> profile_prefs = nullptr;
+
+    // Platform configuration:
+    std::unique_ptr<ModelProviderFactory> model_provider;
+    raw_ptr<UkmDataManager> ukm_data_manager = nullptr;
+    std::vector<std::unique_ptr<Config>> configs;
+    std::unique_ptr<FieldTrialRegister> field_trial_register;
+    std::unique_ptr<processing::InputDelegateHolder> input_delegate_holder;
+
+    scoped_refptr<base::SequencedTaskRunner> task_runner;
+    raw_ptr<base::Clock> clock = nullptr;
+
+    // Test only:
+    std::unique_ptr<StorageService> storage_service;
+  };
+
+  explicit SegmentationPlatformServiceImpl(
+      std::unique_ptr<InitParams> init_params);
+
+  SegmentationPlatformServiceImpl();
 
   ~SegmentationPlatformServiceImpl() override;
 
@@ -84,8 +100,12 @@ class SegmentationPlatformServiceImpl : public SegmentationPlatformService {
                           SegmentSelectionCallback callback) override;
   SegmentSelectionResult GetCachedSegmentResult(
       const std::string& segmentation_key) override;
+  void GetSelectedSegmentOnDemand(const std::string& segmentation_key,
+                                  scoped_refptr<InputContext> input_context,
+                                  SegmentSelectionCallback callback) override;
   void EnableMetrics(bool signal_collection_allowed) override;
   ServiceProxy* GetServiceProxy() override;
+  bool IsPlatformInitialized() override;
 
  private:
   friend class SegmentationPlatformServiceImplTest;
@@ -96,8 +116,15 @@ class SegmentationPlatformServiceImpl : public SegmentationPlatformService {
   // Must only be invoked with a valid SegmentInfo.
   void OnSegmentationModelUpdated(proto::SegmentInfo segment_info);
 
+  // Callback sent to child classes to notify when model results need to be
+  // refreshed. For example, when history is cleared.
+  void OnModelRefreshNeeded();
+
   // Called when service status changes.
   void OnServiceStatusChanged();
+
+  // Task that runs every day or at startup to keep the platform data updated.
+  void RunDailyTasks(bool is_startup);
 
   std::unique_ptr<ModelProviderFactory> model_provider_factory_;
 
@@ -105,10 +132,13 @@ class SegmentationPlatformServiceImpl : public SegmentationPlatformService {
   raw_ptr<base::Clock> clock_;
   const PlatformOptions platform_options_;
 
+  // Temporarily stored till initialization and moved to `execution_service_`.
+  std::unique_ptr<processing::InputDelegateHolder> input_delegate_holder_;
+
   // Config.
   std::vector<std::unique_ptr<Config>> configs_;
-  base::flat_set<optimization_guide::proto::OptimizationTarget>
-      all_segment_ids_;
+  base::flat_set<proto::SegmentId> all_segment_ids_;
+  std::unique_ptr<FieldTrialRegister> field_trial_register_;
 
   std::unique_ptr<StorageService> storage_service_;
   bool storage_initialized_ = false;
@@ -128,6 +158,16 @@ class SegmentationPlatformServiceImpl : public SegmentationPlatformService {
   ExecutionService execution_service_;
 
   std::unique_ptr<ServiceProxyImpl> proxy_;
+
+  // PrefService from profile.
+  raw_ptr<PrefService> profile_prefs_;
+
+  // For metrics only:
+  const base::Time creation_time_;
+  base::Time init_time_;
+
+  // For caching any method calls that were received before initialization.
+  base::circular_deque<base::OnceClosure> pending_actions_;
 
   base::WeakPtrFactory<SegmentationPlatformServiceImpl> weak_ptr_factory_{this};
 };

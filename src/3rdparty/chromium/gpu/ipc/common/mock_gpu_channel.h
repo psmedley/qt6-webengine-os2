@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,6 +55,10 @@ class MockGpuChannel : public mojom::GpuChannel {
                void(int32_t,
                     mojo::PendingAssociatedReceiver<mojom::DCOMPTexture>,
                     CreateDCOMPTextureCallback));
+  MOCK_METHOD3(RegisterOverlayStateObserver,
+               void(mojo::PendingRemote<gpu::mojom::OverlayStateObserver>,
+                    const gpu::Mailbox&,
+                    RegisterOverlayStateObserverCallback));
 #endif  // BUILDFLAG(IS_WIN)
   MOCK_METHOD4(WaitForTokenInRange,
                void(int32_t, int32_t, int32_t, WaitForTokenInRangeCallback));

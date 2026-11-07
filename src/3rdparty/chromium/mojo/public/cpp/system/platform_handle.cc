@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -66,7 +66,7 @@ ScopedSharedBufferHandle WrapPlatformSharedMemoryRegion(
 #elif BUILDFLAG(IS_FUCHSIA)
   platform_handles[0].type = MOJO_PLATFORM_HANDLE_TYPE_FUCHSIA_HANDLE;
   platform_handles[0].value = static_cast<uint64_t>(handle.release());
-#elif BUILDFLAG(IS_MAC)
+#elif BUILDFLAG(IS_APPLE)
   platform_handles[0].type = MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT;
   platform_handles[0].value = static_cast<uint64_t>(handle.release());
 #elif BUILDFLAG(IS_ANDROID)
@@ -128,7 +128,7 @@ base::subtle::PlatformSharedMemoryRegion UnwrapPlatformSharedMemoryRegion(
   if (platform_handles[0].type != MOJO_PLATFORM_HANDLE_TYPE_FUCHSIA_HANDLE)
     return base::subtle::PlatformSharedMemoryRegion();
   region_handle.reset(static_cast<zx_handle_t>(platform_handles[0].value));
-#elif BUILDFLAG(IS_MAC)
+#elif BUILDFLAG(IS_APPLE)
   if (num_platform_handles != 1)
     return base::subtle::PlatformSharedMemoryRegion();
   if (platform_handles[0].type != MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT)

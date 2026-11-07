@@ -1,6 +1,8 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "base/memory/raw_ptr.h"
 
 #import <Cocoa/Cocoa.h>
 
@@ -89,8 +91,8 @@ class TabbedPaneAccessibilityMacTest : public WidgetTest {
   }
 
  protected:
-  Widget* widget_ = nullptr;
-  TabbedPane* tabbed_pane_ = nullptr;
+  raw_ptr<Widget> widget_ = nullptr;
+  raw_ptr<TabbedPane> tabbed_pane_ = nullptr;
 };
 
 // Test the Tab's a11y information compared to a Cocoa NSTabViewItem.

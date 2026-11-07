@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,7 @@ class NET_EXPORT TraceNetLogObserver
   void OnTraceLogDisabled() override;
 
  private:
-  raw_ptr<NetLog> net_log_to_watch_;
+  raw_ptr<NetLog> net_log_to_watch_ = nullptr;
   base::WeakPtrFactory<TraceNetLogObserver> weak_factory_{this};
 };
 

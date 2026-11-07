@@ -1,26 +1,32 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/gpu/chromeos/video_decoder_pipeline.h"
 
+#include <atomic>
 #include <memory>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/containers/contains.h"
 #include "base/memory/ptr_util.h"
+#include "base/no_destructor.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
+#include "base/threading/thread.h"
 #include "build/build_config.h"
-#include "gpu/config/gpu_driver_bug_workarounds.h"
 #include "media/base/async_destroy_video_decoder.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/limits.h"
 #include "media/base/media_log.h"
+#include "media/base/media_switches.h"
 #include "media/gpu/chromeos/dmabuf_video_frame_pool.h"
 #include "media/gpu/chromeos/image_processor.h"
 #include "media/gpu/chromeos/image_processor_factory.h"
+#include "media/gpu/chromeos/oop_video_decoder.h"
 #include "media/gpu/chromeos/platform_video_frame_pool.h"
 #include "media/gpu/macros.h"
 #include "media/media_buildflags.h"
@@ -39,10 +45,6 @@ namespace media {
 namespace {
 
 using PixelLayoutCandidate = ImageProcessor::PixelLayoutCandidate;
-
-// The number of requested frames used for the image processor should be the
-// number of frames in media::Pipeline plus the current processing frame.
-constexpr size_t kNumFramesForImageProcessor = limits::kMaxVideoFrames + 1;
 
 // Preferred output formats in order of preference.
 // TODO(mcasas): query the platform for its preferred formats and modifiers.
@@ -72,13 +74,102 @@ absl::optional<Fourcc> PickRenderableFourcc(
   return absl::nullopt;
 }
 
+class DecoderThreadPool {
+ public:
+  DecoderThreadPool(const DecoderThreadPool&) = delete;
+  DecoderThreadPool& operator=(const DecoderThreadPool&) = delete;
+
+  static scoped_refptr<base::SingleThreadTaskRunner> CreateTaskRunner() {
+    static base::NoDestructor<DecoderThreadPool> decoder_thread_pool;
+    return decoder_thread_pool->GetTaskRunner();
+  }
+
+ private:
+  friend class base::NoDestructor<DecoderThreadPool>;
+
+  DecoderThreadPool() {
+    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+    if (!command_line->HasSwitch(switches::kMaxChromeOSDecoderThreads))
+      return;
+
+    const std::string& num_threads_switch =
+        command_line->GetSwitchValueASCII(switches::kMaxChromeOSDecoderThreads);
+    if (num_threads_switch.empty()) {
+      LOG(ERROR) << "Failed to read the value of "
+                 << switches::kMaxChromeOSDecoderThreads;
+      return;
+    }
+    size_t num_threads = 0;
+    if (!base::StringToSizeT(num_threads_switch, &num_threads)) {
+      LOG(ERROR) << "Failed to convert the value of "
+                 << switches::kMaxChromeOSDecoderThreads << ", "
+                 << num_threads_switch << ", to integer";
+      return;
+    }
+
+    for (size_t i = 0; i < num_threads; i++) {
+      const std::string thread_name =
+          "VDecThread" +
+          base::NumberToString(base::checked_cast<unsigned int>(i));
+      decoder_threads_.emplace_back(
+          std::make_unique<base::Thread>(thread_name));
+      auto& thread = decoder_threads_.back();
+      if (!thread->Start()) {
+        LOG(ERROR) << "Failed to start thread: " << thread->thread_name();
+        decoder_threads_.clear();
+        task_runners_.clear();
+        return;
+      }
+
+      CHECK(thread->task_runner());
+      task_runners_.emplace_back(thread->task_runner());
+    }
+    VLOGF(2) << decoder_threads_.size() << " VideoDecoder Threads are created";
+  }
+
+  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() {
+    if (task_runners_.empty()) {
+      // Note that the decoder thread is created with base::MayBlock(). This is
+      // because the underlying |decoder_| may need to allocate a dummy buffer
+      // to discover the most native modifier accepted by the hardware video
+      // decoder; this in turn may need to open the render node, and this is the
+      // operation that may block.
+      return base::ThreadPool::CreateSingleThreadTaskRunner(
+          {base::WithBaseSyncPrimitives(), base::TaskPriority::USER_VISIBLE,
+           base::MayBlock()},
+          base::SingleThreadTaskRunnerThreadMode::DEDICATED);
+    }
+
+    // atomic unsigned integer may have undefined behavior on overflow.
+    // Use atomic signed integer, which is stated in the C++ specification;
+    // "Signed integer arithmetic is defined to use two's complement; there are
+    // no undefined results."
+    int atomic_index = counter_.fetch_add(1, std::memory_order_relaxed);
+    size_t index = 0;
+    if (atomic_index == INT_MIN) {
+      // Negating INT_MIN would cause an overflow, so just wrap around to
+      // INT_MAX.
+      atomic_index = INT_MAX;
+    }
+    index = base::checked_cast<size_t>(atomic_index >= 0 ? atomic_index
+                                                         : -atomic_index);
+    index %= task_runners_.size();
+    return task_runners_[index];
+  }
+
+  std::vector<std::unique_ptr<base::Thread>> decoder_threads_;
+  std::vector<scoped_refptr<base::SingleThreadTaskRunner>> task_runners_;
+  std::atomic_int counter_{0};
+};
+
 }  //  namespace
 
 VideoDecoderMixin::VideoDecoderMixin(
     std::unique_ptr<MediaLog> media_log,
     scoped_refptr<base::SequencedTaskRunner> decoder_task_runner,
     base::WeakPtr<VideoDecoderMixin::Client> client)
-    : decoder_task_runner_(std::move(decoder_task_runner)),
+    : media_log_(std::move(media_log)),
+      decoder_task_runner_(std::move(decoder_task_runner)),
       client_(std::move(client)) {}
 
 VideoDecoderMixin::~VideoDecoderMixin() = default;
@@ -89,23 +180,32 @@ bool VideoDecoderMixin::NeedsTranscryption() {
 
 // static
 std::unique_ptr<VideoDecoder> VideoDecoderPipeline::Create(
+    const gpu::GpuDriverBugWorkarounds& workarounds,
     scoped_refptr<base::SequencedTaskRunner> client_task_runner,
     std::unique_ptr<DmabufVideoFramePool> frame_pool,
     std::unique_ptr<VideoFrameConverter> frame_converter,
-    std::unique_ptr<MediaLog> media_log) {
+    std::unique_ptr<MediaLog> media_log,
+    mojo::PendingRemote<stable::mojom::StableVideoDecoder> oop_video_decoder) {
   DCHECK(client_task_runner);
   DCHECK(frame_pool);
   DCHECK(frame_converter);
 
-  CreateDecoderFunctionCB create_decoder_function_cb =
+  CreateDecoderFunctionCB create_decoder_function_cb;
+  if (oop_video_decoder) {
+    create_decoder_function_cb =
+        base::BindOnce(&OOPVideoDecoder::Create, std::move(oop_video_decoder));
+  } else {
 #if BUILDFLAG(USE_VAAPI)
-      base::BindOnce(&VaapiVideoDecoder::Create);
-#elif BUILDFLAG(USE_V4L2_CODEC)
-      base::BindOnce(&V4L2VideoDecoder::Create);
+    create_decoder_function_cb = base::BindOnce(&VaapiVideoDecoder::Create);
+#elif BUILDFLAG(USE_V4L2_CODEC) && BUILDFLAG(IS_CHROMEOS_ASH)
+    create_decoder_function_cb = base::BindOnce(&V4L2VideoDecoder::Create);
+#else
+    return nullptr;
 #endif
+  }
 
   auto* pipeline = new VideoDecoderPipeline(
-      std::move(client_task_runner), std::move(frame_pool),
+      workarounds, std::move(client_task_runner), std::move(frame_pool),
       std::move(frame_converter), std::move(media_log),
       std::move(create_decoder_function_cb));
   return std::make_unique<AsyncDestroyVideoDecoder<VideoDecoderPipeline>>(
@@ -153,21 +253,15 @@ VideoDecoderPipeline::GetSupportedConfigs(
 }
 
 VideoDecoderPipeline::VideoDecoderPipeline(
+    const gpu::GpuDriverBugWorkarounds& gpu_workarounds,
     scoped_refptr<base::SequencedTaskRunner> client_task_runner,
     std::unique_ptr<DmabufVideoFramePool> frame_pool,
     std::unique_ptr<VideoFrameConverter> frame_converter,
     std::unique_ptr<MediaLog> media_log,
     CreateDecoderFunctionCB create_decoder_function_cb)
-    : client_task_runner_(std::move(client_task_runner)),
-      // Note that the decoder thread is created with base::MayBlock(). This is
-      // because the underlying |decoder_| may need to allocate a dummy buffer
-      // to discover the most native modifier accepted by the hardware video
-      // decoder; this in turn may need to open the render node, and this is the
-      // operation that may block.
-      decoder_task_runner_(base::ThreadPool::CreateSingleThreadTaskRunner(
-          {base::WithBaseSyncPrimitives(), base::TaskPriority::USER_VISIBLE,
-           base::MayBlock()},
-          base::SingleThreadTaskRunnerThreadMode::DEDICATED)),
+    : gpu_workarounds_(gpu_workarounds),
+      client_task_runner_(std::move(client_task_runner)),
+      decoder_task_runner_(DecoderThreadPool::CreateTaskRunner()),
       main_frame_pool_(std::move(frame_pool)),
       frame_converter_(std::move(frame_converter)),
       media_log_(std::move(media_log)),
@@ -200,9 +294,9 @@ VideoDecoderPipeline::~VideoDecoderPipeline() {
   main_frame_pool_.reset();
   frame_converter_.reset();
   decoder_.reset();
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   buffer_transcryptor_.reset();
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 }
 
 // static
@@ -238,7 +332,14 @@ int VideoDecoderPipeline::GetMaxDecodeRequests() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(client_sequence_checker_);
 
   // TODO(mcasas): query |decoder_| instead.
-  return 4;
+  // This value comes from the number of buffers in the input queue in
+  // V4L2VideoDecoder.
+  return 8;
+}
+
+bool VideoDecoderPipeline::FramesHoldExternalResources() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(client_sequence_checker_);
+  return true;
 }
 
 bool VideoDecoderPipeline::NeedsBitstreamConversion() const {
@@ -287,6 +388,25 @@ void VideoDecoderPipeline::Initialize(const VideoDecoderConfig& config,
     return;
   }
 #endif  // !BUILDFLAG(USE_CHROMEOS_PROTECTED_MEDIA)
+
+  // Make sure that the configuration requested is supported by the driver,
+  // which must provide such information.
+  const auto supported_configs =
+      supported_configs_for_testing_.empty()
+          ? VideoDecoderPipeline::GetSupportedConfigs(gpu_workarounds_)
+          : supported_configs_for_testing_;
+  if (!supported_configs.has_value()) {
+    std::move(init_cb).Run(DecoderStatus::Codes::kUnsupportedConfig);
+    return;
+  }
+  if (!IsVideoDecoderConfigSupported(supported_configs.value(), config)) {
+    VLOGF(1) << "Video configuration is not supported: "
+             << config.AsHumanReadableString();
+    MEDIA_LOG(INFO, media_log_) << "Video configuration is not supported: "
+                                << config.AsHumanReadableString();
+    std::move(init_cb).Run(DecoderStatus::Codes::kUnsupportedConfig);
+    return;
+  }
 
   needs_bitstream_conversion_ = (config.codec() == VideoCodec::kH264) ||
                                 (config.codec() == VideoCodec::kHEVC);
@@ -351,7 +471,7 @@ void VideoDecoderPipeline::OnInitializeDone(InitCB init_cb,
   MEDIA_LOG(INFO, media_log_)
       << "VideoDecoderPipeline |decoder_| Initialize() successful";
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   if (decoder_ && decoder_->NeedsTranscryption()) {
     if (!cdm_context) {
       VLOGF(1) << "CdmContext required for transcryption";
@@ -370,7 +490,7 @@ void VideoDecoderPipeline::OnInitializeDone(InitCB init_cb,
     // In case this was created on a prior initialization but no longer needed.
     buffer_transcryptor_.reset();
   }
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   client_task_runner_->PostTask(FROM_HERE,
                                 base::BindOnce(std::move(init_cb), status));
@@ -402,10 +522,10 @@ void VideoDecoderPipeline::OnResetDone(base::OnceClosure reset_cb) {
     image_processor_->Reset();
   frame_converter_->AbortPendingFrames();
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   if (buffer_transcryptor_)
     buffer_transcryptor_->Reset(DecoderStatus::Codes::kAborted);
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   CallFlushCbIfNeeded(DecoderStatus::Codes::kAborted);
 
@@ -445,7 +565,7 @@ void VideoDecoderPipeline::DecodeTask(scoped_refptr<DecoderBuffer> buffer,
   }
 
   const bool is_flush = buffer->end_of_stream();
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   if (buffer_transcryptor_) {
     buffer_transcryptor_->EnqueueBuffer(
         std::move(buffer),
@@ -453,7 +573,7 @@ void VideoDecoderPipeline::DecodeTask(scoped_refptr<DecoderBuffer> buffer,
                        is_flush, std::move(decode_cb)));
     return;
   }
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   decoder_->Decode(
       std::move(buffer),
@@ -556,10 +676,10 @@ void VideoDecoderPipeline::OnError(const std::string& msg) {
   MEDIA_LOG(ERROR, media_log_) << "VideoDecoderPipeline " << msg;
 
   has_error_ = true;
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   if (buffer_transcryptor_)
     buffer_transcryptor_->Reset(DecoderStatus::Codes::kFailed);
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
   CallFlushCbIfNeeded(DecoderStatus::Codes::kFailed);
 }
 
@@ -669,9 +789,9 @@ VideoDecoderPipeline::PickDecoderOutputFormat(
 #error "Unsupported platform"
 #endif
 
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_LINUX)
   // viable_candidate should always be set unless using L1 protected content,
-  // which isn't an option on linux or lacros.
+  // which isn't an option on linux.
   CHECK(viable_candidate);
 #endif
 
@@ -712,12 +832,12 @@ VideoDecoderPipeline::PickDecoderOutputFormat(
         candidates,
         /*input_visible_rect=*/decoder_visible_rect,
         output_size ? *output_size : decoder_visible_rect.size(),
-        kNumFramesForImageProcessor);
+        num_of_pictures);
   } else {
     image_processor = ImageProcessorFactory::CreateWithInputCandidates(
         candidates, /*input_visible_rect=*/decoder_visible_rect,
         output_size ? *output_size : decoder_visible_rect.size(),
-        kNumFramesForImageProcessor, decoder_task_runner_,
+        num_of_pictures, decoder_task_runner_,
         base::BindRepeating(&PickRenderableFourcc),
         BindToCurrentLoop(base::BindRepeating(&VideoDecoderPipeline::OnError,
                                               decoder_weak_this_,
@@ -758,14 +878,18 @@ VideoDecoderPipeline::PickDecoderOutputFormat(
   // TODO(b/203240043): Add CHECKs to verify that the image processor is being
   // created for only valid use cases. Writing to a linear output buffer, e.g.
   auto status_or_image_processor = ImageProcessorWithPool::Create(
-      std::move(image_processor), main_frame_pool_.get(),
-      kNumFramesForImageProcessor, use_protected, decoder_task_runner_);
+      std::move(image_processor), main_frame_pool_.get(), num_of_pictures,
+      use_protected, decoder_task_runner_);
   if (status_or_image_processor.has_error()) {
     DVLOGF(2) << "Unable to create ImageProcessorWithPool.";
     return std::move(status_or_image_processor).error();
   }
 
   image_processor_ = std::move(status_or_image_processor).value();
+
+  if (decoder_)
+    decoder_->SetDmaIncoherentV4L2(image_processor_->SupportsIncoherentBufs());
+
   // TODO(b/203240043): Currently, the modifier is not read by any callers of
   // this function. We can eventually provide it by making it available to fetch
   // through the |image_processor|.
@@ -773,7 +897,7 @@ VideoDecoderPipeline::PickDecoderOutputFormat(
                               gfx::NativePixmapHandle::kNoModifier};
 }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 void VideoDecoderPipeline::OnBufferTranscrypted(
     scoped_refptr<DecoderBuffer> transcrypted_buffer,
     DecodeCB decode_callback) {
@@ -787,6 +911,6 @@ void VideoDecoderPipeline::OnBufferTranscrypted(
 
   decoder_->Decode(std::move(transcrypted_buffer), std::move(decode_callback));
 }
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 }  // namespace media

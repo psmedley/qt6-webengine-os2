@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,7 +75,7 @@ void PartitionAllocHooks::AllocationObserverHookIfEnabled(
 
 bool PartitionAllocHooks::AllocationOverrideHookIfEnabled(
     void** out,
-    int flags,
+    unsigned int flags,
     size_t size,
     const char* type_name) {
   if (auto* hook = allocation_override_hook_.load(std::memory_order_relaxed))

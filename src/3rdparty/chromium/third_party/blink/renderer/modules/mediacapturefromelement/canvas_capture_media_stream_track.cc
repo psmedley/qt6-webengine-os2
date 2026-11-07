@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/modules/mediacapturefromelement/on_request_canvas_draw_listener.h"
 #include "third_party/blink/renderer/modules/mediacapturefromelement/timed_canvas_draw_listener.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_utils.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_video_track.h"
 
 namespace blink {
 
@@ -22,12 +23,16 @@ void CanvasCaptureMediaStreamTrack::requestFrame() {
 }
 
 CanvasCaptureMediaStreamTrack* CanvasCaptureMediaStreamTrack::clone(
-    ScriptState* script_state) {
-  MediaStreamComponent* cloned_component = Component()->Clone();
+    ExecutionContext* script_state) {
+  MediaStreamComponent* cloned_component =
+      Component()->Clone(std::make_unique<blink::MediaStreamVideoTrack>(
+          MediaStreamVideoSource::GetVideoSource(Component()->Source()),
+          blink::MediaStreamVideoSource::ConstraintsOnceCallback(),
+          Component()->Enabled()));
   CanvasCaptureMediaStreamTrack* cloned_track =
       MakeGarbageCollected<CanvasCaptureMediaStreamTrack>(*this,
                                                           cloned_component);
-  MediaStreamUtils::DidCreateMediaStreamTrack(cloned_component);
+
   return cloned_track;
 }
 

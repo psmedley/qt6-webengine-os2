@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,7 @@ struct FocusParams {
         type(focus_type),
         source_capabilities(capabilities),
         options(focus_options),
-        gate_on_user_activation(gate_on_user_activation)  {}
+        gate_on_user_activation(gate_on_user_activation) {}
 
   SelectionBehaviorOnFocus selection_behavior =
       SelectionBehaviorOnFocus::kRestore;

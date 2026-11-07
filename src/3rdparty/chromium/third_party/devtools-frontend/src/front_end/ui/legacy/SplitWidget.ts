@@ -33,8 +33,8 @@ import * as Platform from '../../core/platform/platform.js';
 
 import * as ARIAUtils from './ARIAUtils.js';
 import {Constraints} from './Geometry.js';
-import type {ResizeUpdatePositionEvent} from './ResizerWidget.js';
-import {Events as ResizerWidgetEvents, SimpleResizerWidget} from './ResizerWidget.js';
+
+import {Events as ResizerWidgetEvents, SimpleResizerWidget, type ResizeUpdatePositionEvent} from './ResizerWidget.js';
 import {ToolbarButton} from './Toolbar.js';
 import {Widget} from './Widget.js';
 import {Events as ZoomManagerEvents, ZoomManager} from './ZoomManager.js';
@@ -61,6 +61,8 @@ export class SplitWidget extends Common.ObjectWrapper.eventMixin<EventTypes, typ
   private animationCallback: (() => void)|null;
   private showSidebarButtonTitle: Common.UIString.LocalizedString;
   private hideSidebarButtonTitle: Common.UIString.LocalizedString;
+  private shownSidebarString: Common.UIString.LocalizedString;
+  private hiddenSidebarString: Common.UIString.LocalizedString;
   private showHideSidebarButton: ToolbarButton|null;
   private isVerticalInternal: boolean;
   private sidebarMinimized: boolean;
@@ -111,6 +113,8 @@ export class SplitWidget extends Common.ObjectWrapper.eventMixin<EventTypes, typ
     this.animationCallback = null;
     this.showSidebarButtonTitle = Common.UIString.LocalizedEmptyString;
     this.hideSidebarButtonTitle = Common.UIString.LocalizedEmptyString;
+    this.shownSidebarString = Common.UIString.LocalizedEmptyString;
+    this.hiddenSidebarString = Common.UIString.LocalizedEmptyString;
     this.showHideSidebarButton = null;
     this.isVerticalInternal = false;
     this.sidebarMinimized = false;
@@ -528,6 +532,7 @@ export class SplitWidget extends Common.ObjectWrapper.eventMixin<EventTypes, typ
     // This order of things is important.
     // 1. Resize main element early and force layout.
     this.contentElement.style.setProperty(animatedMarginPropertyName, marginFrom);
+    this.contentElement.style.setProperty('overflow', 'hidden');
     if (!reverse) {
       suppressUnused(this.mainElement.offsetWidth);
       suppressUnused(this.sidebarElementInternal.offsetWidth);
@@ -575,6 +580,7 @@ export class SplitWidget extends Common.ObjectWrapper.eventMixin<EventTypes, typ
     this.contentElement.style.removeProperty('margin-bottom');
     this.contentElement.style.removeProperty('margin-left');
     this.contentElement.style.removeProperty('transition');
+    this.contentElement.style.removeProperty('overflow');
 
     if (this.animationFrameHandle) {
       this.contentElement.window().cancelAnimationFrame(this.animationFrameHandle);
@@ -715,6 +721,7 @@ export class SplitWidget extends Common.ObjectWrapper.eventMixin<EventTypes, typ
   }
 
   hideDefaultResizer(noSplitter?: boolean): void {
+    this.resizerElementInternal.classList.toggle('hidden', Boolean(noSplitter));
     this.uninstallResizer(this.resizerElementInternal);
     this.sidebarElementInternal.classList.toggle('no-default-splitter', Boolean(noSplitter));
   }
@@ -821,21 +828,27 @@ export class SplitWidget extends Common.ObjectWrapper.eventMixin<EventTypes, typ
       shownString: Common.UIString.LocalizedString, hiddenString: Common.UIString.LocalizedString): ToolbarButton {
     this.showSidebarButtonTitle = showTitle;
     this.hideSidebarButtonTitle = hideTitle;
+    this.shownSidebarString = shownString;
+    this.hiddenSidebarString = hiddenString;
     this.showHideSidebarButton = new ToolbarButton('', '');
     this.showHideSidebarButton.addEventListener(ToolbarButton.Events.Click, buttonClicked, this);
     this.updateShowHideSidebarButton();
 
     function buttonClicked(this: SplitWidget): void {
-      if (this.showModeInternal !== ShowMode.Both) {
-        this.showBoth(true);
-        ARIAUtils.alert(shownString);
-      } else {
-        this.hideSidebar(true);
-        ARIAUtils.alert(hiddenString);
-      }
+      this.toggleSidebar();
     }
 
     return this.showHideSidebarButton;
+  }
+
+  toggleSidebar(): void {
+    if (this.showModeInternal !== ShowMode.Both) {
+      this.showBoth(true);
+      ARIAUtils.alert(this.shownSidebarString);
+    } else {
+      this.hideSidebar(true);
+      ARIAUtils.alert(this.hiddenSidebarString);
+    }
   }
 
   private updateShowHideSidebarButton(): void {

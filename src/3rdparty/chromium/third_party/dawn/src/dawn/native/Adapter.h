@@ -15,6 +15,8 @@
 #ifndef SRC_DAWN_NATIVE_ADAPTER_H_
 #define SRC_DAWN_NATIVE_ADAPTER_H_
 
+#include <string>
+
 #include "dawn/native/DawnNative.h"
 
 #include "dawn/common/RefCounted.h"
@@ -22,77 +24,92 @@
 #include "dawn/native/Error.h"
 #include "dawn/native/Features.h"
 #include "dawn/native/Limits.h"
+#include "dawn/native/Toggles.h"
 #include "dawn/native/dawn_platform.h"
-
-#include <string>
 
 namespace dawn::native {
 
-    class DeviceBase;
+class DeviceBase;
 
-    class AdapterBase : public RefCounted {
-      public:
-        AdapterBase(InstanceBase* instance, wgpu::BackendType backend);
-        virtual ~AdapterBase() = default;
+class AdapterBase : public RefCounted {
+  public:
+    AdapterBase(InstanceBase* instance, wgpu::BackendType backend);
+    ~AdapterBase() override;
 
-        MaybeError Initialize();
+    MaybeError Initialize();
 
-        // WebGPU API
-        bool APIGetLimits(SupportedLimits* limits) const;
-        void APIGetProperties(AdapterProperties* properties) const;
-        bool APIHasFeature(wgpu::FeatureName feature) const;
-        size_t APIEnumerateFeatures(wgpu::FeatureName* features) const;
-        void APIRequestDevice(const DeviceDescriptor* descriptor,
-                              WGPURequestDeviceCallback callback,
-                              void* userdata);
-        DeviceBase* APICreateDevice(const DeviceDescriptor* descriptor = nullptr);
+    // WebGPU API
+    bool APIGetLimits(SupportedLimits* limits) const;
+    void APIGetProperties(AdapterProperties* properties) const;
+    bool APIHasFeature(wgpu::FeatureName feature) const;
+    size_t APIEnumerateFeatures(wgpu::FeatureName* features) const;
+    void APIRequestDevice(const DeviceDescriptor* descriptor,
+                          WGPURequestDeviceCallback callback,
+                          void* userdata);
+    DeviceBase* APICreateDevice(const DeviceDescriptor* descriptor = nullptr);
 
-        uint32_t GetVendorId() const;
-        uint32_t GetDeviceId() const;
-        wgpu::BackendType GetBackendType() const;
-        InstanceBase* GetInstance() const;
+    uint32_t GetVendorId() const;
+    uint32_t GetDeviceId() const;
+    wgpu::BackendType GetBackendType() const;
+    InstanceBase* GetInstance() const;
 
-        void ResetInternalDeviceForTesting();
+    void ResetInternalDeviceForTesting();
 
-        FeaturesSet GetSupportedFeatures() const;
-        bool SupportsAllRequiredFeatures(
-            const ityp::span<size_t, const wgpu::FeatureName>& features) const;
-        WGPUDeviceProperties GetAdapterProperties() const;
+    FeaturesSet GetSupportedFeatures() const;
+    bool SupportsAllRequiredFeatures(
+        const ityp::span<size_t, const wgpu::FeatureName>& features) const;
 
-        bool GetLimits(SupportedLimits* limits) const;
+    bool GetLimits(SupportedLimits* limits) const;
 
-        void SetUseTieredLimits(bool useTieredLimits);
+    void SetUseTieredLimits(bool useTieredLimits);
 
-        virtual bool SupportsExternalImages() const = 0;
+    virtual bool SupportsExternalImages() const = 0;
 
-      protected:
-        uint32_t mVendorId = 0xFFFFFFFF;
-        uint32_t mDeviceId = 0xFFFFFFFF;
-        std::string mName;
-        wgpu::AdapterType mAdapterType = wgpu::AdapterType::Unknown;
-        std::string mDriverDescription;
-        FeaturesSet mSupportedFeatures;
+  protected:
+    uint32_t mVendorId = 0xFFFFFFFF;
+    std::string mVendorName;
+    std::string mArchitectureName;
+    uint32_t mDeviceId = 0xFFFFFFFF;
+    std::string mName;
+    wgpu::AdapterType mAdapterType = wgpu::AdapterType::Unknown;
+    std::string mDriverDescription;
 
-      private:
-        virtual ResultOrError<Ref<DeviceBase>> CreateDeviceImpl(
-            const DeviceDescriptor* descriptor) = 0;
+    // Features set that CAN be supported by devices of this adapter. Some features in this set may
+    // be guarded by toggles, and creating a device with these features required may result in a
+    // validation error if proper toggles are not enabled/disabled.
+    FeaturesSet mSupportedFeatures;
+    // Check if a feature os supported by this adapter AND suitable with given toggles.
+    MaybeError ValidateFeatureSupportedWithToggles(
+        wgpu::FeatureName feature,
+        const TripleStateTogglesSet& userProvidedToggles);
 
-        virtual MaybeError InitializeImpl() = 0;
+  private:
+    virtual ResultOrError<Ref<DeviceBase>> CreateDeviceImpl(
+        const DeviceDescriptor* descriptor,
+        const TripleStateTogglesSet& userProvidedToggles) = 0;
 
-        // Check base WebGPU features and discover supported featurees.
-        virtual MaybeError InitializeSupportedFeaturesImpl() = 0;
+    virtual MaybeError InitializeImpl() = 0;
 
-        // Check base WebGPU limits and populate supported limits.
-        virtual MaybeError InitializeSupportedLimitsImpl(CombinedLimits* limits) = 0;
+    // Check base WebGPU features and discover supported features.
+    virtual MaybeError InitializeSupportedFeaturesImpl() = 0;
 
-        ResultOrError<Ref<DeviceBase>> CreateDeviceInternal(const DeviceDescriptor* descriptor);
+    // Check base WebGPU limits and populate supported limits.
+    virtual MaybeError InitializeSupportedLimitsImpl(CombinedLimits* limits) = 0;
 
-        virtual MaybeError ResetInternalDeviceForTestingImpl();
-        InstanceBase* mInstance = nullptr;
-        wgpu::BackendType mBackend;
-        CombinedLimits mLimits;
-        bool mUseTieredLimits = false;
-    };
+    virtual void InitializeVendorArchitectureImpl();
+
+    virtual MaybeError ValidateFeatureSupportedWithTogglesImpl(
+        wgpu::FeatureName feature,
+        const TripleStateTogglesSet& userProvidedToggles) = 0;
+
+    ResultOrError<Ref<DeviceBase>> CreateDeviceInternal(const DeviceDescriptor* descriptor);
+
+    virtual MaybeError ResetInternalDeviceForTestingImpl();
+    Ref<InstanceBase> mInstance;
+    wgpu::BackendType mBackend;
+    CombinedLimits mLimits;
+    bool mUseTieredLimits = false;
+};
 
 }  // namespace dawn::native
 

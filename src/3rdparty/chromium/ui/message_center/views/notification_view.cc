@@ -1,8 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/message_center/views/notification_view.h"
+
+#include <memory>
 
 #include "build/build_config.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -13,6 +15,7 @@
 #include "ui/gfx/text_elider.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/views/notification_background_painter.h"
+#include "ui/message_center/views/notification_control_button_factory.h"
 #include "ui/message_center/views/notification_control_buttons_view.h"
 #include "ui/message_center/views/notification_header_view.h"
 #include "ui/message_center/views/notification_view_base.h"
@@ -141,6 +144,8 @@ class NotificationTextButton : public views::MdTextButton {
     views::MdTextButton::SetEnabledTextColors(color_);
     label()->SetAutoColorReadabilityEnabled(true);
   }
+
+  absl::optional<SkColor> color() const { return color_; }
 
  private:
   absl::optional<SkColor> color_;
@@ -271,7 +276,13 @@ NotificationView::NotificationView(
   header_row->ConfigureLabelsStyle(font_list, text_view_padding, false);
   header_row->SetPreferredSize(header_row->GetPreferredSize() -
                                gfx::Size(GetInsets().width(), 0));
-  header_row->AddChildView(CreateControlButtonsBuilder().Build());
+  header_row->SetCallback(base::BindRepeating(
+      &NotificationView::HeaderRowPressed, base::Unretained(this)));
+  header_row->AddChildView(
+      CreateControlButtonsBuilder()
+          .SetNotificationControlButtonFactory(
+              std::make_unique<NotificationControlButtonFactory>())
+          .Build());
 
   auto content_row = CreateContentRowBuilder()
                          .SetLayoutManager(std::make_unique<views::BoxLayout>(
@@ -314,6 +325,13 @@ NotificationView::~NotificationView() {
   // gets called in the destructor of InkDrop which would've called the wrong
   // override if it destroys in a parent destructor.
   views::InkDrop::Remove(this);
+}
+
+SkColor NotificationView::GetActionButtonColorForTesting(
+    views::LabelButton* action_button) {
+  NotificationTextButton* button =
+      static_cast<NotificationTextButton*>(action_button);
+  return button->color().value_or(SkColor());
 }
 
 void NotificationView::CreateOrUpdateHeaderView(
@@ -650,6 +668,23 @@ void NotificationView::RemoveBackgroundAnimation() {
 std::vector<views::View*> NotificationView::GetChildrenForLayerAdjustment() {
   return {header_row(), block_all_button_, dont_block_button_,
           settings_done_button_};
+}
+
+void NotificationView::HeaderRowPressed() {
+  if (!IsExpandable() || !content_row()->GetVisible())
+    return;
+
+  // Tapping anywhere on |header_row_| can expand the notification, though only
+  // |expand_button| can be focused by TAB.
+  SetManuallyExpandedOrCollapsed(true);
+  auto weak_ptr = weak_ptr_factory_.GetWeakPtr();
+  SetExpanded(!IsExpanded());
+  // Check |this| is valid before continuing, because ToggleExpanded() might
+  // cause |this| to be deleted.
+  if (!weak_ptr)
+    return;
+  Layout();
+  SchedulePaint();
 }
 
 }  // namespace message_center

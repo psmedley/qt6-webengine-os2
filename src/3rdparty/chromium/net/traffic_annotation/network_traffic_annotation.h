@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,9 @@ namespace {
 // Recursively compute hash code of the given string as a constant expression.
 template <int N>
 constexpr uint32_t recursive_hash(const char* str) {
-  return static_cast<uint32_t>((recursive_hash<N - 1>(str) * 31 + str[N - 1]) %
-                               138003713);
+  return (recursive_hash<N - 1>(str) * 31u +
+          static_cast<uint32_t>(str[N - 1])) %
+         138003713u;
 }
 
 // Recursion stopper for the above function. Note that string of size 0 will
@@ -87,7 +88,7 @@ struct NetworkTrafficAnnotationTag {
   friend struct MutableNetworkTrafficAnnotationTag;
 
  private:
-  constexpr NetworkTrafficAnnotationTag(int32_t unique_id_hash_code_)
+  constexpr explicit NetworkTrafficAnnotationTag(int32_t unique_id_hash_code_)
       : unique_id_hash_code(unique_id_hash_code_) {}
 };
 
@@ -123,7 +124,8 @@ struct PartialNetworkTrafficAnnotationTag {
       : unique_id_hash_code(unique_id_hash_code_),
         completing_id_hash_code(completing_id_hash_code_) {}
 #else
-  constexpr PartialNetworkTrafficAnnotationTag(int32_t unique_id_hash_code_)
+  constexpr explicit PartialNetworkTrafficAnnotationTag(
+      int32_t unique_id_hash_code_)
       : unique_id_hash_code(unique_id_hash_code_) {}
 #endif
 };

@@ -29,8 +29,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FRAME_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FRAME_H_
 
+#include "base/check_op.h"
 #include "base/i18n/rtl.h"
 #include "base/unguessable_token.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/frame/frame_ad_evidence.h"
@@ -41,6 +44,7 @@
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/fenced_frame/fenced_frame.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/frame/remote_frame.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/input/scroll_direction.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink-forward.h"
@@ -82,6 +86,8 @@ class WindowProxyManager;
 struct FrameLoadRequest;
 class WindowAgentFactory;
 class WebFrame;
+class WebLocalFrame;
+class WebRemoteFrame;
 
 enum class FrameDetachType { kRemove, kSwap };
 
@@ -152,30 +158,28 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   //
   // Important notes:
   // - This function is not appropriate for determining if a subframe is
-  //   cross-origin to its parent (see: |IsCrossOriginToParentFrame|).
+  //   cross-origin to its parent (see: |IsCrossOriginToParentOrOuterDocument|).
   // - The return value must NOT be cached. A frame can be reused across
   //   navigations, so the return value can change over time.
   // - The return value is inaccurate for a detached frame: it always
   //   returns true when the frame is detached.
   // TODO(dcheng): Move this to LocalDOMWindow and figure out the right
   // behavior for detached windows.
-  // TODO(crbug.com/1318055): this function should be renamed
-  // IsCrossOriginToNearestMainFrame and most current usages should be
-  // conrverted to IsCrossOriginToOutermostMainFrame.
-  bool IsCrossOriginToMainFrame() const;
+  bool IsCrossOriginToNearestMainFrame() const;
 
   // Returns true if and only if:
   // - this frame is an embedded frame (i.e., a subframe or embedded main frame)
   // - it is cross-origin to the outermost main frame.
   //
-  // The notes for |IsCrossOriginToMainFrame| apply here, but it's also
+  // The notes for |IsCrossOriginToNearestMainFrame| apply here, but it's also
   // important to note that any frame in a fenced frame tree is considered
   // cross-origin with respect to the outermost main frame.
   bool IsCrossOriginToOutermostMainFrame() const;
 
   // Returns true if this frame is a subframe and is cross-origin to the parent
-  // frame. See |IsCrossOriginToMainFrame| for important notes.
-  bool IsCrossOriginToParentFrame() const;
+  // frame or has an outer document in another frame tree.
+  // See |IsCrossOriginToNearestMainFrame| for important notes.
+  bool IsCrossOriginToParentOrOuterDocument() const;
 
   FrameOwner* Owner() const;
   void SetOwner(FrameOwner*);
@@ -270,9 +274,9 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
     return lifecycle_.GetState() == FrameLifecycle::kDetached;
   }
 
-  // Whether the frame is considered to be an ad subframe by Ad Tagging. Returns
-  // true for both root and child ad subframes.
-  virtual bool IsAdSubframe() const = 0;
+  // Whether the frame is considered to be an ad frame by Ad Tagging. Returns
+  // true for both root and child ad frames.
+  virtual bool IsAdFrame() const = 0;
 
   // Called to make a frame inert or non-inert. A frame is inert when there
   // is a modal dialog displayed within an ancestor frame, and this frame
@@ -288,13 +292,6 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   TouchAction InheritedEffectiveTouchAction() const {
     return inherited_effective_touch_action_;
   }
-
-  // Continues to bubble logical scroll from |child| in this frame.
-  // Returns true if the scroll was consumed locally.
-  virtual bool BubbleLogicalScrollFromChildFrame(
-      mojom::blink::ScrollDirection direction,
-      ui::ScrollGranularity granularity,
-      Frame* child) = 0;
 
   const base::UnguessableToken& GetDevToolsFrameToken() const {
     return devtools_frame_token_;
@@ -348,8 +345,8 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   bool GetVisibleToHitTesting() const { return visible_to_hit_testing_; }
   void UpdateVisibleToHitTesting();
 
-  void ScheduleFormSubmission(FrameScheduler* scheduler,
-                              FormSubmission* form_submission);
+  base::OnceClosure ScheduleFormSubmission(FrameScheduler* scheduler,
+                                           FormSubmission* form_submission);
   void CancelFormSubmission();
   bool IsFormSubmissionPending();
 
@@ -361,8 +358,8 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // Called when the focus controller changes the focus to this frame.
   virtual void DidFocus() = 0;
 
-  virtual gfx::Size GetMainFrameViewportSize() const = 0;
-  virtual gfx::Point GetMainFrameScrollOffset() const = 0;
+  virtual gfx::Size GetOutermostMainFrameSize() const = 0;
+  virtual gfx::Point GetOutermostMainFrameScrollPosition() const = 0;
 
   // Sets this frame's opener to another frame, or disowned the opener
   // if opener is null. See http://html.spec.whatwg.org/#dom-opener.
@@ -408,7 +405,18 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // Detaches a frame from its parent frame if it has one.
   void DetachFromParent();
 
-  bool Swap(WebFrame*);
+  // Swap out this frame for a new local frame.
+  bool Swap(WebLocalFrame*);
+
+  // Swap out this frame for a new remote frame. This method takes the
+  // mojo interfaces because they are provided in the construction IPC
+  // as opposed to being fetched via an AssociatedInterfaceProvider which
+  // WebLocalFrame uses.
+  bool Swap(WebRemoteFrame*,
+            mojo::PendingAssociatedRemote<mojom::blink::RemoteFrameHost>
+                remote_frame_host,
+            mojo::PendingAssociatedReceiver<mojom::blink::RemoteFrame>
+                remote_frame_receiver);
 
   // Removes the given child from this frame.
   void RemoveChild(Frame* child);
@@ -430,26 +438,15 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // FrameTree.
   bool IsInFencedFrameTree() const;
 
+  // Returns false if fenced frames are disabled. Otherwise, returns true if
+  // this frame is the main frame of a fenced frame tree. Works for both MPArch
+  // and ShadowDOM based fenced frames.
+  bool IsFencedFrameRoot() const;
+
   // Returns the mode set on the fenced frame if the frame is inside a fenced
   // frame tree. Otherwise returns `absl::nullopt`. This should not be called
   // on a detached frame.
   absl::optional<mojom::blink::FencedFrameMode> GetFencedFrameMode() const;
-
-  // Returns false if fenced frames are disabled. Returns true if the feature
-  // is enabled with the shadowDOM implementation and if `this` is in a fenced
-  // frame tree whose root is in opaque-ads mode.
-  // TODO(crbug.com/1262022): Remove this when we remove the shadowDOM
-  // implementation for fenced frames, or even earlier when we refactor mode
-  // checks to be based on capabilities instead.
-  bool IsInShadowDOMOpaqueAdsFencedFrameTree() const;
-
-  // Returns false if fenced frames are disabled. Returns true if the feature
-  // is enabled with the MPArch implementation and if `this` is in a fenced
-  // frame tree whose root is in opaque-ads mode.
-  // TODO(crbug.com/1262022): Simplify this when we remove the shadowDOM
-  // implementation for fenced frames, or even earlier when we refactor mode
-  // checks to be based on capabilities instead.
-  bool IsInMPArchOpaqueAdsFencedFrameTree() const;
 
  protected:
   // |inheriting_agent_factory| should basically be set to the parent frame or
@@ -521,6 +518,14 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // a fenced frame, as well as focus leaving a fenced frames.
   // Note: This is only called if fenced frames are enabled with ShadowDOM
   bool FocusCrossesFencedBoundary();
+
+  void CancelFormSubmissionWithVersion(uint64_t version);
+
+  bool SwapImpl(WebFrame*,
+                mojo::PendingAssociatedRemote<mojom::blink::RemoteFrameHost>
+                    remote_frame_host,
+                mojo::PendingAssociatedReceiver<mojom::blink::RemoteFrame>
+                    remote_frame_receiver);
 
   Member<FrameClient> client_;
   const Member<WindowProxyManager> window_proxy_manager_;
@@ -595,6 +600,11 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // The reason it is stored here is so that it can handle both LocalFrames and
   // RemoteFrames, and so it can be canceled by FrameLoader.
   TaskHandle form_submit_navigation_task_;
+  // form_submit_navigation_task_version_ is incremented every time we make a
+  // new task for form_submit_navigation_task_. It is used in order to create a
+  // copyable Closure which can cancel a specific task that was assigned to
+  // form_submit_navigation_task_.
+  uint64_t form_submit_navigation_task_version_ = 0;
 
   OpenedFrameTracker opened_frame_tracker_;
 };

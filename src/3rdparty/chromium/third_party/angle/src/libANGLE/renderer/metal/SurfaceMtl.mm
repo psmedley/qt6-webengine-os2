@@ -97,7 +97,7 @@ SurfaceMtl::SurfaceMtl(DisplayMtl *display,
 
     if (depthBits && stencilBits)
     {
-        if (display->getFeatures().allowSeparatedDepthStencilBuffers.enabled)
+        if (display->getFeatures().allowSeparateDepthStencilBuffers.enabled)
         {
             mDepthFormat   = display->getPixelFormat(kDefaultFrameBufferDepthFormatId);
             mStencilFormat = display->getPixelFormat(kDefaultFrameBufferStencilFormatId);
@@ -139,14 +139,6 @@ void SurfaceMtl::destroy(const egl::Display *display)
 egl::Error SurfaceMtl::initialize(const egl::Display *display)
 {
     return egl::NoError();
-}
-
-FramebufferImpl *SurfaceMtl::createDefaultFramebuffer(const gl::Context *context,
-                                                      const gl::FramebufferState &state)
-{
-    auto fbo = new FramebufferMtl(state, /* flipY */ false, /* backbuffer */ nullptr);
-
-    return fbo;
 }
 
 egl::Error SurfaceMtl::makeCurrent(const gl::Context *context)
@@ -248,37 +240,65 @@ EGLint SurfaceMtl::isPostSubBufferSupported() const
 
 EGLint SurfaceMtl::getSwapBehavior() const
 {
-    return EGL_BUFFER_PRESERVED;
+    // dEQP-EGL.functional.query_surface.* requires that for a surface with swap
+    // behavior=EGL_BUFFER_PRESERVED, config.surfaceType must contain
+    // EGL_SWAP_BEHAVIOR_PRESERVED_BIT.
+    // Since we don't support EGL_SWAP_BEHAVIOR_PRESERVED_BIT in egl::Config for now, let's just use
+    // EGL_BUFFER_DESTROYED as default swap behavior.
+    return EGL_BUFFER_DESTROYED;
 }
 
 angle::Result SurfaceMtl::initializeContents(const gl::Context *context,
+                                             GLenum binding,
                                              const gl::ImageIndex &imageIndex)
 {
     ASSERT(mColorTexture);
+
+    if (mContentInitialized)
+    {
+        return angle::Result::Continue;
+    }
+
     ContextMtl *contextMtl = mtl::GetImpl(context);
 
     // Use loadAction=clear
     mtl::RenderPassDesc rpDesc;
-    rpDesc.sampleCount         = mColorTexture->samples();
-    rpDesc.numColorAttachments = 1;
+    rpDesc.sampleCount = mColorTexture->samples();
 
-    mColorRenderTarget.toRenderPassAttachmentDesc(&rpDesc.colorAttachments[0]);
-    rpDesc.colorAttachments[0].loadAction = MTLLoadActionClear;
-    MTLClearColor black                   = {};
-    rpDesc.colorAttachments[0].clearColor =
-        mtl::EmulatedAlphaClearColor(black, mColorTexture->getColorWritableMask());
-    if (mDepthTexture)
+    switch (binding)
     {
-        mDepthRenderTarget.toRenderPassAttachmentDesc(&rpDesc.depthAttachment);
-        rpDesc.depthAttachment.loadAction = MTLLoadActionClear;
-    }
-    if (mStencilTexture)
-    {
-        mStencilRenderTarget.toRenderPassAttachmentDesc(&rpDesc.stencilAttachment);
-        rpDesc.stencilAttachment.loadAction = MTLLoadActionClear;
+        case GL_BACK:
+        {
+            rpDesc.numColorAttachments = 1;
+            mColorRenderTarget.toRenderPassAttachmentDesc(&rpDesc.colorAttachments[0]);
+            rpDesc.colorAttachments[0].loadAction = MTLLoadActionClear;
+            MTLClearColor black                   = {};
+            rpDesc.colorAttachments[0].clearColor =
+                mtl::EmulatedAlphaClearColor(black, mColorTexture->getColorWritableMask());
+            break;
+        }
+        case GL_DEPTH:
+        case GL_STENCIL:
+        {
+            if (mDepthTexture)
+            {
+                mDepthRenderTarget.toRenderPassAttachmentDesc(&rpDesc.depthAttachment);
+                rpDesc.depthAttachment.loadAction = MTLLoadActionClear;
+            }
+            if (mStencilTexture)
+            {
+                mStencilRenderTarget.toRenderPassAttachmentDesc(&rpDesc.stencilAttachment);
+                rpDesc.stencilAttachment.loadAction = MTLLoadActionClear;
+            }
+            break;
+        }
+        default:
+            UNREACHABLE();
+            break;
     }
     mtl::RenderCommandEncoder *encoder = contextMtl->getRenderPassCommandEncoder(rpDesc);
     encoder->setStoreAction(MTLStoreActionStore);
+    mContentInitialized = true;
 
     return angle::Result::Continue;
 }
@@ -309,6 +329,17 @@ angle::Result SurfaceMtl::getAttachmentRenderTarget(const gl::Context *context,
     }
 
     return angle::Result::Continue;
+}
+
+egl::Error SurfaceMtl::attachToFramebuffer(const gl::Context *context, gl::Framebuffer *framebuffer)
+{
+    return egl::NoError();
+}
+
+egl::Error SurfaceMtl::detachFromFramebuffer(const gl::Context *context,
+                                             gl::Framebuffer *framebuffer)
+{
+    return egl::NoError();
 }
 
 angle::Result SurfaceMtl::ensureCompanionTexturesSizeCorrect(const gl::Context *context,
@@ -458,14 +489,6 @@ egl::Error WindowSurfaceMtl::initialize(const egl::Display *display)
     return egl::NoError();
 }
 
-FramebufferImpl *WindowSurfaceMtl::createDefaultFramebuffer(const gl::Context *context,
-                                                            const gl::FramebufferState &state)
-{
-    auto fbo = new FramebufferMtl(state, /* flipY */ true, /* backbuffer */ this);
-
-    return fbo;
-}
-
 egl::Error WindowSurfaceMtl::swap(const gl::Context *context)
 {
     ANGLE_TO_EGL_TRY(swapImpl(context));
@@ -497,17 +520,11 @@ EGLint WindowSurfaceMtl::getSwapBehavior() const
 }
 
 angle::Result WindowSurfaceMtl::initializeContents(const gl::Context *context,
+                                                   GLenum binding,
                                                    const gl::ImageIndex &imageIndex)
 {
-    bool newDrawable;
-    ANGLE_TRY(ensureCurrentDrawableObtained(context, &newDrawable));
-
-    if (!newDrawable)
-    {
-        return angle::Result::Continue;
-    }
-
-    return SurfaceMtl::initializeContents(context, imageIndex);
+    ANGLE_TRY(ensureCurrentDrawableObtained(context));
+    return SurfaceMtl::initializeContents(context, binding, imageIndex);
 }
 
 angle::Result WindowSurfaceMtl::getAttachmentRenderTarget(const gl::Context *context,
@@ -516,24 +533,34 @@ angle::Result WindowSurfaceMtl::getAttachmentRenderTarget(const gl::Context *con
                                                           GLsizei samples,
                                                           FramebufferAttachmentRenderTarget **rtOut)
 {
-    ANGLE_TRY(ensureCurrentDrawableObtained(context, nullptr));
+    ANGLE_TRY(ensureCurrentDrawableObtained(context));
     ANGLE_TRY(ensureCompanionTexturesSizeCorrect(context));
 
     return SurfaceMtl::getAttachmentRenderTarget(context, binding, imageIndex, samples, rtOut);
 }
 
+egl::Error WindowSurfaceMtl::attachToFramebuffer(const gl::Context *context,
+                                                 gl::Framebuffer *framebuffer)
+{
+    FramebufferMtl *framebufferMtl = GetImplAs<FramebufferMtl>(framebuffer);
+    ASSERT(!framebufferMtl->getBackbuffer());
+    framebufferMtl->setBackbuffer(this);
+    framebufferMtl->setFlipY(true);
+    return egl::NoError();
+}
+
+egl::Error WindowSurfaceMtl::detachFromFramebuffer(const gl::Context *context,
+                                                   gl::Framebuffer *framebuffer)
+{
+    FramebufferMtl *framebufferMtl = GetImplAs<FramebufferMtl>(framebuffer);
+    ASSERT(framebufferMtl->getBackbuffer() == this);
+    framebufferMtl->setBackbuffer(nullptr);
+    framebufferMtl->setFlipY(false);
+    return egl::NoError();
+}
+
 angle::Result WindowSurfaceMtl::ensureCurrentDrawableObtained(const gl::Context *context)
 {
-    return ensureCurrentDrawableObtained(context, nullptr);
-}
-angle::Result WindowSurfaceMtl::ensureCurrentDrawableObtained(const gl::Context *context,
-                                                              bool *newDrawableOut)
-{
-    if (newDrawableOut)
-    {
-        *newDrawableOut = !mCurrentDrawable;
-    }
-
     if (!mCurrentDrawable)
     {
         ANGLE_TRY(obtainNextDrawable(context));
@@ -556,7 +583,7 @@ angle::Result WindowSurfaceMtl::ensureCompanionTexturesSizeCorrect(const gl::Con
 
 angle::Result WindowSurfaceMtl::ensureColorTextureReadyForReadPixels(const gl::Context *context)
 {
-    ANGLE_TRY(ensureCurrentDrawableObtained(context, nullptr));
+    ANGLE_TRY(ensureCurrentDrawableObtained(context));
 
     if (mMSColorTexture)
     {
@@ -632,6 +659,7 @@ angle::Result WindowSurfaceMtl::obtainNextDrawable(const gl::Context *context)
             mMetalLayer.get().allowsNextDrawableTimeout = NO;
             mCurrentDrawable.retainAssign([mMetalLayer nextDrawable]);
             mMetalLayer.get().allowsNextDrawableTimeout = YES;
+            mContentInitialized                         = false;
         }
 
         if (!mColorTexture)
@@ -696,6 +724,16 @@ OffscreenSurfaceMtl::~OffscreenSurfaceMtl() {}
 void OffscreenSurfaceMtl::destroy(const egl::Display *display)
 {
     SurfaceMtl::destroy(display);
+}
+
+EGLint OffscreenSurfaceMtl::getWidth() const
+{
+    return mSize.width;
+}
+
+EGLint OffscreenSurfaceMtl::getHeight() const
+{
+    return mSize.height;
 }
 
 egl::Error OffscreenSurfaceMtl::swap(const gl::Context *context)
@@ -776,4 +814,4 @@ void PBufferSurfaceMtl::setFixedHeight(EGLint height)
     mSize.height = height;
 }
 
-}
+}  // namespace rx

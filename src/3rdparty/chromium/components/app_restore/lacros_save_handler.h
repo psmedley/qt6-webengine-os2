@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,12 +35,8 @@ class COMPONENT_EXPORT(APP_RESTORE) LacrosSaveHandler {
   // Invoked when `window` is destroyed.
   void OnWindowDestroyed(aura::Window* window);
 
-  // Invoked when Lacros browser window is created. `browser_session_id` is the
-  // current browser session id.
-  void OnBrowserWindowAdded(aura::Window* const window,
-                            uint32_t browser_session_id,
-                            uint32_t restored_browser_session_id,
-                            bool is_browser_app);
+  // Invoked when Lacros browser window is created.
+  void OnBrowserWindowAdded(aura::Window* const window, bool is_browser_app);
 
   // Invoked when an Chrome app Lacros window is created. `app_id` is the
   // AppService id, and `window_id` is the wayland app_id property for the
@@ -59,6 +55,10 @@ class COMPONENT_EXPORT(APP_RESTORE) LacrosSaveHandler {
 
   // Returns the app id that associates with `window`.
   std::string GetAppId(aura::Window* window);
+
+  // Returns the window id that associates with `window` of a chrome app.
+  // Returns -1 if the window is not in `window_candidates_`.
+  int GetLacrosChromeAppWindowId(aura::Window* window) const;
 
  private:
   friend class FullRestoreSaveHandlerTestApi;

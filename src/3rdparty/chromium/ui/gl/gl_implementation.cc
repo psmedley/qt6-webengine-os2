@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <cstdlib>
 #include <sstream>
 #include <string>
 
@@ -67,9 +68,6 @@ std::string GLImplementationParts::ToString() const {
       break;
     case GLImplementation::kGLImplementationDesktopGLCoreProfile:
       s << "desktop-gl-core-profile";
-      break;
-    case GLImplementation::kGLImplementationAppleGL:
-      s << "apple-gl";
       break;
     case GLImplementation::kGLImplementationEGLGLES2:
       s << "egl-gles2";
@@ -135,10 +133,6 @@ const struct {
      GLImplementationParts(kGLImplementationDesktopGL)},
     {kGLImplementationCoreProfileName, kANGLEImplementationNoneName,
       GLImplementationParts(kGLImplementationDesktopGLCoreProfile)},
-#if BUILDFLAG(IS_APPLE)
-    {kGLImplementationAppleName, kANGLEImplementationNoneName,
-     GLImplementationParts(kGLImplementationAppleGL)},
-#endif
     {kGLImplementationEGLName, kANGLEImplementationNoneName,
      GLImplementationParts(kGLImplementationEGLGLES2)},
     {kGLImplementationANGLEName, kANGLEImplementationNoneName,
@@ -195,6 +189,12 @@ GLGetProcAddressProc g_get_proc_address;
 
 void CleanupNativeLibraries(void* due_to_fallback) {
   if (g_libraries) {
+#if BUILDFLAG(IS_MAC)
+    // Mac `NativeLibrary` is heap-allocated, so always unload to ensure they're
+    // freed.
+    for (auto* library : *g_libraries)
+      base::UnloadNativeLibrary(library);
+#else
     // We do not call base::UnloadNativeLibrary() for these libraries as
     // unloading libGL without closing X display is not allowed. See
     // https://crbug.com/250813 for details.
@@ -209,6 +209,7 @@ void CleanupNativeLibraries(void* due_to_fallback) {
       for (auto* library : *g_libraries)
         base::UnloadNativeLibrary(library);
     }
+#endif  // BUILDFLAG(IS_MAC)
     delete g_libraries;
     g_libraries = nullptr;
   }
@@ -290,7 +291,19 @@ GetRequestedGLImplementationFromCommandLine(
     const base::CommandLine* command_line,
     bool* fallback_to_software_gl) {
   *fallback_to_software_gl = false;
-  if (command_line->HasSwitch(switches::kOverrideUseSoftwareGLForTests)) {
+  bool overrideUseSoftwareGL =
+      command_line->HasSwitch(switches::kOverrideUseSoftwareGLForTests);
+#if BUILDFLAG(IS_LINUX) || \
+    (BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_CHROMEOS_DEVICE))
+  if (std::getenv("RUNNING_UNDER_RR")) {
+    // https://rr-project.org/ is a Linux-only record-and-replay debugger that
+    // is unhappy when things like GPU drivers write directly into the
+    // process's address space.  Using swiftshader helps ensure that doesn't
+    // happen and keeps Chrome and linux-chromeos usable with rr.
+    overrideUseSoftwareGL = true;
+  }
+#endif
+  if (overrideUseSoftwareGL) {
     return GetSoftwareGLImplementation();
   }
 
@@ -371,8 +384,7 @@ ANGLEImplementation GetANGLEImplementation() {
 
 bool HasDesktopGLFeatures() {
   return kGLImplementationDesktopGL == g_gl_implementation.gl ||
-         kGLImplementationDesktopGLCoreProfile == g_gl_implementation.gl ||
-         kGLImplementationAppleGL == g_gl_implementation.gl;
+         kGLImplementationDesktopGLCoreProfile == g_gl_implementation.gl;
 }
 
 void AddGLNativeLibrary(base::NativeLibrary library) {

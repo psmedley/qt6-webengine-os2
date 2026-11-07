@@ -98,8 +98,9 @@
 
 #include "avcodec.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include "get_bits.h"
+#include "internal.h"
 #include "put_bits.h"
 #include "wmaprodata.h"
 #include "sinewin.h"
@@ -317,27 +318,27 @@ static av_cold int get_rate(AVCodecContext *avctx)
 
 static av_cold void decode_init_static(void)
 {
-    INIT_VLC_STATIC(&sf_vlc, SCALEVLCBITS, HUFF_SCALE_SIZE,
-                    scale_huffbits, 1, 1,
-                    scale_huffcodes, 2, 2, 616);
-    INIT_VLC_STATIC(&sf_rl_vlc, VLCBITS, HUFF_SCALE_RL_SIZE,
-                    scale_rl_huffbits, 1, 1,
-                    scale_rl_huffcodes, 4, 4, 1406);
-    INIT_VLC_STATIC(&coef_vlc[0], VLCBITS, HUFF_COEF0_SIZE,
-                    coef0_huffbits, 1, 1,
-                    coef0_huffcodes, 4, 4, 2108);
-    INIT_VLC_STATIC(&coef_vlc[1], VLCBITS, HUFF_COEF1_SIZE,
-                    coef1_huffbits, 1, 1,
-                    coef1_huffcodes, 4, 4, 3912);
-    INIT_VLC_STATIC(&vec4_vlc, VLCBITS, HUFF_VEC4_SIZE,
-                    vec4_huffbits, 1, 1,
-                    vec4_huffcodes, 2, 2, 604);
-    INIT_VLC_STATIC(&vec2_vlc, VLCBITS, HUFF_VEC2_SIZE,
-                    vec2_huffbits, 1, 1,
-                    vec2_huffcodes, 2, 2, 562);
-    INIT_VLC_STATIC(&vec1_vlc, VLCBITS, HUFF_VEC1_SIZE,
-                    vec1_huffbits, 1, 1,
-                    vec1_huffcodes, 2, 2, 562);
+    INIT_VLC_STATIC_FROM_LENGTHS(&sf_vlc, SCALEVLCBITS, HUFF_SCALE_SIZE,
+                                 &scale_table[0][1], 2,
+                                 &scale_table[0][0], 2, 1, -60, 0, 616);
+    INIT_VLC_STATIC_FROM_LENGTHS(&sf_rl_vlc, VLCBITS, HUFF_SCALE_RL_SIZE,
+                                 &scale_rl_table[0][1], 2,
+                                 &scale_rl_table[0][0], 2, 1, 0, 0, 1406);
+    INIT_VLC_STATIC_FROM_LENGTHS(&coef_vlc[0], VLCBITS, HUFF_COEF0_SIZE,
+                                 coef0_lens, 1,
+                                 coef0_syms, 2, 2, 0, 0, 2108);
+    INIT_VLC_STATIC_FROM_LENGTHS(&coef_vlc[1], VLCBITS, HUFF_COEF1_SIZE,
+                                 &coef1_table[0][1], 2,
+                                 &coef1_table[0][0], 2, 1, 0, 0, 3912);
+    INIT_VLC_STATIC_FROM_LENGTHS(&vec4_vlc, VLCBITS, HUFF_VEC4_SIZE,
+                                 vec4_lens, 1,
+                                 vec4_syms, 2, 2, -1, 0, 604);
+    INIT_VLC_STATIC_FROM_LENGTHS(&vec2_vlc, VLCBITS, HUFF_VEC2_SIZE,
+                                 &vec2_table[0][1], 2,
+                                 &vec2_table[0][0], 2, 1, -1, 0, 562);
+    INIT_VLC_STATIC_FROM_LENGTHS(&vec1_vlc, VLCBITS, HUFF_VEC1_SIZE,
+                                 &vec1_table[0][1], 2,
+                                 &vec1_table[0][0], 2, 1, 0, 0, 562);
 
     /** calculate sine values for the decorrelation matrix */
     for (int i = 0; i < 33; i++)
@@ -956,10 +957,10 @@ static int decode_coeffs(WMAProDecodeCtx *s, int c)
 
         idx = get_vlc2(&s->gb, vec4_vlc.table, VLCBITS, VEC4MAXDEPTH);
 
-        if (idx == HUFF_VEC4_SIZE - 1) {
+        if ((int)idx < 0) {
             for (i = 0; i < 4; i += 2) {
                 idx = get_vlc2(&s->gb, vec2_vlc.table, VLCBITS, VEC2MAXDEPTH);
-                if (idx == HUFF_VEC2_SIZE - 1) {
+                if ((int)idx < 0) {
                     uint32_t v0, v1;
                     v0 = get_vlc2(&s->gb, vec1_vlc.table, VLCBITS, VEC1MAXDEPTH);
                     if (v0 == HUFF_VEC1_SIZE - 1)
@@ -970,15 +971,15 @@ static int decode_coeffs(WMAProDecodeCtx *s, int c)
                     vals[i  ] = av_float2int(v0);
                     vals[i+1] = av_float2int(v1);
                 } else {
-                    vals[i]   = fval_tab[symbol_to_vec2[idx] >> 4 ];
-                    vals[i+1] = fval_tab[symbol_to_vec2[idx] & 0xF];
+                    vals[i]   = fval_tab[idx >> 4 ];
+                    vals[i+1] = fval_tab[idx & 0xF];
                 }
             }
         } else {
-            vals[0] = fval_tab[ symbol_to_vec4[idx] >> 12      ];
-            vals[1] = fval_tab[(symbol_to_vec4[idx] >> 8) & 0xF];
-            vals[2] = fval_tab[(symbol_to_vec4[idx] >> 4) & 0xF];
-            vals[3] = fval_tab[ symbol_to_vec4[idx]       & 0xF];
+            vals[0] = fval_tab[ idx >> 12      ];
+            vals[1] = fval_tab[(idx >> 8) & 0xF];
+            vals[2] = fval_tab[(idx >> 4) & 0xF];
+            vals[3] = fval_tab[ idx       & 0xF];
         }
 
         /** decode sign */
@@ -1055,7 +1056,7 @@ static int decode_scale_factors(WMAProDecodeCtx* s)
                 s->channel[c].scale_factor_step = get_bits(&s->gb, 2) + 1;
                 val = 45 / s->channel[c].scale_factor_step;
                 for (sf = s->channel[c].scale_factors; sf < sf_end; sf++) {
-                    val += get_vlc2(&s->gb, sf_vlc.table, SCALEVLCBITS, SCALEMAXDEPTH) - 60;
+                    val += get_vlc2(&s->gb, sf_vlc.table, SCALEVLCBITS, SCALEMAXDEPTH);
                     *sf = val;
                 }
             } else {
@@ -1610,7 +1611,7 @@ static void save_bits(WMAProDecodeCtx *s, GetBitContext* gb, int len,
 }
 
 static int decode_packet(AVCodecContext *avctx, WMAProDecodeCtx *s,
-                         void *data, int *got_frame_ptr, AVPacket *avpkt)
+                         AVFrame *frame, int *got_frame_ptr, AVPacket *avpkt)
 {
     GetBitContext* gb  = &s->pgb;
     const uint8_t* buf = avpkt->data;
@@ -1622,7 +1623,6 @@ static int decode_packet(AVCodecContext *avctx, WMAProDecodeCtx *s,
     *got_frame_ptr = 0;
 
     if (!buf_size) {
-        AVFrame *frame = data;
         int i;
 
         /** Must output remaining samples after stream end. WMAPRO 5.1 created
@@ -1714,7 +1714,7 @@ static int decode_packet(AVCodecContext *avctx, WMAProDecodeCtx *s,
 
             /** decode the cross packet frame if it is valid */
             if (!s->packet_loss)
-                decode_frame(s, data, got_frame_ptr);
+                decode_frame(s, frame, got_frame_ptr);
         } else if (s->num_saved_bits - s->frame_offset) {
             ff_dlog(avctx, "ignoring %x previously saved bits\n",
                     s->num_saved_bits - s->frame_offset);
@@ -1745,7 +1745,7 @@ static int decode_packet(AVCodecContext *avctx, WMAProDecodeCtx *s,
             frame_size <= remaining_bits(s, gb)) {
             save_bits(s, gb, frame_size, 0);
             if (!s->packet_loss)
-                s->packet_done = !decode_frame(s, data, got_frame_ptr);
+                s->packet_done = !decode_frame(s, frame, got_frame_ptr);
         } else if (!s->len_prefix
                    && s->num_saved_bits > get_bits_count(&s->gb)) {
             /** when the frames do not have a length prefix, we don't know
@@ -1755,7 +1755,7 @@ static int decode_packet(AVCodecContext *avctx, WMAProDecodeCtx *s,
                 therefore we save the incoming packet first, then we append
                 the "previous frame" data from the next packet so that
                 we get a buffer that only contains full frames */
-            s->packet_done = !decode_frame(s, data, got_frame_ptr);
+            s->packet_done = !decode_frame(s, frame, got_frame_ptr);
         } else {
             s->packet_done = 1;
         }
@@ -1778,8 +1778,6 @@ static int decode_packet(AVCodecContext *avctx, WMAProDecodeCtx *s,
         return AVERROR_INVALIDDATA;
 
     if (s->trim_start && avctx->codec_id == AV_CODEC_ID_WMAPRO) {
-        AVFrame *frame = data;
-
         if (s->trim_start < frame->nb_samples) {
             for (int ch = 0; ch < frame->ch_layout.nb_channels; ch++)
                 frame->extended_data[ch] += s->trim_start * 4;
@@ -1793,8 +1791,6 @@ static int decode_packet(AVCodecContext *avctx, WMAProDecodeCtx *s,
     }
 
     if (s->trim_end && avctx->codec_id == AV_CODEC_ID_WMAPRO) {
-        AVFrame *frame = data;
-
         if (s->trim_end < frame->nb_samples) {
             frame->nb_samples -= s->trim_end;
         } else {
@@ -1814,11 +1810,10 @@ static int decode_packet(AVCodecContext *avctx, WMAProDecodeCtx *s,
  *@param avpkt input packet
  *@return number of bytes that were read from the input buffer
  */
-static int wmapro_decode_packet(AVCodecContext *avctx, void *data,
+static int wmapro_decode_packet(AVCodecContext *avctx, AVFrame *frame,
                                 int *got_frame_ptr, AVPacket *avpkt)
 {
     WMAProDecodeCtx *s = avctx->priv_data;
-    AVFrame *frame = data;
     int ret;
 
     /* get output buffer */
@@ -1828,15 +1823,14 @@ static int wmapro_decode_packet(AVCodecContext *avctx, void *data,
         return 0;
     }
 
-    return decode_packet(avctx, s, data, got_frame_ptr, avpkt);
+    return decode_packet(avctx, s, frame, got_frame_ptr, avpkt);
 }
 
-static int xma_decode_packet(AVCodecContext *avctx, void *data,
+static int xma_decode_packet(AVCodecContext *avctx, AVFrame *frame,
                              int *got_frame_ptr, AVPacket *avpkt)
 {
     XMADecodeCtx *s = avctx->priv_data;
     int got_stream_frame_ptr = 0;
-    AVFrame *frame = data;
     int i, ret = 0, eof = 0;
 
     if (!s->frames[s->current_stream]->data[0]) {
@@ -2089,47 +2083,47 @@ static void xma_flush(AVCodecContext *avctx)
  */
 const FFCodec ff_wmapro_decoder = {
     .p.name         = "wmapro",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Windows Media Audio 9 Professional"),
+    CODEC_LONG_NAME("Windows Media Audio 9 Professional"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_WMAPRO,
     .priv_data_size = sizeof(WMAProDecodeCtx),
     .init           = wmapro_decode_init,
     .close          = wmapro_decode_end,
-    .decode         = wmapro_decode_packet,
+    FF_CODEC_DECODE_CB(wmapro_decode_packet),
     .p.capabilities = AV_CODEC_CAP_SUBFRAMES | AV_CODEC_CAP_DR1,
     .flush          = wmapro_flush,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };
 
 const FFCodec ff_xma1_decoder = {
     .p.name         = "xma1",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Xbox Media Audio 1"),
+    CODEC_LONG_NAME("Xbox Media Audio 1"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_XMA1,
     .priv_data_size = sizeof(XMADecodeCtx),
     .init           = xma_decode_init,
     .close          = xma_decode_end,
-    .decode         = xma_decode_packet,
+    FF_CODEC_DECODE_CB(xma_decode_packet),
     .p.capabilities = AV_CODEC_CAP_SUBFRAMES | AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };
 
 const FFCodec ff_xma2_decoder = {
     .p.name         = "xma2",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Xbox Media Audio 2"),
+    CODEC_LONG_NAME("Xbox Media Audio 2"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_XMA2,
     .priv_data_size = sizeof(XMADecodeCtx),
     .init           = xma_decode_init,
     .close          = xma_decode_end,
-    .decode         = xma_decode_packet,
+    FF_CODEC_DECODE_CB(xma_decode_packet),
     .flush          = xma_flush,
     .p.capabilities = AV_CODEC_CAP_SUBFRAMES | AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,8 @@ void GtkShell1::Instantiate(WaylandConnection* connection,
                             uint32_t name,
                             const std::string& interface,
                             uint32_t version) {
-  DCHECK_EQ(interface, kInterfaceName);
+  CHECK_EQ(interface, kInterfaceName) << "Expected \"" << kInterfaceName
+                                      << "\" but got \"" << interface << "\"";
 
   if (connection->gtk_shell1_ ||
       !wl::CanBind(interface, version, kMinVersion, kMaxVersion)) {
@@ -55,6 +56,10 @@ std::unique_ptr<GtkSurface1> GtkShell1::GetGtkSurface1(
     wl_surface* top_level_window_surface) {
   return std::make_unique<GtkSurface1>(
       gtk_shell1_get_gtk_surface(shell1_.get(), top_level_window_surface));
+}
+
+void GtkShell1::SetStartupId(const std::string& startup_id) {
+  gtk_shell1_set_startup_id(shell1_.get(), startup_id.c_str());
 }
 
 }  // namespace ui

@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -57,6 +57,8 @@ jumbo_component("gfx") {
     "break_list.h",
     "color_analysis.cc",
     "color_analysis.h",
+    "color_conversions.cc",
+    "color_conversions.h",
     "decorated_text.cc",
     "decorated_text.h",
     "delegated_ink_metadata.cc",
@@ -130,6 +132,7 @@ jumbo_component("gfx") {
     "text_elider.h",
     "text_utils.cc",
     "text_utils.h",
+    "ubidi_deleter.h",
     "ui_gfx_exports.cc",
     "utf16_indexing.cc",
     "utf16_indexing.h",
@@ -157,6 +160,7 @@ jumbo_component("gfx") {
       "font_fallback_linux.cc",
       "font_fallback_linux.h",
       "font_render_params_linux.cc",
+      "font_render_params_linux.h",
       "linux/fontconfig_util.cc",
       "linux/fontconfig_util.h",
     ]
@@ -306,8 +310,6 @@ jumbo_component("gfx") {
     sources += [
       "platform_font_skia.cc",
       "platform_font_skia.h",
-      "skia_font_delegate.cc",
-      "skia_font_delegate.h",
     ]
   }
 
@@ -367,6 +369,7 @@ jumbo_component("gfx") {
   if (is_win) {
     libs = [
       "setupapi.lib",
+      "dwmapi.lib",
       "dwrite.lib",
     ]
     deps += [ "//components/crash/core/common" ]
@@ -382,6 +385,9 @@ jumbo_component("gfx") {
   }
 
   # Linux.
+  if (is_linux) {
+    deps += [ "//ui/linux:linux_ui" ]
+  }
   if (is_linux || is_chromeos) {
     deps += [ "//third_party/fontconfig" ]
   }
@@ -419,6 +425,8 @@ jumbo_component("color_space") {
     "color_transform.h",
     "display_color_spaces.cc",
     "display_color_spaces.h",
+    "hdr_metadata.cc",
+    "hdr_metadata.h",
     "hdr_static_metadata.cc",
     "hdr_static_metadata.h",
     "icc_profile.cc",
@@ -444,6 +452,8 @@ jumbo_component("color_space") {
   ]
   if (is_mac) {
     sources += [
+      "hdr_metadata_mac.h",
+      "hdr_metadata_mac.mm",
       "mac/display_icc_profiles.cc",
       "mac/display_icc_profiles.h",
     ]
@@ -543,8 +553,6 @@ jumbo_source_set("memory_buffer_sources") {
     "gpu_fence.h",
     "gpu_fence_handle.cc",
     "gpu_fence_handle.h",
-    "hdr_metadata.cc",
-    "hdr_metadata.h",
     "native_pixmap.h",
     "overlay_priority_hint.h",
     "overlay_transform.h",
@@ -573,7 +581,7 @@ jumbo_source_set("memory_buffer_sources") {
     "//ui/gfx/geometry",
   ]
 
-  if ((is_linux || is_chromeos) && !use_qt) {
+  if (is_linux || is_chromeos) {
     sources += [
       "linux/client_native_pixmap_dmabuf.cc",
       "linux/client_native_pixmap_dmabuf.h",
@@ -654,6 +662,7 @@ jumbo_static_library("test_support") {
   public_deps = [ ":gfx" ]
 
   deps = [
+    ":gfx_export",
     "//base",
     "//base/test:test_support",
     "//skia",
@@ -670,27 +679,6 @@ jumbo_static_library("test_support") {
   }
 }
 
-if (is_mac) {
-  component("gfx_io_surface_hdr_metadata") {
-    sources = [
-      "mac/io_surface_hdr_metadata.cc",
-      "mac/io_surface_hdr_metadata.h",
-    ]
-    defines = [ "IS_GFX_IO_SURFACE_HDR_METADATA_IMPL" ]
-
-    # This is a separate component from the other sources because it depends on
-    # the mojo serialize and deserialize methods.
-    deps = [
-      ":gfx",
-      "//ui/gfx/mojom:mojom",
-    ]
-    frameworks = [
-      "CoreFoundation.framework",
-      "IOSurface.framework",
-    ]
-  }
-}
-
 test("gfx_unittests") {
   sources = [
     "animation/keyframe/keyframe_animation_unittest.cc",
@@ -699,6 +687,7 @@ test("gfx_unittests") {
     "font_names_testing.h",
     "font_unittest.cc",
     "geometry/linear_gradient_unittest.cc",
+    "geometry/mask_filter_info_unittest.cc",
     "geometry/rrect_f_unittest.cc",
     "geometry/transform_operations_unittest.cc",
     "geometry/transform_unittest.cc",
@@ -711,11 +700,11 @@ test("gfx_unittests") {
     "text_elider_unittest.cc",
     "text_utils_unittest.cc",
   ]
+  if (is_linux) {
+    sources += [ "font_render_params_linux_unittest.cc" ]
+  }
   if (is_linux || is_chromeos) {
-    sources += [
-      "font_fallback_linux_unittest.cc",
-      "font_render_params_linux_unittest.cc",
-    ]
+    sources += [ "font_fallback_linux_unittest.cc" ]
   }
   if (is_mac) {
     sources += [
@@ -760,6 +749,7 @@ test("gfx_unittests") {
       "codec/jpeg_codec_unittest.cc",
       "codec/png_codec_unittest.cc",
       "color_analysis_unittest.cc",
+      "color_conversions_unittest.cc",
       "color_space_unittest.cc",
       "color_transform_unittest.cc",
       "color_utils_unittest.cc",
@@ -850,10 +840,6 @@ test("gfx_unittests") {
     deps += [ "//ui/resources:ui_test_pak_bundle_data" ]
   }
 
-  if (is_mac) {
-    deps += [ ":gfx_io_surface_hdr_metadata" ]
-  }
-
   if (is_android) {
     deps += [ "//ui/android:ui_java" ]
   }
@@ -904,6 +890,10 @@ test("gfx_unittests") {
     ]
   }
 
+  if (is_linux) {
+    deps += [ "//ui/linux:test_support" ]
+  }
+
   if (is_linux || is_chromeos) {
     sources += [
       "linux/fontconfig_util_unittest.cc",
@@ -913,11 +903,9 @@ test("gfx_unittests") {
   }
 
   if (is_fuchsia) {
-    # TODO(https://crbug.com/1287051): fuchsia.sys.Launcher is used to launch
-    # fuchsia-pkg://fuchsia.com/fonts#meta/fonts.cmx with specific test
-    # args.
-    use_cfv2 = false
-    deps += [ "//skia:test_fonts" ]
+    deps += [ "//skia:test_fonts_cfv2" ]
+    additional_manifest_fragments =
+        [ "//build/config/fuchsia/test/test_fonts.shard.test-cml" ]
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,6 +58,9 @@ class PLATFORM_EXPORT CullRect {
                             const absl::optional<CullRect>& old_cull_rect);
 
   const gfx::Rect& Rect() const { return rect_; }
+
+  bool HasScrolledEnough(const gfx::Vector2dF& delta,
+                         const TransformPaintPropertyNode&);
 
   String ToString() const { return String(rect_.ToString()); }
 

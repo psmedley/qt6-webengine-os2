@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -126,6 +126,8 @@ class VIZ_SERVICE_EXPORT SurfaceAllocationGroup {
   Surface* last_created_surface() const {
     return surfaces_.empty() ? nullptr : surfaces_.back();
   }
+
+  const std::vector<Surface*>& surfaces() const { return surfaces_; }
 
  private:
   // Returns an iterator to the latest surface in |surfaces_| whose SurfaceId is

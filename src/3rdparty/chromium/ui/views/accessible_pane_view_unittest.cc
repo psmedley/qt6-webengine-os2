@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,7 +42,8 @@ class TestBarView : public AccessiblePaneView {
   void Init();
 
   raw_ptr<LabelButton> child_button_;
-  raw_ptr<LabelButton> second_child_button_;
+  // TODO(crbug.com/1298696): Breaks views_unittests.
+  raw_ptr<LabelButton, DegradeToNoOpWhenMTE> second_child_button_;
   raw_ptr<LabelButton> third_child_button_;
   std::unique_ptr<LabelButton> not_child_button_;
 };

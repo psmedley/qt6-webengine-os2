@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -21,6 +21,8 @@ android_library("java") {
     "java/src/org/chromium/chrome/browser/tab/TabHidingType.java",
     "java/src/org/chromium/chrome/browser/tab/TabIdManager.java",
     "java/src/org/chromium/chrome/browser/tab/TabLifecycle.java",
+    "java/src/org/chromium/chrome/browser/tab/TabObscuringHandler.java",
+    "java/src/org/chromium/chrome/browser/tab/TabObscuringHandlerSupplier.java",
     "java/src/org/chromium/chrome/browser/tab/TabObserver.java",
     "java/src/org/chromium/chrome/browser/tab/TabResolver.java",
     "java/src/org/chromium/chrome/browser/tab/TabState.java",
@@ -32,6 +34,7 @@ android_library("java") {
     "java/src/org/chromium/chrome/browser/tab/TrustedCdn.java",
     "java/src/org/chromium/chrome/browser/tab/WebContentsState.java",
     "java/src/org/chromium/chrome/browser/tab/WebContentsStateBridge.java",
+    "java/src/org/chromium/chrome/browser/tab/state/CouponPersistedTabData.java",
     "java/src/org/chromium/chrome/browser/tab/state/CriticalPersistedTabData.java",
     "java/src/org/chromium/chrome/browser/tab/state/CriticalPersistedTabDataObserver.java",
     "java/src/org/chromium/chrome/browser/tab/state/EmptyByteBufferPersistedTabDataStorage.java",
@@ -52,6 +55,7 @@ android_library("java") {
     "java/src/org/chromium/chrome/browser/tab/state/PersistedTabDataStorageFactory.java",
     "java/src/org/chromium/chrome/browser/tab/state/PriceDropMetricsLogger.java",
     "java/src/org/chromium/chrome/browser/tab/state/SerializedCriticalPersistedTabData.java",
+    "java/src/org/chromium/chrome/browser/tab/state/Serializer.java",
     "java/src/org/chromium/chrome/browser/tab/state/ShoppingPersistedTabData.java",
     "java/src/org/chromium/chrome/browser/tab/state/StorePersistedTabData.java",
   ]
@@ -69,6 +73,8 @@ android_library("java") {
     ":critical_persisted_tab_data_proto_java",
     ":java_resources",
     "//base:base_java",
+    "//base:jni_java",
+    "//build/android:build_java",
     "//chrome/browser/android/crypto:java",
     "//chrome/browser/commerce/android:java",
     "//chrome/browser/contextmenu:java",
@@ -101,6 +107,7 @@ android_library("java") {
     "//third_party/androidx:androidx_annotation_annotation_java",
     "//third_party/androidx:androidx_core_core_java",
     "//ui/android:ui_full_java",
+    "//ui/base/ime/mojom:mojom_java",
     "//url:gurl_java",
     "//url:origin_java",
   ]
@@ -125,6 +132,7 @@ generate_jni("jni_headers") {
   sources = [
     "java/src/org/chromium/chrome/browser/tab/TrustedCdn.java",
     "java/src/org/chromium/chrome/browser/tab/WebContentsStateBridge.java",
+    "java/src/org/chromium/chrome/browser/tab/state/CriticalPersistedTabData.java",
     "java/src/org/chromium/chrome/browser/tab/state/LevelDBPersistedDataStorage.java",
   ]
 }
@@ -132,7 +140,7 @@ generate_jni("jni_headers") {
 proto_java_library("critical_persisted_tab_data_proto_java") {
   proto_path = "java/src/org/chromium/chrome/browser/tab/state/proto"
   sources = [
-    "$proto_path/critical_persisted_tab_data.proto",
+    "$proto_path/coupon_persisted_tab_data.proto",
     "$proto_path/shopping_persisted_tab_data.proto",
     "$proto_path/store_persisted_tab_data.proto",
   ]
@@ -143,9 +151,7 @@ flatbuffer_java_library("critical_persisted_tab_data_flatbuffer_java") {
   sources = [ "$root_dir/critical_persisted_tab_data.fbs" ]
 }
 
-android_library("junit") {
-  bypass_platform_checks = true
-  testonly = true
+robolectric_library("junit") {
   sources = [
     "java/src/org/chromium/chrome/browser/tab/CurrentTabObserverTest.java",
     "java/src/org/chromium/chrome/browser/tab/TabAssociatedAppTest.java",
@@ -159,7 +165,6 @@ android_library("junit") {
     "//base:base_junit_test_support",
     "//chrome/browser/preferences:java",
     "//content/public/android:content_full_java",
-    "//third_party/android_deps:robolectric_all_java",
     "//third_party/android_support_test_runner:runner_java",
     "//third_party/androidx:androidx_test_runner_java",
     "//third_party/junit",

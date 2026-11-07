@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/sequence_checker.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "gpu/config/gpu_driver_bug_workarounds.h"
 #include "media/base/cdm_context.h"
 #include "media/base/supported_video_decoder_config.h"
 #include "media/base/video_decoder.h"
@@ -21,20 +22,17 @@
 #include "media/gpu/chromeos/image_processor_with_pool.h"
 #include "media/gpu/chromeos/video_frame_converter.h"
 #include "media/gpu/media_gpu_export.h"
+#include "media/mojo/mojom/stable/stable_video_decoder.mojom.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_pixmap.h"
 #include "ui/gfx/native_pixmap_handle.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "media/gpu/chromeos/decoder_buffer_transcryptor.h"
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 namespace base {
 class SequencedTaskRunner;
-}
-
-namespace gpu {
-class GpuDriverBugWorkarounds;
 }
 
 namespace media {
@@ -114,6 +112,10 @@ class MEDIA_GPU_EXPORT VideoDecoderMixin : public VideoDecoder {
   // AMD). Default implementation returns false.
   virtual bool NeedsTranscryption();
 
+  // Set the DMA coherency of the video decoder buffers. Only relevant for
+  // V4L2.
+  virtual void SetDmaIncoherentV4L2(bool incoherent) {}
+
  protected:
   const std::unique_ptr<MediaLog> media_log_;
 
@@ -137,10 +139,12 @@ class MEDIA_GPU_EXPORT VideoDecoderPipeline : public VideoDecoder,
   // Creates a VideoDecoderPipeline instance that allocates VideoFrames from
   // |frame_pool| and converts the decoded VideoFrames using |frame_converter|.
   static std::unique_ptr<VideoDecoder> Create(
+      const gpu::GpuDriverBugWorkarounds& workarounds,
       scoped_refptr<base::SequencedTaskRunner> client_task_runner,
       std::unique_ptr<DmabufVideoFramePool> frame_pool,
       std::unique_ptr<VideoFrameConverter> frame_converter,
-      std::unique_ptr<MediaLog> media_log);
+      std::unique_ptr<MediaLog> media_log,
+      mojo::PendingRemote<stable::mojom::StableVideoDecoder> oop_video_decoder);
 
   static absl::optional<SupportedVideoDecoderConfigs> GetSupportedConfigs(
       const gpu::GpuDriverBugWorkarounds& workarounds);
@@ -152,6 +156,7 @@ class MEDIA_GPU_EXPORT VideoDecoderPipeline : public VideoDecoder,
   VideoDecoderType GetDecoderType() const override;
   bool IsPlatformDecoder() const override;
   int GetMaxDecodeRequests() const override;
+  bool FramesHoldExternalResources() const override;
   bool NeedsBitstreamConversion() const override;
   bool CanReadWithoutStalling() const override;
   void Initialize(const VideoDecoderConfig& config,
@@ -184,6 +189,7 @@ class MEDIA_GPU_EXPORT VideoDecoderPipeline : public VideoDecoder,
 #endif
 
   VideoDecoderPipeline(
+      const gpu::GpuDriverBugWorkarounds& workarounds,
       scoped_refptr<base::SequencedTaskRunner> client_task_runner,
       std::unique_ptr<DmabufVideoFramePool> frame_pool,
       std::unique_ptr<VideoFrameConverter> frame_converter,
@@ -226,11 +232,16 @@ class MEDIA_GPU_EXPORT VideoDecoderPipeline : public VideoDecoder,
   // Call |client_flush_cb_| with |status|.
   void CallFlushCbIfNeeded(DecoderStatus status);
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   // Callback for when transcryption of a buffer completes.
   void OnBufferTranscrypted(scoped_refptr<DecoderBuffer> transcrypted_buffer,
                             DecodeCB decode_callback);
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+  // Used to figure out the supported configurations in Initialize().
+  const gpu::GpuDriverBugWorkarounds gpu_workarounds_;
+
+  SupportedVideoDecoderConfigs supported_configs_for_testing_;
 
   // The client task runner and its sequence checker. All public methods should
   // run on this task runner.
@@ -267,12 +278,12 @@ class MEDIA_GPU_EXPORT VideoDecoderPipeline : public VideoDecoder,
 
   const std::unique_ptr<MediaLog> media_log_;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   // The transcryptor for transcrypting DecoderBuffers when needed by the HW
   // decoder implementation.
   std::unique_ptr<DecoderBufferTranscryptor> buffer_transcryptor_
       GUARDED_BY_CONTEXT(decoder_sequence_checker_);
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   // The current video decoder implementation. Valid after initialization is
   // successfully done.

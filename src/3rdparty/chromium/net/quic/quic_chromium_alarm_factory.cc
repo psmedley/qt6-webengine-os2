@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -78,7 +78,7 @@ QuicChromiumAlarmFactory::QuicChromiumAlarmFactory(
     const quic::QuicClock* clock)
     : task_runner_(task_runner), clock_(clock) {}
 
-QuicChromiumAlarmFactory::~QuicChromiumAlarmFactory() {}
+QuicChromiumAlarmFactory::~QuicChromiumAlarmFactory() = default;
 
 quic::QuicArenaScopedPtr<quic::QuicAlarm> QuicChromiumAlarmFactory::CreateAlarm(
     quic::QuicArenaScopedPtr<quic::QuicAlarm::Delegate> delegate,

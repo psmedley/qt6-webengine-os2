@@ -22,28 +22,32 @@
 
 namespace dawn::native::vulkan {
 
-    class Device;
+class Device;
 
-    class PipelineLayout final : public PipelineLayoutBase {
-      public:
-        static ResultOrError<Ref<PipelineLayout>> Create(
-            Device* device,
-            const PipelineLayoutDescriptor* descriptor);
+class PipelineLayout final : public PipelineLayoutBase {
+  public:
+    static ResultOrError<Ref<PipelineLayout>> Create(Device* device,
+                                                     const PipelineLayoutDescriptor* descriptor);
 
-        VkPipelineLayout GetHandle() const;
+    VkPipelineLayout GetHandle() const;
 
-      private:
-        ~PipelineLayout() override;
-        void DestroyImpl() override;
+    // Friend definition of StreamIn which can be found by ADL to override stream::StreamIn<T>.
+    friend void StreamIn(stream::Sink* sink, const PipelineLayout& obj) {
+        StreamIn(sink, static_cast<const CachedObject&>(obj));
+    }
 
-        using PipelineLayoutBase::PipelineLayoutBase;
-        MaybeError Initialize();
+  private:
+    ~PipelineLayout() override;
+    void DestroyImpl() override;
 
-        // Dawn API
-        void SetLabelImpl() override;
+    using PipelineLayoutBase::PipelineLayoutBase;
+    MaybeError Initialize();
 
-        VkPipelineLayout mHandle = VK_NULL_HANDLE;
-    };
+    // Dawn API
+    void SetLabelImpl() override;
+
+    VkPipelineLayout mHandle = VK_NULL_HANDLE;
+};
 
 }  // namespace dawn::native::vulkan
 

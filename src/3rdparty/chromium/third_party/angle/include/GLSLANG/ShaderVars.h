@@ -16,9 +16,6 @@
 #include <string>
 #include <vector>
 
-// This type is defined here to simplify ANGLE's integration with glslang for SPIR-V.
-using ShCompileOptions = uint64_t;
-
 namespace sh
 {
 // GLenum alias
@@ -217,6 +214,7 @@ struct ShaderVariable
     int binding;
     GLenum imageUnitFormat;
     int offset;
+    bool rasterOrdered;
     bool readonly;
     bool writeonly;
 

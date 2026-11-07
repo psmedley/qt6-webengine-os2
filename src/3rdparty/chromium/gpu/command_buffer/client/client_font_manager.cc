@@ -1,8 +1,10 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/client/client_font_manager.h"
+
+#include <type_traits>
 
 #include "base/bits.h"
 #include "base/logging.h"
@@ -21,7 +23,7 @@ class Serializer {
 
   template <typename T>
   void Write(const T* val) {
-    static_assert(base::is_trivially_copyable<T>::value, "");
+    static_assert(std::is_trivially_copyable_v<T>);
     WriteData(val, sizeof(T), alignof(T));
   }
 

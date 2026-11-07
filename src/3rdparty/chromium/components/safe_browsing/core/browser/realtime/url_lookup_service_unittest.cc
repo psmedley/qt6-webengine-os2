@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "components/safe_browsing/buildflags.h"
 #include "components/safe_browsing/core/browser/referrer_chain_provider.h"
 #include "components/safe_browsing/core/browser/safe_browsing_token_fetcher.h"
+#include "components/safe_browsing/core/browser/test_safe_browsing_token_fetcher.h"
 #include "components/safe_browsing/core/browser/verdict_cache_manager.h"
 #include "components/safe_browsing/core/common/features.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
@@ -44,28 +45,6 @@ constexpr char kTestUrl[] = "http://example.test/";
 constexpr char kTestReferrerUrl[] = "http://example.referrer/";
 constexpr char kTestSubframeUrl[] = "http://iframe.example.test/";
 constexpr char kTestSubframeReferrerUrl[] = "http://iframe.example.referrer/";
-
-class TestSafeBrowsingTokenFetcher : public SafeBrowsingTokenFetcher {
- public:
-  TestSafeBrowsingTokenFetcher() = default;
-  ~TestSafeBrowsingTokenFetcher() override {
-    // Like SafeBrowsingTokenFetchTracer, trigger the callback when destroyed.
-    RunAccessTokenCallback("");
-  }
-
-  // SafeBrowsingTokenFetcher:
-  void Start(Callback callback) override { callback_ = std::move(callback); }
-
-  void RunAccessTokenCallback(std::string token) {
-    if (callback_)
-      std::move(callback_).Run(token);
-  }
-
-  MOCK_METHOD1(OnInvalidAccessToken, void(const std::string&));
-
- private:
-  Callback callback_;
-};
 
 class MockReferrerChainProvider : public ReferrerChainProvider {
  public:
@@ -232,8 +211,8 @@ class RealTimeUrlLookupServiceTest : public PlatformTest {
   }
 
   void EnableRealTimeUrlLookup(
-      const std::vector<base::Feature>& enabled_features,
-      const std::vector<base::Feature>& disabled_features) {
+      const std::vector<base::test::FeatureRef>& enabled_features,
+      const std::vector<base::test::FeatureRef>& disabled_features) {
     EnableMbb();
     feature_list_.InitWithFeatures(enabled_features, disabled_features);
   }
@@ -241,7 +220,7 @@ class RealTimeUrlLookupServiceTest : public PlatformTest {
   void EnableRealTimeUrlLookupWithParameters(
       const std::vector<base::test::ScopedFeatureList::FeatureAndParams>&
           enabled_features_and_params,
-      const std::vector<base::Feature>& disabled_features) {
+      const std::vector<base::test::FeatureRef>& disabled_features) {
     EnableMbb();
     feature_list_.InitWithFeaturesAndParameters(enabled_features_and_params,
                                                 disabled_features);
@@ -795,8 +774,14 @@ TEST_F(RealTimeUrlLookupServiceTest,
         // Cookies should be removed when token is set.
         EXPECT_EQ(request.credentials_mode,
                   network::mojom::CredentialsMode::kOmit);
+        std::string header_value;
+        bool found_header = request.headers.GetHeader(
+            net::HttpRequestHeaders::kAuthorization, &header_value);
+        EXPECT_TRUE(found_header);
+        EXPECT_EQ(header_value, "Bearer access_token_string");
       }));
 
+  EXPECT_TRUE(raw_token_fetcher()->WasStartCalled());
   FulfillAccessTokenRequest("access_token_string");
   EXPECT_CALL(*raw_token_fetcher(), OnInvalidAccessToken(_)).Times(0);
   task_environment_.RunUntilIdle();
@@ -808,6 +793,49 @@ TEST_F(RealTimeUrlLookupServiceTest,
 
   histograms.ExpectUniqueSample("SafeBrowsing.RT.ThreatInfoSize",
                                 /* sample */ 1,
+                                /* expected_count */ 1);
+}
+
+TEST_F(RealTimeUrlLookupServiceTest,
+       TestStartLookup_NoTokenWhenTokenIsUnavailable) {
+  base::HistogramTester histograms;
+  EnableRealTimeUrlLookup({kSafeBrowsingRemoveCookiesInAuthRequests}, {});
+  EnableTokenFetchesInClient();
+  GURL url(kTestUrl);
+  SetUpRTLookupResponse(RTLookupResponse::ThreatInfo::DANGEROUS,
+                        RTLookupResponse::ThreatInfo::SOCIAL_ENGINEERING, 60,
+                        "example.test/",
+                        RTLookupResponse::ThreatInfo::COVERING_MATCH);
+
+  base::MockCallback<RTLookupResponseCallback> response_callback;
+  rt_service()->StartLookup(
+      url, last_committed_url_, is_mainframe_,
+      base::BindOnce(
+          [](std::unique_ptr<RTLookupRequest> request, std::string token) {
+            EXPECT_FALSE(request->has_dm_token());
+            // Check token is not attached.
+            EXPECT_EQ("", token);
+          }),
+      response_callback.Get(), base::SequencedTaskRunnerHandle::Get());
+
+  EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ true,
+                                     /* is_cached_response */ false, _));
+
+  test_url_loader_factory_.SetInterceptor(
+      base::BindLambdaForTesting([&](const network::ResourceRequest& request) {
+        std::string header_value;
+        bool found_header = request.headers.GetHeader(
+            net::HttpRequestHeaders::kAuthorization, &header_value);
+        EXPECT_FALSE(found_header);
+      }));
+
+  EXPECT_TRUE(raw_token_fetcher()->WasStartCalled());
+  // Token fetcher returns empty string when the token is unavailable.
+  FulfillAccessTokenRequest("");
+  task_environment_.RunUntilIdle();
+
+  histograms.ExpectUniqueSample("SafeBrowsing.RT.HasTokenInRequest",
+                                /* sample */ 0,
                                 /* expected_count */ 1);
 }
 
@@ -1149,17 +1177,18 @@ TEST_F(RealTimeUrlLookupServiceTest, TestShutdown_CallbackNotPostedOnShutdown) {
 
 TEST_F(RealTimeUrlLookupServiceTest, TestShutdown_CacheManagerReset) {
   GURL url("https://a.example.test/path1/path2");
-  // Post a task to cache_manager_ to cache the verdict.
-  MayBeCacheRealTimeUrlVerdict(url, RTLookupResponse::ThreatInfo::DANGEROUS,
-                               RTLookupResponse::ThreatInfo::SOCIAL_ENGINEERING,
-                               60, "a.example.test/path1/path2",
-                               RTLookupResponse::ThreatInfo::COVERING_MATCH);
 
   // Shutdown and delete depending objects.
   rt_service()->Shutdown();
   cache_manager_.reset();
   content_setting_map_->ShutdownOnUIThread();
   content_setting_map_.reset();
+
+  // Post a task to cache_manager_ to cache the verdict.
+  MayBeCacheRealTimeUrlVerdict(url, RTLookupResponse::ThreatInfo::DANGEROUS,
+                               RTLookupResponse::ThreatInfo::SOCIAL_ENGINEERING,
+                               60, "a.example.test/path1/path2",
+                               RTLookupResponse::ThreatInfo::COVERING_MATCH);
 
   // The task to cache_manager_ should be cancelled and not cause crash.
   task_environment_.RunUntilIdle();
@@ -1226,8 +1255,6 @@ TEST_F(RealTimeUrlLookupServiceTest,
   // Enable extended reporting.
   EnableExtendedReporting();
   rt_service()->set_bypass_probability_for_tests(true);
-  // When feature is not enabled, a sampled ping should not be sent.
-  EXPECT_FALSE(CanSendRTSampleRequest());
   feature_list_.InitAndDisableFeature(
       safe_browsing::kSendSampledPingsForProtegoAllowlistDomains);
   // After enabling the feature, a sampled ping should be sent.

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,15 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/memory/raw_ptr.h"
 #include "base/unguessable_token.h"
-#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "ui/android/view_android_observer.h"
 #include "ui/android/window_android.h"
 #include "ui/android/window_android_observer.h"
 
 namespace content {
+
+class RenderFrameHost;
+class RenderFrameHostImpl;
 
 // Native counterpart to DialogOverlayImpl java class.  This is created by the
 // java side.  When the WebContents for the provided token is attached or

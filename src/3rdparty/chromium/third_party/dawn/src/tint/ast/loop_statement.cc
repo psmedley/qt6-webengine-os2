@@ -21,13 +21,14 @@ TINT_INSTANTIATE_TYPEINFO(tint::ast::LoopStatement);
 namespace tint::ast {
 
 LoopStatement::LoopStatement(ProgramID pid,
+                             NodeID nid,
                              const Source& src,
                              const BlockStatement* b,
                              const BlockStatement* cont)
-    : Base(pid, src), body(b), continuing(cont) {
-  TINT_ASSERT(AST, body);
-  TINT_ASSERT_PROGRAM_IDS_EQUAL_IF_VALID(AST, body, program_id);
-  TINT_ASSERT_PROGRAM_IDS_EQUAL_IF_VALID(AST, continuing, program_id);
+    : Base(pid, nid, src), body(b), continuing(cont) {
+    TINT_ASSERT(AST, body);
+    TINT_ASSERT_PROGRAM_IDS_EQUAL_IF_VALID(AST, body, program_id);
+    TINT_ASSERT_PROGRAM_IDS_EQUAL_IF_VALID(AST, continuing, program_id);
 }
 
 LoopStatement::LoopStatement(LoopStatement&&) = default;
@@ -35,11 +36,11 @@ LoopStatement::LoopStatement(LoopStatement&&) = default;
 LoopStatement::~LoopStatement() = default;
 
 const LoopStatement* LoopStatement::Clone(CloneContext* ctx) const {
-  // Clone arguments outside of create() call to have deterministic ordering
-  auto src = ctx->Clone(source);
-  auto* b = ctx->Clone(body);
-  auto* cont = ctx->Clone(continuing);
-  return ctx->dst->create<LoopStatement>(src, b, cont);
+    // Clone arguments outside of create() call to have deterministic ordering
+    auto src = ctx->Clone(source);
+    auto* b = ctx->Clone(body);
+    auto* cont = ctx->Clone(continuing);
+    return ctx->dst->create<LoopStatement>(src, b, cont);
 }
 
 }  // namespace tint::ast

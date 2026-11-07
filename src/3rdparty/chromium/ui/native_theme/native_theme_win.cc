@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "base/no_destructor.h"
 #include "base/notreached.h"
 #include "base/threading/sequenced_task_runner_handle.h"
+#include "base/win/dark_mode_support.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/scoped_hdc.h"
 #include "base/win/scoped_select_object.h"
@@ -278,7 +279,9 @@ void NativeThemeWin::Paint(cc::PaintCanvas* canvas,
 
 NativeThemeWin::NativeThemeWin(bool configure_web_instance,
                                bool should_only_use_dark_colors)
-    : NativeTheme(should_only_use_dark_colors), color_change_listener_(this) {
+    : NativeTheme(should_only_use_dark_colors),
+      supports_windows_dark_mode_(base::win::IsDarkModeAvailable()),
+      color_change_listener_(this) {
   // If there's no sequenced task runner handle, we can't be called back for
   // dark mode changes. This generally happens in tests. As a result, ignore
   // dark mode in this case.
@@ -299,7 +302,7 @@ NativeThemeWin::NativeThemeWin(bool configure_web_instance,
   // Initialize the cached system colors.
   UpdateSystemColors();
   set_preferred_color_scheme(CalculatePreferredColorScheme());
-  set_preferred_contrast(CalculatePreferredContrast());
+  SetPreferredContrast(CalculatePreferredContrast());
 
   memset(theme_handles_, 0, sizeof(theme_handles_));
 
@@ -323,7 +326,7 @@ void NativeThemeWin::ConfigureWebInstance() {
   web_instance->set_use_dark_colors(ShouldUseDarkColors());
   web_instance->set_forced_colors(InForcedColorsMode());
   web_instance->set_preferred_color_scheme(GetPreferredColorScheme());
-  web_instance->set_preferred_contrast(GetPreferredContrast());
+  web_instance->SetPreferredContrast(GetPreferredContrast());
   web_instance->set_system_colors(GetSystemColors());
 }
 
@@ -354,7 +357,7 @@ void NativeThemeWin::OnSysColorChange() {
   if (!IsForcedHighContrast())
     set_forced_colors(IsUsingHighContrastThemeInternal());
   set_preferred_color_scheme(CalculatePreferredColorScheme());
-  set_preferred_contrast(CalculatePreferredContrast());
+  SetPreferredContrast(CalculatePreferredContrast());
   NotifyOnNativeThemeUpdated();
 }
 
@@ -1529,7 +1532,9 @@ HANDLE NativeThemeWin::GetThemeHandle(ThemeName theme_name) const {
     handle = OpenThemeData(nullptr, L"Combobox");
     break;
   case SCROLLBAR:
-    handle = OpenThemeData(nullptr, L"Scrollbar");
+    handle = OpenThemeData(nullptr, supports_windows_dark_mode_
+                                        ? L"Explorer::Scrollbar"
+                                        : L"Scrollbar");
     break;
   case STATUS:
     handle = OpenThemeData(nullptr, L"Status");
@@ -1582,6 +1587,7 @@ void NativeThemeWin::UpdateDarkModeStatus() {
   }
   set_use_dark_colors(dark_mode_enabled);
   set_preferred_color_scheme(CalculatePreferredColorScheme());
+  CloseHandlesInternal();
   NotifyOnNativeThemeUpdated();
 }
 

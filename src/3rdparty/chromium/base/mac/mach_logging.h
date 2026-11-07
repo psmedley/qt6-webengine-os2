@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,10 +50,10 @@ class BASE_EXPORT MachLogMessage : public logging::LogMessage {
 
 }  // namespace logging
 
-#if defined(NDEBUG)
-#define MACH_DVLOG_IS_ON(verbose_level) 0
-#else
+#if DCHECK_IS_ON()
 #define MACH_DVLOG_IS_ON(verbose_level) VLOG_IS_ON(verbose_level)
+#else
+#define MACH_DVLOG_IS_ON(verbose_level) 0
 #endif
 
 #define MACH_LOG_STREAM(severity, mach_err) \

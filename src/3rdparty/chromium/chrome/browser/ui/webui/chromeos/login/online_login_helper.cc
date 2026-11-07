@@ -1,11 +1,9 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/chromeos/login/online_login_helper.h"
 
-#include "ash/components/login/auth/challenge_response/cert_utils.h"
-#include "ash/components/login/auth/cryptohome_key_constants.h"
 #include "chrome/browser/ash/login/signin_partition_manager.h"
 #include "chrome/browser/ash/login/ui/login_display_host_webui.h"
 #include "chrome/browser/ash/login/ui/signin_ui.h"
@@ -14,7 +12,9 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/installer/util/google_update_settings.h"
-#include "chromeos/dbus/util/version_loader.h"
+#include "chromeos/ash/components/login/auth/challenge_response/cert_utils.h"
+#include "chromeos/ash/components/login/auth/public/cryptohome_key_constants.h"
+#include "chromeos/version/version_loader.h"
 #include "content/public/browser/storage_partition.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -71,10 +71,11 @@ void SetCookieForPartition(
 
   std::string gaps_cookie_value(kGAPSCookie);
   gaps_cookie_value += "=" + context.gaps_cookie;
-  const GURL& gaia_url = GaiaUrls::GetInstance()->gaia_url();
+  const GURL gaia_url = GaiaUrls::GetInstance()->gaia_url();
   std::unique_ptr<net::CanonicalCookie> cc(net::CanonicalCookie::Create(
       gaia_url, gaps_cookie_value, base::Time::Now(),
-      absl::nullopt /* server_time */, net::CookiePartitionKey::Todo()));
+      absl::nullopt /* server_time */,
+      absl::nullopt /* cookie_partition_key */));
   if (!cc)
     return;
 

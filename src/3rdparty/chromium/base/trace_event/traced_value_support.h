@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -96,7 +96,7 @@ template <>
 struct TraceFormatTraits<::base::TimeDelta> {
   static void WriteIntoTrace(perfetto::TracedValue context,
                              const ::base::TimeDelta& value) {
-    std::move(context).WriteUInt64(value.InMicroseconds());
+    std::move(context).WriteInt64(value.InMicroseconds());
   }
 };
 

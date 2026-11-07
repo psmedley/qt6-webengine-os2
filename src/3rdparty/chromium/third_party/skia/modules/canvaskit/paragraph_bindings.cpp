@@ -69,6 +69,10 @@ struct SimpleTextStyle {
     int fontFeatureLen;
     WASMPointerF32 fontFeatureNamesPtr;
     WASMPointerF32 fontFeatureValuesPtr;
+
+    int fontVariationLen;
+    WASMPointerF32 fontVariationAxesPtr;
+    WASMPointerF32 fontVariationValuesPtr;
 };
 
 struct SimpleStrutStyle {
@@ -204,6 +208,28 @@ para::TextStyle toTextStyle(const SimpleTextStyle& s) {
         }
     }
 
+    if (s.fontVariationLen > 0) {
+        const char** fontVariationAxes = reinterpret_cast<const char**>(s.fontVariationAxesPtr);
+        const float* fontVariationValues = reinterpret_cast<const float*>(s.fontVariationValuesPtr);
+        std::vector<SkFontArguments::VariationPosition::Coordinate> coordinates;
+        for (int i = 0; i < s.fontVariationLen; i++) {
+            // Font variation axis tags are 4-character simple strings.
+            SkString axis(fontVariationAxes[i]);
+            if (axis.size() != 4) {
+                continue;
+            }
+            coordinates.push_back({
+                SkSetFourByteTag(axis[0], axis[1], axis[2], axis[3]),
+                fontVariationValues[i]
+            });
+        }
+        SkFontArguments::VariationPosition position = {
+            coordinates.data(),
+            static_cast<int>(coordinates.size())
+        };
+        ts.setFontArguments(SkFontArguments().setVariationDesignPosition(position));
+    }
+
     return ts;
 }
 
@@ -213,6 +239,7 @@ struct SimpleParagraphStyle {
     size_t ellipsisLen;
     SkScalar heightMultiplier;
     size_t maxLines;
+    bool replaceTabCharacters;
     para::TextAlign textAlign;
     para::TextDirection textDirection;
     para::TextHeightBehavior textHeightBehavior;
@@ -244,6 +271,7 @@ para::ParagraphStyle toParagraphStyle(const SimpleParagraphStyle& s) {
         ps.setMaxLines(s.maxLines);
     }
     ps.setTextHeightBehavior(s.textHeightBehavior);
+    ps.setReplaceTabCharacters(s.replaceTabCharacters);
     return ps;
 }
 
@@ -261,7 +289,7 @@ Float32Array TextBoxesToFloat32Array(std::vector<para::TextBox> boxes) {
         return emscripten::val::null();
     }
     SimpleTextBox* rects = new SimpleTextBox[boxes.size()];
-    for (int i = 0; i < boxes.size(); i++) {
+    for (size_t i = 0; i < boxes.size(); i++) {
         rects[i].rect = boxes[i].rect;
         if (boxes[i].direction == para::TextDirection::kRtl) {
             rects[i].direction = 0;
@@ -325,9 +353,9 @@ JSArray GetShapedLines(para::Paragraph& self) {
         // not really accumulated, but definitely set
         float       baseline    = 0;
 
-        void reset(int lineNumber) {
+        void reset(int newLineNum) {
             new (this) LineAccumulate;
-            this->lineNumber = lineNumber;
+            this->lineNumber = newLineNum;
         }
     };
 
@@ -408,6 +436,14 @@ JSArray GetShapedLines(para::Paragraph& self) {
 
     });
     return jlines;
+}
+
+std::vector<SkUnicode::Position> convertArrayU32(WASMPointerU32 array, size_t count) {
+    std::vector<size_t> vec;
+    vec.resize(count);
+    SkUnicode::Position* data = reinterpret_cast<SkUnicode::Position*>(array);
+    std::memcpy(vec.data(), data, count * sizeof(size_t));
+    return vec;
 }
 
 EMSCRIPTEN_BINDINGS(Paragraph) {
@@ -549,7 +585,47 @@ EMSCRIPTEN_BINDINGS(Paragraph) {
                                                               SkScalar offset) {
                           para::PlaceholderStyle ps(width, height, alignment, baseline, offset);
                           self.addPlaceholder(ps);
-                      }));
+                      }))
+            .function("getText",
+                      optional_override([](para::ParagraphBuilderImpl& self) -> JSString {
+                          auto text = self.getText();
+                          return emscripten::val(std::string(text.data(), text.size()).c_str());
+                      }))
+            .function("_buildWithClientInfo",
+                      optional_override([](para::ParagraphBuilderImpl& self,
+                                           WASMPointerU32 clientBidis, size_t bidisNum,
+                                           WASMPointerU32 clientWords, size_t wordsNum,
+                                           WASMPointerU32 clientGraphemes, size_t graphemesNum,
+                                           WASMPointerU32 clientLineBreaks, size_t lineBreaksNum) {
+                      SkUnicode::Position* bidiData = reinterpret_cast<SkUnicode::Position*>(clientBidis);
+                      std::vector<SkUnicode::BidiRegion> bidiRegions;
+                      for (size_t i = 0; i < bidisNum; i += 3) {
+                          auto start = bidiData[i];
+                          auto end = bidiData[i+1];
+                          auto direction = SkToU8(bidiData[i+2]);
+
+                          SkUnicode::BidiLevel level = direction == static_cast<int>(para::TextDirection::kLtr)
+                                                   ? static_cast<SkUnicode::BidiLevel>(SkUnicode::TextDirection::kLTR)
+                                                   : static_cast<SkUnicode::BidiLevel>(SkUnicode::TextDirection::kRTL);
+                          bidiRegions.emplace_back(start, end, level);
+                      }
+                      SkUnicode::Position* lineBreakData = reinterpret_cast<SkUnicode::Position*>(clientLineBreaks);
+                      std::vector<SkUnicode::LineBreakBefore> lineBreaks;
+                      for (size_t i = 0; i < lineBreaksNum; i += 2) {
+                          auto pos = lineBreakData[i];
+                          auto breakType = lineBreakData[i+1];
+                          if (breakType == 0) {
+                              lineBreaks.emplace_back(pos, SkUnicode::LineBreakType::kSoftLineBreak);
+                          } else {
+                              lineBreaks.emplace_back(pos, SkUnicode::LineBreakType::kHardLineBreak);
+                          }
+                      }
+                      return self.BuildWithClientInfo(
+                                        std::move(bidiRegions),
+                                        convertArrayU32(clientWords, wordsNum),
+                                        convertArrayU32(clientGraphemes, graphemesNum),
+                                        std::move(lineBreaks));
+                  }));
 
     class_<para::TypefaceFontProvider, base<SkFontMgr>>("TypefaceFontProvider")
       .smart_ptr<sk_sp<para::TypefaceFontProvider>>("sk_sp<TypefaceFontProvider>")
@@ -576,16 +652,17 @@ EMSCRIPTEN_BINDINGS(Paragraph) {
         .field("width",     &SimpleFontStyle::width);
 
     value_object<SimpleParagraphStyle>("ParagraphStyle")
-        .field("disableHinting",     &SimpleParagraphStyle::disableHinting)
-        .field("_ellipsisPtr",       &SimpleParagraphStyle::ellipsisPtr)
-        .field("_ellipsisLen",       &SimpleParagraphStyle::ellipsisLen)
-        .field("heightMultiplier",   &SimpleParagraphStyle::heightMultiplier)
-        .field("maxLines",           &SimpleParagraphStyle::maxLines)
-        .field("textAlign",          &SimpleParagraphStyle::textAlign)
-        .field("textDirection",      &SimpleParagraphStyle::textDirection)
-        .field("textHeightBehavior", &SimpleParagraphStyle::textHeightBehavior)
-        .field("textStyle",          &SimpleParagraphStyle::textStyle)
-        .field("strutStyle",         &SimpleParagraphStyle::strutStyle);
+        .field("disableHinting",       &SimpleParagraphStyle::disableHinting)
+        .field("_ellipsisPtr",         &SimpleParagraphStyle::ellipsisPtr)
+        .field("_ellipsisLen",         &SimpleParagraphStyle::ellipsisLen)
+        .field("heightMultiplier",     &SimpleParagraphStyle::heightMultiplier)
+        .field("maxLines",             &SimpleParagraphStyle::maxLines)
+        .field("replaceTabCharacters", &SimpleParagraphStyle::replaceTabCharacters)
+        .field("textAlign",            &SimpleParagraphStyle::textAlign)
+        .field("textDirection",        &SimpleParagraphStyle::textDirection)
+        .field("textHeightBehavior",   &SimpleParagraphStyle::textHeightBehavior)
+        .field("textStyle",            &SimpleParagraphStyle::textStyle)
+        .field("strutStyle",           &SimpleParagraphStyle::strutStyle);
 
     value_object<SimpleStrutStyle>("StrutStyle")
         .field("_fontFamiliesPtr", &SimpleStrutStyle::fontFamiliesPtr)
@@ -622,7 +699,10 @@ EMSCRIPTEN_BINDINGS(Paragraph) {
         .field("_shadowBlurRadiiPtr",   &SimpleTextStyle::shadowBlurRadiiPtr)
         .field("_fontFeatureLen",       &SimpleTextStyle::fontFeatureLen)
         .field("_fontFeatureNamesPtr",  &SimpleTextStyle::fontFeatureNamesPtr)
-        .field("_fontFeatureValuesPtr", &SimpleTextStyle::fontFeatureValuesPtr);
+        .field("_fontFeatureValuesPtr", &SimpleTextStyle::fontFeatureValuesPtr)
+        .field("_fontVariationLen",     &SimpleTextStyle::fontVariationLen)
+        .field("_fontVariationAxesPtr", &SimpleTextStyle::fontVariationAxesPtr)
+        .field("_fontVariationValuesPtr", &SimpleTextStyle::fontVariationValuesPtr);
 
     // The U stands for unsigned - we can't bind a generic/template object, so we have to specify it
     // with the type we are using.

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -91,7 +91,7 @@ class ArcIntentHelperMojoDelegate {
                       bool is_preferred,
                       absl::optional<std::string> fallback_url);
     IntentHandlerInfo(const IntentHandlerInfo& other);
-    IntentHandlerInfo& operator=(const IntentHandlerInfo&) = delete;
+    IntentHandlerInfo& operator=(const IntentHandlerInfo&) = default;
     ~IntentHandlerInfo();
 
     // The name of the package used as a description text.

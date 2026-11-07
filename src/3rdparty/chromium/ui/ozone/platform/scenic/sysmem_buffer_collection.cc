@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -120,18 +120,25 @@ VkImageFormatConstraintsInfoFUCHSIA GetDefaultImageFormatConstraintsInfo(
   DCHECK(create_info.usage != 0);
 
   static const VkSysmemColorSpaceFUCHSIA kSrgbColorSpace = {
-      .sType = VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA,
-      .pNext = nullptr,
-      .colorSpace =
-          static_cast<uint32_t>(fuchsia::sysmem::ColorSpaceType::SRGB),
+      VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA, nullptr,
+      static_cast<uint32_t>(fuchsia::sysmem::ColorSpaceType::SRGB)};
+
+  static const VkSysmemColorSpaceFUCHSIA kYuvDefaultColorSpaces[] = {
+      {VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA, nullptr,
+       static_cast<uint32_t>(fuchsia::sysmem::ColorSpaceType::REC709)},
+      {VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA, nullptr,
+       static_cast<uint32_t>(fuchsia::sysmem::ColorSpaceType::REC601_NTSC)},
+      {VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA, nullptr,
+       static_cast<uint32_t>(
+           fuchsia::sysmem::ColorSpaceType::REC601_NTSC_FULL_RANGE)},
+      {VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA, nullptr,
+       static_cast<uint32_t>(fuchsia::sysmem::ColorSpaceType::REC601_PAL)},
+      {VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA, nullptr,
+       static_cast<uint32_t>(
+           fuchsia::sysmem::ColorSpaceType::REC601_PAL_FULL_RANGE)},
   };
 
-  static const VkSysmemColorSpaceFUCHSIA kYuvDefaultColorSpace = {
-      .sType = VK_STRUCTURE_TYPE_SYSMEM_COLOR_SPACE_FUCHSIA,
-      .pNext = nullptr,
-      .colorSpace =
-          static_cast<uint32_t>(fuchsia::sysmem::ColorSpaceType::REC709),
-  };
+  bool is_yuv = IsYuvVkFormat(create_info.format);
 
   VkImageFormatConstraintsInfoFUCHSIA format_info = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_CONSTRAINTS_INFO_FUCHSIA,
@@ -140,9 +147,9 @@ VkImageFormatConstraintsInfoFUCHSIA GetDefaultImageFormatConstraintsInfo(
       .requiredFormatFeatures =
           GetFormatFeatureFlagsFromUsage(create_info.usage),
       .sysmemPixelFormat = 0u,
-      .colorSpaceCount = 1u,
-      .pColorSpaces = IsYuvVkFormat(create_info.format) ? &kYuvDefaultColorSpace
-                                                        : &kSrgbColorSpace,
+      .colorSpaceCount = static_cast<uint32_t>(
+          is_yuv ? std::size(kYuvDefaultColorSpaces) : 1u),
+      .pColorSpaces = is_yuv ? kYuvDefaultColorSpaces : &kSrgbColorSpace,
   };
   return format_info;
 }
@@ -303,7 +310,8 @@ bool SysmemBufferCollection::Initialize(
 }
 
 scoped_refptr<gfx::NativePixmap> SysmemBufferCollection::CreateNativePixmap(
-    size_t buffer_index) {
+    size_t buffer_index,
+    gfx::Size size) {
   CHECK_LT(buffer_index, num_buffers());
 
   gfx::NativePixmapHandle handle;
@@ -330,10 +338,10 @@ scoped_refptr<gfx::NativePixmap> SysmemBufferCollection::CreateNativePixmap(
   // The logic should match LogicalBufferCollection::Allocate().
   size_t stride =
       RoundUp(std::max(static_cast<size_t>(format.min_bytes_per_row),
-                       image_size_.width() * GetBytesPerPixel(format_)),
+                       size.width() * GetBytesPerPixel(format_)),
               format.bytes_per_row_divisor);
   size_t plane_offset = buffers_info_.buffers[buffer_index].vmo_usable_start;
-  size_t plane_size = stride * image_size_.height();
+  size_t plane_size = stride * size.height();
   handle.planes.emplace_back(stride, plane_offset, plane_size,
                              std::move(main_plane_vmo));
 
@@ -346,18 +354,16 @@ scoped_refptr<gfx::NativePixmap> SysmemBufferCollection::CreateNativePixmap(
     DCHECK_LE(uv_plane_offset + uv_plane_size, buffer_size_);
   }
 
-  return new SysmemNativePixmap(this, std::move(handle));
+  return new SysmemNativePixmap(this, std::move(handle), size);
 }
 
-bool SysmemBufferCollection::CreateVkImage(
-    size_t buffer_index,
-    VkDevice vk_device,
-    gfx::Size size,
-    VkImage* vk_image,
-    VkImageCreateInfo* vk_image_info,
-    VkDeviceMemory* vk_device_memory,
-    VkDeviceSize* mem_allocation_size,
-    absl::optional<gpu::VulkanYCbCrInfo>* ycbcr_info) {
+bool SysmemBufferCollection::CreateVkImage(size_t buffer_index,
+                                           VkDevice vk_device,
+                                           gfx::Size size,
+                                           VkImage* vk_image,
+                                           VkImageCreateInfo* vk_image_info,
+                                           VkDeviceMemory* vk_device_memory,
+                                           VkDeviceSize* mem_allocation_size) {
   DCHECK_CALLED_ON_VALID_THREAD(vulkan_thread_checker_);
 
   if (vk_device_ != vk_device) {
@@ -431,33 +437,6 @@ bool SysmemBufferCollection::CreateVkImage(
   }
 
   *mem_allocation_size = requirements.size;
-
-  auto color_space =
-      buffers_info_.settings.image_format_constraints.color_space[0].type;
-  switch (color_space) {
-    case fuchsia::sysmem::ColorSpaceType::SRGB:
-      *ycbcr_info = absl::nullopt;
-      break;
-
-    case fuchsia::sysmem::ColorSpaceType::REC709: {
-      // Currently sysmem doesn't specify location of chroma samples relative to
-      // luma (see fxb/13677). Assume they are cosited with luma. YCbCr info
-      // here must match the values passed for the same buffer in
-      // FuchsiaVideoDecoder. |format_features| are resolved later in the GPU
-      // process before the ycbcr info is passed to Skia.
-      *ycbcr_info = gpu::VulkanYCbCrInfo(
-          vk_image_info->format, /*external_format=*/0,
-          VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_709,
-          VK_SAMPLER_YCBCR_RANGE_ITU_NARROW, VK_CHROMA_LOCATION_COSITED_EVEN,
-          VK_CHROMA_LOCATION_COSITED_EVEN, /*format_features=*/0);
-      break;
-    }
-
-    default:
-      DLOG(ERROR) << "Sysmem allocated buffer with unsupported color space: "
-                  << static_cast<int>(color_space);
-      return false;
-  }
 
   return true;
 }
@@ -591,23 +570,8 @@ bool SysmemBufferCollection::InitializeInternal(
   DCHECK_GE(buffers_info_.buffer_count, min_buffer_count);
   DCHECK(buffers_info_.settings.has_image_format_constraints);
 
-  // The logic should match LogicalBufferCollection::Allocate().
-  const fuchsia::sysmem::ImageFormatConstraints& format =
-      buffers_info_.settings.image_format_constraints;
-  size_t width =
-      RoundUp(std::max(format.min_coded_width, format.required_max_coded_width),
-              format.coded_width_divisor);
-  size_t height = RoundUp(
-      std::max(format.min_coded_height, format.required_max_coded_height),
-      format.coded_height_divisor);
-  image_size_ = gfx::Size(width, height);
   buffer_size_ = buffers_info_.settings.buffer_settings.size_bytes;
   is_protected_ = buffers_info_.settings.buffer_settings.is_secure;
-
-  // Add all images to Image pipe for presentation later.
-  if (scenic_overlay_view_) {
-    scenic_overlay_view_->AddImages(buffers_info_.buffer_count, image_size_);
-  }
 
   // CreateVkImage() should always be called on the same thread, but it may be
   // different from the thread that called Initialize().

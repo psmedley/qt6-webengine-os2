@@ -39,9 +39,19 @@
 namespace blink {
 
 namespace {
-const base::Feature kFontCacheNoSizeInKey{"FontCacheNoSizeInKey",
-                                          base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kFontCacheNoSizeInKey,
+             "FontCacheNoSizeInKey",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 }
+
+#if defined(USE_PARALLEL_TEXT_SHAPING)
+// static
+FontPlatformDataCache& FontPlatformDataCache::SharedInstance() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(FontPlatformDataCache,
+                                  shared_font_platform_data_cache, ());
+  return shared_font_platform_data_cache;
+}
+#endif
 
 // static
 std::unique_ptr<FontPlatformDataCache> FontPlatformDataCache::Create() {
@@ -108,7 +118,7 @@ FontPlatformData* FontPlatformDataCache::GetOrCreateFontPlatformData(
   // looking up the font under the aliased name.
   const AtomicString& alternate_name =
       AlternateFamilyName(creation_params.Family());
-  if (alternate_name.IsEmpty())
+  if (alternate_name.empty())
     return nullptr;
 
   FontFaceCreationParams create_by_alternate_family(alternate_name);
@@ -126,14 +136,17 @@ FontPlatformData* FontPlatformDataCache::GetOrCreateFontPlatformData(
 }
 
 size_t FontPlatformDataCache::ByteSize() const {
+  AutoLockForParallelTextShaping guard(lock_);
   return map_.size() * sizeof(SizedFontPlatformDataSet);
 }
 
 void FontPlatformDataCache::Clear() {
+  AutoLockForParallelTextShaping guard(lock_);
   map_.clear();
 }
 
 void FontPlatformDataCache::Purge(const FontDataCache& font_data_cache) {
+  AutoLockForParallelTextShaping guard(lock_);
   Vector<FontCacheKey> keys_to_remove;
   keys_to_remove.ReserveInitialCapacity(map_.size());
   for (auto& entry : map_) {
@@ -145,6 +158,7 @@ void FontPlatformDataCache::Purge(const FontDataCache& font_data_cache) {
 
 FontPlatformDataCache::SizedFontPlatformDataSet&
 FontPlatformDataCache::GetOrCreateSizeMap(const FontCacheKey& key) {
+  AutoLockForParallelTextShaping guard(lock_);
   auto result = map_.insert(key, nullptr);
   if (result.is_new_entry)
     result.stored_value->value = SizedFontPlatformDataSet::Create();
@@ -173,11 +187,12 @@ FontPlatformDataCache::SizedFontPlatformDataSet::GetOrCreateFontPlatformData(
     float size,
     AlternateFontName alternate_font_name,
     unsigned rounded_size) {
+  AutoLockForParallelTextShaping guard(lock_);
   // Take a different size instance of the same font before adding an entry to
   // `size_to_data_map`.
   FontPlatformData* const another_size =
-      size_to_data_map_.IsEmpty() ? nullptr
-                                  : size_to_data_map_.begin()->value.get();
+      size_to_data_map_.empty() ? nullptr
+                                : size_to_data_map_.begin()->value.get();
   const auto add_result = size_to_data_map_.insert(rounded_size, nullptr);
   std::unique_ptr<FontPlatformData>* found = &add_result.stored_value->value;
   if (!add_result.is_new_entry)
@@ -196,6 +211,7 @@ FontPlatformDataCache::SizedFontPlatformDataSet::GetOrCreateFontPlatformData(
 
 bool FontPlatformDataCache::SizedFontPlatformDataSet::Purge(
     const FontDataCache& font_data_cache) {
+  AutoLockForParallelTextShaping guard(lock_);
   Vector<unsigned> sizes_to_remove;
   sizes_to_remove.ReserveInitialCapacity(size_to_data_map_.size());
   for (const auto& entry : size_to_data_map_) {
@@ -203,12 +219,13 @@ bool FontPlatformDataCache::SizedFontPlatformDataSet::Purge(
       sizes_to_remove.push_back(entry.key);
   }
   size_to_data_map_.RemoveAll(sizes_to_remove);
-  return size_to_data_map_.IsEmpty();
+  return size_to_data_map_.empty();
 }
 
 void FontPlatformDataCache::SizedFontPlatformDataSet::Set(
     unsigned rounded_size,
     FontPlatformData* platform_data) {
+  AutoLockForParallelTextShaping guard(lock_);
   size_to_data_map_.insert(rounded_size,
                            std::make_unique<FontPlatformData>(*platform_data));
 }

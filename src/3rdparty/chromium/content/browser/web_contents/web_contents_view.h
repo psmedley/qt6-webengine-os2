@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,14 +13,18 @@
 #include "ui/gfx/native_widget_types.h"
 
 namespace content {
+
 class RenderViewHost;
+class RenderViewHostDelegateView;
 class RenderWidgetHost;
 class RenderWidgetHostViewBase;
+class WebContentsImpl;
+class WebContentsViewDelegate;
 struct DropData;
 
-// The WebContentsView is an interface that is implemented by the platform-
-// dependent web contents views. The WebContents uses this interface to talk to
-// them.
+// The `WebContentsView` is an interface that is implemented by the platform-
+// dependent web contents views. The `WebContents` uses this interface to talk
+// to them.
 class WebContentsView {
  public:
   virtual ~WebContentsView() = default;
@@ -85,7 +89,8 @@ class WebContentsView {
   // trying to find a specific window.
   virtual void SetPageTitle(const std::u16string& title) = 0;
 
-  // Invoked when the WebContents is notified that the RenderView is ready.
+  // Invoked when the WebContents is notified that the `blink::WebView` is
+  // ready.
   virtual void RenderViewReady() = 0;
 
   // Invoked when the WebContents is notified that the RenderViewHost has been
@@ -107,7 +112,16 @@ class WebContentsView {
   // loop has ended.
   virtual bool CloseTabAfterEventTrackingIfNeeded() = 0;
 #endif
+
+  virtual void FullscreenStateChanged(bool is_fullscreen) = 0;
 };
+
+// Factory function to create `WebContentsView`s. Implemented in the platform
+// files.
+std::unique_ptr<WebContentsView> CreateWebContentsView(
+    WebContentsImpl* web_contents,
+    std::unique_ptr<WebContentsViewDelegate> delegate,
+    RenderViewHostDelegateView** render_view_host_delegate_view);
 
 }  // namespace content
 

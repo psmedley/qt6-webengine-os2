@@ -17,40 +17,36 @@
 
 #include <string>
 
+#include "src/tint/ast/node_id.h"
 #include "src/tint/clone_context.h"
-
-// Forward declarations
-namespace tint {
-class CloneContext;
-}  // namespace tint
-namespace tint::sem {
-class Type;
-class Info;
-}  // namespace tint::sem
 
 namespace tint::ast {
 
 /// AST base class node
 class Node : public Castable<Node, Cloneable> {
- public:
-  ~Node() override;
+  public:
+    ~Node() override;
 
-  /// The identifier of the program that owns this node
-  const ProgramID program_id;
+    /// The identifier of the program that owns this node
+    const ProgramID program_id;
 
-  /// The node source data
-  const Source source;
+    /// The node identifier, unique for the program.
+    const NodeID node_id;
 
- protected:
-  /// Create a new node
-  /// @param pid the identifier of the program that owns this node
-  /// @param src the input source for the node
-  Node(ProgramID pid, const Source& src);
-  /// Move constructor
-  Node(Node&&);
+    /// The node source data
+    const Source source;
 
- private:
-  Node(const Node&) = delete;
+  protected:
+    /// Create a new node
+    /// @param pid the identifier of the program that owns this node
+    /// @param nid the unique node identifier
+    /// @param src the input source for the node
+    Node(ProgramID pid, NodeID nid, const Source& src);
+    /// Move constructor
+    Node(Node&&);
+
+  private:
+    Node(const Node&) = delete;
 };
 
 }  // namespace tint::ast
@@ -60,7 +56,7 @@ namespace tint {
 /// @param node a pointer to an AST node
 /// @returns the ProgramID of the given AST node.
 inline ProgramID ProgramIDOf(const ast::Node* node) {
-  return node ? node->program_id : ProgramID();
+    return node ? node->program_id : ProgramID();
 }
 
 }  // namespace tint

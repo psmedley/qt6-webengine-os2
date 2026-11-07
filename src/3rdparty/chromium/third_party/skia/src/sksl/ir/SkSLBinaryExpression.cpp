@@ -5,11 +5,16 @@
  * found in the LICENSE file.
  */
 
+#include "src/sksl/ir/SkSLBinaryExpression.h"
+
+#include "include/private/SkSLDefines.h"
 #include "include/sksl/SkSLErrorReporter.h"
 #include "src/sksl/SkSLAnalysis.h"
 #include "src/sksl/SkSLConstantFolder.h"
+#include "src/sksl/SkSLContext.h"
 #include "src/sksl/SkSLProgramSettings.h"
-#include "src/sksl/ir/SkSLBinaryExpression.h"
+#include "src/sksl/SkSLUtil.h"
+#include "src/sksl/ir/SkSLFieldAccess.h"
 #include "src/sksl/ir/SkSLIndexExpression.h"
 #include "src/sksl/ir/SkSLLiteral.h"
 #include "src/sksl/ir/SkSLSetting.h"
@@ -176,15 +181,24 @@ std::unique_ptr<Expression> BinaryExpression::Make(const Context& context,
         return result;
     }
 
-    if (context.fConfig->fSettings.fOptimize) {
+    if (context.fConfig->fSettings.fOptimize && !context.fConfig->fIsBuiltinCode) {
         // When sk_Caps.rewriteMatrixVectorMultiply is set, we rewrite medium-precision
         // matrix * vector multiplication as:
         //   (sk_Caps.rewriteMatrixVectorMultiply ? (mat[0]*vec[0] + ... + mat[N]*vec[N])
         //                                        : mat * vec)
         if (is_low_precision_matrix_vector_multiply(*left, op, *right, *resultType)) {
             // Look up `sk_Caps.rewriteMatrixVectorMultiply`.
-            auto caps = Setting::Convert(context, pos, "rewriteMatrixVectorMultiply");
+            auto caps = Setting::Make(context, pos, &ShaderCaps::fRewriteMatrixVectorMultiply);
 
+            // There are three possible outcomes from Setting::Convert:
+            // - If the ShaderCaps aren't known (fCaps in the Context is null), we will get back a
+            //   Setting IRNode. In practice, this should happen when compiling a module.
+            //   In this case, we generate a ternary expression which will be optimized away when
+            //   the module code is actually incorporated into a program.
+            // - If `rewriteMatrixVectorMultiply` is true in our shader caps, we will get back a
+            //   Literal set to true. When this happens, we always return the rewritten expression.
+            // - If `rewriteMatrixVectorMultiply` is false in our shader caps, we will get back a
+            //   Literal set to false. When this happens, we return the expression as-is.
             bool capsBitIsTrue = caps->isBoolLiteral() && caps->as<Literal>().boolValue();
             if (capsBitIsTrue || !caps->isBoolLiteral()) {
                 // Rewrite the multiplication as a sum of vector-scalar products.
@@ -239,18 +253,32 @@ bool BinaryExpression::CheckRef(const Expression& expr) {
     }
 }
 
-std::unique_ptr<Expression> BinaryExpression::clone() const {
-    return std::make_unique<BinaryExpression>(fPosition,
+std::unique_ptr<Expression> BinaryExpression::clone(Position pos) const {
+    return std::make_unique<BinaryExpression>(pos,
                                               this->left()->clone(),
                                               this->getOperator(),
                                               this->right()->clone(),
                                               &this->type());
 }
 
-std::string BinaryExpression::description() const {
-    return "(" + this->left()->description() +
-                 this->getOperator().operatorName() +
-                 this->right()->description() + ")";
+std::string BinaryExpression::description(OperatorPrecedence parentPrecedence) const {
+    OperatorPrecedence operatorPrecedence = this->getOperator().getBinaryPrecedence();
+    bool needsParens = (operatorPrecedence >= parentPrecedence);
+    return std::string(needsParens ? "(" : "") +
+           this->left()->description(operatorPrecedence) +
+           this->getOperator().operatorName() +
+           this->right()->description(operatorPrecedence) +
+           std::string(needsParens ? ")" : "");
+}
+
+VariableReference* BinaryExpression::isAssignmentIntoVariable() {
+    if (this->getOperator().isAssignment()) {
+        Analysis::AssignmentInfo assignmentInfo;
+        if (Analysis::IsAssignable(*this->left(), &assignmentInfo, /*errors=*/nullptr)) {
+            return assignmentInfo.fAssignedVar;
+        }
+    }
+    return nullptr;
 }
 
 }  // namespace SkSL

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
+#include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_image_bitmap_options.h"
@@ -59,7 +60,7 @@
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkSurface.h"
-#include "third_party/skia/include/third_party/skcms/skcms.h"
+#include "third_party/skia/modules/skcms/skcms.h"
 
 using testing::_;
 using testing::InSequence;
@@ -939,7 +940,7 @@ static void TestDrawSingleHighBitDepthPNGOnCanvas(
     ImageDataSettings* color_setting,
     ScriptState* script_state) {
   scoped_refptr<SharedBuffer> pixel_buffer = test::ReadFromFile(filepath);
-  ASSERT_EQ(false, pixel_buffer->IsEmpty());
+  ASSERT_EQ(false, pixel_buffer->empty());
 
   ImageResourceContent* resource_content =
       ImageResourceContent::CreateNotStarted();
@@ -1420,8 +1421,6 @@ TEST_P(CanvasRenderingContext2DTestAccelerated,
   gfx::Size size(300, 300);
   std::unique_ptr<Canvas2DLayerBridge> bridge =
       std::make_unique<Canvas2DLayerBridge>(size, RasterMode::kGPU, kNonOpaque);
-  // Force hibernatation to occur in an immediate task.
-  bridge->DontUseIdleSchedulingForTesting();
   CanvasElement().SetResourceProviderForTesting(nullptr, std::move(bridge),
                                                 size);
   CanvasElement().GetCanvas2DLayerBridge()->SetCanvasResourceHost(
@@ -1442,11 +1441,16 @@ TEST_P(CanvasRenderingContext2DTestAccelerated,
   GetDocument().GetPage()->SetVisibilityState(
       mojom::blink::PageVisibilityState::kHidden,
       /*is_initial_state=*/false);
-  blink::test::RunPendingTasks();  // Run hibernation task.
+  // Run hibernation task.
+  scheduler::RunIdleTasksForTesting(
+      scheduler::WebThreadScheduler::MainThreadScheduler(),
+      base::BindOnce([]() {}));
+  blink::test::RunPendingTasks();
   // If enabled, hibernation should cause repaint of the painting layer.
   EXPECT_FALSE(box->NeedsPaintPropertyUpdate());
-  EXPECT_EQ(!!CANVAS2D_HIBERNATION_ENABLED, painting_layer->SelfNeedsRepaint());
-  EXPECT_EQ(!!CANVAS2D_HIBERNATION_ENABLED,
+  EXPECT_EQ(Canvas2DLayerBridge::IsHibernationEnabled(),
+            painting_layer->SelfNeedsRepaint());
+  EXPECT_EQ(Canvas2DLayerBridge::IsHibernationEnabled(),
             !CanvasElement().ResourceProvider());
 
   // The page is hidden so it doesn't make sense to paint, and doing so will
@@ -1459,7 +1463,8 @@ TEST_P(CanvasRenderingContext2DTestAccelerated,
       mojom::blink::PageVisibilityState::kVisible,
       /*is_initial_state=*/false);
   EXPECT_FALSE(box->NeedsPaintPropertyUpdate());
-  EXPECT_EQ(!!CANVAS2D_HIBERNATION_ENABLED, painting_layer->SelfNeedsRepaint());
+  EXPECT_EQ(Canvas2DLayerBridge::IsHibernationEnabled(),
+            painting_layer->SelfNeedsRepaint());
 }
 
 TEST_P(CanvasRenderingContext2DTestAccelerated,
@@ -1468,8 +1473,6 @@ TEST_P(CanvasRenderingContext2DTestAccelerated,
   gfx::Size size(300, 300);
   std::unique_ptr<Canvas2DLayerBridge> bridge =
       std::make_unique<Canvas2DLayerBridge>(size, RasterMode::kGPU, kNonOpaque);
-  // Force hibernatation to occur in an immediate task.
-  bridge->DontUseIdleSchedulingForTesting();
   CanvasElement().SetResourceProviderForTesting(nullptr, std::move(bridge),
                                                 size);
   CanvasElement().GetCanvas2DLayerBridge()->SetCanvasResourceHost(
@@ -1490,7 +1493,11 @@ TEST_P(CanvasRenderingContext2DTestAccelerated,
   GetDocument().GetPage()->SetVisibilityState(
       mojom::blink::PageVisibilityState::kHidden,
       /*is_initial_state=*/false);
-  blink::test::RunPendingTasks();  // Run hibernation task.
+  // Run hibernation task.
+  scheduler::RunIdleTasksForTesting(
+      scheduler::WebThreadScheduler::MainThreadScheduler(),
+      base::BindOnce([]() {}));
+  blink::test::RunPendingTasks();
 
   // Never hibernate a canvas with no resource provider.
   EXPECT_FALSE(box->NeedsPaintPropertyUpdate());
@@ -1522,7 +1529,7 @@ TEST_P(CanvasRenderingContext2DTestAccelerated, DrawImage_Video_Flush) {
   gfx::Size visible_size(10, 10);
   scoped_refptr<media::VideoFrame> media_frame =
       media::VideoFrame::WrapVideoFrame(
-          media::VideoFrame::CreateBlackFrame(/*coded_size=*/gfx::Size(16, 16)),
+          media::VideoFrame::CreateBlackFrame(/*size=*/gfx::Size(16, 16)),
           media::PIXEL_FORMAT_I420,
           /*visible_rect=*/gfx::Rect(visible_size),
           /*natural_size=*/visible_size);
@@ -1598,9 +1605,7 @@ class CanvasRenderingContext2DTestSwapChain
     : public CanvasRenderingContext2DTestAccelerated {
  protected:
   CanvasRenderingContext2DTestSwapChain()
-      : CanvasRenderingContext2DTestAccelerated() {
-    feature_list_.InitAndEnableFeature(features::kLowLatencyCanvas2dSwapChain);
-  }
+      : CanvasRenderingContext2DTestAccelerated() {}
 
   scoped_refptr<viz::TestContextProvider> CreateContextProvider() override {
     auto context_provider = viz::TestContextProvider::Create();

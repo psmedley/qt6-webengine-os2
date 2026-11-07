@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -241,6 +241,10 @@ void Receiver::OnError(PipelineStatus status) {
   auto rpc = cast_streaming::remoting::CreateMessageForError();
   rpc->set_handle(remote_handle_);
   SendRpcMessageOnMainThread(std::move(rpc));
+}
+
+void Receiver::OnFallback(PipelineStatus status) {
+  NOTREACHED();
 }
 
 void Receiver::OnEnded() {

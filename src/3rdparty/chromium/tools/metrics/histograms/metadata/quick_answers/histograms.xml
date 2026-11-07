@@ -1,5 +1,5 @@
 <!--
-Copyright 2022 The Chromium Authors. All rights reserved.
+Copyright 2022 The Chromium Authors
 Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
@@ -37,7 +37,7 @@ chromium-metrics-reviews@google.com.
 </variants>
 
 <histogram name="QuickAnswers.ActiveImpression" enum="QuickAnswersResultType"
-    expires_after="2023-03-21">
+    expires_after="2023-04-09">
   <owner>updowndota@chromium.org</owner>
   <owner>llin@google.com</owner>
   <owner>croissant-eng@chromium.org</owner>
@@ -64,7 +64,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="QuickAnswers.Click" enum="QuickAnswersResultType"
-    expires_after="2023-03-21">
+    expires_after="2023-03-26">
   <owner>updowndota@chromium.org</owner>
   <owner>llin@google.com</owner>
   <owner>croissant-eng@chromium.org</owner>
@@ -116,13 +116,43 @@ chromium-metrics-reviews@google.com.
   </token>
 </histogram>
 
+<histogram name="QuickAnswers.DictionaryIntent.Language" enum="LanguageName"
+    expires_after="2023-07-01">
+  <owner>updowndota@chromium.org</owner>
+  <owner>croissant-eng@chromium.org</owner>
+  <summary>
+    For Quick answers fetch, records the query text language of dictionary
+    intent generated on device. ChromeOS only.
+  </summary>
+</histogram>
+
+<histogram name="QuickAnswers.DictionaryIntent.Source"
+    enum="QuickAnswersDictionaryIntentSource" expires_after="2023-07-01">
+  <owner>updowndota@chromium.org</owner>
+  <owner>croissant-eng@chromium.org</owner>
+  <summary>
+    For Quick answers fetch, records the source type of dictionary intent
+    generated on device. ChromeOS only.
+  </summary>
+</histogram>
+
 <histogram name="QuickAnswers.ExitPoint" enum="QuickAnswersExitPoint"
-    expires_after="2022-09-01">
+    expires_after="2023-08-15">
   <owner>updowndota@chromium.org</owner>
   <owner>croissant-eng@chromium.org</owner>
   <summary>
     Record the Quick Answers exit point point when the Quick Answers UI is
     dismissed. ChromeOS only.
+  </summary>
+</histogram>
+
+<histogram name="QuickAnswers.FeatureEnabled" enum="BooleanEnabled"
+    expires_after="2023-08-15">
+  <owner>updowndota@chromium.org</owner>
+  <owner>croissant-eng@chromium.org</owner>
+  <summary>
+    Record the Quick Answers feature enabled status when the first user session
+    starts. ChromeOS only.
   </summary>
 </histogram>
 
@@ -149,7 +179,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="QuickAnswers.Loading.Status" enum="QuickAnswersLoadStatus"
-    expires_after="2022-12-31">
+    expires_after="2023-03-05">
   <owner>updowndota@chromium.org</owner>
   <owner>llin@google.com</owner>
   <owner>croissant-eng@chromium.org</owner>
@@ -168,8 +198,23 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="QuickAnswers.NetworkError.ResponseCode.{IntentType}"
+    enum="HttpResponseCode" expires_after="2023-03-21">
+  <owner>updowndota@chromium.org</owner>
+  <owner>croissant-eng@chromium.org</owner>
+  <summary>
+    Records the Http response codes when network error occurs when fetching
+    {IntentType} results. ChromeOS only.
+  </summary>
+  <token key="IntentType">
+    <variant name="Definition" summary="definition"/>
+    <variant name="Translation" summary="translation"/>
+    <variant name="UnitConversion" summary="unit conversion"/>
+  </token>
+</histogram>
+
 <histogram name="QuickAnswers.RequestTextLength.{IntentType}"
-    units="characters" expires_after="2022-09-01">
+    units="characters" expires_after="2023-08-15">
   <owner>updowndota@chromium.org</owner>
   <owner>croissant-eng@chromium.org</owner>
   <summary>
@@ -220,8 +265,20 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="QuickAnswers.TextToSpeech.EngineEvent"
+    enum="QuickAnswersTextToSpeechEngineEvent" expires_after="2023-03-21">
+  <owner>updowndota@chromium.org</owner>
+  <owner>angelaxiao@chromium.org</owner>
+  <owner>croissant-eng@chromium.org</owner>
+  <summary>
+    Reports the various TTS engine events received by the quick answers TTS
+    utterance event delegate. Records every time TTS audio is used in quick
+    answers results. ChromeOS only.
+  </summary>
+</histogram>
+
 <histogram name="QuickAnswers.V2.Consent" units="impressions"
-    expires_after="2022-09-01">
+    expires_after="2022-11-06">
   <owner>updowndota@chromium.org</owner>
   <owner>croissant-eng@chromium.org</owner>
   <summary>
@@ -232,7 +289,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="QuickAnswers.V2.Consent.Duration{QuickAnswersV2ConsentResultType}"
-    units="ms" expires_after="2022-09-01">
+    units="ms" expires_after="2023-08-15">
   <owner>updowndota@chromium.org</owner>
   <owner>croissant-eng@chromium.org</owner>
   <summary>
@@ -245,7 +302,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="QuickAnswers.V2.Consent.Impression{QuickAnswersV2ConsentResultType}"
-    units="impressions" expires_after="2022-09-01">
+    units="impressions" expires_after="2023-08-15">
   <owner>updowndota@chromium.org</owner>
   <owner>croissant-eng@chromium.org</owner>
   <summary>

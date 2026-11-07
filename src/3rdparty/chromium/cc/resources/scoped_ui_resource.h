@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,6 +39,8 @@ class CC_EXPORT ScopedUIResource : public UIResourceClient {
 
   // Returns the memory usage of the bitmap.
   size_t EstimateMemoryUsage() const { return bitmap_.SizeInBytes(); }
+
+  bool IsUniquelyOwned() const { return bitmap_.IsUniquelyOwned(); }
 
  protected:
   ScopedUIResource(UIResourceManager* ui_resource_manager,

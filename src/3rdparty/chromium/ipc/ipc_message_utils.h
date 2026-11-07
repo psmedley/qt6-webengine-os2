@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -191,7 +191,9 @@ struct ParamTraits<int> {
 template <>
 struct ParamTraits<unsigned int> {
   typedef unsigned int param_type;
-  static void Write(base::Pickle* m, const param_type& p) { m->WriteInt(p); }
+  static void Write(base::Pickle* m, const param_type& p) {
+    m->WriteInt(static_cast<int>(p));
+  }
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
                    param_type* r) {
@@ -260,7 +262,9 @@ struct ParamTraits<long long> {
 template <>
 struct ParamTraits<unsigned long long> {
   typedef unsigned long long param_type;
-  static void Write(base::Pickle* m, const param_type& p) { m->WriteInt64(p); }
+  static void Write(base::Pickle* m, const param_type& p) {
+    m->WriteInt64(static_cast<int64_t>(p));
+  }
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
                    param_type* r) {
@@ -404,15 +408,15 @@ struct ParamTraits<std::vector<P>> {
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
                    param_type* r) {
-    int size;
+    size_t size;
     // ReadLength() checks for < 0 itself.
     if (!iter->ReadLength(&size))
       return false;
     // Resizing beforehand is not safe, see BUG 1006367 for details.
-    if (INT_MAX / sizeof(P) <= static_cast<size_t>(size))
+    if (size > INT_MAX / sizeof(P))
       return false;
     r->resize(size);
-    for (int i = 0; i < size; i++) {
+    for (size_t i = 0; i < size; i++) {
       if (!ReadParam(m, iter, &(*r)[i]))
         return false;
     }
@@ -439,10 +443,10 @@ struct ParamTraits<std::set<P> > {
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
                    param_type* r) {
-    int size;
+    size_t size;
     if (!iter->ReadLength(&size))
       return false;
-    for (int i = 0; i < size; ++i) {
+    for (size_t i = 0; i < size; ++i) {
       P item;
       if (!ReadParam(m, iter, &item))
         return false;
@@ -720,16 +724,6 @@ struct COMPONENT_EXPORT(IPC) ParamTraits<base::FilePath> {
 };
 
 template <>
-struct COMPONENT_EXPORT(IPC) ParamTraits<base::ListValue> {
-  typedef base::ListValue param_type;
-  static void Write(base::Pickle* m, const param_type& p);
-  static bool Read(const base::Pickle* m,
-                   base::PickleIterator* iter,
-                   param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
 struct COMPONENT_EXPORT(IPC) ParamTraits<base::Value::List> {
   typedef base::Value::List param_type;
   static void Write(base::Pickle* m, const param_type& p);
@@ -884,15 +878,14 @@ struct ParamTraits<base::StackVector<P, stack_capacity> > {
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
                    param_type* r) {
-    int size;
-    // ReadLength() checks for < 0 itself.
+    size_t size;
     if (!iter->ReadLength(&size))
       return false;
     // Sanity check for the vector size.
-    if (INT_MAX / sizeof(P) <= static_cast<size_t>(size))
+    if (size > INT_MAX / sizeof(P))
       return false;
     P value;
-    for (int i = 0; i < size; i++) {
+    for (size_t i = 0; i < size; i++) {
       if (!ReadParam(m, iter, &value))
         return false;
       (*r)->push_back(value);
@@ -922,7 +915,7 @@ struct ParamTraits<base::flat_map<Key, Mapped, Compare>> {
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
                    param_type* r) {
-    int size;
+    size_t size;
     if (!iter->ReadLength(&size))
       return false;
 
@@ -931,7 +924,7 @@ struct ParamTraits<base::flat_map<Key, Mapped, Compare>> {
     // serialized ones will still be handled properly.
     std::vector<typename param_type::value_type> vect;
     vect.resize(size);
-    for (int i = 0; i < size; ++i) {
+    for (size_t i = 0; i < size; ++i) {
       if (!ReadParam(m, iter, &vect[i].first))
         return false;
       if (!ReadParam(m, iter, &vect[i].second))
@@ -982,6 +975,8 @@ struct ParamTraits<std::unique_ptr<P>> {
   }
 };
 
+// absl types ParamTraits
+
 template <class P>
 struct ParamTraits<absl::optional<P>> {
   typedef absl::optional<P> param_type;
@@ -1011,6 +1006,18 @@ struct ParamTraits<absl::optional<P>> {
     else
       l->append("(unset)");
   }
+};
+
+template <>
+struct ParamTraits<absl::monostate> {
+  typedef absl::monostate param_type;
+  static void Write(base::Pickle* m, const param_type& p) {}
+  static bool Read(const base::Pickle* m,
+                   base::PickleIterator* iter,
+                   param_type* r) {
+    return true;
+  }
+  static void Log(const param_type& p, std::string* l) { l->append("()"); }
 };
 
 // base/util types ParamTraits

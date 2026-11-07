@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -113,10 +113,12 @@ class AutofillAgentTests : public web::WebTest {
     return frame;
   }
 
+  // The client_ needs to outlive the fake_web_state_, which owns the
+  // frames.
+  autofill::TestAutofillClient client_;
   web::FakeWebState fake_web_state_;
   web::FakeWebFrame* fake_main_frame_ = nullptr;
   web::FakeWebFramesManager* fake_web_frames_manager_ = nullptr;
-  autofill::TestAutofillClient client_;
   std::unique_ptr<PrefService> prefs_;
   AutofillAgent* autofill_agent_;
 };
@@ -129,7 +131,7 @@ TEST_F(AutofillAgentTests,
   std::string locale("en");
   autofill::AutofillDriverIOS::PrepareForWebStateWebFrameAndDelegate(
       &fake_web_state_, &client_, nil, locale,
-      autofill::BrowserAutofillManager::DISABLE_AUTOFILL_DOWNLOAD_MANAGER);
+      autofill::AutofillManager::EnableDownloadManager(false));
 
   autofill::FormData form;
   form.url = GURL("https://myform.com");
@@ -143,7 +145,6 @@ TEST_F(AutofillAgentTests,
   field.name = u"number";
   field.name_attribute = field.name;
   field.id_attribute = u"number";
-  field.unique_id = field.id_attribute;
   field.value = u"number_value";
   field.is_autofilled = true;
   field.unique_renderer_id = FieldRendererId(2);
@@ -152,7 +153,6 @@ TEST_F(AutofillAgentTests,
   field.name = u"name";
   field.name_attribute = field.name;
   field.id_attribute = u"name";
-  field.unique_id = field.id_attribute;
   field.value = u"name_value";
   field.is_autofilled = true;
   field.unique_renderer_id = FieldRendererId(3);
@@ -161,7 +161,6 @@ TEST_F(AutofillAgentTests,
   field.name = u"expiry_month";
   field.name_attribute = field.name;
   field.id_attribute = u"expiry_month";
-  field.unique_id = field.id_attribute;
   field.value = u"01";
   field.is_autofilled = false;
   field.unique_renderer_id = FieldRendererId(4);
@@ -170,7 +169,6 @@ TEST_F(AutofillAgentTests,
   field.name = u"unknown";
   field.name_attribute = field.name;
   field.id_attribute = u"unknown";
-  field.unique_id = field.id_attribute;
   field.value = u"";
   field.is_autofilled = true;
   field.unique_renderer_id = FieldRendererId(5);
@@ -179,10 +177,10 @@ TEST_F(AutofillAgentTests,
       fillFormData:form
            inFrame:fake_web_state_.GetWebFramesManager()->GetMainWebFrame()];
   fake_web_state_.WasShown();
-  EXPECT_EQ("__gCrWeb.autofill.fillForm({\"fields\":{\"2\":{\"section\":\"\","
-            "\"value\":\"number_value\"},"
-            "\"3\":{\"section\":\"\",\"value\":\"name_value\"}},"
-            "\"formName\":\"CC form\",\"formRendererID\":1}, 0);",
+  EXPECT_EQ(u"__gCrWeb.autofill.fillForm({\"fields\":{\"2\":{\"section\":\"-"
+            u"default\",\"value\":\"number_value\"},\"3\":{\"section\":\"-"
+            u"default\",\"value\":\"name_value\"}},\"formName\":\"CC "
+            u"form\",\"formRendererID\":1}, 0);",
             fake_main_frame_->GetLastJavaScriptCall());
 }
 
@@ -204,7 +202,6 @@ TEST_F(AutofillAgentTests,
                                                  typedValue:@""
                                                     frameID:@"frameID"];
   [autofill_agent_ checkIfSuggestionsAvailableForForm:form_query
-                                          isMainFrame:YES
                                        hasUserGesture:NO
                                              webState:&fake_web_state_
                                     completionHandler:^(BOOL success) {
@@ -226,11 +223,11 @@ TEST_F(AutofillAgentTests, onSuggestionsReady_ShowAccountCards) {
   __block BOOL completion_handler_called = NO;
 
   // Make the suggestions available to AutofillAgent.
-  std::vector<autofill::Suggestion> suggestions;
-  suggestions.push_back(
+  std::vector<autofill::Suggestion> autofillSuggestions;
+  autofillSuggestions.push_back(
       autofill::Suggestion("", "", "", POPUP_ITEM_ID_SHOW_ACCOUNT_CARDS));
   [autofill_agent_
-      showAutofillPopup:suggestions
+      showAutofillPopup:autofillSuggestions
           popupDelegate:base::WeakPtr<autofill::AutofillPopupDelegate>()];
 
   // Retrieves the suggestions.
@@ -272,13 +269,13 @@ TEST_F(AutofillAgentTests, onSuggestionsReady_ClearForm) {
   __block BOOL completion_handler_called = NO;
 
   // Make the suggestions available to AutofillAgent.
-  std::vector<autofill::Suggestion> suggestions;
-  suggestions.push_back(autofill::Suggestion("", "", "", 123));
-  suggestions.push_back(autofill::Suggestion("", "", "", 321));
-  suggestions.push_back(
+  std::vector<autofill::Suggestion> autofillSuggestions;
+  autofillSuggestions.push_back(autofill::Suggestion("", "", "", 123));
+  autofillSuggestions.push_back(autofill::Suggestion("", "", "", 321));
+  autofillSuggestions.push_back(
       autofill::Suggestion("", "", "", POPUP_ITEM_ID_CLEAR_FORM));
   [autofill_agent_
-      showAutofillPopup:suggestions
+      showAutofillPopup:autofillSuggestions
           popupDelegate:base::WeakPtr<autofill::AutofillPopupDelegate>()];
 
   // Retrieves the suggestions.
@@ -322,13 +319,13 @@ TEST_F(AutofillAgentTests, onSuggestionsReady_ClearFormWithGPay) {
   __block BOOL completion_handler_called = NO;
 
   // Make the suggestions available to AutofillAgent.
-  std::vector<autofill::Suggestion> suggestions;
-  suggestions.push_back(autofill::Suggestion("", "", "", 123));
-  suggestions.push_back(autofill::Suggestion("", "", "", 321));
-  suggestions.push_back(
+  std::vector<autofill::Suggestion> autofillSuggestions;
+  autofillSuggestions.push_back(autofill::Suggestion("", "", "", 123));
+  autofillSuggestions.push_back(autofill::Suggestion("", "", "", 321));
+  autofillSuggestions.push_back(
       autofill::Suggestion("", "", "", POPUP_ITEM_ID_CLEAR_FORM));
   [autofill_agent_
-      showAutofillPopup:suggestions
+      showAutofillPopup:autofillSuggestions
           popupDelegate:base::WeakPtr<autofill::AutofillPopupDelegate>()];
 
   // Retrieves the suggestions.
@@ -369,7 +366,7 @@ TEST_F(AutofillAgentTests, FrameInitializationOrderFrames) {
   std::string locale("en");
   autofill::AutofillDriverIOS::PrepareForWebStateWebFrameAndDelegate(
       &fake_web_state_, &client_, nil, locale,
-      autofill::BrowserAutofillManager::DISABLE_AUTOFILL_DOWNLOAD_MANAGER);
+      autofill::AutofillManager::EnableDownloadManager(false));
 
   // Remove the current main frame.
   RemoveWebFrame(fake_main_frame_->GetFrameId());

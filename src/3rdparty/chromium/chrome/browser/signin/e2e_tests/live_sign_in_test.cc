@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -184,6 +184,38 @@ class SignInTestObserver : public IdentityManager::Observer,
   int expected_signed_in_accounts_ = 0;
   PrimarySyncAccountWait primary_sync_account_wait_ =
       PrimarySyncAccountWait::kNotWait;
+};
+
+// Helper class to wait until all accounts have been removed from the
+// `IdentityManager`.
+class AccountsRemovedWaiter : public signin::IdentityManager::Observer {
+ public:
+  explicit AccountsRemovedWaiter(signin::IdentityManager* identity_manager)
+      : identity_manager_(identity_manager) {
+    DCHECK(identity_manager_);
+  }
+
+  void Wait() {
+    if (identity_manager_->GetAccountsWithRefreshTokens().empty())
+      return;
+    observation_.Observe(identity_manager_.get());
+    run_loop_.Run();
+  }
+
+ private:
+  void OnRefreshTokenRemovedForAccount(
+      const CoreAccountId& account_id) override {
+    if (!identity_manager_->GetAccountsWithRefreshTokens().empty())
+      return;
+    observation_.Reset();
+    run_loop_.Quit();
+  }
+
+  base::RunLoop run_loop_;
+  const raw_ptr<signin::IdentityManager> identity_manager_;
+  base::ScopedObservation<signin::IdentityManager,
+                          signin::IdentityManager::Observer>
+      observation_{this};
 };
 
 // Observer class allowing to wait for account capabilities to be known.
@@ -484,9 +516,13 @@ IN_PROC_BROWSER_TEST_F(LiveSignInTest, MANUAL_TurnOffSyncWhenPaused) {
           primary_account.account_id));
 
   TurnOffSync();
-  EXPECT_TRUE(identity_manager()->GetAccountsWithRefreshTokens().empty());
   EXPECT_FALSE(
       identity_manager()->HasPrimaryAccount(signin::ConsentLevel::kSync));
+
+  // Wait until the signin manager clears the invalid token.
+  AccountsRemovedWaiter accounts_removed_waiter(identity_manager());
+  accounts_removed_waiter.Wait();
+  EXPECT_TRUE(identity_manager()->GetAccountsWithRefreshTokens().empty());
 }
 
 // This test can pass. Marked as manual because it TIMED_OUT on Win7.

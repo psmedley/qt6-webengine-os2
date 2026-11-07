@@ -1,38 +1,13 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import("//ash/ambient/resources/resources.gni")
 import("//build/config/chromeos/ui_mode.gni")
-import("//tools/grit/grit_rule.gni")
 import("//tools/grit/repack.gni")
 import("//ui/base/ui_features.gni")
 
 assert(is_chromeos_ash)
-
-grit("resources") {
-  source = "ash_resources.grd"
-
-  outputs = [
-    "grit/ash_resources.h",
-    "grit/ash_resources_map.cc",
-    "grit/ash_resources_map.h",
-    "ash_resources.pak",
-  ]
-  output_dir = "$root_gen_dir/ash"
-
-  grit_flags = [
-    "-E",
-    "mojom_root=" + rebase_path(root_gen_dir, root_build_dir),
-  ]
-
-  deps = [
-    "//ash/components/multidevice/mojom:mojom_js",
-    "//ash/services/cellular_setup/public/mojom:mojom_js",
-    "//ash/services/device_sync/public/mojom:mojom_js",
-    "//ash/services/multidevice_setup/public/mojom:mojom_js",
-  ]
-}
 
 assert(enable_hidpi)
 
@@ -60,7 +35,6 @@ template("ash_test_resources") {
     output = "$root_build_dir/${target_name}.pak"
 
     sources = [
-      "$root_gen_dir/ash/app_list/resources/app_list_resources_${percent}_percent.pak",
       "$root_gen_dir/ash/login/resources/login_resources_${percent}_percent.pak",
       "$root_gen_dir/ui/chromeos/resources/ui_chromeos_resources_${percent}_percent.pak",
       "$root_gen_dir/ui/resources/ui_resources_${percent}_percent.pak",
@@ -79,7 +53,6 @@ template("ash_test_resources") {
     }
 
     deps = [
-      "//ash/app_list/resources",
       "//ash/login/resources",
       "//mojo/public/js:resources",
       "//ui/chromeos/resources",

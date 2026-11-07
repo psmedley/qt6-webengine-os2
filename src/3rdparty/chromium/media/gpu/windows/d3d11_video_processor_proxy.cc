@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,12 +90,6 @@ D3D11Status VideoProcessorProxy::Init(uint32_t width, uint32_t height) {
   if (!SUCCEEDED(hr)) {
     return DebugStatus({D3D11Status::Codes::kCreateDecoderOutputViewFailed, hr},
                        device);
-  }
-
-  D3D11_VIDEO_PROCESSOR_CAPS caps = {0};
-  if (SUCCEEDED(processor_enumerator_->GetVideoProcessorCaps(&caps))) {
-    supports_tone_mapping_ =
-        caps.FeatureCaps & D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_METADATA_HDR10;
   }
 
   hr = video_device_->CreateVideoProcessor(processor_enumerator_.Get(), 0,

@@ -6,6 +6,7 @@
     \title WebEngine Lifecycle Example
     \ingroup webengine-examples
     \brief Freezes and discards background tabs to reduce CPU and memory usage.
+    \examplecategory {Web Technologies}
 
     \image lifecycle.png
 
@@ -30,6 +31,9 @@
     the top and a \l {WebEngineView} for displaying web pages. Finally, the main
     window also has a \l {Drawer} for changing settings. The drawer can be
     opened by clicking the "⋮" button on the tool bar.
+
+    \note Note that \c {WebTab.qml} uses \l {QUrl::}
+    {fromUserInput} to handle incomplete URLs.
 
     \section1 Lifecycle States in the Example
 

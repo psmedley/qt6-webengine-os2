@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,6 +39,18 @@ WebController* FakeScriptExecutorDelegate::GetWebController() {
   return web_controller_;
 }
 
+bool FakeScriptExecutorDelegate::IsXmlSigned(
+    const std::string& xml_string) const {
+  return true;
+}
+
+const std::vector<std::string>
+FakeScriptExecutorDelegate::ExtractValuesFromSingleTagXml(
+    const std::string& xml_string,
+    const std::vector<std::string>& keys) const {
+  return (const std::vector<std::string>){};
+}
+
 TriggerContext* FakeScriptExecutorDelegate::GetTriggerContext() {
   return trigger_context_.get();
 }
@@ -59,6 +71,28 @@ FakeScriptExecutorDelegate::GetPasswordChangeSuccessTracker() {
 
 content::WebContents* FakeScriptExecutorDelegate::GetWebContents() {
   return web_contents_;
+}
+
+const std::string FakeScriptExecutorDelegate::GetLocale() {
+  return "en-US";
+}
+
+void FakeScriptExecutorDelegate::SetJsFlowLibrary(
+    const std::string& js_flow_library) {
+  GetJsFlowDevtoolsWrapper()->SetJsFlowLibrary(js_flow_library);
+}
+
+JsFlowDevtoolsWrapper* FakeScriptExecutorDelegate::GetJsFlowDevtoolsWrapper() {
+  if (!js_flow_devtools_wrapper_) {
+    content::WebContents* web_contents = GetWebContents();
+    DCHECK(web_contents_)
+        << "devtools wrapper is only available in browsertests";
+
+    js_flow_devtools_wrapper_ =
+        std::make_unique<JsFlowDevtoolsWrapper>(web_contents);
+  }
+
+  return js_flow_devtools_wrapper_.get();
 }
 
 std::string FakeScriptExecutorDelegate::GetEmailAddressForAccessTokenAccount() {
@@ -116,6 +150,10 @@ ProcessedActionStatusDetailsProto& FakeScriptExecutorDelegate::GetLogInfo() {
   return log_info_;
 }
 
+bool FakeScriptExecutorDelegate::MustUseBackendData() const {
+  return must_use_backend_data_;
+}
+
 void FakeScriptExecutorDelegate::AddNavigationListener(
     ScriptExecutorDelegate::NavigationListener* listener) {
   navigation_listeners_.insert(listener);
@@ -140,6 +178,10 @@ UserModel* FakeScriptExecutorDelegate::GetUserModel() {
   return user_model_;
 }
 
+UserData* FakeScriptExecutorDelegate::GetUserData() {
+  return user_data_;
+}
+
 void FakeScriptExecutorDelegate::SetOverlayBehavior(
     ConfigureUiStateProto::OverlayBehavior overaly_behavior) {}
 
@@ -152,6 +194,11 @@ bool FakeScriptExecutorDelegate::ShouldShowWarning() {
 std::vector<std::string>*
 FakeScriptExecutorDelegate::GetCurrentBrowseDomainsList() {
   return &browse_domains_;
+}
+
+void FakeScriptExecutorDelegate::OnActionsResponseReceived(
+    const RoundtripNetworkStats& network_stats) {
+  roundtrip_network_stats_ = network_stats;
 }
 
 }  // namespace autofill_assistant

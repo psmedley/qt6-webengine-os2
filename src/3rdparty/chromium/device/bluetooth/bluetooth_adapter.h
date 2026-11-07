@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,9 +29,9 @@
 #include "device/bluetooth/bluetooth_export.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "device/bluetooth/bluetooth_low_energy_scan_session.h"
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -43,9 +43,9 @@ class BluetoothAdvertisement;
 class BluetoothDiscoveryFilter;
 class BluetoothDiscoverySession;
 class BluetoothLocalGattService;
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
 class BluetoothLowEnergyScanFilter;
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 class BluetoothRemoteGattCharacteristic;
 class BluetoothRemoteGattDescriptor;
 class BluetoothRemoteGattService;
@@ -62,13 +62,13 @@ enum class UMABluetoothDiscoverySessionOutcome;
 class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
     : public base::RefCounted<BluetoothAdapter> {
  public:
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   enum class LowEnergyScanSessionHardwareOffloadingStatus {
     kUndetermined = 0,
     kNotSupported,
     kSupported
   };
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   // Interface for observing changes from bluetooth adapters.
   class DEVICE_BLUETOOTH_EXPORT Observer {
@@ -328,12 +328,12 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
         BluetoothRemoteGattDescriptor* descriptor,
         const std::vector<uint8_t>& value) {}
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
     // Called when the low energy scanning hardware offloading support state
     // changes.
     virtual void LowEnergyScanSessionHardwareOffloadingStatusChanged(
         LowEnergyScanSessionHardwareOffloadingStatus status) {}
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
   };
 
   // Used to configure a listening service.
@@ -373,6 +373,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
       base::OnceCallback<void(scoped_refptr<BluetoothAdvertisement>)>;
   using AdvertisementErrorCallback = BluetoothAdvertisement::ErrorCallback;
   using ConnectDeviceCallback = base::OnceCallback<void(BluetoothDevice*)>;
+  using ConnectDeviceErrorCallback =
+      base::OnceCallback<void(const std::string& error_message)>;
   using DiscoverySessionErrorCallback =
       base::OnceCallback<void(UMABluetoothDiscoverySessionOutcome)>;
   // The is_error bool is a flag to indicate if the result is an error(true)
@@ -639,7 +641,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
       const std::string& address,
       const absl::optional<BluetoothDevice::AddressType>& address_type,
       ConnectDeviceCallback callback,
-      ErrorCallback error_callback) = 0;
+      ConnectDeviceErrorCallback error_callback) = 0;
 #endif
 
   // Returns the list of pending advertisements that are not registered yet.
@@ -692,7 +694,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
       BluetoothRemoteGattDescriptor* descriptor,
       const std::vector<uint8_t>& value);
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   void NotifyLowEnergyScanSessionHardwareOffloadingStatusChanged(
       LowEnergyScanSessionHardwareOffloadingStatus status);
 
@@ -734,14 +736,11 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
   // an identical scanning session, it should discard its newly invalidated
   // BluetoothLowEnergyScanSession and create a new one by calling
   // StartLowEnergyScanSession() again.
-  //
-  // Returns a nullptr if the BluetoothAdvertisementMonitoring chrome flag is
-  // not enabled.
   virtual std::unique_ptr<BluetoothLowEnergyScanSession>
   StartLowEnergyScanSession(
       std::unique_ptr<BluetoothLowEnergyScanFilter> filter,
       base::WeakPtr<BluetoothLowEnergyScanSession::Delegate> delegate) = 0;
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   // Set the adapter name to one chosen from the system information. Only Ash

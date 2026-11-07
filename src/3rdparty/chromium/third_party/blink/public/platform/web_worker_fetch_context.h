@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "services/network/public/mojom/url_loader_factory.mojom-shared.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/service_worker/controller_service_worker_mode.mojom-shared.h"
-#include "third_party/blink/public/mojom/timing/worker_timing_container.mojom-shared.h"
 #include "third_party/blink/public/platform/cross_variant_mojo_util.h"
 #include "third_party/blink/public/platform/resource_load_info_notifier_wrapper.h"
 #include "third_party/blink/public/platform/web_code_cache_loader.h"
@@ -150,12 +149,6 @@ class WebWorkerFetchContext : public base::RefCounted<WebWorkerFetchContext> {
 
   // Returns the current list of user preferred languages.
   virtual blink::WebString GetAcceptLanguages() const = 0;
-
-  // Returns the blink::mojom::WorkerTimingContainer receiver for the
-  // blink::ResourceResponse with the given |request_id|. Null if the
-  // request has not been intercepted by a service worker.
-  virtual CrossVariantMojoReceiver<mojom::WorkerTimingContainerInterfaceBase>
-  TakePendingWorkerTimingReceiver(int request_id) = 0;
 
   // This flag is set to disallow all network accesses in the context. Used for
   // offline capability detection in service workers.

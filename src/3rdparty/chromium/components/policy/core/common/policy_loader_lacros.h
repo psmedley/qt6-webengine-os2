@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,11 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/sequence_checker.h"
 #include "base/task/sequenced_task_runner.h"
+#include "base/time/time.h"
 #include "chromeos/lacros/lacros_service.h"
 #include "components/policy/core/common/async_policy_loader.h"
 #include "components/policy/core/common/policy_proto_decoders.h"
+#include "components/policy/core/common/values_util.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
@@ -30,9 +32,8 @@ class POLICY_EXPORT PolicyLoaderLacros
   // task_runner is used to have in sequence the process of policy parsing and
   // validation. The |per_profile| parameter specifies which policy should be
   // installed.
-  explicit PolicyLoaderLacros(
-      scoped_refptr<base::SequencedTaskRunner> task_runner,
-      PolicyPerProfileFilter per_profile);
+  PolicyLoaderLacros(scoped_refptr<base::SequencedTaskRunner> task_runner,
+                     PolicyPerProfileFilter per_profile);
   // Not copyable or movable
   PolicyLoaderLacros(const PolicyLoaderLacros&) = delete;
   PolicyLoaderLacros& operator=(const PolicyLoaderLacros&) = delete;
@@ -51,10 +52,23 @@ class POLICY_EXPORT PolicyLoaderLacros
   // initial load was not done yet.
   enterprise_management::PolicyData* GetPolicyData();
 
-  // LacrosChromeServiceDelegateImpl::Observer implementation.
+  // chromeos::LacrosService::Observer implementation.
   // Update and reload the policy with new data.
   void OnPolicyUpdated(
       const std::vector<uint8_t>& policy_fetch_response) override;
+
+  // chromeos::LacrosService::Observer implementation.
+  // Update the latest policy fetch attempt timestamp.
+  void OnPolicyFetchAttempt() override;
+
+  // chromeos::LacrosService::Observer implementation.
+  void OnComponentPolicyUpdated(
+      const policy::ComponentPolicyMap& component_policy) override;
+
+  // Returns the current device account policies for components.
+  const PolicyBundle* component_policy() const {
+    return component_policy_.get();
+  }
 
   // Return if the main user is a device local account (i.e. Kiosk, MGS) user.
   static bool IsDeviceLocalAccountUser();
@@ -73,15 +87,25 @@ class POLICY_EXPORT PolicyLoaderLacros
   static void set_main_user_policy_data_for_testing(
       const enterprise_management::PolicyData& policy_data);
 
+  base::Time last_fetch_timestamp() { return last_fetch_timestamp_; }
+
  private:
+  void SetComponentPolicy(const policy::ComponentPolicyMap& component_policy);
+
   // The filter for policy data to install.
   const PolicyPerProfileFilter per_profile_;
 
   // Serialized blob of PolicyFetchResponse object received from the server.
   absl::optional<std::vector<uint8_t>> policy_fetch_response_;
 
+  // The component policy of the device account.
+  std::unique_ptr<PolicyBundle> component_policy_;
+
   // The parsed policy objects received from Ash.
   std::unique_ptr<enterprise_management::PolicyData> policy_data_;
+
+  // Timestamp at which last policy fetch was attempted.
+  base::Time last_fetch_timestamp_;
 
   // Checks that the method is called on the right sequence.
   SEQUENCE_CHECKER(sequence_checker_);

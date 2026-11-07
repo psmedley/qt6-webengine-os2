@@ -120,6 +120,9 @@ class ValidateAST : public TIntermTraverser
     // For validateMultiDeclarations:
     bool mMultiDeclarationsFailed = false;
 
+    // For validateNoSwizzleOfSwizzle:
+    bool mNoSwizzleOfSwizzleFailed = false;
+
     // For validateNoStatementsAfterBranch:
     bool mIsBranchVisitedInBlock        = false;
     bool mNoStatementsAfterBranchFailed = false;
@@ -154,6 +157,7 @@ ValidateAST::ValidateAST(TIntermNode *root,
     {
         mOptions.validateVariableReferences = false;
         mOptions.validateFunctionCall       = false;
+        mOptions.validateStructUsage        = false;
     }
 
     if (mOptions.validateSingleParent)
@@ -209,9 +213,28 @@ void ValidateAST::visitStructOrInterfaceBlockDeclaration(const TType &type,
 
     // Make sure the structure or interface block is not doubly defined.
     ImmutableString typeName("");
-    const TFieldListCollection *structOrBlock = getStructOrInterfaceBlock(type, &typeName);
+    const TFieldListCollection *namedStructOrBlock = getStructOrInterfaceBlock(type, &typeName);
 
-    if (structOrBlock)
+    // Recurse the fields of the structure or interface block and check members of structure type.
+    // This is done before visiting the struct itself, because if the fields refer to a struct with
+    // the same name, they would be referencing the struct declared in an outer scope.
+    {
+        // Note that structOrBlock was previously only set for named structures, so make sure
+        // nameless structs are also recursed.
+        const TFieldListCollection *structOrBlock = namedStructOrBlock;
+        if (structOrBlock == nullptr)
+        {
+            structOrBlock = type.getStruct();
+        }
+        ASSERT(structOrBlock != nullptr);
+
+        for (const TField *field : structOrBlock->fields())
+        {
+            visitStructUsage(*field->type(), field->line());
+        }
+    }
+
+    if (namedStructOrBlock)
     {
         ASSERT(!typeName.empty());
         // Structures are not allowed to be doubly defined
@@ -249,22 +272,8 @@ void ValidateAST::visitStructOrInterfaceBlockDeclaration(const TType &type,
         else
         {
             // First encounter.
-            mStructsAndBlocksByName.back()[typeName] = structOrBlock;
+            mStructsAndBlocksByName.back()[typeName] = namedStructOrBlock;
         }
-    }
-
-    // Recurse the fields of the structure or interface block and check members of structure type.
-    // Note that structOrBlock was previously only set for named structures, so make sure nameless
-    // structs are also recursed.
-    if (structOrBlock == nullptr)
-    {
-        structOrBlock = type.getStruct();
-    }
-    ASSERT(structOrBlock != nullptr);
-
-    for (const TField *field : structOrBlock->fields())
-    {
-        visitStructUsage(*field->type(), field->line());
     }
 }
 
@@ -451,7 +460,8 @@ void ValidateAST::validateExpressionTypeSwitch(TIntermSwitch *node)
 {
     const TType &selectorType = node->getInit()->getType();
 
-    if (selectorType.getBasicType() != EbtInt && selectorType.getBasicType() != EbtUInt)
+    if (selectorType.getBasicType() != EbtYuvCscStandardEXT &&
+        selectorType.getBasicType() != EbtInt && selectorType.getBasicType() != EbtUInt)
     {
         mDiagnostics->error(node->getLine(), "Found switch selector expression that is not integer",
                             "<validateExpressionTypes>");
@@ -698,6 +708,17 @@ void ValidateAST::visitConstantUnion(TIntermConstantUnion *node)
 bool ValidateAST::visitSwizzle(Visit visit, TIntermSwizzle *node)
 {
     visitNode(visit, node);
+
+    if (mOptions.validateNoSwizzleOfSwizzle)
+    {
+        if (node->getOperand()->getAsSwizzleNode() != nullptr)
+        {
+            mDiagnostics->error(node->getLine(), "Found swizzle applied to swizzle",
+                                "<validateNoSwizzleOfSwizzle>");
+            mNoSwizzleOfSwizzleFailed = true;
+        }
+    }
+
     return true;
 }
 
@@ -814,6 +835,16 @@ void ValidateAST::visitFunctionPrototype(TIntermFunctionPrototype *node)
                                     "Found function prototype with an invalid qualifier "
                                     "<validateQualifiers>",
                                     param->name().data());
+                mQualifiersFailed = true;
+            }
+
+            if (IsOpaqueType(paramType.getBasicType()) && qualifier != EvqParamIn)
+            {
+                mDiagnostics->error(
+                    node->getLine(),
+                    "Found function prototype with an invalid qualifier on opaque parameter "
+                    "<validateQualifiers>",
+                    param->name().data());
                 mQualifiersFailed = true;
             }
         }
@@ -1079,7 +1110,8 @@ bool ValidateAST::validateInternal()
     return !mSingleParentFailed && !mVariableReferencesFailed && !mBuiltInOpsFailed &&
            !mFunctionCallFailed && !mNoRawFunctionCallsFailed && !mNullNodesFailed &&
            !mQualifiersFailed && !mPrecisionFailed && !mStructUsageFailed &&
-           !mExpressionTypesFailed && !mMultiDeclarationsFailed && !mNoStatementsAfterBranchFailed;
+           !mExpressionTypesFailed && !mMultiDeclarationsFailed && !mNoSwizzleOfSwizzleFailed &&
+           !mNoStatementsAfterBranchFailed;
 }
 
 }  // anonymous namespace

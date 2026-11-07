@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,15 +59,6 @@ void PageSpecificContentSettingsDelegate::SetDefaultRendererContentSettingRules(
     content::RenderFrameHost* rfh,
     RendererContentSettingRules* rules) {}
 
-ContentSetting PageSpecificContentSettingsDelegate::GetEmbargoSetting(
-    const GURL& request_origin,
-    ContentSettingsType permission) {
-  return PermissionDecisionAutoBlockerFactory::GetForBrowserContext(
-             web_contents_->GetBrowserContext())
-      ->GetEmbargoResult(request_origin, permission)
-      .content_setting;
-}
-
 std::vector<storage::FileSystemType>
 PageSpecificContentSettingsDelegate::GetAdditionalFileSystemTypes() {
   return {};
@@ -90,6 +81,12 @@ content_settings::PageSpecificContentSettings::MicrophoneCameraState
 PageSpecificContentSettingsDelegate::GetMicrophoneCameraState() {
   return content_settings::PageSpecificContentSettings::
       MICROPHONE_CAMERA_NOT_ACCESSED;
+}
+
+content::WebContents* PageSpecificContentSettingsDelegate::
+    MaybeGetSyncedWebContentsForPictureInPicture(
+        content::WebContents* web_contents) {
+  return nullptr;
 }
 
 void PageSpecificContentSettingsDelegate::OnContentAllowed(

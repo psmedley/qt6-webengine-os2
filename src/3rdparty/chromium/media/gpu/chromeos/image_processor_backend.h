@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -113,6 +113,8 @@ class MEDIA_GPU_EXPORT ImageProcessorBackend {
   OutputMode output_mode() const { return output_mode_; }
 
   virtual bool needs_linear_output_buffers() const;
+
+  virtual bool supports_incoherent_buffers() const;
 
  protected:
   friend struct std::default_delete<ImageProcessorBackend>;

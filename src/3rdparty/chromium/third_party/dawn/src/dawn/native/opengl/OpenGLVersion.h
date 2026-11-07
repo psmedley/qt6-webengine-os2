@@ -19,25 +19,27 @@
 
 namespace dawn::native::opengl {
 
-    struct OpenGLVersion {
-      public:
-        MaybeError Initialize(GetProcAddress getProc);
-
-        bool IsDesktop() const;
-        bool IsES() const;
-        uint32_t GetMajor() const;
-        uint32_t GetMinor() const;
-        bool IsAtLeast(uint32_t majorVersion, uint32_t minorVersion) const;
-
-      private:
-        enum class Standard {
-            Desktop,
-            ES,
-        };
-        uint32_t mMajorVersion;
-        uint32_t mMinorVersion;
-        Standard mStandard;
+struct OpenGLVersion {
+  public:
+    enum class Standard {
+        Desktop,
+        ES,
     };
+
+    MaybeError Initialize(GetProcAddress getProc);
+
+    bool IsDesktop() const;
+    bool IsES() const;
+    Standard GetStandard() const;
+    uint32_t GetMajor() const;
+    uint32_t GetMinor() const;
+    bool IsAtLeast(uint32_t majorVersion, uint32_t minorVersion) const;
+
+  private:
+    uint32_t mMajorVersion;
+    uint32_t mMinorVersion;
+    Standard mStandard;
+};
 
 }  // namespace dawn::native::opengl
 

@@ -1,8 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/modules/credentialmanagement/authenticator_attestation_response.h"
+
+#include <algorithm>
 
 #include "third_party/blink/renderer/modules/credentialmanagement/credential_manager_type_converters.h"
 
@@ -30,6 +32,7 @@ Vector<String> AuthenticatorAttestationResponse::getTransports() const {
     ret.emplace_back(mojo::ConvertTo<String>(transport));
   }
   std::sort(ret.begin(), ret.end(), WTF::CodeUnitCompareLessThan);
+  ret.erase(std::unique(ret.begin(), ret.end()), ret.end());
   return ret;
 }
 

@@ -6,6 +6,8 @@
 #
 # main.star: lucicfg configuration for ANGLE's standalone builders.
 
+lucicfg.check_version(min = "1.31.3", message = "Update depot_tools")
+
 # Use LUCI Scheduler BBv2 names and add Scheduler realms configs.
 lucicfg.enable_experiment("crbug.com/1182002")
 
@@ -137,6 +139,7 @@ _DEFAULT_BUILDERLESS_OS_CATEGORIES = [os_category.LINUX, os_category.WINDOWS]
 _GOMA_RBE_PROD = {
     "server_host": "goma.chromium.org",
     "rpc_extra_params": "?prod",
+    "use_luci_auth": True,
 }
 
 def _recipe_for_package(cipd_package):
@@ -224,6 +227,7 @@ def angle_builder(name, cpu):
 
         # Trace tests are only run on CQ if files in the capture folders change.
         location_regexp = [
+            ".+/[+]/DEPS",
             ".+/[+]/src/libANGLE/capture/.+",
             ".+/[+]/src/tests/angle_end2end_tests_expectations.txt",
             ".+/[+]/src/tests/capture.+",
@@ -269,13 +273,28 @@ def angle_builder(name, cpu):
         "test_mode": test_mode,
     }
 
+    ci_properties = {
+        "builder_group": "angle",
+        "$build/goma": goma_props,
+        "platform": config_os.console_name,
+        "toolchain": toolchain,
+        "test_mode": test_mode,
+    }
+
+    ci_properties["sheriff_rotations"] = ["angle"]
+
+    if is_perf:
+        timeout_hours = 5
+    else:
+        timeout_hours = 3
+
     luci.builder(
         name = name,
         bucket = "ci",
         triggered_by = ["main-poller"],
         executable = "recipe:angle",
         service_account = "angle-ci-builder@chops-service-accounts.iam.gserviceaccount.com",
-        properties = properties,
+        properties = ci_properties,
         dimensions = dimensions,
         build_numbers = True,
         resultdb_settings = resultdb.settings(enable = True),
@@ -287,6 +306,7 @@ def angle_builder(name, cpu):
             kind = scheduler.LOGARITHMIC_BATCHING_KIND,
             log_base = 2,
         ),
+        execution_timeout = timeout_hours * time.hour,
     )
 
     luci.console_view_entry(
@@ -297,7 +317,8 @@ def angle_builder(name, cpu):
     )
 
     # Do not include perf tests in "try".
-    if not is_perf:
+    # TSAN is also excluded from "try" due to excessive flakiness: crbug.com/1275223
+    if not is_perf and not is_tsan:
         luci.list_view_entry(
             list_view = "try",
             builder = "try/" + name,
@@ -388,6 +409,7 @@ angle_builder("android-arm64-dbg-compile", cpu = "arm64")
 angle_builder("android-arm64-exp-test", cpu = "arm64")
 angle_builder("android-arm64-test", cpu = "arm64")
 angle_builder("linux-asan-test", cpu = "x64")
+angle_builder("linux-exp-test", cpu = "x64")
 angle_builder("linux-tsan-test", cpu = "x64")
 angle_builder("linux-ubsan-test", cpu = "x64")
 angle_builder("linux-dbg-compile", cpu = "x64")
@@ -411,10 +433,10 @@ angle_builder("linux-trace", cpu = "x64")
 angle_builder("win-trace", cpu = "x64")
 
 angle_builder("android-pixel4-perf", cpu = "arm64")
-angle_builder("linux-intel-hd630-perf", cpu = "x64")
-angle_builder("linux-nvidia-p400-perf", cpu = "x64")
-angle_builder("win10-intel-hd630-perf", cpu = "x64")
-angle_builder("win10-nvidia-p400-perf", cpu = "x64")
+angle_builder("linux-intel-uhd630-perf", cpu = "x64")
+angle_builder("linux-nvidia-gtx1660-perf", cpu = "x64")
+angle_builder("win10-intel-uhd630-perf", cpu = "x64")
+angle_builder("win10-nvidia-gtx1660-perf", cpu = "x64")
 
 # Views
 

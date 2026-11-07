@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -126,13 +126,13 @@ void MediaDevicesSelectionHandler::UpdateDevicesMenu(
 
   // Build the list of devices to send to JS.
   std::string default_id;
-  base::ListValue device_list;
-  for (size_t i = 0; i < devices.size(); ++i) {
-    std::unique_ptr<base::DictionaryValue> entry(new base::DictionaryValue());
-    entry->SetStringKey("name", GetDeviceDisplayName(devices[i]));
-    entry->SetStringKey("id", devices[i].id);
+  base::Value::List device_list;
+  for (const auto& device : devices) {
+    base::Value::Dict entry;
+    entry.Set("name", GetDeviceDisplayName(device));
+    entry.Set("id", device.id);
     device_list.Append(std::move(entry));
-    if (devices[i].id == default_device)
+    if (device.id == default_device)
       default_id = default_device;
   }
 
@@ -143,6 +143,7 @@ void MediaDevicesSelectionHandler::UpdateDevicesMenu(
 
   base::Value default_value(default_id);
   base::Value type_value(device_type);
+
   FireWebUIListener("updateDevicesMenu", type_value, device_list,
                     default_value);
 }

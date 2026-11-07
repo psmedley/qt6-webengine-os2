@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include <algorithm>
 
+#include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/i18n/base_i18n_switches.h"
@@ -36,9 +37,15 @@ std::string GetLocaleString(const icu::Locale& locale) {
   const char* language = locale.getLanguage();
   const char* country = locale.getCountry();
   const char* variant = locale.getVariant();
+  const char* script = locale.getScript();
 
   std::string result =
       (language != nullptr && *language != '\0') ? language : "und";
+
+  if (script != nullptr && *script != '\0') {
+    result += '-';
+    result += script;
+  }
 
   if (country != nullptr && *country != '\0') {
     result += '-';
@@ -108,20 +115,20 @@ std::string ICULocaleName(const std::string& locale_string) {
   if (locale_string.substr(0, 2) != "es")
     return locale_string;
   // Expand es to es-ES.
-  if (LowerCaseEqualsASCII(locale_string, "es"))
+  if (EqualsCaseInsensitiveASCII(locale_string, "es"))
     return "es-ES";
   // Map es-419 (Latin American Spanish) to es-FOO depending on the system
   // locale.  If it's es-RR other than es-ES, map to es-RR. Otherwise, map
   // to es-MX (the most populous in Spanish-speaking Latin America).
-  if (LowerCaseEqualsASCII(locale_string, "es-419")) {
+  if (EqualsCaseInsensitiveASCII(locale_string, "es-419")) {
     const icu::Locale& locale = icu::Locale::getDefault();
     std::string language = locale.getLanguage();
     const char* country = locale.getCountry();
-    if (LowerCaseEqualsASCII(language, "es") &&
-      !LowerCaseEqualsASCII(country, "es")) {
-        language += '-';
-        language += country;
-        return language;
+    if (EqualsCaseInsensitiveASCII(language, "es") &&
+        !EqualsCaseInsensitiveASCII(country, "es")) {
+      language += '-';
+      language += country;
+      return language;
     }
     return "es-MX";
   }

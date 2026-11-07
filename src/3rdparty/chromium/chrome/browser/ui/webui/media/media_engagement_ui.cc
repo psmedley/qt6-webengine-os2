@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@
 #include "chrome/browser/media/media_engagement_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/dev_ui_browser_resources.h"
+#include "chrome/grit/media_resources.h"
 #include "components/component_updater/component_updater_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -151,10 +151,11 @@ MediaEngagementUI::MediaEngagementUI(content::WebUI* web_ui)
       network::mojom::CSPDirectiveName::ScriptSrc,
       "script-src chrome://resources chrome://webui-test 'self';");
 
-  source->AddResourcePath("media_engagement.js", IDR_MEDIA_ENGAGEMENT_JS);
-  source->AddResourcePath("media_engagement_score_details.mojom-webui.js",
-                          IDR_MEDIA_ENGAGEMENT_SCORE_DETAILS_MOJOM_WEBUI_JS);
-  source->SetDefaultResource(IDR_MEDIA_ENGAGEMENT_HTML);
+  source->AddResourcePath("media_engagement.js", IDR_MEDIA_MEDIA_ENGAGEMENT_JS);
+  source->AddResourcePath(
+      "media_engagement_score_details.mojom-webui.js",
+      IDR_MEDIA_MEDIA_ENGAGEMENT_SCORE_DETAILS_MOJOM_WEBUI_JS);
+  source->SetDefaultResource(IDR_MEDIA_MEDIA_ENGAGEMENT_HTML);
   content::WebUIDataSource::Add(Profile::FromWebUI(web_ui), source.release());
 }
 

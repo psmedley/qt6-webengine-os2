@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,7 +28,7 @@ class HttpsOnlyModeBlockingPage : public SecurityInterstitialPage {
  protected:
   // SecurityInterstitialPage:
   void CommandReceived(const std::string& command) override;
-  void PopulateInterstitialStrings(base::Value* load_time_data) override;
+  void PopulateInterstitialStrings(base::Value::Dict& load_time_data) override;
 
  private:
   bool user_made_decision_ = false;

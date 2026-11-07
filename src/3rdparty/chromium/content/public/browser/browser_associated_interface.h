@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -83,6 +83,10 @@ class BrowserAssociatedInterface : public Interface {
         return;
       }
       receivers_.reset();
+      // `impl_` destructor calls this function, so it must be reset. It isn't
+      // useful anymore, because `BindReceiver` become a no-op after resetting
+      // `receiver_`.
+      impl_ = nullptr;
     }
 
     void BindReceiver(mojo::ScopedInterfaceEndpointHandle handle) {

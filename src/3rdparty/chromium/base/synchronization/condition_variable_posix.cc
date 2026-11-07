@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -91,7 +91,8 @@ void ConditionVariable::TimedWait(const TimeDelta& max_time) {
 
   int64_t usecs = max_time.InMicroseconds();
   struct timespec relative_time;
-  relative_time.tv_sec = usecs / Time::kMicrosecondsPerSecond;
+  relative_time.tv_sec =
+      static_cast<time_t>(usecs / Time::kMicrosecondsPerSecond);
   relative_time.tv_nsec =
       (usecs % Time::kMicrosecondsPerSecond) * Time::kNanosecondsPerMicrosecond;
 

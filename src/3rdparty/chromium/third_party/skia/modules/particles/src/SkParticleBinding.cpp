@@ -9,6 +9,7 @@
 
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkContourMeasure.h"
+#include "include/core/SkFont.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkPath.h"
 #include "include/private/SkTPin.h"
@@ -19,6 +20,7 @@
 #include "src/core/SkMatrixProvider.h"
 #include "src/core/SkVM.h"
 #include "src/shaders/SkShaderBase.h"
+#include "src/sksl/SkSLBuiltinTypes.h"
 #include "src/sksl/SkSLCompiler.h"
 
 void SkParticleBinding::visitFields(SkFieldVisitor* v) {
@@ -236,7 +238,6 @@ public:
                 return;
             }
         }
-
         fShader = SkShaders::Color(SK_ColorWHITE);
     }
 

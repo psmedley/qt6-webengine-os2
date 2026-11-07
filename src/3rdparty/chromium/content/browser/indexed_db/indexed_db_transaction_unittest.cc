@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
-#include "components/services/storage/indexed_db/locks/disjoint_range_lock_manager.h"
+#include "components/services/storage/indexed_db/locks/partitioned_lock_manager_impl.h"
 #include "content/browser/indexed_db/fake_indexed_db_metadata_coding.h"
 #include "content/browser/indexed_db/indexed_db_class_factory.h"
 #include "content/browser/indexed_db/indexed_db_connection.h"
@@ -120,14 +120,14 @@ class IndexedDBTransactionTest : public testing::Test {
 
   std::unique_ptr<IndexedDBConnection> CreateConnection() {
     auto connection = std::make_unique<IndexedDBConnection>(
-        IndexedDBStorageKeyStateHandle(), IndexedDBClassFactory::Get(),
+        IndexedDBBucketStateHandle(), IndexedDBClassFactory::Get(),
         db_->AsWeakPtr(), base::DoNothing(), base::DoNothing(),
         base::MakeRefCounted<MockIndexedDBDatabaseCallbacks>());
     db_->AddConnectionForTesting(connection.get());
     return connection;
   }
 
-  DisjointRangeLockManager* lock_manager() { return &lock_manager_; }
+  PartitionedLockManagerImpl* lock_manager() { return &lock_manager_; }
 
  protected:
   std::unique_ptr<base::test::TaskEnvironment> task_environment_;
@@ -138,7 +138,7 @@ class IndexedDBTransactionTest : public testing::Test {
   bool error_called_ = false;
 
  private:
-  DisjointRangeLockManager lock_manager_;
+  PartitionedLockManagerImpl lock_manager_;
 };
 
 class IndexedDBTransactionTestMode
@@ -543,20 +543,20 @@ TEST_F(IndexedDBTransactionTest, AbortCancelsLockRequest) {
 
   // Acquire a lock to block the transaction's lock acquisition.
   bool locks_recieved = false;
-  std::vector<LeveledLockManager::LeveledLockRequest> lock_requests;
+  std::vector<PartitionedLockManager::PartitionedLockRequest> lock_requests;
   lock_requests.emplace_back(kDatabaseRangeLockLevel, GetDatabaseLockRange(id),
-                             LeveledLockManager::LockType::kShared);
+                             PartitionedLockManager::LockType::kShared);
   lock_requests.emplace_back(kObjectStoreRangeLockLevel,
                              GetObjectStoreLockRange(id, object_store_id),
-                             LeveledLockManager::LockType::kExclusive);
-  LeveledLockHolder temp_lock_receiver;
+                             PartitionedLockManager::LockType::kExclusive);
+  PartitionedLockHolder temp_lock_receiver;
   lock_manager()->AcquireLocks(lock_requests,
                                temp_lock_receiver.weak_factory.GetWeakPtr(),
                                base::BindOnce(SetToTrue, &locks_recieved));
   EXPECT_TRUE(locks_recieved);
 
   // Register the transaction, which should request locks and wait for
-  // |temp_lock_receiver| to release the locks.
+  // `temp_lock_receiver` to release the locks.
   db_->RegisterAndScheduleTransaction(transaction);
   EXPECT_EQ(transaction->state(), IndexedDBTransaction::CREATED);
 
@@ -566,7 +566,7 @@ TEST_F(IndexedDBTransactionTest, AbortCancelsLockRequest) {
       IndexedDBDatabaseError(blink::mojom::IDBException::kUnknownError));
   EXPECT_EQ(transaction->state(), IndexedDBTransaction::FINISHED);
 
-  // Clear |temp_lock_receiver| so we can test later that all locks have
+  // Clear `temp_lock_receiver` so we can test later that all locks have
   // cleared.
   temp_lock_receiver.locks.clear();
 

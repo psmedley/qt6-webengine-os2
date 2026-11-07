@@ -161,15 +161,6 @@ void SyncContainer(CXFA_FFNotify* pNotify,
   }
 }
 
-void ReorderLayoutItemToTail(CXFA_LayoutItem* pLayoutItem) {
-  CXFA_LayoutItem* pParentLayoutItem = pLayoutItem->GetParent();
-  if (!pParentLayoutItem)
-    return;
-
-  pParentLayoutItem->RemoveChild(pLayoutItem);
-  pParentLayoutItem->AppendLastChild(pLayoutItem);
-}
-
 CXFA_Node* ResolveBreakTarget(CXFA_Node* pPageSetRoot,
                               bool bNewExprStyle,
                               WideString* pTargetAll) {
@@ -536,37 +527,17 @@ void CXFA_ViewLayoutProcessor::RemoveLayoutRecord(
   }
 }
 
-void CXFA_ViewLayoutProcessor::ReorderPendingLayoutRecordToTail(
-    CXFA_ViewRecord* pNewRecord,
-    CXFA_ViewRecord* pPrevRecord) {
-  if (!pNewRecord || !pPrevRecord)
-    return;
-  if (pNewRecord->pCurPageSet != pPrevRecord->pCurPageSet) {
-    ReorderLayoutItemToTail(pNewRecord->pCurPageSet);
-    return;
-  }
-  if (pNewRecord->pCurPageArea != pPrevRecord->pCurPageArea) {
-    ReorderLayoutItemToTail(pNewRecord->pCurPageArea);
-    return;
-  }
-  if (pNewRecord->pCurContentArea != pPrevRecord->pCurContentArea) {
-    ReorderLayoutItemToTail(pNewRecord->pCurContentArea);
-    return;
-  }
-}
-
 void CXFA_ViewLayoutProcessor::SubmitContentItem(
     CXFA_ContentLayoutItem* pContentLayoutItem,
     CXFA_ContentLayoutProcessor::Result eStatus) {
   if (pContentLayoutItem) {
-    if (!HasCurrentViewRecord())
+    CXFA_ViewRecord* pViewRecord = GetCurrentViewRecord();
+    if (!pViewRecord)
       return;
 
-    GetCurrentViewRecord()->pCurContentArea->AppendLastChild(
-        pContentLayoutItem);
+    pViewRecord->pCurContentArea->AppendLastChild(pContentLayoutItem);
     m_bCreateOverFlowPage = false;
   }
-
   if (eStatus != CXFA_ContentLayoutProcessor::Result::kDone) {
     if (eStatus == CXFA_ContentLayoutProcessor::Result::kPageFullBreak &&
         m_CurrentViewRecordIter == GetTailPosition()) {
@@ -578,10 +549,11 @@ void CXFA_ViewLayoutProcessor::SubmitContentItem(
 }
 
 float CXFA_ViewLayoutProcessor::GetAvailHeight() {
-  if (!HasCurrentViewRecord())
+  CXFA_ViewRecord* pViewRecord = GetCurrentViewRecord();
+  if (!pViewRecord)
     return 0.0f;
 
-  CXFA_ViewLayoutItem* pLayoutItem = GetCurrentViewRecord()->pCurContentArea;
+  CXFA_ViewLayoutItem* pLayoutItem = pViewRecord->pCurContentArea;
   if (!pLayoutItem || !pLayoutItem->GetFormNode())
     return 0.0f;
 
@@ -673,8 +645,9 @@ CXFA_ViewLayoutProcessor::CXFA_ViewRecord*
 CXFA_ViewLayoutProcessor::CreateViewRecordSimple() {
   auto* pNewRecord = cppgc::MakeGarbageCollected<CXFA_ViewRecord>(
       GetHeap()->GetAllocationHandle());
-  if (HasCurrentViewRecord())
-    *pNewRecord = *GetCurrentViewRecord();
+  CXFA_ViewRecord* pCurrentRecord = GetCurrentViewRecord();
+  if (pCurrentRecord)
+    *pNewRecord = *pCurrentRecord;
   else
     pNewRecord->pCurPageSet = m_pPageSetRootLayoutItem;
   AppendNewRecord(pNewRecord);
@@ -1551,10 +1524,11 @@ void CXFA_ViewLayoutProcessor::ProcessLastPageSet() {
 }
 
 bool CXFA_ViewLayoutProcessor::GetNextAvailContentHeight(float fChildHeight) {
-  if (!HasCurrentViewRecord())
+  CXFA_ViewRecord* pViewRecord = GetCurrentViewRecord();
+  if (!pViewRecord)
     return false;
-  CXFA_Node* pCurContentNode =
-      GetCurrentViewRecord()->pCurContentArea->GetFormNode();
+
+  CXFA_Node* pCurContentNode = pViewRecord->pCurContentArea->GetFormNode();
   if (!pCurContentNode)
     return false;
 

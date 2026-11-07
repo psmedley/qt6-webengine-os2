@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,9 @@
 #include "base/check_op.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
+#include "pdf/loader/url_loader.h"
 #include "pdf/pdfium/pdfium_engine.h"
 #include "pdf/pdfium/pdfium_form_filler.h"
-#include "pdf/ppapi_migration/url_loader.h"
 #include "pdf/test/test_client.h"
 #include "pdf/test/test_document_loader.h"
 #include "testing/gtest/include/gtest/gtest.h"

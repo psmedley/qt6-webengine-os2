@@ -516,14 +516,6 @@
     exec->GS.round_state = 1;
     exec->GS.loop        = 1;
 
-#ifdef TT_SUPPORT_SUBPIXEL_HINTING_INFINALITY
-    exec->iup_called  = FALSE;
-#endif
-#ifdef TT_SUPPORT_SUBPIXEL_HINTING_MINIMAL
-    exec->iupx_called = FALSE;
-    exec->iupy_called = FALSE;
-#endif
-
     /* some glyphs leave something on the stack. so we clean it */
     /* before a new execution.                                  */
     exec->top     = 0;
@@ -7847,6 +7839,15 @@
     Compute_Funcs( exc );
     Compute_Round( exc, (FT_Byte)exc->GS.round_state );
 
+    /* These flags cancel execution of some opcodes after IUP is called */
+#ifdef TT_SUPPORT_SUBPIXEL_HINTING_INFINALITY
+    exc->iup_called  = FALSE;
+#endif
+#ifdef TT_SUPPORT_SUBPIXEL_HINTING_MINIMAL
+    exc->iupx_called = FALSE;
+    exc->iupy_called = FALSE;
+#endif
+
     do
     {
       exc->opcode = exc->code[exc->IP];
@@ -8569,7 +8570,8 @@
 
       /* increment instruction counter and check if we didn't */
       /* run this program for too long (e.g. infinite loops). */
-      if ( ++ins_counter > TT_CONFIG_OPTION_MAX_RUNNABLE_OPCODES ) {
+      if ( ++ins_counter > TT_CONFIG_OPTION_MAX_RUNNABLE_OPCODES )
+      {
         exc->error = FT_THROW( Execution_Too_Long );
         goto LErrorLabel_;
       }

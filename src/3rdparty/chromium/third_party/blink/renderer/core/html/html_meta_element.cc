@@ -51,9 +51,9 @@ namespace blink {
 HTMLMetaElement::HTMLMetaElement(Document& document,
                                  const CreateElementFlags flags)
     : HTMLElement(html_names::kMetaTag, document),
-      is_being_created_by_parser_with_sync_flag_(
-          flags.IsCreatedByParser() && !flags.IsAsyncCustomElements() &&
-          !document.IsInDocumentWrite()) {}
+      is_sync_parser_(flags.IsCreatedByParser() &&
+                      !flags.IsAsyncCustomElements() &&
+                      !document.IsInDocumentWrite()) {}
 
 static bool IsInvalidSeparator(UChar c) {
   return c == ';';
@@ -65,7 +65,7 @@ static bool IsSeparator(UChar c) {
          c == ',' || c == '\0';
 }
 
-void HTMLMetaElement::ParseContentAttribute(
+void HTMLMetaElement::ParseViewportContentAttribute(
     const String& content,
     ViewportDescription& viewport_description,
     Document* document,
@@ -330,6 +330,19 @@ blink::mojom::ViewportFit HTMLMetaElement::ParseViewportFitValueAsEnum(
   return mojom::ViewportFit::kAuto;
 }
 
+// static
+absl::optional<ui::mojom::blink::VirtualKeyboardMode>
+HTMLMetaElement::ParseVirtualKeyboardValueAsEnum(const String& value) {
+  if (EqualIgnoringASCIICase(value, "resizes-content"))
+    return ui::mojom::blink::VirtualKeyboardMode::kResizesContent;
+  else if (EqualIgnoringASCIICase(value, "resizes-visual"))
+    return ui::mojom::blink::VirtualKeyboardMode::kResizesVisual;
+  else if (EqualIgnoringASCIICase(value, "overlays-content"))
+    return ui::mojom::blink::VirtualKeyboardMode::kOverlaysContent;
+
+  return absl::nullopt;
+}
+
 void HTMLMetaElement::ProcessViewportKeyValuePair(
     Document* document,
     bool report_warnings,
@@ -389,6 +402,37 @@ void HTMLMetaElement::ProcessViewportKeyValuePair(
     }
   } else if (key_string == "shrink-to-fit") {
     // Ignore vendor-specific argument.
+  } else if (RuntimeEnabledFeatures::
+                 ViewportMetaInteractiveWidgetPropertyEnabled() &&
+             key_string == "interactive-widget") {
+    absl::optional<ui::mojom::blink::VirtualKeyboardMode> resize_type =
+        ParseVirtualKeyboardValueAsEnum(value_string);
+
+    if (resize_type) {
+      description.virtual_keyboard_mode = resize_type.value();
+      switch (resize_type.value()) {
+        case ui::mojom::blink::VirtualKeyboardMode::kOverlaysContent: {
+          UseCounter::Count(document,
+                            WebFeature::kInteractiveWidgetOverlaysContent);
+        } break;
+        case ui::mojom::blink::VirtualKeyboardMode::kResizesContent: {
+          UseCounter::Count(document,
+                            WebFeature::kInteractiveWidgetResizesContent);
+        } break;
+        case ui::mojom::blink::VirtualKeyboardMode::kResizesVisual: {
+          UseCounter::Count(document,
+                            WebFeature::kInteractiveWidgetResizesVisual);
+        } break;
+        case ui::mojom::blink::VirtualKeyboardMode::kUnset: {
+          NOTREACHED();
+        } break;
+      }
+    } else {
+      description.virtual_keyboard_mode =
+          ui::mojom::blink::VirtualKeyboardMode::kUnset;
+      ReportViewportWarning(document, kUnrecognizedViewportArgumentValueError,
+                            value_string, key_string);
+    }
   } else if (report_warnings) {
     ReportViewportWarning(document, kUnrecognizedViewportArgumentKeyError,
                           key_string, String());
@@ -452,8 +496,8 @@ void HTMLMetaElement::GetViewportDescriptionFromContentAttribute(
     ViewportDescription& description,
     Document* document,
     bool viewport_meta_zero_values_quirk) {
-  ParseContentAttribute(content, description, document,
-                        viewport_meta_zero_values_quirk);
+  ParseViewportContentAttribute(content, description, document,
+                                viewport_meta_zero_values_quirk);
 
   if (description.min_zoom == ViewportDescription::kValueAuto)
     description.min_zoom = 0.25;
@@ -496,8 +540,6 @@ void HTMLMetaElement::NameRemoved(const AtomicString& name_value) {
         /*update_theme_color_cache=*/true);
   } else if (EqualIgnoringASCIICase(name_value, "color-scheme")) {
     GetDocument().ColorSchemeMetaChanged();
-  } else if (EqualIgnoringASCIICase(name_value, "battery-savings")) {
-    GetDocument().BatterySavingsMetaChanged();
   } else if (EqualIgnoringASCIICase(name_value, "supports-reduced-motion")) {
     GetDocument().SupportsReducedMotionMetaChanged();
   }
@@ -537,7 +579,7 @@ void HTMLMetaElement::RemovedFrom(ContainerNode& insertion_point) {
   if (!insertion_point.IsInDocumentTree())
     return;
   const AtomicString& name_value = FastGetAttribute(html_names::kNameAttr);
-  if (!name_value.IsEmpty())
+  if (!name_value.empty())
     NameRemoved(name_value);
 }
 
@@ -557,10 +599,10 @@ void HTMLMetaElement::ProcessHttpEquiv() {
     return;
   const AtomicString& http_equiv_value =
       FastGetAttribute(html_names::kHttpEquivAttr);
-  if (http_equiv_value.IsEmpty())
+  if (http_equiv_value.empty())
     return;
   HttpEquiv::Process(GetDocument(), http_equiv_value, content_value,
-                     InDocumentHead(this), this);
+                     InDocumentHead(this), is_sync_parser_, this);
 }
 
 void HTMLMetaElement::ProcessContent() {
@@ -568,7 +610,7 @@ void HTMLMetaElement::ProcessContent() {
     return;
 
   const AtomicString& name_value = FastGetAttribute(html_names::kNameAttr);
-  if (name_value.IsEmpty())
+  if (name_value.empty())
     return;
 
   const AtomicString& content_value =
@@ -582,10 +624,6 @@ void HTMLMetaElement::ProcessContent() {
   }
   if (EqualIgnoringASCIICase(name_value, "color-scheme")) {
     GetDocument().ColorSchemeMetaChanged();
-    return;
-  }
-  if (EqualIgnoringASCIICase(name_value, "battery-savings")) {
-    GetDocument().BatterySavingsMetaChanged();
     return;
   }
 
@@ -624,13 +662,10 @@ void HTMLMetaElement::ProcessContent() {
     // TODO(1031476): The Web Monetization specification is an unofficial draft,
     // available at https://webmonetization.org/specification.html
     // For now, only use counters are implemented in Blink.
-    if (!GetDocument().ParentDocument()) {
+    if (GetDocument().IsInOutermostMainFrame()) {
       UseCounter::Count(&GetDocument(),
                         WebFeature::kHTMLMetaElementMonetization);
     }
-  } else if (EqualIgnoringASCIICase(name_value, http_names::kAcceptCH)) {
-    ProcessMetaAcceptCH(GetDocument(), content_value, /*is_http_equiv*/ false,
-                        is_being_created_by_parser_with_sync_flag_);
   }
 }
 
@@ -658,15 +693,28 @@ const AtomicString& HTMLMetaElement::GetName() const {
   return FastGetAttribute(html_names::kNameAttr);
 }
 
+const AtomicString& HTMLMetaElement::Property() const {
+  return FastGetAttribute(html_names::kPropertyAttr);
+}
+
+const AtomicString& HTMLMetaElement::Itemprop() const {
+  return FastGetAttribute(html_names::kItempropAttr);
+}
+
 // static
-void HTMLMetaElement::ProcessMetaAcceptCH(Document& document,
-                                          const AtomicString& content,
-                                          bool is_http_equiv,
-                                          bool is_preload_or_sync_parser) {
-  if (is_http_equiv
-          ? !RuntimeEnabledFeatures::ClientHintsMetaHTTPEquivAcceptCHEnabled()
-          : !RuntimeEnabledFeatures::ClientHintsMetaNameAcceptCHEnabled()) {
-    return;
+void HTMLMetaElement::ProcessMetaCH(Document& document,
+                                    const AtomicString& content,
+                                    network::MetaCHType type,
+                                    bool is_doc_preloader_or_sync_parser) {
+  switch (type) {
+    case network::MetaCHType::HttpEquivAcceptCH:
+      if (!RuntimeEnabledFeatures::ClientHintsMetaHTTPEquivAcceptCHEnabled())
+        return;
+      break;
+    case network::MetaCHType::HttpEquivDelegateCH:
+      if (!RuntimeEnabledFeatures::ClientHintsMetaEquivDelegateCHEnabled())
+        return;
+      break;
   }
 
   LocalFrame* frame = document.GetFrame();
@@ -684,18 +732,24 @@ void HTMLMetaElement::ProcessMetaAcceptCH(Document& document,
     return;
   }
 
-  UseCounter::Count(
-      document, is_http_equiv ? WebFeature::kClientHintsMetaHTTPEquivAcceptCH
-                              : WebFeature::kClientHintsMetaNameAcceptCH);
+  switch (type) {
+    case network::MetaCHType::HttpEquivAcceptCH:
+      UseCounter::Count(document,
+                        WebFeature::kClientHintsMetaHTTPEquivAcceptCH);
+      break;
+    case network::MetaCHType::HttpEquivDelegateCH:
+      UseCounter::Count(document, WebFeature::kClientHintsMetaEquivDelegateCH);
+      break;
+  }
   FrameClientHintsPreferencesContext hints_context(frame);
   UpdateWindowPermissionsPolicyWithDelegationSupportForClientHints(
       frame->GetClientHintsPreferences(), document.domWindow(), content,
-      document.Url(), &hints_context, is_http_equiv, is_preload_or_sync_parser);
+      document.Url(), &hints_context, type, is_doc_preloader_or_sync_parser);
 }
 
 void HTMLMetaElement::FinishParsingChildren() {
   // Flag the tag was parsed so if it's re-read we know it was modified.
-  is_being_created_by_parser_with_sync_flag_ = false;
+  is_sync_parser_ = false;
   HTMLElement::FinishParsingChildren();
 }
 

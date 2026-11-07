@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -85,7 +85,7 @@ bool ShouldUseMitShm(x11::Connection* connection) {
   std::string j2d_use_mitshm;
   if (env->GetVar("J2D_USE_MITSHM", &j2d_use_mitshm) &&
       (j2d_use_mitshm == "0" ||
-       base::LowerCaseEqualsASCII(j2d_use_mitshm, "false"))) {
+       base::EqualsCaseInsensitiveASCII(j2d_use_mitshm, "false"))) {
     return false;
   }
 

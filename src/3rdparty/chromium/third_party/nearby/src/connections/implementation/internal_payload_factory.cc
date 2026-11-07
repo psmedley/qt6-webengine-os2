@@ -16,6 +16,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <utility>
 
 #include "absl/memory/memory.h"
 #include "connections/implementation/offline_frames_validator.h"
@@ -314,12 +316,14 @@ std::unique_ptr<InternalPayload> CreateOutgoingInternalPayload(
 }
 
 std::string make_path(std::string& parent_folder, std::string& file_name) {
-  return api::ImplementationPlatform::GetDownloadPath(parent_folder, file_name);
+  return std::string(
+      api::ImplementationPlatform::GetDownloadPath(parent_folder, file_name));
 }
 
 std::string make_path(std::string& parent_folder, int64_t id) {
   std::string file_name(std::to_string(id));
-  return api::ImplementationPlatform::GetDownloadPath(parent_folder, file_name);
+  return std::string(
+      api::ImplementationPlatform::GetDownloadPath(parent_folder, file_name));
 }
 
 std::unique_ptr<InternalPayload> CreateIncomingInternalPayload(

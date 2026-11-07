@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/win/windows_version.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "components/crash/core/app/crash_export_thunks.h"
@@ -74,6 +75,8 @@ bool PlatformCrashpadInitialization(
   std::unique_ptr<base::Environment> env(base::Environment::Create());
 
   CrashReporterClient* crash_reporter_client = GetCrashReporterClient();
+
+  bool initialized = false;
 
   if (initial_client) {
     std::wstring database_path_str;
@@ -140,28 +143,46 @@ bool PlatformCrashpadInitialization(
     arguments.push_back(std::string("--monitor-self-annotation=ptype=") +
                         switches::kCrashpadHandler);
 
-    GetCrashpadClient().StartHandler(exe_file, *database_path, metrics_path,
-                                     url, process_annotations, arguments, false,
-                                     false);
+    initialized = GetCrashpadClient().StartHandler(
+        exe_file, *database_path, metrics_path, url, process_annotations,
+        arguments, /*restartable=*/false, /*asynchronous_start=*/false);
 
-    // If we're the browser, push the pipe name into the environment so child
-    // processes can connect to it. If we inherited another crashpad_handler's
-    // pipe name, we'll overwrite it here.
-    env->SetVar(kPipeNameVar,
-                base::WideToUTF8(GetCrashpadClient().GetHandlerIPCPipe()));
+    if (initialized) {
+      // If we're the browser, push the pipe name into the environment so child
+      // processes can connect to it. If we inherited another crashpad_handler's
+      // pipe name, we'll overwrite it here.
+      env->SetVar(kPipeNameVar,
+                  base::WideToUTF8(GetCrashpadClient().GetHandlerIPCPipe()));
+    }
   } else {
     std::string pipe_name_utf8;
     if (env->GetVar(kPipeNameVar, &pipe_name_utf8)) {
-      GetCrashpadClient().SetHandlerIPCPipe(base::UTF8ToWide(pipe_name_utf8));
+      initialized = GetCrashpadClient().SetHandlerIPCPipe(
+          base::UTF8ToWide(pipe_name_utf8));
     }
   }
 
-  if (crash_reporter_client->GetShouldDumpLargerDumps()) {
-    const uint32_t kIndirectMemoryLimit = 4 * 1024 * 1024;
-    crashpad::CrashpadInfo::GetCrashpadInfo()
-        ->set_gather_indirectly_referenced_memory(crashpad::TriState::kEnabled,
-                                                  kIndirectMemoryLimit);
+  if (!initialized)
+    return false;
+
+  // Regester WER helper only if it will produce useful information - prior to
+  // 20H1 the crashes it can help with did not make their way to the helper.
+  if (base::win::GetVersion() >= base::win::Version::WIN10_20H1) {
+    auto path = crash_reporter_client->GetWerRuntimeExceptionModule();
+    if (!path.empty())
+      GetCrashpadClient().RegisterWerModule(path);
   }
+
+  // In the not-large-dumps case record enough extra memory to be able to save
+  // dereferenced memory from all registers on the crashing thread. crashpad may
+  // save 512-bytes per register, and the largest register set (not including
+  // stack pointers) is ARM64 with 32 registers. Hence, 16 KiB.
+  const uint32_t kIndirectMemoryLimit =
+      crash_reporter_client->GetShouldDumpLargerDumps() ? 4 * 1024 * 1024
+                                                        : 16 * 1024;
+  crashpad::CrashpadInfo::GetCrashpadInfo()
+      ->set_gather_indirectly_referenced_memory(crashpad::TriState::kEnabled,
+                                                kIndirectMemoryLimit);
 
   return true;
 }

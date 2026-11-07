@@ -1,8 +1,9 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gl/hdr_metadata_helper_win.h"
+#include "ui/gl/gpu_switching_manager.h"
 
 namespace {
 
@@ -19,9 +20,12 @@ HDRMetadataHelperWin::HDRMetadataHelperWin(
     Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device)
     : d3d11_device_(std::move(d3d11_device)) {
   UpdateDisplayMetadata();
+  ui::GpuSwitchingManager::GetInstance()->AddObserver(this);
 }
 
-HDRMetadataHelperWin::~HDRMetadataHelperWin() = default;
+HDRMetadataHelperWin::~HDRMetadataHelperWin() {
+  ui::GpuSwitchingManager::GetInstance()->RemoveObserver(this);
+}
 
 absl::optional<DXGI_HDR_METADATA_HDR10>
 HDRMetadataHelperWin::GetDisplayMetadata() {
@@ -131,4 +135,11 @@ DXGI_HDR_METADATA_HDR10 HDRMetadataHelperWin::HDRMetadataToDXGI(
   return metadata;
 }
 
+void HDRMetadataHelperWin::OnDisplayAdded() {
+  UpdateDisplayMetadata();
+}
+
+void HDRMetadataHelperWin::OnDisplayRemoved() {
+  UpdateDisplayMetadata();
+}
 }  // namespace gl

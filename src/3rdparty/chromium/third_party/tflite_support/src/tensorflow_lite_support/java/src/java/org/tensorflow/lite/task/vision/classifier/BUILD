@@ -18,6 +18,13 @@ filegroup(
     ),
 )
 
+filegroup(
+    name = "image_classifier_src_experimental",
+    srcs = glob(
+        ["**/*.java"],
+    ),
+)
+
 # Default target that uses BuiltInOpResolver, registers all built-in OPs.
 # IMPORTANT: In order to use hardware acceleration delegates, you must
 # additionally link to the appropriate delegate plugin target as follows:
@@ -43,7 +50,6 @@ android_library(
         ":image_classifier_src",
         "//tensorflow_lite_support/java/src/java/org/tensorflow/lite/task/vision/core:base_vision_api_src",
     ],
-    javacopts = ["-source 7 -target 7"],
     manifest = "AndroidManifest.xml",
     deps = [
         "//tensorflow_lite_support/java:tensorflowlite_support_java",

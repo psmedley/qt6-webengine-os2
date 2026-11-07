@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -118,6 +118,7 @@ EncoderStatus SetUpAomConfig(const VideoEncoder::Options& opts,
   svc_params = {};
   svc_params.framerate_factor[0] = 1;
   svc_params.number_spatial_layers = 1;
+  svc_params.number_temporal_layers = 1;
   if (opts.scalability_mode.has_value()) {
     switch (opts.scalability_mode.value()) {
       case SVCScalabilityMode::kL1T2:
@@ -343,21 +344,26 @@ void Av1VideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
                                                          : AOM_IMG_FMT_I420;
   aom_image_t* image = aom_img_wrap(&image_, fmt, options_.frame_size.width(),
                                     options_.frame_size.height(), 1,
-                                    frame->data(VideoFrame::kYPlane));
+                                    frame->writable_data(VideoFrame::kYPlane));
   DCHECK_EQ(image, &image_);
 
   switch (frame->format()) {
     case PIXEL_FORMAT_I420:
-      image->planes[AOM_PLANE_Y] = frame->visible_data(VideoFrame::kYPlane);
-      image->planes[AOM_PLANE_U] = frame->visible_data(VideoFrame::kUPlane);
-      image->planes[AOM_PLANE_V] = frame->visible_data(VideoFrame::kVPlane);
+      image->planes[AOM_PLANE_Y] =
+          frame->GetWritableVisibleData(VideoFrame::kYPlane);
+      image->planes[AOM_PLANE_U] =
+          frame->GetWritableVisibleData(VideoFrame::kUPlane);
+      image->planes[AOM_PLANE_V] =
+          frame->GetWritableVisibleData(VideoFrame::kVPlane);
       image->stride[AOM_PLANE_Y] = frame->stride(VideoFrame::kYPlane);
       image->stride[AOM_PLANE_U] = frame->stride(VideoFrame::kUPlane);
       image->stride[AOM_PLANE_V] = frame->stride(VideoFrame::kVPlane);
       break;
     case PIXEL_FORMAT_NV12:
-      image->planes[AOM_PLANE_Y] = frame->visible_data(VideoFrame::kYPlane);
-      image->planes[AOM_PLANE_U] = frame->visible_data(VideoFrame::kUVPlane);
+      image->planes[AOM_PLANE_Y] =
+          frame->GetWritableVisibleData(VideoFrame::kYPlane);
+      image->planes[AOM_PLANE_U] =
+          frame->GetWritableVisibleData(VideoFrame::kUVPlane);
       image->planes[AOM_PLANE_V] = nullptr;
       image->stride[AOM_PLANE_Y] = frame->stride(VideoFrame::kYPlane);
       image->stride[AOM_PLANE_U] = frame->stride(VideoFrame::kUVPlane);
@@ -380,7 +386,7 @@ void Av1VideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
     return;
   }
 
-  TRACE_EVENT0("media", "aom_codec_encode");
+  TRACE_EVENT1("media", "aom_codec_encode", "timestamp", frame->timestamp());
   // Use artificial timestamps, so the encoder will not be misled by frame's
   // fickle timestamps when doing rate control.
   auto error =
@@ -498,7 +504,7 @@ void Av1VideoEncoder::DrainOutputs(int temporal_id,
       result.temporal_id = temporal_id;
     }
 
-    result.data.reset(new uint8_t[result.size]);
+    result.data = std::make_unique<uint8_t[]>(result.size);
     memcpy(result.data.get(), pkt->data.frame.buf, result.size);
     output_cb_.Run(std::move(result), {});
   }

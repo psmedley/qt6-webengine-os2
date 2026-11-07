@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@ class DummyTrainingDataCollector : public TrainingDataCollector {
   // TrainingDataCollector implementation.
   void OnModelMetadataUpdated() override;
   void OnServiceInitialized() override;
+  void ReportCollectedContinuousTrainingData() override;
 };
 
 }  // namespace segmentation_platform

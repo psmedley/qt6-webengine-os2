@@ -79,7 +79,7 @@ static std::unique_ptr<BlobData> CreateBlobDataForFileWithType(
 static std::unique_ptr<BlobData> CreateBlobDataForFile(
     const String& path,
     File::ContentTypeLookupPolicy policy) {
-  if (path.IsEmpty()) {
+  if (path.empty()) {
     auto blob_data = std::make_unique<BlobData>();
     blob_data->SetContentType("application/octet-stream");
     return blob_data;
@@ -110,23 +110,6 @@ static std::unique_ptr<BlobData> CreateBlobDataForFileWithMetadata(
   }
   blob_data->SetContentType(GetContentTypeFromFileName(
       file_system_name, File::kWellKnownContentTypes));
-  return blob_data;
-}
-
-static std::unique_ptr<BlobData> CreateBlobDataForFileSystemURL(
-    const KURL& file_system_url,
-    const FileMetadata& metadata) {
-  std::unique_ptr<BlobData> blob_data;
-  if (metadata.length == BlobData::kToEndOfFile) {
-    blob_data = BlobData::CreateForFileSystemURLWithUnknownSize(
-        file_system_url, metadata.modification_time);
-  } else {
-    blob_data = std::make_unique<BlobData>();
-    blob_data->AppendFileSystemURL(file_system_url, 0, metadata.length,
-                                   metadata.modification_time);
-  }
-  blob_data->SetContentType(GetContentTypeFromFileName(
-      file_system_url.GetPath(), File::kWellKnownContentTypes));
   return blob_data;
 }
 
@@ -172,7 +155,7 @@ File* File::CreateFromControlState(const FormControlState& state,
   String path = state[index++];
   String name = state[index++];
   String relative_path = state[index++];
-  if (relative_path.IsEmpty())
+  if (relative_path.empty())
     return File::CreateForUserProvidedFile(path, name);
   return File::CreateWithRelativePath(path, relative_path);
 }
@@ -246,7 +229,7 @@ File::File(const String& path,
            const absl::optional<base::Time>& last_modified,
            scoped_refptr<BlobDataHandle> blob_data_handle)
     : Blob(std::move(blob_data_handle)),
-      has_backing_file_(!path.IsEmpty() || !relative_path.IsEmpty()),
+      has_backing_file_(!path.empty() || !relative_path.empty()),
       user_visibility_(user_visibility),
       path_(path),
       name_(name),
@@ -289,22 +272,6 @@ File::File(const KURL& file_system_url,
            UserVisibility user_visibility,
            scoped_refptr<BlobDataHandle> blob_data_handle)
     : Blob(std::move(blob_data_handle)),
-      has_backing_file_(false),
-      user_visibility_(user_visibility),
-      name_(DecodeURLEscapeSequences(file_system_url.LastPathComponent(),
-                                     DecodeURLMode::kUTF8OrIsomorphic)),
-      file_system_url_(file_system_url),
-      snapshot_size_(metadata.length),
-      snapshot_modification_time_(metadata.modification_time) {
-  DCHECK_GE(metadata.length, 0);
-}
-
-File::File(const KURL& file_system_url,
-           const FileMetadata& metadata,
-           UserVisibility user_visibility)
-    : Blob(BlobDataHandle::Create(
-          CreateBlobDataForFileSystemURL(file_system_url, metadata),
-          metadata.length)),
       has_backing_file_(false),
       user_visibility_(user_visibility),
       name_(DecodeURLEscapeSequences(file_system_url.LastPathComponent(),
@@ -393,7 +360,7 @@ Blob* File::slice(int64_t start,
   uint64_t length = end - start;
   auto blob_data = std::make_unique<BlobData>();
   blob_data->SetContentType(NormalizeType(content_type));
-  DCHECK(!path_.IsEmpty());
+  DCHECK(!path_.empty());
   blob_data->AppendFile(path_, start, length, snapshot_modification_time_);
   return MakeGarbageCollected<Blob>(
       BlobDataHandle::Create(std::move(blob_data), length));
@@ -419,7 +386,7 @@ void File::AppendTo(BlobData& blob_data) const {
   // FIXME: This involves synchronous file operation. We need to figure out how
   // to make it asynchronous.
   CaptureSnapshotIfNeeded();
-  DCHECK(!path_.IsEmpty());
+  DCHECK(!path_.empty());
   blob_data.AppendFile(path_, 0, *snapshot_size_, snapshot_modification_time_);
 }
 

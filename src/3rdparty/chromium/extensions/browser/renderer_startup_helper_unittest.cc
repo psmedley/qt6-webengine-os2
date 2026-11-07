@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -137,6 +137,9 @@ class RendererStartupHelperInterceptor : public RendererStartupHelper,
     default_blocked_hosts_.AddPatterns(default_policy_blocked_hosts);
     default_allowed_hosts_.AddPatterns(default_policy_allowed_hosts);
   }
+
+  void UpdateUserHostRestrictions(URLPatternSet user_blocked_hosts,
+                                  URLPatternSet user_allowed_hosts) override {}
 
   void UpdateTabSpecificPermissions(const std::string& extension_id,
                                     URLPatternSet new_hosts,

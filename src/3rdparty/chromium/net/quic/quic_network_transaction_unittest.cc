@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@
 #include "net/base/features.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/mock_network_change_notifier.h"
-#include "net/base/network_isolation_key.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/base/schemeful_site.h"
 #include "net/base/test_completion_callback.h"
 #include "net/base/test_proxy_delegate.h"
@@ -94,8 +94,7 @@
 using ::testing::ElementsAre;
 using ::testing::Key;
 
-namespace net {
-namespace test {
+namespace net::test {
 
 namespace {
 
@@ -233,7 +232,7 @@ class TestSocketPerformanceWatcher : public SocketPerformanceWatcher {
   TestSocketPerformanceWatcher& operator=(const TestSocketPerformanceWatcher&) =
       delete;
 
-  ~TestSocketPerformanceWatcher() override {}
+  ~TestSocketPerformanceWatcher() override = default;
 
   bool ShouldNotifyUpdatedRTT() const override {
     return *should_notify_updated_rtt_;
@@ -253,17 +252,14 @@ class TestSocketPerformanceWatcher : public SocketPerformanceWatcher {
 class TestSocketPerformanceWatcherFactory
     : public SocketPerformanceWatcherFactory {
  public:
-  TestSocketPerformanceWatcherFactory()
-      : watcher_count_(0u),
-        should_notify_updated_rtt_(true),
-        rtt_notification_received_(false) {}
+  TestSocketPerformanceWatcherFactory() = default;
 
   TestSocketPerformanceWatcherFactory(
       const TestSocketPerformanceWatcherFactory&) = delete;
   TestSocketPerformanceWatcherFactory& operator=(
       const TestSocketPerformanceWatcherFactory&) = delete;
 
-  ~TestSocketPerformanceWatcherFactory() override {}
+  ~TestSocketPerformanceWatcherFactory() override = default;
 
   // SocketPerformanceWatcherFactory implementation:
   std::unique_ptr<SocketPerformanceWatcher> CreateSocketPerformanceWatcher(
@@ -273,9 +269,8 @@ class TestSocketPerformanceWatcherFactory
       return nullptr;
     }
     ++watcher_count_;
-    return std::unique_ptr<SocketPerformanceWatcher>(
-        new TestSocketPerformanceWatcher(&should_notify_updated_rtt_,
-                                         &rtt_notification_received_));
+    return std::make_unique<TestSocketPerformanceWatcher>(
+        &should_notify_updated_rtt_, &rtt_notification_received_);
   }
 
   size_t watcher_count() const { return watcher_count_; }
@@ -287,9 +282,9 @@ class TestSocketPerformanceWatcherFactory
   }
 
  private:
-  size_t watcher_count_;
-  bool should_notify_updated_rtt_;
-  bool rtt_notification_received_;
+  size_t watcher_count_ = 0u;
+  bool should_notify_updated_rtt_ = true;
+  bool rtt_notification_received_ = false;
 };
 
 class QuicNetworkTransactionTest
@@ -302,7 +297,7 @@ class QuicNetworkTransactionTest
         client_headers_include_h2_stream_dependency_(
             GetParam().client_headers_include_h2_stream_dependency),
         supported_versions_(quic::test::SupportedVersions(version_)),
-        client_maker_(new QuicTestPacketMaker(
+        client_maker_(std::make_unique<QuicTestPacketMaker>(
             version_,
             quic::QuicUtils::CreateRandomConnectionId(
                 context_.random_generator()),
@@ -317,15 +312,15 @@ class QuicNetworkTransactionTest
                       kDefaultServerHostName,
                       quic::Perspective::IS_SERVER,
                       false),
-        quic_task_runner_(new TestTaskRunner(context_.mock_clock())),
-        ssl_config_service_(new SSLConfigServiceDefaults),
+        quic_task_runner_(
+            base::MakeRefCounted<TestTaskRunner>(context_.mock_clock())),
+        ssl_config_service_(std::make_unique<SSLConfigServiceDefaults>()),
         proxy_resolution_service_(
             ConfiguredProxyResolutionService::CreateDirect()),
         auth_handler_factory_(HttpAuthHandlerFactory::CreateDefault()),
         http_server_properties_(std::make_unique<HttpServerProperties>()),
         ssl_data_(ASYNC, OK) {
     FLAGS_quic_enable_http3_grease_randomness = false;
-    FLAGS_quic_enable_chaos_protection = false;
     request_.method = "GET";
     std::string url("https://");
     url.append(kDefaultServerHostName);
@@ -797,14 +792,14 @@ class QuicNetworkTransactionTest
 
   void AddQuicAlternateProtocolMapping(
       MockCryptoClientStream::HandshakeMode handshake_mode,
-      const NetworkIsolationKey& network_isolation_key =
-          NetworkIsolationKey()) {
+      const NetworkAnonymizationKey& network_anonymization_key =
+          NetworkAnonymizationKey()) {
     crypto_client_stream_factory_.set_handshake_mode(handshake_mode);
     url::SchemeHostPort server(request_.url);
     AlternativeService alternative_service(kProtoQUIC, server.host(), 443);
     base::Time expiration = base::Time::Now() + base::Days(1);
     http_server_properties_->SetQuicAlternativeService(
-        server, network_isolation_key, alternative_service, expiration,
+        server, network_anonymization_key, alternative_service, expiration,
         supported_versions_);
   }
 
@@ -817,37 +812,37 @@ class QuicNetworkTransactionTest
                                            alternative.port());
     base::Time expiration = base::Time::Now() + base::Days(1);
     http_server_properties_->SetQuicAlternativeService(
-        server, NetworkIsolationKey(), alternative_service, expiration,
+        server, NetworkAnonymizationKey(), alternative_service, expiration,
         supported_versions_);
   }
 
   void ExpectBrokenAlternateProtocolMapping(
-      const NetworkIsolationKey& network_isolation_key =
-          NetworkIsolationKey()) {
+      const NetworkAnonymizationKey& network_anonymization_key =
+          NetworkAnonymizationKey()) {
     const url::SchemeHostPort server(request_.url);
     const AlternativeServiceInfoVector alternative_service_info_vector =
         http_server_properties_->GetAlternativeServiceInfos(
-            server, network_isolation_key);
+            server, network_anonymization_key);
     EXPECT_EQ(1u, alternative_service_info_vector.size());
     EXPECT_TRUE(http_server_properties_->IsAlternativeServiceBroken(
         alternative_service_info_vector[0].alternative_service(),
-        network_isolation_key));
+        network_anonymization_key));
   }
 
   void ExpectQuicAlternateProtocolMapping(
-      const NetworkIsolationKey& network_isolation_key =
-          NetworkIsolationKey()) {
+      const NetworkAnonymizationKey& network_anonymization_key =
+          NetworkAnonymizationKey()) {
     const url::SchemeHostPort server(request_.url);
     const AlternativeServiceInfoVector alternative_service_info_vector =
         http_server_properties_->GetAlternativeServiceInfos(
-            server, network_isolation_key);
+            server, network_anonymization_key);
     EXPECT_EQ(1u, alternative_service_info_vector.size());
     EXPECT_EQ(
         kProtoQUIC,
         alternative_service_info_vector[0].alternative_service().protocol);
     EXPECT_FALSE(http_server_properties_->IsAlternativeServiceBroken(
         alternative_service_info_vector[0].alternative_service(),
-        network_isolation_key));
+        network_anonymization_key));
   }
 
   void AddHangingNonAlternateProtocolSocketData() {
@@ -1056,7 +1051,7 @@ class QuicNetworkTransactionTest
       GenerateQuicAltSvcHeader({version_}) + "\r\n";
   const bool client_headers_include_h2_stream_dependency_;
   quic::ParsedQuicVersionVector supported_versions_;
-  QuicFlagSaver flags_;  // Save/restore all QUIC flag values.
+  quic::test::QuicFlagSaver flags_;  // Save/restore all QUIC flag values.
   MockQuicContext context_;
   std::unique_ptr<QuicTestPacketMaker> client_maker_;
   QuicTestPacketMaker server_maker_;
@@ -1672,7 +1667,7 @@ TEST_P(QuicNetworkTransactionTest, 408Response) {
 TEST_P(QuicNetworkTransactionTest, QuicProxy) {
   session_params_.enable_quic = true;
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC mail.example.org:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   MockQuicData mock_quic_data(version_);
@@ -1723,7 +1718,7 @@ TEST_P(QuicNetworkTransactionTest, QuicProxyWithCert) {
 
   session_params_.enable_quic = true;
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC " + proxy_host + ":70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   client_maker_->set_hostname(origin_host);
@@ -1850,12 +1845,12 @@ TEST_P(QuicNetworkTransactionTest, DoNotUseQuicForUnsupportedVersion) {
                                          443);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties_->SetQuicAlternativeService(
-      server, NetworkIsolationKey(), alternative_service, expiration,
+      server, NetworkAnonymizationKey(), alternative_service, expiration,
       {unsupported_version});
 
   AlternativeServiceInfoVector alt_svc_info_vector =
       http_server_properties_->GetAlternativeServiceInfos(
-          server, NetworkIsolationKey());
+          server, NetworkAnonymizationKey());
   EXPECT_EQ(1u, alt_svc_info_vector.size());
   EXPECT_EQ(kProtoQUIC, alt_svc_info_vector[0].alternative_service().protocol);
   EXPECT_EQ(1u, alt_svc_info_vector[0].advertised_versions().size());
@@ -1918,7 +1913,7 @@ TEST_P(QuicNetworkTransactionTest, DoNotUseQuicForUnsupportedVersion) {
   // Check alternative service list is updated with new versions.
   alt_svc_info_vector =
       session_->http_server_properties()->GetAlternativeServiceInfos(
-          server, NetworkIsolationKey());
+          server, NetworkAnonymizationKey());
   VerifyQuicVersionsInAlternativeServices(alt_svc_info_vector,
                                           supported_versions_);
 }
@@ -1937,7 +1932,7 @@ TEST_P(QuicNetworkTransactionTest, RetryMisdirectedRequest) {
                                          443);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties_->SetQuicAlternativeService(
-      server, NetworkIsolationKey(), alternative_service, expiration,
+      server, NetworkAnonymizationKey(), alternative_service, expiration,
       supported_versions_);
 
   // First try: The alternative job uses QUIC and reports an HTTP 421
@@ -2162,9 +2157,9 @@ TEST_P(QuicNetworkTransactionTest, UseIetfAlternativeServiceForQuic) {
   SendRequestAndExpectQuicResponse("hello!");
 }
 
-// Much like above, but makes sure NetworkIsolationKey is respected.
+// Much like above, but makes sure NetworkAnonymizationKey is respected.
 TEST_P(QuicNetworkTransactionTest,
-       UseAlternativeServiceForQuicWithNetworkIsolationKey) {
+       UseAlternativeServiceForQuicWithNetworkAnonymizationKey) {
   if (version_.AlpnDeferToRFCv1()) {
     // These versions currently do not support Alt-Svc.
     return;
@@ -2182,8 +2177,11 @@ TEST_P(QuicNetworkTransactionTest,
 
   const SchemefulSite kSite1(GURL("https://foo.test/"));
   const net::NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
+
   const SchemefulSite kSite2(GURL("https://bar.test/"));
   const net::NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
 
   MockRead http_reads[] = {
       MockRead("HTTP/1.1 200 OK\r\n"), MockRead(alt_svc_header_.data()),
@@ -2193,7 +2191,7 @@ TEST_P(QuicNetworkTransactionTest,
 
   AddCertificate(&ssl_data_);
 
-  // Request with empty NetworkIsolationKey.
+  // Request with empty NetworkAnonymizationKey.
   StaticSocketDataProvider http_data1(http_reads, base::span<MockWrite>());
   socket_factory_.AddSocketDataProvider(&http_data1);
   socket_factory_.AddSSLSocketDataProvider(&ssl_data_);
@@ -2240,18 +2238,22 @@ TEST_P(QuicNetworkTransactionTest,
   CreateSession();
 
   // This is first so that the test fails if alternative service info is
-  // written with the right NetworkIsolationKey, but always queried with an
+  // written with the right NetworkAnonymizationKey, but always queried with an
   // empty one.
   request_.network_isolation_key = NetworkIsolationKey();
+  request_.network_anonymization_key = NetworkAnonymizationKey();
   SendRequestAndExpectHttpResponse("hello world");
   request_.network_isolation_key = kNetworkIsolationKey1;
+  request_.network_anonymization_key = kNetworkAnonymizationKey1;
   SendRequestAndExpectHttpResponse("hello world");
   request_.network_isolation_key = kNetworkIsolationKey2;
+  request_.network_anonymization_key = kNetworkAnonymizationKey2;
   SendRequestAndExpectHttpResponse("hello world");
 
-  // Only use QUIC when using a NetworkIsolationKey which has been used when
+  // Only use QUIC when using a NetworkAnonymizationKey which has been used when
   // alternative service information was received.
   request_.network_isolation_key = kNetworkIsolationKey1;
+  request_.network_anonymization_key = kNetworkAnonymizationKey1;
   SendRequestAndExpectQuicResponse("hello!");
 }
 
@@ -2468,13 +2470,13 @@ TEST_P(QuicNetworkTransactionTest, SetAlternativeServiceWithScheme) {
   url::SchemeHostPort http_server("http", "mail.example.org", 443);
   url::SchemeHostPort https_server("https", "mail.example.org", 443);
   // Check alternative service is set for the correct origin.
-  EXPECT_EQ(
-      2u, http_server_properties
-              ->GetAlternativeServiceInfos(https_server, NetworkIsolationKey())
-              .size());
+  EXPECT_EQ(2u, http_server_properties
+                    ->GetAlternativeServiceInfos(https_server,
+                                                 NetworkAnonymizationKey())
+                    .size());
   EXPECT_TRUE(
       http_server_properties
-          ->GetAlternativeServiceInfos(http_server, NetworkIsolationKey())
+          ->GetAlternativeServiceInfos(http_server, NetworkAnonymizationKey())
           .empty());
 }
 
@@ -2511,10 +2513,10 @@ TEST_P(QuicNetworkTransactionTest, DoNotGetAltSvcForDifferentOrigin) {
 
   const url::SchemeHostPort https_server(request_.url);
   // Check alternative service is set.
-  EXPECT_EQ(
-      2u, http_server_properties
-              ->GetAlternativeServiceInfos(https_server, NetworkIsolationKey())
-              .size());
+  EXPECT_EQ(2u, http_server_properties
+                    ->GetAlternativeServiceInfos(https_server,
+                                                 NetworkAnonymizationKey())
+                    .size());
 
   // Send http request to the same origin but with diffrent scheme, should not
   // use QUIC.
@@ -2584,7 +2586,7 @@ TEST_P(QuicNetworkTransactionTest,
   const url::SchemeHostPort https_server(request_.url);
   const AlternativeServiceInfoVector alt_svc_info_vector =
       session_->http_server_properties()->GetAlternativeServiceInfos(
-          https_server, NetworkIsolationKey());
+          https_server, NetworkAnonymizationKey());
   VerifyQuicVersionsInAlternativeServices(alt_svc_info_vector,
                                           supported_versions_);
 }
@@ -2976,14 +2978,16 @@ TEST_P(
 
   const SchemefulSite kSite1(GURL("https://foo.test/"));
   const net::NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
   const SchemefulSite kSite2(GURL("https://bar.test/"));
   const net::NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
 
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
       // enabled_features
       {features::kPartitionHttpServerPropertiesByNetworkIsolationKey,
-       // Need to partition connections by NetworkIsolationKey for
+       // Need to partition connections by NetworkAnonymizationKey for
        // QuicSessionAliasKey to include NetworkIsolationKeys.
        features::kPartitionConnectionsByNetworkIsolationKey},
       // disabled_features
@@ -3061,11 +3065,14 @@ TEST_P(
   // QUIC connection requires handshake to be confirmed and sends CHLO to the
   // peer.
   AddQuicAlternateProtocolMapping(
-      MockCryptoClientStream::COLD_START_WITH_CHLO_SENT, kNetworkIsolationKey1);
+      MockCryptoClientStream::COLD_START_WITH_CHLO_SENT,
+      kNetworkAnonymizationKey1);
   AddQuicAlternateProtocolMapping(
-      MockCryptoClientStream::COLD_START_WITH_CHLO_SENT, kNetworkIsolationKey2);
+      MockCryptoClientStream::COLD_START_WITH_CHLO_SENT,
+      kNetworkAnonymizationKey2);
 
   request_.network_isolation_key = kNetworkIsolationKey1;
+  request_.network_anonymization_key = kNetworkAnonymizationKey1;
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session_.get());
   TestCompletionCallback callback;
   int rv = trans.Start(&request_, callback.callback(), net_log_with_source_);
@@ -3085,8 +3092,8 @@ TEST_P(
 
   // The second connection hasn't finish handshake, verify that QUIC is not
   // marked as broken.
-  ExpectQuicAlternateProtocolMapping(kNetworkIsolationKey1);
-  ExpectQuicAlternateProtocolMapping(kNetworkIsolationKey2);
+  ExpectQuicAlternateProtocolMapping(kNetworkAnonymizationKey1);
+  ExpectQuicAlternateProtocolMapping(kNetworkAnonymizationKey2);
   // Explicitly confirm the handshake on the second connection.
   crypto_client_stream_factory_.last_stream()
       ->NotifySessionOneRttKeyAvailable();
@@ -3095,16 +3102,16 @@ TEST_P(
   base::RunLoop().RunUntilIdle();
 
   // Verify that QUIC is marked as broken for kNetworkIsolationKey1 only.
-  ExpectBrokenAlternateProtocolMapping(kNetworkIsolationKey1);
-  ExpectQuicAlternateProtocolMapping(kNetworkIsolationKey2);
+  ExpectBrokenAlternateProtocolMapping(kNetworkAnonymizationKey1);
+  ExpectQuicAlternateProtocolMapping(kNetworkAnonymizationKey2);
 
   // Deliver a message to notify the new network becomes default, the previous
   // brokenness will be clear as the brokenness is bond with old default
   // network.
   scoped_mock_change_notifier_->mock_network_change_notifier()
       ->NotifyNetworkMadeDefault(kNewNetworkForTests);
-  ExpectQuicAlternateProtocolMapping(kNetworkIsolationKey1);
-  ExpectQuicAlternateProtocolMapping(kNetworkIsolationKey2);
+  ExpectQuicAlternateProtocolMapping(kNetworkAnonymizationKey1);
+  ExpectQuicAlternateProtocolMapping(kNetworkAnonymizationKey2);
 
   ASSERT_TRUE(quic_data2.AllReadDataConsumed());
   ASSERT_TRUE(quic_data2.AllWriteDataConsumed());
@@ -3241,6 +3248,9 @@ TEST_P(QuicNetworkTransactionTest,
 TEST_P(QuicNetworkTransactionTest, TimeoutAfterHandshakeConfirmed) {
   context_.params()->retry_without_alt_svc_on_quic_errors = false;
   context_.params()->idle_connection_timeout = base::Seconds(5);
+  // Turn off port migration to avoid dealing with unnecessary complexity in
+  // this test.
+  context_.params()->allow_port_migration = false;
 
   // The request will initially go out over QUIC.
   MockQuicData quic_data(version_);
@@ -3286,7 +3296,7 @@ TEST_P(QuicNetworkTransactionTest, TimeoutAfterHandshakeConfirmed) {
                        client_maker_->MakeConnectionClosePacket(
                            packet_num++, true, quic::QUIC_NETWORK_IDLE_TIMEOUT,
                            "No recent network activity after 4s. Timeout:4s"));
-  } else if (version_.UsesTls() || GetQuicRestartFlag(quic_default_on_pto2)) {
+  } else {
     // Settings were sent in the request packet so there is only 1 packet to
     // retransmit.
     // QuicConnection::OnRetransmissionTimeout skips a packet number when
@@ -3305,29 +3315,6 @@ TEST_P(QuicNetworkTransactionTest, TimeoutAfterHandshakeConfirmed) {
     // sending PTO packets.
     packet_num++;
     // PTO 3
-    quic_data.AddWrite(SYNCHRONOUS, client_maker_->MakeRetransmissionPacket(
-                                        1, packet_num++, true));
-
-    quic_data.AddWrite(SYNCHRONOUS,
-                       client_maker_->MakeConnectionClosePacket(
-                           packet_num++, true, quic::QUIC_NETWORK_IDLE_TIMEOUT,
-                           "No recent network activity after 4s. Timeout:4s"));
-  } else {
-    // Settings were sent in the request packet so there is only 1 packet to
-    // retransmit.
-    // TLP 1
-    quic_data.AddWrite(SYNCHRONOUS, client_maker_->MakeRetransmissionPacket(
-                                        1, packet_num++, true));
-    // TLP 2
-    quic_data.AddWrite(SYNCHRONOUS, client_maker_->MakeRetransmissionPacket(
-                                        1, packet_num++, true));
-    // RTO 1
-    quic_data.AddWrite(SYNCHRONOUS, client_maker_->MakeRetransmissionPacket(
-                                        1, packet_num++, true));
-    // RTO 2
-    quic_data.AddWrite(SYNCHRONOUS, client_maker_->MakeRetransmissionPacket(
-                                        1, packet_num++, true));
-    // RTO 3
     quic_data.AddWrite(SYNCHRONOUS, client_maker_->MakeRetransmissionPacket(
                                         1, packet_num++, true));
 
@@ -3463,6 +3450,9 @@ TEST_P(QuicNetworkTransactionTest, TimeoutAfterHandshakeConfirmedThenBroken2) {
     return;
   }
   context_.params()->idle_connection_timeout = base::Seconds(5);
+  // Turn off port migration to avoid dealing with unnecessary complexity in
+  // this test.
+  context_.params()->allow_port_migration = false;
 
   // The request will initially go out over QUIC.
   MockQuicData quic_data(version_);
@@ -3509,7 +3499,7 @@ TEST_P(QuicNetworkTransactionTest, TimeoutAfterHandshakeConfirmedThenBroken2) {
                        client_maker_->MakeConnectionClosePacket(
                            packet_num++, true, quic::QUIC_NETWORK_IDLE_TIMEOUT,
                            "No recent network activity after 4s. Timeout:4s"));
-  } else if (version_.UsesTls() || GetQuicRestartFlag(quic_default_on_pto2)) {
+  } else {
     // Settings were sent in the request packet so there is only 1 packet to
     // retransmit.
     // QuicConnection::OnRetransmissionTimeout skips a packet number when
@@ -3528,27 +3518,6 @@ TEST_P(QuicNetworkTransactionTest, TimeoutAfterHandshakeConfirmedThenBroken2) {
     // sending PTO packets.
     packet_num++;
     // PTO 3
-    quic_data.AddWrite(SYNCHRONOUS, client_maker_->MakeRetransmissionPacket(
-                                        1, packet_num++, true));
-
-    quic_data.AddWrite(SYNCHRONOUS,
-                       client_maker_->MakeConnectionClosePacket(
-                           packet_num++, true, quic::QUIC_NETWORK_IDLE_TIMEOUT,
-                           "No recent network activity after 4s. Timeout:4s"));
-  } else {
-    // TLP 1
-    quic_data.AddWrite(SYNCHRONOUS, client_maker_->MakeRetransmissionPacket(
-                                        1, packet_num++, true));
-    // TLP 2
-    quic_data.AddWrite(SYNCHRONOUS, client_maker_->MakeRetransmissionPacket(
-                                        1, packet_num++, true));
-    // RTO 1
-    quic_data.AddWrite(SYNCHRONOUS, client_maker_->MakeRetransmissionPacket(
-                                        1, packet_num++, true));
-    // RTO 2
-    quic_data.AddWrite(SYNCHRONOUS, client_maker_->MakeRetransmissionPacket(
-                                        1, packet_num++, true));
-    // RTO 3
     quic_data.AddWrite(SYNCHRONOUS, client_maker_->MakeRetransmissionPacket(
                                         1, packet_num++, true));
 
@@ -3729,7 +3698,7 @@ TEST_P(QuicNetworkTransactionTest,
   ASSERT_TRUE(http_data.AllReadDataConsumed());
 }
 
-// Much like above test, but verifies that NetworkIsolationKey is respected.
+// Much like above test, but verifies that NetworkAnonymizationKey is respected.
 TEST_P(QuicNetworkTransactionTest,
        ProtocolErrorAfterHandshakeConfirmedThenBrokenWithNetworkIsolationKey) {
   if (version_.AlpnDeferToRFCv1()) {
@@ -3738,8 +3707,10 @@ TEST_P(QuicNetworkTransactionTest,
   }
   const SchemefulSite kSite1(GURL("https://foo.test/"));
   const net::NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
   const SchemefulSite kSite2(GURL("https://bar.test/"));
   const net::NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
 
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
@@ -3815,13 +3786,14 @@ TEST_P(QuicNetworkTransactionTest,
   CreateSession();
 
   AddQuicAlternateProtocolMapping(MockCryptoClientStream::ZERO_RTT,
-                                  kNetworkIsolationKey1);
+                                  kNetworkAnonymizationKey1);
   AddQuicAlternateProtocolMapping(MockCryptoClientStream::ZERO_RTT,
-                                  kNetworkIsolationKey2);
+                                  kNetworkAnonymizationKey2);
 
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, session_.get());
   TestCompletionCallback callback;
   request_.network_isolation_key = kNetworkIsolationKey1;
+  request_.network_anonymization_key = kNetworkAnonymizationKey1;
   int rv = trans.Start(&request_, callback.callback(), net_log_with_source_);
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
@@ -3849,19 +3821,21 @@ TEST_P(QuicNetworkTransactionTest,
 
   // The alternative service shouldhave been marked as broken under
   // kNetworkIsolationKey1 but not kNetworkIsolationKey2.
-  ExpectBrokenAlternateProtocolMapping(kNetworkIsolationKey1);
-  ExpectQuicAlternateProtocolMapping(kNetworkIsolationKey2);
+  ExpectBrokenAlternateProtocolMapping(kNetworkAnonymizationKey1);
+  ExpectQuicAlternateProtocolMapping(kNetworkAnonymizationKey2);
 
   // Subsequent requests using kNetworkIsolationKey1 should not use QUIC.
   AddHttpDataAndRunRequest();
   // Requests using other NetworkIsolationKeys can still use QUIC.
   request_.network_isolation_key = kNetworkIsolationKey2;
+  request_.network_anonymization_key = kNetworkAnonymizationKey2;
+
   AddQuicDataAndRunRequest();
 
   // The last two requests should not have changed the alternative service
   // mappings.
-  ExpectBrokenAlternateProtocolMapping(kNetworkIsolationKey1);
-  ExpectQuicAlternateProtocolMapping(kNetworkIsolationKey2);
+  ExpectBrokenAlternateProtocolMapping(kNetworkAnonymizationKey1);
+  ExpectQuicAlternateProtocolMapping(kNetworkAnonymizationKey2);
 }
 
 // Verify that with retry_without_alt_svc_on_quic_errors enabled, if a QUIC
@@ -4033,11 +4007,11 @@ TEST_P(QuicNetworkTransactionTest, RemoteAltSvcWorkingWhileLocalAltSvcBroken) {
           remote_alternative, expiration,
           context_.params()->supported_versions));
   http_server_properties_->SetAlternativeServices(url::SchemeHostPort(origin1),
-                                                  NetworkIsolationKey(),
+                                                  NetworkAnonymizationKey(),
                                                   alternative_services);
 
-  http_server_properties_->MarkAlternativeServiceBroken(local_alternative,
-                                                        NetworkIsolationKey());
+  http_server_properties_->MarkAlternativeServiceBroken(
+      local_alternative, NetworkAnonymizationKey());
 
   SendRequestAndExpectQuicResponse("hello!");
 }
@@ -4089,11 +4063,11 @@ TEST_P(QuicNetworkTransactionTest, BrokenAlternativeOnlyRecordedOnce) {
           local_alternative, expiration,
           context_.params()->supported_versions));
   http_server_properties_->SetAlternativeServices(url::SchemeHostPort(origin1),
-                                                  NetworkIsolationKey(),
+                                                  NetworkAnonymizationKey(),
                                                   alternative_services);
 
-  http_server_properties_->MarkAlternativeServiceBroken(local_alternative,
-                                                        NetworkIsolationKey());
+  http_server_properties_->MarkAlternativeServiceBroken(
+      local_alternative, NetworkAnonymizationKey());
 
   SendRequestAndExpectHttpResponse("hello world");
 
@@ -4217,13 +4191,13 @@ TEST_P(QuicNetworkTransactionTest,
   base::Time expiration = base::Time::Now() + base::Days(1);
   AlternativeService alternative1(kProtoQUIC, origin1.host(), 443);
   http_server_properties_->SetQuicAlternativeService(
-      url::SchemeHostPort(origin1), NetworkIsolationKey(), alternative1,
+      url::SchemeHostPort(origin1), NetworkAnonymizationKey(), alternative1,
       expiration, supported_versions_);
 
   // Set up alternative service for |origin2|.
   AlternativeService alternative2(kProtoQUIC, origin2.host(), 443);
   http_server_properties_->SetQuicAlternativeService(
-      url::SchemeHostPort(origin2), NetworkIsolationKey(), alternative2,
+      url::SchemeHostPort(origin2), NetworkAnonymizationKey(), alternative2,
       expiration, supported_versions_);
 
   // First request opens connection to |destination1|
@@ -4236,10 +4210,10 @@ TEST_P(QuicNetworkTransactionTest,
   request_.url = origin2;
   SendRequestAndExpectHttpResponse("hello world");
   EXPECT_FALSE(http_server_properties_->IsAlternativeServiceBroken(
-      alternative1, NetworkIsolationKey()))
+      alternative1, NetworkAnonymizationKey()))
       << alternative1.ToString();
   EXPECT_TRUE(http_server_properties_->IsAlternativeServiceBroken(
-      alternative2, NetworkIsolationKey()))
+      alternative2, NetworkAnonymizationKey()))
       << alternative2.ToString();
 
   // The third request should use a new TCP connection, not the broken
@@ -4433,7 +4407,7 @@ TEST_P(QuicNetworkTransactionTest, PoolByOrigin) {
   AlternativeService alternative_service(kProtoQUIC, destination1, 443);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties_->SetQuicAlternativeService(
-      server, NetworkIsolationKey(), alternative_service, expiration,
+      server, NetworkAnonymizationKey(), alternative_service, expiration,
       supported_versions_);
   // First request opens connection to |destination1|
   // with quic::QuicServerId.host() == kDefaultServerHostName.
@@ -4442,7 +4416,7 @@ TEST_P(QuicNetworkTransactionTest, PoolByOrigin) {
   // Set up alternative service entry to a different destination.
   alternative_service = AlternativeService(kProtoQUIC, destination2, 443);
   http_server_properties_->SetQuicAlternativeService(
-      server, NetworkIsolationKey(), alternative_service, expiration,
+      server, NetworkAnonymizationKey(), alternative_service, expiration,
       supported_versions_);
   // Second request pools to existing connection with same quic::QuicServerId,
   // even though alternative service destination is different.
@@ -4529,8 +4503,8 @@ TEST_P(QuicNetworkTransactionTest, PoolByDestination) {
   AlternativeService alternative_service1(kProtoQUIC, destination1, 443);
   base::Time expiration = base::Time::Now() + base::Days(1);
   http_server_properties_->SetQuicAlternativeService(
-      url::SchemeHostPort(origin1), NetworkIsolationKey(), alternative_service1,
-      expiration, supported_versions_);
+      url::SchemeHostPort(origin1), NetworkAnonymizationKey(),
+      alternative_service1, expiration, supported_versions_);
 
   // Set up multiple alternative service entries for |origin2|,
   // the first one with a different destination as for |origin1|,
@@ -4547,7 +4521,7 @@ TEST_P(QuicNetworkTransactionTest, PoolByDestination) {
           alternative_service1, expiration,
           context_.params()->supported_versions));
   http_server_properties_->SetAlternativeServices(url::SchemeHostPort(origin2),
-                                                  NetworkIsolationKey(),
+                                                  NetworkAnonymizationKey(),
                                                   alternative_services);
   // First request opens connection to |destination1|
   // with quic::QuicServerId.host() == origin1.host().
@@ -4702,7 +4676,7 @@ TEST_P(QuicNetworkTransactionTest, AlternativeServiceDifferentPort) {
   url::SchemeHostPort http_server("https", kDefaultServerHostName, 443);
   AlternativeServiceInfoVector alternative_service_info_vector =
       http_server_properties_->GetAlternativeServiceInfos(
-          http_server, NetworkIsolationKey());
+          http_server, NetworkAnonymizationKey());
   ASSERT_EQ(1u, alternative_service_info_vector.size());
   const AlternativeService alternative_service =
       alternative_service_info_vector[0].alternative_service();
@@ -4759,9 +4733,9 @@ TEST_P(QuicNetworkTransactionTest, ConfirmAlternativeService) {
   AlternativeService alternative_service(kProtoQUIC,
                                          HostPortPair::FromURL(request_.url));
   http_server_properties_->MarkAlternativeServiceRecentlyBroken(
-      alternative_service, NetworkIsolationKey());
+      alternative_service, NetworkAnonymizationKey());
   EXPECT_TRUE(http_server_properties_->WasAlternativeServiceRecentlyBroken(
-      alternative_service, NetworkIsolationKey()));
+      alternative_service, NetworkAnonymizationKey()));
 
   SendRequestAndExpectHttpResponse("hello world");
   SendRequestAndExpectQuicResponse("hello!");
@@ -4769,10 +4743,10 @@ TEST_P(QuicNetworkTransactionTest, ConfirmAlternativeService) {
   mock_quic_data.Resume();
 
   EXPECT_FALSE(http_server_properties_->WasAlternativeServiceRecentlyBroken(
-      alternative_service, NetworkIsolationKey()));
+      alternative_service, NetworkAnonymizationKey()));
   EXPECT_NE(nullptr, http_server_properties_->GetServerNetworkStats(
                          url::SchemeHostPort("https", request_.url.host(), 443),
-                         NetworkIsolationKey()));
+                         NetworkAnonymizationKey()));
 }
 
 TEST_P(QuicNetworkTransactionTest,
@@ -4783,8 +4757,10 @@ TEST_P(QuicNetworkTransactionTest,
   }
   const SchemefulSite kSite1(GURL("https://foo.test/"));
   const net::NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
   const SchemefulSite kSite2(GURL("https://bar.test/"));
   const net::NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
 
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
@@ -4839,30 +4815,31 @@ TEST_P(QuicNetworkTransactionTest,
   AlternativeService alternative_service(kProtoQUIC,
                                          HostPortPair::FromURL(request_.url));
   http_server_properties_->MarkAlternativeServiceRecentlyBroken(
-      alternative_service, kNetworkIsolationKey1);
+      alternative_service, kNetworkAnonymizationKey1);
   http_server_properties_->MarkAlternativeServiceRecentlyBroken(
-      alternative_service, kNetworkIsolationKey2);
+      alternative_service, kNetworkAnonymizationKey2);
   EXPECT_TRUE(http_server_properties_->WasAlternativeServiceRecentlyBroken(
-      alternative_service, kNetworkIsolationKey1));
+      alternative_service, kNetworkAnonymizationKey1));
   EXPECT_TRUE(http_server_properties_->WasAlternativeServiceRecentlyBroken(
-      alternative_service, kNetworkIsolationKey2));
+      alternative_service, kNetworkAnonymizationKey2));
 
   request_.network_isolation_key = kNetworkIsolationKey1;
+  request_.network_anonymization_key = kNetworkAnonymizationKey1;
   SendRequestAndExpectHttpResponse("hello world");
   SendRequestAndExpectQuicResponse("hello!");
 
   mock_quic_data.Resume();
 
   EXPECT_FALSE(http_server_properties_->WasAlternativeServiceRecentlyBroken(
-      alternative_service, kNetworkIsolationKey1));
+      alternative_service, kNetworkAnonymizationKey1));
   EXPECT_NE(nullptr, http_server_properties_->GetServerNetworkStats(
                          url::SchemeHostPort("https", request_.url.host(), 443),
-                         kNetworkIsolationKey1));
+                         kNetworkAnonymizationKey1));
   EXPECT_TRUE(http_server_properties_->WasAlternativeServiceRecentlyBroken(
-      alternative_service, kNetworkIsolationKey2));
+      alternative_service, kNetworkAnonymizationKey2));
   EXPECT_EQ(nullptr, http_server_properties_->GetServerNetworkStats(
                          url::SchemeHostPort("https", request_.url.host(), 443),
-                         kNetworkIsolationKey2));
+                         kNetworkAnonymizationKey2));
 }
 
 TEST_P(QuicNetworkTransactionTest, UseAlternativeServiceForQuicForHttps) {
@@ -5025,7 +5002,7 @@ TEST_P(QuicNetworkTransactionTest, ZeroRTTWithHttpRace) {
 
   EXPECT_EQ(nullptr, http_server_properties_->GetServerNetworkStats(
                          url::SchemeHostPort("https", request_.url.host(), 443),
-                         NetworkIsolationKey()));
+                         NetworkAnonymizationKey()));
 }
 
 TEST_P(QuicNetworkTransactionTest, ZeroRTTWithNoHttpRace) {
@@ -5096,7 +5073,7 @@ TEST_P(QuicNetworkTransactionTest, ZeroRTTWithProxy) {
     return;
   }
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "PROXY myproxy:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   // Since we are using a proxy, the QUIC job will not succeed.
@@ -5690,8 +5667,10 @@ TEST_P(QuicNetworkTransactionTest,
        BrokenAlternateProtocolWithNetworkIsolationKey) {
   const SchemefulSite kSite1(GURL("https://foo.test/"));
   const net::NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
   const SchemefulSite kSite2(GURL("https://bar.test/"));
   const net::NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
 
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
@@ -5727,14 +5706,17 @@ TEST_P(QuicNetworkTransactionTest,
 
   CreateSession();
   AddQuicAlternateProtocolMapping(
-      MockCryptoClientStream::COLD_START_WITH_CHLO_SENT, kNetworkIsolationKey1);
+      MockCryptoClientStream::COLD_START_WITH_CHLO_SENT,
+      kNetworkAnonymizationKey1);
   AddQuicAlternateProtocolMapping(
-      MockCryptoClientStream::COLD_START_WITH_CHLO_SENT, kNetworkIsolationKey2);
+      MockCryptoClientStream::COLD_START_WITH_CHLO_SENT,
+      kNetworkAnonymizationKey2);
   request_.network_isolation_key = kNetworkIsolationKey1;
+  request_.network_anonymization_key = kNetworkAnonymizationKey1;
   SendRequestAndExpectHttpResponse("hello from http");
 
-  ExpectBrokenAlternateProtocolMapping(kNetworkIsolationKey1);
-  ExpectQuicAlternateProtocolMapping(kNetworkIsolationKey2);
+  ExpectBrokenAlternateProtocolMapping(kNetworkAnonymizationKey1);
+  ExpectQuicAlternateProtocolMapping(kNetworkAnonymizationKey2);
 }
 
 TEST_P(QuicNetworkTransactionTest, BrokenAlternateProtocolReadError) {
@@ -6026,8 +6008,10 @@ TEST_P(QuicNetworkTransactionTest,
 
   const SchemefulSite kSite1(GURL("https://foo.test/"));
   const net::NetworkIsolationKey kNetworkIsolationKey1(kSite1, kSite1);
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey1(kSite1, kSite1);
   const SchemefulSite kSite2(GURL("https://bar.test/"));
   const net::NetworkIsolationKey kNetworkIsolationKey2(kSite2, kSite2);
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey2(kSite2, kSite2);
 
   // Alternate-protocol job
   MockRead quic_reads[] = {
@@ -6053,28 +6037,31 @@ TEST_P(QuicNetworkTransactionTest,
   CreateSession();
 
   AddQuicAlternateProtocolMapping(MockCryptoClientStream::ZERO_RTT,
-                                  kNetworkIsolationKey1);
+                                  kNetworkAnonymizationKey1);
   AddQuicAlternateProtocolMapping(MockCryptoClientStream::ZERO_RTT,
-                                  kNetworkIsolationKey2);
+                                  kNetworkAnonymizationKey2);
 
   request_.network_isolation_key = kNetworkIsolationKey1;
+  request_.network_anonymization_key = kNetworkAnonymizationKey1;
   SendRequestAndExpectHttpResponse("hello from http");
   EXPECT_TRUE(quic_data.AllReadDataConsumed());
   EXPECT_TRUE(quic_data.AllWriteDataConsumed());
 
-  ExpectBrokenAlternateProtocolMapping(kNetworkIsolationKey1);
-  ExpectQuicAlternateProtocolMapping(kNetworkIsolationKey2);
+  ExpectBrokenAlternateProtocolMapping(kNetworkAnonymizationKey1);
+  ExpectQuicAlternateProtocolMapping(kNetworkAnonymizationKey2);
 
   // Subsequent requests using kNetworkIsolationKey1 should not use QUIC.
   AddHttpDataAndRunRequest();
   // Requests using other NetworkIsolationKeys can still use QUIC.
   request_.network_isolation_key = kNetworkIsolationKey2;
+  request_.network_anonymization_key = kNetworkAnonymizationKey2;
+
   AddQuicDataAndRunRequest();
 
   // The last two requests should not have changed the alternative service
   // mappings.
-  ExpectBrokenAlternateProtocolMapping(kNetworkIsolationKey1);
-  ExpectQuicAlternateProtocolMapping(kNetworkIsolationKey2);
+  ExpectBrokenAlternateProtocolMapping(kNetworkAnonymizationKey1);
+  ExpectQuicAlternateProtocolMapping(kNetworkAnonymizationKey2);
 }
 
 TEST_P(QuicNetworkTransactionTest, BrokenAlternateProtocolOnConnectFailure) {
@@ -6100,7 +6087,8 @@ TEST_P(QuicNetworkTransactionTest, BrokenAlternateProtocolOnConnectFailure) {
   ExpectBrokenAlternateProtocolMapping();
 }
 
-TEST_P(QuicNetworkTransactionTest, ConnectionCloseDuringConnect) {
+// TODO(crbug.com/1347664): This test is failing on various platforms.
+TEST_P(QuicNetworkTransactionTest, DISABLED_ConnectionCloseDuringConnect) {
   if (version_.AlpnDeferToRFCv1()) {
     // These versions currently do not support Alt-Svc.
     return;
@@ -6165,7 +6153,7 @@ TEST_P(QuicNetworkTransactionTest, ConnectionCloseDuringConnectProxy) {
   const HostPortPair host_port_pair("myproxy.org", 443);
 
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC myproxy.org:443; HTTPS myproxy.org:443",
           TRAFFIC_ANNOTATION_FOR_TESTS);
   proxy_resolution_service_->SetProxyDelegate(&test_proxy_delegate);
@@ -6300,8 +6288,8 @@ TEST_P(QuicNetworkTransactionTest, QuicUploadWriteError) {
 
   request_.upload_data_stream = &upload_data;
 
-  std::unique_ptr<HttpNetworkTransaction> trans(
-      new HttpNetworkTransaction(DEFAULT_PRIORITY, session_.get()));
+  auto trans = std::make_unique<HttpNetworkTransaction>(DEFAULT_PRIORITY,
+                                                        session_.get());
   TestCompletionCallback callback;
   int rv = trans->Start(&request_, callback.callback(), net_log_with_source_);
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
@@ -6808,14 +6796,23 @@ TEST_P(QuicNetworkTransactionTest, QuicServerPushRespectsNetworkIsolationKey) {
       NetworkIsolationKey::CreateTransient();
   NetworkIsolationKey network_isolation_key2 =
       NetworkIsolationKey::CreateTransient();
+  NetworkAnonymizationKey network_anonymization_key1 =
+      net::NetworkAnonymizationKey::CreateFromNetworkIsolationKey(
+          network_isolation_key1);
+  NetworkAnonymizationKey network_anonymization_key2 =
+      net::NetworkAnonymizationKey::CreateFromNetworkIsolationKey(
+          network_isolation_key2);
 
   // Creates the first QUIC session, and triggers the first push.
   request_.network_isolation_key = network_isolation_key1;
+  request_.network_anonymization_key = network_anonymization_key1;
+
   SendRequestAndExpectQuicResponse("hello1");
 
   // Use a different NIK, which creates another QUIC session, triggering a
   // second push,
   request_.network_isolation_key = network_isolation_key2;
+  request_.network_anonymization_key = network_anonymization_key2;
   SendRequestAndExpectQuicResponse("hello2");
 
   // Use the second NIK again, should receive the push body from the second
@@ -6826,6 +6823,7 @@ TEST_P(QuicNetworkTransactionTest, QuicServerPushRespectsNetworkIsolationKey) {
   // Use the first NIK again, should receive the push body from the first
   // session.
   request_.network_isolation_key = network_isolation_key1;
+  request_.network_anonymization_key = network_anonymization_key1;
   SendRequestAndExpectQuicResponse("and hello1");
 }
 
@@ -7069,7 +7067,7 @@ class QuicNetworkTransactionWithDestinationTest
             GetParam().client_headers_include_h2_stream_dependency),
         supported_versions_(quic::test::SupportedVersions(version_)),
         destination_type_(GetParam().destination_type),
-        ssl_config_service_(new SSLConfigServiceDefaults),
+        ssl_config_service_(std::make_unique<SSLConfigServiceDefaults>()),
         proxy_resolution_service_(
             ConfiguredProxyResolutionService::CreateDirect()),
         auth_handler_factory_(HttpAuthHandlerFactory::CreateDefault()),
@@ -7142,7 +7140,7 @@ class QuicNetworkTransactionWithDestinationTest
     AlternativeService alternative_service(kProtoQUIC, destination);
     base::Time expiration = base::Time::Now() + base::Days(1);
     http_server_properties_.SetQuicAlternativeService(
-        url::SchemeHostPort("https", origin, 443), NetworkIsolationKey(),
+        url::SchemeHostPort("https", origin, 443), NetworkAnonymizationKey(),
         alternative_service, expiration, supported_versions_);
   }
 
@@ -7204,8 +7202,7 @@ class QuicNetworkTransactionWithDestinationTest
   }
 
   void AddRefusedSocketData() {
-    std::unique_ptr<StaticSocketDataProvider> refused_data(
-        new StaticSocketDataProvider());
+    auto refused_data = std::make_unique<StaticSocketDataProvider>();
     MockConnect refused_connect(SYNCHRONOUS, ERR_CONNECTION_REFUSED);
     refused_data->set_connect_data(refused_connect);
     socket_factory_.AddSocketDataProvider(refused_data.get());
@@ -7213,8 +7210,7 @@ class QuicNetworkTransactionWithDestinationTest
   }
 
   void AddHangingSocketData() {
-    std::unique_ptr<StaticSocketDataProvider> hanging_data(
-        new StaticSocketDataProvider());
+    auto hanging_data = std::make_unique<StaticSocketDataProvider>();
     MockConnect hanging_connect(SYNCHRONOUS, ERR_IO_PENDING);
     hanging_data->set_connect_data(hanging_connect);
     socket_factory_.AddSocketDataProvider(hanging_data.get());
@@ -7266,7 +7262,7 @@ class QuicNetworkTransactionWithDestinationTest
         version_.transport_version, n);
   }
 
-  QuicFlagSaver flags_;  // Save/restore all QUIC flag values.
+  quic::test::QuicFlagSaver flags_;  // Save/restore all QUIC flag values.
   const quic::ParsedQuicVersion version_;
   const bool client_headers_include_h2_stream_dependency_;
   quic::ParsedQuicVersionVector supported_versions_;
@@ -7424,8 +7420,8 @@ TEST_P(QuicNetworkTransactionWithDestinationTest, PoolIfCertificateValid) {
   AddHangingSocketData();
   AddHangingSocketData();
 
-  scoped_refptr<TestTaskRunner> quic_task_runner(
-      new TestTaskRunner(context_.mock_clock()));
+  auto quic_task_runner =
+      base::MakeRefCounted<TestTaskRunner>(context_.mock_clock());
   QuicStreamFactoryPeer::SetAlarmFactory(
       session_->quic_stream_factory(),
       std::make_unique<QuicChromiumAlarmFactory>(quic_task_runner.get(),
@@ -7749,7 +7745,7 @@ TEST_P(QuicNetworkTransactionTest, QuicProxyConnectHttpsServer) {
   session_params_.enable_quic = true;
   session_params_.enable_quic_proxies_for_https_urls = true;
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC proxy.example.org:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   MockQuicData mock_quic_data(version_);
@@ -7842,7 +7838,7 @@ TEST_P(QuicNetworkTransactionTest, QuicProxyConnectSpdyServer) {
   session_params_.enable_quic = true;
   session_params_.enable_quic_proxies_for_https_urls = true;
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC proxy.example.org:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   MockQuicData mock_quic_data(version_);
@@ -7936,7 +7932,7 @@ TEST_P(QuicNetworkTransactionTest, QuicProxyConnectReuseTransportSocket) {
   session_params_.enable_quic = true;
   session_params_.enable_quic_proxies_for_https_urls = true;
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC proxy.example.org:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   MockQuicData mock_quic_data(version_);
@@ -8063,7 +8059,7 @@ TEST_P(QuicNetworkTransactionTest, QuicProxyConnectReuseQuicSession) {
   session_params_.enable_quic = true;
   session_params_.enable_quic_proxies_for_https_urls = true;
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC proxy.example.org:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   MockQuicData mock_quic_data(version_);
@@ -8223,7 +8219,7 @@ TEST_P(QuicNetworkTransactionTest, QuicProxyConnectFailure) {
   session_params_.enable_quic = true;
   session_params_.enable_quic_proxies_for_https_urls = true;
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC proxy.example.org:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   MockQuicData mock_quic_data(version_);
@@ -8274,7 +8270,7 @@ TEST_P(QuicNetworkTransactionTest, QuicProxyQuicConnectionError) {
   session_params_.enable_quic = true;
   session_params_.enable_quic_proxies_for_https_urls = true;
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC proxy.example.org:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   MockQuicData mock_quic_data(version_);
@@ -8315,7 +8311,7 @@ TEST_P(QuicNetworkTransactionTest, QuicProxyConnectBadCertificate) {
   session_params_.enable_quic = true;
   session_params_.enable_quic_proxies_for_https_urls = true;
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC proxy.example.org:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   MockQuicData mock_quic_data(version_);
@@ -8450,7 +8446,7 @@ TEST_P(QuicNetworkTransactionTest, QuicProxyUserAgent) {
   session_params_.enable_quic = true;
   session_params_.enable_quic_proxies_for_https_urls = true;
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC proxy.example.org:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   MockQuicData mock_quic_data(version_);
@@ -8502,7 +8498,7 @@ TEST_P(QuicNetworkTransactionTest, QuicProxyRequestPriority) {
   session_params_.enable_quic = true;
   session_params_.enable_quic_proxies_for_https_urls = true;
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC proxy.example.org:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   const RequestPriority request_priority = MEDIUM;
@@ -8547,7 +8543,7 @@ TEST_P(QuicNetworkTransactionTest, QuicProxyMultipleRequestsError) {
   session_params_.enable_quic = true;
   session_params_.enable_quic_proxies_for_https_urls = true;
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC proxy.example.org:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   const RequestPriority kRequestPriority = MEDIUM;
@@ -8638,7 +8634,7 @@ TEST_P(QuicNetworkTransactionTest, QuicProxyAuth) {
     session_params_.enable_quic = true;
     session_params_.enable_quic_proxies_for_https_urls = true;
     proxy_resolution_service_ =
-        ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+        ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
             "QUIC proxy.example.org:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
     MockQuicData mock_quic_data(version_);
@@ -8989,13 +8985,15 @@ TEST_P(QuicNetworkTransactionTest, QuicServerPushUpdatesPriority) {
   EXPECT_TRUE(mock_quic_data.AllWriteDataConsumed());
 }
 
-// Test that NetworkIsolationKey is respected by QUIC connections, when
+// Test that NetworkAnonymizationKey is respected by QUIC connections, when
 // kPartitionConnectionsByNetworkIsolationKey is enabled.
 TEST_P(QuicNetworkTransactionTest, NetworkIsolation) {
   const SchemefulSite kSite1(GURL("http://origin1/"));
   const SchemefulSite kSite2(GURL("http://origin2/"));
   NetworkIsolationKey network_isolation_key1(kSite1, kSite1);
   NetworkIsolationKey network_isolation_key2(kSite2, kSite2);
+  NetworkAnonymizationKey network_anonymization_key1(kSite1, kSite1);
+  NetworkAnonymizationKey network_anonymization_key2(kSite2, kSite2);
 
   context_.params()->origins_to_force_quic_on.insert(
       HostPortPair::FromString("mail.example.org:443"));
@@ -9009,7 +9007,7 @@ TEST_P(QuicNetworkTransactionTest, NetworkIsolation) {
 
     if (use_proxy) {
       proxy_resolution_service_ =
-          ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+          ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
               "QUIC mail.example.org:443", TRAFFIC_ANNOTATION_FOR_TESTS);
     } else {
       proxy_resolution_service_ =
@@ -9243,6 +9241,7 @@ TEST_P(QuicNetworkTransactionTest, NetworkIsolation) {
       request1.traffic_annotation =
           net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
       request1.network_isolation_key = network_isolation_key1;
+      request1.network_anonymization_key = network_anonymization_key1;
       HttpNetworkTransaction trans1(LOWEST, session_.get());
       int rv = trans1.Start(&request1, callback.callback(), NetLogWithSource());
       EXPECT_THAT(callback.GetResult(rv), IsOk());
@@ -9256,6 +9255,7 @@ TEST_P(QuicNetworkTransactionTest, NetworkIsolation) {
       request2.traffic_annotation =
           net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
       request2.network_isolation_key = network_isolation_key2;
+      request2.network_anonymization_key = network_anonymization_key2;
       HttpNetworkTransaction trans2(LOWEST, session_.get());
       rv = trans2.Start(&request2, callback.callback(), NetLogWithSource());
       EXPECT_THAT(callback.GetResult(rv), IsOk());
@@ -9269,6 +9269,8 @@ TEST_P(QuicNetworkTransactionTest, NetworkIsolation) {
       request3.traffic_annotation =
           net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
       request3.network_isolation_key = network_isolation_key1;
+      request3.network_anonymization_key = network_anonymization_key1;
+
       HttpNetworkTransaction trans3(LOWEST, session_.get());
       rv = trans3.Start(&request3, callback.callback(), NetLogWithSource());
       EXPECT_THAT(callback.GetResult(rv), IsOk());
@@ -9300,7 +9302,7 @@ TEST_P(QuicNetworkTransactionTest, NetworkIsolationTunnel) {
   session_params_.enable_quic = true;
   session_params_.enable_quic_proxies_for_https_urls = true;
   proxy_resolution_service_ =
-      ConfiguredProxyResolutionService::CreateFixedFromPacResult(
+      ConfiguredProxyResolutionService::CreateFixedFromPacResultForTest(
           "QUIC proxy.example.org:70", TRAFFIC_ANNOTATION_FOR_TESTS);
 
   const char kGetRequest[] =
@@ -9385,6 +9387,7 @@ TEST_P(QuicNetworkTransactionTest, NetworkIsolationTunnel) {
   HttpRequestInfo request2;
   const SchemefulSite kSite1(GURL("http://origin1/"));
   request_.network_isolation_key = NetworkIsolationKey(kSite1, kSite1);
+  request_.network_anonymization_key = NetworkAnonymizationKey(kSite1, kSite1);
   HttpNetworkTransaction trans2(DEFAULT_PRIORITY, session_.get());
   RunTransaction(&trans2);
   CheckResponseData(&trans2, "0123456789");
@@ -9464,7 +9467,8 @@ TEST_P(QuicNetworkTransactionTest, AllowHTTP1MockTest) {
   SendRequestAndExpectQuicResponse("hello!");
 }
 
-TEST_P(QuicNetworkTransactionTest, AllowHTTP1UploadPauseAndResume) {
+// TODO(crbug.com/1347664): This test is failing on various platforms.
+TEST_P(QuicNetworkTransactionTest, DISABLED_AllowHTTP1UploadPauseAndResume) {
   context_.params()->origins_to_force_quic_on.insert(
       HostPortPair::FromString("mail.example.org:443"));
 
@@ -9525,7 +9529,9 @@ TEST_P(QuicNetworkTransactionTest, AllowHTTP1UploadPauseAndResume) {
   CheckResponseData(&trans, "hello!");
 }
 
-TEST_P(QuicNetworkTransactionTest, AllowHTTP1UploadFailH1AndResumeQuic) {
+// TODO(crbug.com/1347664): This test is failing on various platforms.
+TEST_P(QuicNetworkTransactionTest,
+       DISABLED_AllowHTTP1UploadFailH1AndResumeQuic) {
   if (version_.AlpnDeferToRFCv1()) {
     // These versions currently do not support Alt-Svc.
     return;
@@ -9592,7 +9598,7 @@ TEST_P(QuicNetworkTransactionTest, AllowHTTP1UploadFailH1AndResumeQuic) {
   ServerNetworkStats stats1;
   stats1.srtt = base::Microseconds(10);
   http_server_properties_->SetServerNetworkStats(
-      url::SchemeHostPort(request_.url), NetworkIsolationKey(), stats1);
+      url::SchemeHostPort(request_.url), NetworkAnonymizationKey(), stats1);
 
   // Set up request.
   request_.method = "POST";
@@ -9640,16 +9646,13 @@ TEST_P(QuicNetworkTransactionTest, IncorrectHttp3GoAway) {
   // a client-initiated bidirectional stream.  Any other kind of stream ID
   // should cause the client to close the connection.
   quic::GoAwayFrame goaway{3};
-  std::unique_ptr<char[]> goaway_buffer;
-  auto goaway_length =
-      quic::HttpEncoder::SerializeGoAwayFrame(goaway, &goaway_buffer);
+  auto goaway_buffer = quic::HttpEncoder::SerializeGoAwayFrame(goaway);
   const quic::QuicStreamId control_stream_id =
       quic::QuicUtils::GetFirstUnidirectionalStreamId(
           version_.transport_version, quic::Perspective::IS_SERVER);
   mock_quic_data.AddRead(
-      ASYNC, ConstructServerDataPacket(
-                 read_packet_number++, control_stream_id, false, false,
-                 absl::string_view(goaway_buffer.get(), goaway_length)));
+      ASYNC, ConstructServerDataPacket(read_packet_number++, control_stream_id,
+                                       false, false, goaway_buffer));
   mock_quic_data.AddWrite(
       SYNCHRONOUS,
       ConstructClientAckAndConnectionClosePacket(
@@ -9716,16 +9719,13 @@ TEST_P(QuicNetworkTransactionTest, RetryOnHttp3GoAway) {
   // GOAWAY with stream_id2 informs the client that stream_id2 (and streams with
   // larger IDs) have not been processed and can safely be retried.
   quic::GoAwayFrame goaway{stream_id2};
-  std::unique_ptr<char[]> goaway_buffer;
-  auto goaway_length =
-      quic::HttpEncoder::SerializeGoAwayFrame(goaway, &goaway_buffer);
+  auto goaway_buffer = quic::HttpEncoder::SerializeGoAwayFrame(goaway);
   const quic::QuicStreamId control_stream_id =
       quic::QuicUtils::GetFirstUnidirectionalStreamId(
           version_.transport_version, quic::Perspective::IS_SERVER);
   mock_quic_data1.AddRead(
-      ASYNC, ConstructServerDataPacket(
-                 read_packet_number1++, control_stream_id, false, false,
-                 absl::string_view(goaway_buffer.get(), goaway_length)));
+      ASYNC, ConstructServerDataPacket(read_packet_number1++, control_stream_id,
+                                       false, false, goaway_buffer));
   mock_quic_data1.AddWrite(
       ASYNC, ConstructClientAckPacket(write_packet_number1++, 2, 1));
 
@@ -9822,5 +9822,4 @@ TEST_P(QuicNetworkTransactionTest, RetryOnHttp3GoAway) {
 
 // TODO(yoichio):  Add the TCP job reuse case. See crrev.com/c/2174099.
 
-}  // namespace test
-}  // namespace net
+}  // namespace net::test

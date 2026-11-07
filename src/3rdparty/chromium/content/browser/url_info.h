@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,6 +65,12 @@ struct CONTENT_EXPORT UrlInfo {
     kCOOP = (1 << 2)
   };
 
+  // For isolated sandboxed iframes, when per-document mode is used, we
+  // assign each sandboxed SiteInstance a unique identifier to prevent other
+  // same-site/same-origin frames from re-using the same SiteInstance. This
+  // identifier is used to indicate that the sandbox id is not in use.
+  static const int64_t kInvalidUniqueSandboxId;
+
   UrlInfo();  // Needed for inclusion in SiteInstanceDescriptor.
   UrlInfo(const UrlInfo& other);
   explicit UrlInfo(const UrlInfoInit& init);
@@ -111,14 +117,27 @@ struct CONTENT_EXPORT UrlInfo {
   OriginIsolationRequest origin_isolation_request =
       OriginIsolationRequest::kNone;
 
-  // If |url| represents a resource inside another resource (e.g. a resource
-  // with a urn: URL in WebBundle), origin of the original resource. Otherwise,
-  // this is just the origin of |url|.
-  url::Origin origin;
+  // This allows overriding the origin of |url| for process assignment purposes
+  // in certain very special cases. Namely, if |url| represents a resource
+  // inside another resource (e.g. a resource with a urn: URL in WebBundle),
+  // this will be the origin of the original resource. If the navigation to
+  // |url| is performed via the loadDataWithBaseURL API (e.g., in a <webview>
+  // tag or on Android Webview), this will be the base origin provided via that
+  // API. Otherwise, this will be nullopt.
+  //
+  // TODO(alexmos): Currently, this is also used to hold the origin committed
+  // by the renderer at DidCommitNavigation() time, for use in commit-time URL
+  // and origin checks that require a UrlInfo.  Investigate whether there's a
+  // cleaner way to organize these checks.  See https://crbug.com/1320402.
+  absl::optional<url::Origin> origin;
 
   // If url is being loaded in a frame that is in a origin-restricted sandboxed,
   // then this flag will be true.
   bool is_sandboxed = false;
+
+  // Only used when `is_sandboxed` is true, this unique identifier allows for
+  // per-document SiteInfo grouping.
+  int64_t unique_sandbox_id = kInvalidUniqueSandboxId;
 
   // The StoragePartitionConfig that should be used when loading content from
   // |url|. If absent, ContentBrowserClient::GetStoragePartitionConfig will be
@@ -162,11 +181,14 @@ class CONTENT_EXPORT UrlInfoInit {
       UrlInfo::OriginIsolationRequest origin_isolation_request);
   UrlInfoInit& WithOrigin(const url::Origin& origin);
   UrlInfoInit& WithSandbox(bool is_sandboxed);
+  UrlInfoInit& WithUniqueSandboxId(int unique_sandbox_id);
   UrlInfoInit& WithStoragePartitionConfig(
       absl::optional<StoragePartitionConfig> storage_partition_config);
   UrlInfoInit& WithWebExposedIsolationInfo(
       absl::optional<WebExposedIsolationInfo> web_exposed_isolation_info);
   UrlInfoInit& WithIsPdf(bool is_pdf);
+
+  const absl::optional<url::Origin>& origin() { return origin_; }
 
  private:
   UrlInfoInit(UrlInfoInit&);
@@ -176,8 +198,9 @@ class CONTENT_EXPORT UrlInfoInit {
   GURL url_;
   UrlInfo::OriginIsolationRequest origin_isolation_request_ =
       UrlInfo::OriginIsolationRequest::kNone;
-  url::Origin origin_;
+  absl::optional<url::Origin> origin_;
   bool is_sandboxed_ = false;
+  int64_t unique_sandbox_id_ = UrlInfo::kInvalidUniqueSandboxId;
   absl::optional<StoragePartitionConfig> storage_partition_config_;
   absl::optional<WebExposedIsolationInfo> web_exposed_isolation_info_;
   bool is_pdf_ = false;

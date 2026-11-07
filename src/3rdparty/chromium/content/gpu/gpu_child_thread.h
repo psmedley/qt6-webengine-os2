@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,7 +53,7 @@ class GpuChildThread : public ChildThreadImpl,
 
   ~GpuChildThread() override;
 
-  void Init(const base::Time& process_start_time);
+  void Init(const base::TimeTicks& process_start_time);
 
   static GpuChildThread* instance() { return instance_; }
 

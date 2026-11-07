@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,6 +56,7 @@ void DisplayUtil::DisplayToScreenInfo(ScreenInfo* screen_info,
       screen && (screen->GetPrimaryDisplay().id() == display.id());
   screen_info->is_internal = display.IsInternal();
   screen_info->display_id = display.id();
+  screen_info->label = display.label();
 }
 
 // static

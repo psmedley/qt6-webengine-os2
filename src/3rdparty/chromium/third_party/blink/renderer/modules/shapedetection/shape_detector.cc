@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,8 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
-#include "third_party/blink/renderer/bindings/modules/v8/v8_union_blob_htmlcanvaselement_htmlimageelement_htmlvideoelement_imagebitmap_imagedata_offscreencanvas_svgimageelement_videoframe.h"
+#include "third_party/blink/renderer/modules/shorter_includes.h"
+#include SHORT_INCLUDE_FILE(third_party/blink/renderer/bindings/modules/v8/v8_union,blob_htmlcanvaselement_htmlimageelement_htmlvideoelement_imagebitmap_imagedata_offscreencanvas_svgimageelement_videoframe)
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -22,6 +23,7 @@
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
+#include "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/skia/include/core/SkImage.h"
@@ -142,9 +144,10 @@ ScriptPromise ShapeDetector::DetectShapesOnImageData(
 
   SkPixmap image_data_pixmap = image_data->GetSkPixmap();
   SkBitmap sk_bitmap;
+  // Pass 0 for rowBytes to have SkBitmap calculate minimum valid size.
   if (!sk_bitmap.tryAllocPixels(
           image_data_pixmap.info().makeColorType(kN32_SkColorType),
-          image_data_pixmap.rowBytes())) {
+          /*rowBytes=*/0)) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidStateError,
         "Failed to allocate pixels for current frame.");

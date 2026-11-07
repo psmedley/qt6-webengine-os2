@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,16 +46,25 @@ bool StubWindow::IsVisible() const {
 
 void StubWindow::PrepareForShutdown() {}
 
-void StubWindow::SetBounds(const gfx::Rect& bounds) {
+void StubWindow::SetBoundsInPixels(const gfx::Rect& bounds) {
   // Even if the pixel bounds didn't change this call to the delegate should
   // still happen. The device scale factor may have changed which effectively
   // changes the bounds.
+  bool origin_changed = bounds_.origin() != bounds.origin();
   bounds_ = bounds;
-  delegate_->OnBoundsChanged(bounds);
+  delegate_->OnBoundsChanged({origin_changed});
 }
 
-gfx::Rect StubWindow::GetBounds() const {
+gfx::Rect StubWindow::GetBoundsInPixels() const {
   return bounds_;
+}
+
+void StubWindow::SetBoundsInDIP(const gfx::Rect& bounds) {
+  SetBoundsInPixels(delegate_->ConvertRectToPixels(bounds));
+}
+
+gfx::Rect StubWindow::GetBoundsInDIP() const {
+  return delegate_->ConvertRectToDIP(bounds_);
 }
 
 void StubWindow::SetTitle(const std::u16string& title) {}
@@ -107,9 +116,9 @@ void StubWindow::MoveCursorTo(const gfx::Point& location) {}
 
 void StubWindow::ConfineCursorToBounds(const gfx::Rect& bounds) {}
 
-void StubWindow::SetRestoredBoundsInPixels(const gfx::Rect& bounds) {}
+void StubWindow::SetRestoredBoundsInDIP(const gfx::Rect& bounds) {}
 
-gfx::Rect StubWindow::GetRestoredBoundsInPixels() const {
+gfx::Rect StubWindow::GetRestoredBoundsInDIP() const {
   return gfx::Rect();
 }
 

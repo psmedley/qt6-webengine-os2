@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,19 +50,19 @@ TEST(NetLogUtil, GetNetInfo) {
 
   // Get NetInfo when there's no cache backend (It's only created on first use).
   EXPECT_FALSE(http_cache->GetCurrentBackend());
-  base::Value net_info_without_cache(GetNetInfo(context.get()));
+  base::Value::Dict net_info_without_cache(GetNetInfo(context.get()));
   EXPECT_FALSE(http_cache->GetCurrentBackend());
-  EXPECT_GT(net_info_without_cache.DictSize(), 0u);
+  EXPECT_GT(net_info_without_cache.size(), 0u);
 
   // Force creation of a cache backend, and get NetInfo again.
   disk_cache::Backend* backend = nullptr;
   EXPECT_EQ(OK, context->http_transaction_factory()->GetCache()->GetBackend(
                     &backend, TestCompletionCallback().callback()));
   EXPECT_TRUE(http_cache->GetCurrentBackend());
-  base::Value net_info_with_cache = GetNetInfo(context.get());
-  EXPECT_GT(net_info_with_cache.DictSize(), 0u);
+  base::Value::Dict net_info_with_cache = GetNetInfo(context.get());
+  EXPECT_GT(net_info_with_cache.size(), 0u);
 
-  EXPECT_EQ(net_info_without_cache.DictSize(), net_info_with_cache.DictSize());
+  EXPECT_EQ(net_info_without_cache.size(), net_info_with_cache.size());
 }
 
 // Verify that active Field Trials are reflected.
@@ -75,23 +75,20 @@ TEST(NetLogUtil, GetNetInfoIncludesFieldTrials) {
       std::make_unique<base::FeatureList>());
 
   // Add and activate a new Field Trial.
-  base::FieldTrial* field_trial = base::FieldTrialList::FactoryGetFieldTrial(
-      "NewFieldTrial", 100, "Default", base::FieldTrial::ONE_TIME_RANDOMIZED,
-      nullptr);
-  field_trial->AppendGroup("Active", 100);
-  EXPECT_EQ(field_trial->group_name(), "Active");
+  base::FieldTrialList::CreateFieldTrial("NewFieldTrial", "Active");
+  EXPECT_EQ(base::FieldTrialList::FindFullName("NewFieldTrial"), "Active");
 
   auto context = CreateTestURLRequestContextBuilder()->Build();
   base::Value net_info(GetNetInfo(context.get()));
 
   // Verify that the returned information reflects the new trial.
   ASSERT_TRUE(net_info.is_dict());
-  base::Value* trials = net_info.FindListPath("activeFieldTrialGroups");
+  base::Value::List* trials =
+      net_info.GetDict().FindList("activeFieldTrialGroups");
   ASSERT_NE(nullptr, trials);
-  const auto& trial_list = trials->GetListDeprecated();
-  EXPECT_EQ(1u, trial_list.size());
-  EXPECT_TRUE(trial_list[0].is_string());
-  EXPECT_EQ("NewFieldTrial:Active", trial_list[0].GetString());
+  EXPECT_EQ(1u, trials->size());
+  EXPECT_TRUE((*trials)[0].is_string());
+  EXPECT_EQ("NewFieldTrial:Active", (*trials)[0].GetString());
 }
 
 // Demonstrate that disabling a provider causes it to be added to the list of

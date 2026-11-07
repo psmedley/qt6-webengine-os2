@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,8 +60,8 @@ class BodyConsumerBase : public GarbageCollected<BodyConsumerBase>,
   template <typename T>
   void ResolveLater(const T& object) {
     task_runner_->PostTask(FROM_HERE,
-                           WTF::Bind(&BodyConsumerBase::ResolveNow<T>,
-                                     WrapPersistent(this), object));
+                           WTF::BindOnce(&BodyConsumerBase::ResolveNow<T>,
+                                         WrapPersistent(this), object));
   }
 
   void Trace(Visitor* visitor) const override {
@@ -118,8 +118,13 @@ class BodyFormDataConsumer final : public BodyConsumerBase {
 
   void DidFetchDataLoadedString(const String& string) override {
     auto* formData = MakeGarbageCollected<FormData>();
-    for (const auto& pair : URLSearchParams::Create(string)->Params())
+    // URLSearchParams::Create() returns an on-heap object, but it can be
+    // garbage collected, so making it a persistent variable on the stack
+    // mitigates use-after-free scenarios. See crbug.com/1497997.
+    Persistent<URLSearchParams> search_params = URLSearchParams::Create(string);
+    for (const auto& pair : search_params->Params()) {
       formData->append(pair.first, pair.second);
+    }
     DidFetchDataLoadedFormData(formData);
   }
 };
@@ -247,7 +252,7 @@ ScriptPromise Body::formData(ScriptState* script_state,
     const String boundary =
         parsedTypeWithParameters.ParameterValueForName("boundary");
     auto* body_buffer = BodyBuffer();
-    if (body_buffer && !boundary.IsEmpty()) {
+    if (body_buffer && !boundary.empty()) {
       body_buffer->StartLoading(
           FetchDataLoader::CreateLoaderAsFormData(boundary),
           MakeGarbageCollected<BodyFormDataConsumer>(resolver),

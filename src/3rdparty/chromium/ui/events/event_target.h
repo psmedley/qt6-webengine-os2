@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -130,7 +130,8 @@ class EVENTS_EXPORT EventTarget {
 
   EventHandlerPriorityList pre_target_list_;
   EventHandlerList post_target_list_;
-  raw_ptr<EventHandler> target_handler_ = nullptr;
+  // TODO(crbug.com/1298696): Breaks content_unittests.
+  raw_ptr<EventHandler, DegradeToNoOpWhenMTE> target_handler_ = nullptr;
 };
 
 }  // namespace ui

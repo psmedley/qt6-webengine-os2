@@ -1,8 +1,8 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {$} from 'chrome://resources/js/util.m.js';
+import {$} from 'chrome://resources/js/util.js';
 import {TimeDelta} from 'chrome://resources/mojo/mojo/public/mojom/base/time.mojom-webui.js';
 import {FeedOrder, LastFetchProperties, PageHandler, PageHandlerRemote, Properties} from './feed_internals.mojom-webui.js';
 
@@ -29,8 +29,7 @@ function updatePageWithProperties() {
     $('enable-webfeed-follow-intro-debug').checked =
         properties.isWebFeedFollowIntroDebugEnabled;
     $('enable-webfeed-follow-intro-debug').disabled = false;
-    $('use-feed-query-requests-for-web-feeds').checked =
-        properties.useFeedQueryRequestsForWebFeeds;
+    $('use-feed-query-requests').checked = properties.useFeedQueryRequests;
 
     switch (properties.followingFeedOrder) {
       case FeedOrder.kUnspecified:
@@ -127,7 +126,8 @@ function setupEventListeners() {
   });
 
   $('discover-api-override-apply').addEventListener('click', function() {
-    pageHandler.overrideFeedHost({url: $('discover-api-override').value});
+    pageHandler.overrideDiscoverApiEndpoint(
+        {url: $('discover-api-override').value});
   });
 
   $('feed-stream-data-override').addEventListener('click', function() {
@@ -148,11 +148,9 @@ function setupEventListeners() {
     $('enable-webfeed-follow-intro-debug').disabled = true;
   });
 
-  $('use-feed-query-requests-for-web-feeds')
-      .addEventListener('click', function() {
-        pageHandler.setUseFeedQueryRequestsForWebFeeds(
-            $('use-feed-query-requests-for-web-feeds').checked);
-      });
+  $('use-feed-query-requests').addEventListener('click', function() {
+    pageHandler.setUseFeedQueryRequests($('use-feed-query-requests').checked);
+  });
 
   const orderRadioClickListener = function(order) {
     $('following-feed-order-grouped').disabled = true;

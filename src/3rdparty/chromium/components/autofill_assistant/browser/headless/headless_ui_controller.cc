@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,40 @@
 
 namespace autofill_assistant {
 
-HeadlessUiController::HeadlessUiController() = default;
+HeadlessUiController::HeadlessUiController(
+    ExternalActionDelegate* action_extension_delegate)
+    : action_extension_delegate_(action_extension_delegate) {}
 
-// TODO(b/201964911): fail execution instead of just logging a warning if a
+bool HeadlessUiController::SupportsExternalActions() {
+  return action_extension_delegate_ != nullptr;
+}
+
+void HeadlessUiController::ExecuteExternalAction(
+    const external::Action& external_action,
+    bool is_interrupt,
+    base::OnceCallback<void(ExternalActionDelegate::DomUpdateCallback)>
+        start_dom_checks_callback,
+    base::OnceCallback<void(const external::Result& result)>
+        end_action_callback) {
+  DCHECK(action_extension_delegate_);
+
+  action_extension_delegate_->OnActionRequested(
+      external_action, is_interrupt, std::move(start_dom_checks_callback),
+      std::move(end_action_callback));
+}
+
+void HeadlessUiController::OnInterruptStarted() {
+  if (action_extension_delegate_) {
+    action_extension_delegate_->OnInterruptStarted();
+  }
+}
+void HeadlessUiController::OnInterruptFinished() {
+  if (action_extension_delegate_) {
+    action_extension_delegate_->OnInterruptFinished();
+  }
+}
+
+// TODO(b/249983799): fail execution instead of just logging a warning if a
 // method is unexpectedly called.
 
 void HeadlessUiController::SetStatusMessage(const std::string& message) {}
@@ -92,13 +123,34 @@ bool HeadlessUiController::SetForm(
   VLOG(2) << "Unexpected UI method called: " << __func__;
   return false;
 }
+void HeadlessUiController::ShowQrCodeScanUi(
+    std::unique_ptr<PromptQrCodeScanProto> qr_code_scan,
+    base::OnceCallback<void(const ClientStatus&,
+                            const absl::optional<ValueProto>&)> callback) {
+  VLOG(2) << "Unexpected UI method called: " << __func__;
+}
+
+void HeadlessUiController::ClearQrCodeScanUi() {
+  VLOG(2) << "Unexpected UI method called: " << __func__;
+}
 void HeadlessUiController::SetGenericUi(
     std::unique_ptr<GenericUserInterfaceProto> generic_ui,
     base::OnceCallback<void(const ClientStatus&)> end_action_callback,
     base::OnceCallback<void(const ClientStatus&)>
-        view_inflation_finished_callback) {
+        view_inflation_finished_callback,
+    base::RepeatingCallback<void(const RequestBackendDataProto&)>
+        request_backend_data_callback,
+    base::RepeatingCallback<void(const ShowAccountScreenProto&)>
+        show_account_screen_callback) {
   VLOG(2) << "Unexpected UI method called: " << __func__;
 }
+
+void HeadlessUiController::ShowAccountScreen(
+    const ShowAccountScreenProto& proto,
+    const std::string& email_address) {
+  VLOG(2) << "Unexpected UI method called: " << __func__;
+}
+
 void HeadlessUiController::SetPersistentGenericUi(
     std::unique_ptr<GenericUserInterfaceProto> generic_ui,
     base::OnceCallback<void(const ClientStatus&)>
@@ -122,6 +174,11 @@ void HeadlessUiController::SetCollectUserDataOptions(
     CollectUserDataOptions* options) {
   VLOG(2) << "Unexpected UI method called: " << __func__;
 }
+void HeadlessUiController::SetCollectUserDataUiState(
+    bool loading,
+    UserDataEventField event_field) {
+  VLOG(2) << "Unexpected UI method called: " << __func__;
+}
 void HeadlessUiController::SetLastSuccessfulUserDataOptions(
     std::unique_ptr<CollectUserDataOptions> collect_user_data_options) {
   VLOG(2) << "Unexpected UI method called: " << __func__;
@@ -130,6 +187,16 @@ const CollectUserDataOptions*
 HeadlessUiController::GetLastSuccessfulUserDataOptions() const {
   VLOG(2) << "Unexpected UI method called: " << __func__;
   return nullptr;
+}
+
+void HeadlessUiController::OnTouchableAreaChanged(
+    const RectF& visual_viewport,
+    const std::vector<RectF>& touchable_areas,
+    const std::vector<RectF>& restricted_areas) {
+  if (action_extension_delegate_) {
+    action_extension_delegate_->OnTouchableAreaChanged(
+        visual_viewport, touchable_areas, restricted_areas);
+  }
 }
 
 }  // namespace autofill_assistant

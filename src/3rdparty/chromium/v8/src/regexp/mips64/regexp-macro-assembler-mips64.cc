@@ -545,7 +545,7 @@ void RegExpMacroAssemblerMIPS::CheckBitInTable(
   BranchOrBacktrack(on_bit_set, ne, a0, Operand(zero_reg));
 }
 
-bool RegExpMacroAssemblerMIPS::CheckSpecialCharacterClass(
+bool RegExpMacroAssemblerMIPS::CheckSpecialClassRanges(
     StandardCharacterSet type, Label* on_no_match) {
   // Range checks (c in min..max) are generally implemented by an unsigned
   // (c - min) <= (max - min) check.
@@ -725,21 +725,21 @@ Handle<HeapObject> RegExpMacroAssemblerMIPS::GetCode(Handle<String> source) {
     // from generated code.
     // TODO(plind): this 8 is the # of argument regs, should have definition.
     __ Daddu(frame_pointer(), sp, Operand(8 * kPointerSize));
-    STATIC_ASSERT(kSuccessfulCaptures == kInputString - kSystemPointerSize);
+    static_assert(kSuccessfulCaptures == kInputString - kSystemPointerSize);
     __ mov(a0, zero_reg);
     __ push(a0);  // Make room for success counter and initialize it to 0.
-    STATIC_ASSERT(kStringStartMinusOne ==
+    static_assert(kStringStartMinusOne ==
                   kSuccessfulCaptures - kSystemPointerSize);
     __ push(a0);  // Make room for "string start - 1" constant.
-    STATIC_ASSERT(kBacktrackCount == kStringStartMinusOne - kSystemPointerSize);
+    static_assert(kBacktrackCount == kStringStartMinusOne - kSystemPointerSize);
     __ push(a0);  // The backtrack counter
-    STATIC_ASSERT(kRegExpStackBasePointer ==
+    static_assert(kRegExpStackBasePointer ==
                   kBacktrackCount - kSystemPointerSize);
     __ push(a0);  // The regexp stack base ptr.
 
     // Initialize backtrack stack pointer. It must not be clobbered from here
     // on. Note the backtrack_stackpointer is callee-saved.
-    STATIC_ASSERT(backtrack_stackpointer() == s7);
+    static_assert(backtrack_stackpointer() == s7);
     LoadRegExpStackPointerFromMemory(backtrack_stackpointer());
 
     // Store the regexp base pointer - we'll later restore it / write it to
@@ -898,19 +898,18 @@ Handle<HeapObject> RegExpMacroAssemblerMIPS::GetCode(Handle<String> source) {
         __ Daddu(a2, a2, num_saved_registers_ * kIntSize);
         __ Sd(a2, MemOperand(frame_pointer(), kRegisterOutput));
 
-        // Prepare a0 to initialize registers with its value in the next run.
-        __ Ld(a0, MemOperand(frame_pointer(), kStringStartMinusOne));
-
         // Restore the original regexp stack pointer value (effectively, pop the
         // stored base pointer).
         PopRegExpBasePointer(backtrack_stackpointer(), a2);
+
+        Label reload_string_start_minus_one;
 
         if (global_with_zero_length_check()) {
           // Special case for zero-length matches.
           // t3: capture start index
           // Not a zero-length match, restart.
-          __ Branch(
-              &load_char_start_regexp, ne, current_input_offset(), Operand(t3));
+          __ Branch(&reload_string_start_minus_one, ne, current_input_offset(),
+                    Operand(t3));
           // Offset from the end is zero if we already reached the end.
           __ Branch(&exit_label_, eq, current_input_offset(),
                     Operand(zero_reg));
@@ -921,6 +920,11 @@ Handle<HeapObject> RegExpMacroAssemblerMIPS::GetCode(Handle<String> source) {
                    Operand((mode_ == UC16) ? 2 : 1));
           if (global_unicode()) CheckNotInSurrogatePair(0, &advance);
         }
+
+        __ bind(&reload_string_start_minus_one);
+        // Prepare a0 to initialize registers with its value in the next run.
+        // Must be immediately before the jump to avoid clobbering.
+        __ Ld(a0, MemOperand(frame_pointer(), kStringStartMinusOne));
 
         __ Branch(&load_char_start_regexp);
       } else {

@@ -1,8 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/policy/core/common/cloud/realtime_reporting_job_configuration.h"
+
+#include <utility>
 
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
@@ -66,7 +68,7 @@ bool RealtimeReportingJobConfiguration::AddReport(base::Value::Dict report) {
   // Overwrite internal context. |context_| will be merged with |payload_| in
   // |GetPayload|.
   if (context_.has_value()) {
-    context_->Merge(*context);
+    context_->Merge(std::move(*context));
   } else {
     context_ = std::move(*context);
   }
@@ -129,7 +131,7 @@ std::set<std::string> RealtimeReportingJobConfiguration::GetFailedUploadIds(
   base::Value response_value = response ? std::move(*response) : base::Value();
   base::Value* failedUploads = response_value.FindListKey(kFailedUploadsKey);
   if (failedUploads) {
-    for (const auto& failedUpload : failedUploads->GetListDeprecated()) {
+    for (const auto& failedUpload : failedUploads->GetList()) {
       auto* id = failedUpload.FindStringKey(kEventIdKey);
       if (id) {
         failedIds.insert(*id);

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,19 +13,20 @@
 
 namespace password_manager {
 
-// Aggregates a vector of PasswordStoreChangeLists into a single
-// PasswordStoreChangeList. Does not check for duplicate values.
-absl::optional<PasswordStoreChangeList> JoinPasswordStoreChanges(
-    std::vector<absl::optional<PasswordStoreChangeList>> changes);
+// Aggregates a vector of PasswordChangesOrError into a single
+// PasswordChangesOrError. Does not check for duplicate values.
+// Will return first occurred error if any.
+PasswordChanges JoinPasswordStoreChanges(
+    const std::vector<PasswordChangesOrError>& changes);
 
 // Returns logins if |result| holds them, or an empty list if |result|
 // holds an error.
 LoginsResult GetLoginsOrEmptyListOnFailure(LoginsResultOrError result);
 
-// Helper function allowing to bind base::OnceClosure to
-// PasswordStoreChangeListReply.
-PasswordStoreChangeListReply IgnoreChangeListAndRunCallback(
-    base::OnceClosure callback);
+// Returns password changes if |result| holds them, empty changelist if the
+// |result| holds an error and absl::nullopt if the result is absl::nullopt.
+PasswordChanges GetPasswordChangesOrEmptyListOnFailure(
+    PasswordChangesOrError result);
 
 }  // namespace password_manager
 

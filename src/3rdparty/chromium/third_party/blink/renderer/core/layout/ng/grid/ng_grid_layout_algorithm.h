@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,9 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/grid/ng_grid_break_token_data.h"
-#include "third_party/blink/renderer/core/layout/ng/grid/ng_grid_data.h"
-#include "third_party/blink/renderer/core/layout/ng/grid/ng_grid_item.h"
 #include "third_party/blink/renderer/core/layout/ng/grid/ng_grid_node.h"
 #include "third_party/blink/renderer/core/layout/ng/grid/ng_grid_placement.h"
-#include "third_party/blink/renderer/core/layout/ng/grid/ng_grid_properties.h"
-#include "third_party/blink/renderer/core/layout/ng/grid/ng_grid_track_collection.h"
+#include "third_party/blink/renderer/core/layout/ng/grid/ng_grid_sizing_tree.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_block_break_token.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_box_fragment_builder.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_constraint_space.h"
@@ -20,6 +17,8 @@
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
+
+class NGBoxFragment;
 
 // This enum corresponds to each step used to accommodate grid items across
 // intrinsic tracks according to their min and max track sizing functions, as
@@ -46,8 +45,9 @@ class CORE_EXPORT NGGridLayoutAlgorithm
   // Computes the containing block rect of out of flow items from stored data in
   // |NGGridLayoutData|.
   static LogicalRect ComputeOutOfFlowItemContainingRect(
-      const NGGridPlacement& grid_placement,
+      const NGGridPlacementData& placement_data,
       const NGGridLayoutData& layout_data,
+      const ComputedStyle& grid_style,
       const NGBoxStrut& borders,
       const LogicalSize& border_box_size,
       GridItemData* out_of_flow_item);
@@ -61,6 +61,18 @@ class CORE_EXPORT NGGridLayoutAlgorithm
  private:
   friend class NGGridLayoutAlgorithmTest;
 
+  // Aggregate all direct OOF children from the current grid to `oof_children`,
+  // unless `oof_children` is nullptr.
+  wtf_size_t BuildGridSizingSubtree(
+      NGGridSizingTree* sizing_tree,
+      HeapVector<Member<LayoutBox>>* oof_children = nullptr,
+      const NGGridSizingData* parent_sizing_data = nullptr,
+      const NGGridLineResolver* parent_line_resolver = nullptr,
+      const GridItemData* subgrid_data_in_parent = nullptr) const;
+
+  NGGridSizingTree BuildGridSizingTree(
+      HeapVector<Member<LayoutBox>>* oof_children = nullptr) const;
+
   const NGLayoutResult* LayoutInternal();
 
   LayoutUnit Baseline(const NGGridLayoutData& layout_data,
@@ -73,6 +85,12 @@ class CORE_EXPORT NGGridLayoutAlgorithm
                            LayoutUnit* intrinsic_block_size);
 
   LayoutUnit ComputeIntrinsicBlockSizeIgnoringChildren() const;
+
+  LayoutUnit GetLogicalBaseline(const NGBoxFragment&,
+                                const bool is_last_baseline) const;
+  LayoutUnit GetSynthesizedLogicalBaseline(const LayoutUnit block_size,
+                                           const bool is_flipped_lines,
+                                           const bool is_last_baseline) const;
 
   // Returns the size that a grid item will distribute across the tracks with an
   // intrinsic sizing function it spans in the relevant track direction.
@@ -202,12 +220,14 @@ class CORE_EXPORT NGGridLayoutAlgorithm
       NGGridLayoutData* layout_data,
       Vector<GridItemPlacementData>* grid_item_placement_data,
       Vector<LayoutUnit>* row_offset_adjustments,
-      LayoutUnit* intrinsic_block_size);
+      LayoutUnit* intrinsic_block_size,
+      LayoutUnit* consumed_grid_block_size);
 
   // Computes the static position, grid area and its offset of out of flow
-  // elements in the grid.
+  // elements in the grid (as provided by `oof_children`).
   void PlaceOutOfFlowItems(const NGGridLayoutData& layout_data,
-                           const LayoutUnit block_size);
+                           const LayoutUnit block_size,
+                           HeapVector<Member<LayoutBox>>& oof_children);
 
   void ComputeGridItemOffsetAndSize(
       const GridItemData& grid_item,

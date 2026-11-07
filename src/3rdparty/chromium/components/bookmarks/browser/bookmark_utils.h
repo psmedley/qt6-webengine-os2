@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,9 +134,9 @@ void DeleteBookmarkFolders(BookmarkModel* model,
                            const std::vector<int64_t>& ids);
 
 // If there are no user bookmarks for url, a bookmark is created.
-void AddIfNotBookmarked(BookmarkModel* model,
-                        const GURL& url,
-                        const std::u16string& title);
+const BookmarkNode* AddIfNotBookmarked(BookmarkModel* model,
+                                       const GURL& url,
+                                       const std::u16string& title);
 
 // Removes all bookmarks for the given |url|.
 void RemoveAllBookmarks(BookmarkModel* model, const GURL& url);
@@ -178,6 +178,10 @@ bool IsBookmarkedByUser(BookmarkModel* model, const GURL& url);
 
 // Returns the node with |id|, or NULL if there is no node with |id|.
 const BookmarkNode* GetBookmarkNodeByID(const BookmarkModel* model, int64_t id);
+
+// Returns the node with |guid|, or NULL if there is no node with |guid|.
+const BookmarkNode* GetBookmarkNodeByGUID(const BookmarkModel* model,
+                                          const base::GUID& guid);
 
 // Returns true if |node| is a descendant of |root|.
 bool IsDescendantOf(const BookmarkNode* node, const BookmarkNode* root);

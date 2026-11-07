@@ -12,9 +12,7 @@ if (current_cpu == "arm" || current_cpu == "arm64") {
   import("//build/config/arm.gni")
 }
 
-if (!use_qt) {
-assert(!is_ios, "This is not used on iOS, don't drag it in unintentionally")
-}
+assert(!is_ios || is_qtwebengine, "This is not used on iOS, don't drag it in unintentionally")
 
 source_set("libjpeg_headers") {
   sources = [
@@ -187,7 +185,7 @@ static_library("simd") {
     sources = [ "jsimd_none.c" ]
   }
 
-  if (is_win) {
+  if (is_win && !is_mingw) {
     cflags = [ "/wd4245" ]
   }
 }

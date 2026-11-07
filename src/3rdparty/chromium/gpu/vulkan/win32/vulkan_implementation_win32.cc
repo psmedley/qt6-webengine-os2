@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -111,6 +111,7 @@ VulkanImplementationWin32::GetExternalImageHandleType() {
 }
 
 bool VulkanImplementationWin32::CanImportGpuMemoryBuffer(
+    VulkanDeviceQueue* device_queue,
     gfx::GpuMemoryBufferType memory_buffer_type) {
   return false;
 }
@@ -120,7 +121,8 @@ VulkanImplementationWin32::CreateImageFromGpuMemoryHandle(
     VulkanDeviceQueue* device_queue,
     gfx::GpuMemoryBufferHandle gmb_handle,
     gfx::Size size,
-    VkFormat vk_formae) {
+    VkFormat vk_format,
+    const gfx::ColorSpace& color_space) {
   NOTIMPLEMENTED();
   return nullptr;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -101,6 +101,7 @@
 #include "ui/base/ime/mock_input_method.h"
 #include "ui/base/ime/mojom/text_input_state.mojom.h"
 #include "ui/base/ime/virtual_keyboard_controller.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/compositor.h"
@@ -123,14 +124,9 @@
 #include "ui/gfx/selection_bound.h"
 #include "ui/wm/core/window_util.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "ui/base/ime/input_method.h"
-#endif
-
 #if BUILDFLAG(IS_WIN)
 #include "ui/base/view_prop.h"
 #include "ui/base/win/window_event_target.h"
-#include "ui/display/win/test/scoped_screen_win.h"
 #endif
 
 using testing::_;
@@ -706,6 +702,9 @@ class RenderWidgetHostViewAuraTest : public testing::Test {
     state_with_type_text.show_ime_if_needed = true;
     view->TextInputStateChanged(state_with_type_text);
   }
+
+  void RunTimerBasedWheelEventPhaseInfoTest(
+      bool percent_based_scrolling_enabled);
 
   BrowserTaskEnvironment task_environment_{
       base::test::SingleThreadTaskEnvironment::TimeSource::MOCK_TIME};
@@ -1733,6 +1732,22 @@ TEST_F(RenderWidgetHostViewAuraTest,
 }
 
 TEST_F(RenderWidgetHostViewAuraTest, TimerBasedWheelEventPhaseInfo) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(
+      features::kWindowsScrollingPersonality);
+  RunTimerBasedWheelEventPhaseInfoTest(false);
+}
+
+TEST_F(RenderWidgetHostViewAuraTest,
+       TimerBasedWheelEventPhaseInfoWithPercentBasedScrolling) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      features::kWindowsScrollingPersonality);
+  RunTimerBasedWheelEventPhaseInfoTest(true);
+}
+
+void RenderWidgetHostViewAuraTest::RunTimerBasedWheelEventPhaseInfoTest(
+    bool percent_based_scrolling_enabled) {
   InitViewForFrame(nullptr);
   view_->Show();
   sink_->ClearMessages();
@@ -1765,7 +1780,11 @@ TEST_F(RenderWidgetHostViewAuraTest, TimerBasedWheelEventPhaseInfo) {
   EXPECT_EQ(WebInputEvent::Type::kGestureScrollUpdate,
             gesture_event->GetType());
   EXPECT_EQ(0U, gesture_event->data.scroll_update.delta_x);
-  EXPECT_EQ(5U, gesture_event->data.scroll_update.delta_y);
+  EXPECT_EQ(percent_based_scrolling_enabled
+                ? 5 * ui::kScrollPercentPerLineOrChar /
+                      ui::MouseWheelEvent::kWheelDelta
+                : 5U,
+            gesture_event->data.scroll_update.delta_y);
   events[1]->ToEvent()->CallCallback(
       blink::mojom::InputEventResultState::kConsumed);
 
@@ -3092,7 +3111,7 @@ TEST_F(RenderWidgetHostViewAuraTest, BackgroundColorMatchesCompositorFrame) {
   view_->SetSize(frame_size);
   view_->Show();
   cc::RenderFrameMetadata metadata;
-  metadata.root_background_color = SK_ColorRED;
+  metadata.root_background_color = SkColors::kRed;
   view_->SetRenderFrameMetadata(metadata);
   view_->OnRenderFrameMetadataChangedAfterActivation(base::TimeTicks::Now());
   ui::Layer* parent_layer = view_->GetNativeView()->layer();
@@ -3113,7 +3132,7 @@ TEST_F(RenderWidgetHostViewAuraTest, BackgroundColorOrder) {
   // If the content background color is available, ignore the default background
   // color setting.
   cc::RenderFrameMetadata metadata;
-  metadata.root_background_color = SK_ColorWHITE;
+  metadata.root_background_color = SkColors::kWhite;
   view_->SetRenderFrameMetadata(metadata);
   view_->OnRenderFrameMetadataChangedAfterActivation(base::TimeTicks::Now());
   ASSERT_TRUE(view_->GetBackgroundColor());
@@ -3741,11 +3760,6 @@ TEST_F(RenderWidgetHostViewAuraOverscrollTest,
        ScrollEventsOverscrollWithFling) {
   SetUpOverscrollEnvironment();
 
-#if BUILDFLAG(IS_WIN)
-  // Create a ScopedScreenWin.
-  display::win::test::ScopedScreenWin scoped_screen_win;
-#endif
-
   // Send a wheel event. ACK the event as not processed. This should not
   // initiate an overscroll gesture since it doesn't cross the threshold yet.
   SimulateWheelEvent(10, 0, 0, true, WebMouseWheelEvent::kPhaseBegan);
@@ -3821,11 +3835,6 @@ TEST_F(RenderWidgetHostViewAuraOverscrollTest,
 TEST_F(RenderWidgetHostViewAuraOverscrollTest,
        ScrollEventsOverscrollWithZeroFling) {
   SetUpOverscrollEnvironment();
-
-#if BUILDFLAG(IS_WIN)
-  // Create a ScopedScreenWin.
-  display::win::test::ScopedScreenWin scoped_screen_win;
-#endif
 
   // Send a wheel event. ACK the event as not processed. This should not
   // initiate an overscroll gesture since it doesn't cross the threshold yet.
@@ -3903,11 +3912,6 @@ TEST_F(RenderWidgetHostViewAuraOverscrollTest,
 TEST_F(RenderWidgetHostViewAuraOverscrollTest,
        MAYBE_ReverseFlingCancelsOverscroll) {
   SetUpOverscrollEnvironment();
-
-#if BUILDFLAG(IS_WIN)
-  // Create a ScopedScreenWin.
-  display::win::test::ScopedScreenWin scoped_screen_win;
-#endif
 
   {
     PressAndSetTouchActionAuto();
@@ -4779,11 +4783,6 @@ TEST_F(RenderWidgetHostViewAuraOverscrollTest,
        OverscrollStateResetsAfterScroll) {
   SetUpOverscrollEnvironment();
 
-#if BUILDFLAG(IS_WIN)
-  // Create a ScopedScreenWin.
-  display::win::test::ScopedScreenWin scoped_screen_win;
-#endif
-
   SimulateWheelEvent(0, 5, 0, true,
                      WebMouseWheelEvent::kPhaseBegan);  // sent directly
   SimulateWheelEvent(0, 30, 0, true,
@@ -4970,7 +4969,7 @@ TEST_F(RenderWidgetHostViewAuraTest, VirtualKeyboardFocusEnsureCaretInRect) {
   EXPECT_EQ(view_->GetNativeView()->bounds(), orig_view_bounds);
 
   // Simulate virtual keyboard.
-  input_method->SetOnScreenKeyboardBounds(keyboard_view_bounds);
+  input_method->SetVirtualKeyboardBounds(keyboard_view_bounds);
 
   // Window should be shifted.
   EXPECT_EQ(view_->GetNativeView()->bounds(), shifted_view_bounds);
@@ -5019,7 +5018,7 @@ TEST_F(RenderWidgetHostViewAuraTest, UpdateInsetsWithVirtualKeyboardEnabled) {
       0, 0,
       gfx::IntersectRects(orig_view_bounds, keyboard_view_bounds).height(), 0));
   EXPECT_EQ(view_->insets_, origin_view_insets);
-  input_method->SetOnScreenKeyboardBounds(keyboard_view_bounds);
+  input_method->SetVirtualKeyboardBounds(keyboard_view_bounds);
 
   // Window should be shifted. The insets will be updated.
   EXPECT_EQ(view_->GetNativeView()->bounds(), shifted_view_bounds);
@@ -5220,11 +5219,6 @@ TEST_F(RenderWidgetHostViewAuraTest, CorrectNumberOfAcksAreDispatched) {
 // isn't surpassed and the overscroll mode stays OVERSCROLL_NONE.
 TEST_F(RenderWidgetHostViewAuraOverscrollTest, ScrollDeltasResetOnEnd) {
   SetUpOverscrollEnvironment();
-
-#if BUILDFLAG(IS_WIN)
-  // Create a ScopedScreenWin.
-  display::win::test::ScopedScreenWin scoped_screen_win;
-#endif
 
   PressAndSetTouchActionAuto();
   // Wheel event scroll ending with mouse move.
@@ -5892,11 +5886,10 @@ class MockWebContentsViewDelegate : public WebContentsViewDelegate {
 // This test validates this behavior.
 TEST_F(RenderWidgetHostViewAuraWithViewHarnessTest,
        ContextMenuTest) {
-  // This instance will be destroyed when the WebContents instance is
-  // destroyed.
-  MockWebContentsViewDelegate* delegate = new MockWebContentsViewDelegate;
-  static_cast<WebContentsViewAura*>(
-      contents()->GetView())->SetDelegateForTesting(delegate);
+  auto delegate = std::make_unique<MockWebContentsViewDelegate>();
+  MockWebContentsViewDelegate* delegate_ptr = delegate.get();
+  static_cast<WebContentsViewAura*>(contents()->GetView())
+      ->SetDelegateForTesting(std::move(delegate));
 
   RenderViewHostFactory::set_is_real_render_view_host(true);
 
@@ -5908,41 +5901,41 @@ TEST_F(RenderWidgetHostViewAuraWithViewHarnessTest,
   contents()->ShowContextMenu(
       *contents()->GetRenderViewHost()->GetMainRenderFrameHost(),
       mojo::NullAssociatedRemote(), context_menu_params);
-  EXPECT_TRUE(delegate->context_menu_request_received());
-  EXPECT_EQ(delegate->context_menu_source_type(), ui::MENU_SOURCE_MOUSE);
+  EXPECT_TRUE(delegate_ptr->context_menu_request_received());
+  EXPECT_EQ(delegate_ptr->context_menu_source_type(), ui::MENU_SOURCE_MOUSE);
 
   // A context menu request with the MENU_SOURCE_TOUCH source type should
   // result in the MockWebContentsViewDelegate::ShowContextMenu method
   // getting called on all platforms. This means that the request worked
   // correctly.
-  delegate->ClearState();
+  delegate_ptr->ClearState();
   context_menu_params.source_type = ui::MENU_SOURCE_TOUCH;
   contents()->ShowContextMenu(
       *contents()->GetRenderViewHost()->GetMainRenderFrameHost(),
       mojo::NullAssociatedRemote(), context_menu_params);
-  EXPECT_TRUE(delegate->context_menu_request_received());
+  EXPECT_TRUE(delegate_ptr->context_menu_request_received());
 
   // A context menu request with the MENU_SOURCE_LONG_TAP source type should
   // result in the MockWebContentsViewDelegate::ShowContextMenu method
   // getting called on all platforms. This means that the request worked
   // correctly.
-  delegate->ClearState();
+  delegate_ptr->ClearState();
   context_menu_params.source_type = ui::MENU_SOURCE_LONG_TAP;
   contents()->ShowContextMenu(
       *contents()->GetRenderViewHost()->GetMainRenderFrameHost(),
       mojo::NullAssociatedRemote(), context_menu_params);
-  EXPECT_TRUE(delegate->context_menu_request_received());
+  EXPECT_TRUE(delegate_ptr->context_menu_request_received());
 
   // A context menu request with the MENU_SOURCE_LONG_PRESS source type should
   // result in the MockWebContentsViewDelegate::ShowContextMenu method
   // getting called on non Windows platforms. This means that the request
   //  worked correctly.
-  delegate->ClearState();
+  delegate_ptr->ClearState();
   context_menu_params.source_type = ui::MENU_SOURCE_LONG_PRESS;
   contents()->ShowContextMenu(
       *contents()->GetRenderViewHost()->GetMainRenderFrameHost(),
       mojo::NullAssociatedRemote(), context_menu_params);
-  EXPECT_TRUE(delegate->context_menu_request_received());
+  EXPECT_TRUE(delegate_ptr->context_menu_request_received());
 
   RenderViewHostFactory::set_is_real_render_view_host(false);
 }
@@ -6133,7 +6126,7 @@ TEST_F(InputMethodResultAuraTest, SetCompositionText) {
 
 // This test is for ui::TextInputClient::ConfirmCompositionText.
 TEST_F(InputMethodResultAuraTest, ConfirmCompositionText) {
-  base::RepeatingCallback<uint32_t()> ime_call = base::BindRepeating(
+  base::RepeatingCallback<size_t()> ime_call = base::BindRepeating(
       &ui::TextInputClient::ConfirmCompositionText,
       base::Unretained(text_input_client()), /** keep_selection */ true);
   for (auto index : active_view_sequence_) {

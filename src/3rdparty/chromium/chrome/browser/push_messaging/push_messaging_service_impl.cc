@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,16 +23,13 @@
 #include "build/build_config.h"
 #ifndef TOOLKIT_QT
 #include "chrome/browser/browser_process.h"
-#endif
-#include "chrome/browser/chrome_notification_types.h"
-#ifndef TOOLKIT_QT
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #endif
 #include "chrome/browser/gcm/gcm_profile_service_factory.h"
 #include "chrome/browser/gcm/instance_id/instance_id_profile_service_factory.h"
 #ifndef TOOLKIT_QT
-#include "chrome/browser/permissions/abusive_origin_permission_revocation_request.h"
-#include "chrome/browser/permissions/permission_manager_factory.h"
+#include "chrome/browser/lifetime/termination_notification.h"
+#include "chrome/browser/permissions/permission_revocation_request.h"
 #include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
 #include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
 #endif
@@ -59,20 +56,25 @@
 #include "components/permissions/permission_manager.h"
 #include "components/permissions/permission_result.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/devtools_background_services_context.h"
-#include "content/public/browser/notification_service.h"
+#include "content/public/browser/permission_controller.h"
+#include "content/public/browser/permission_result.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
+#include "third_party/blink/public/common/permissions/permission_utils.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom.h"
 #include "third_party/blink/public/mojom/push_messaging/push_messaging_status.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/origin.h"
 
 #if BUILDFLAG(ENABLE_BACKGROUND_MODE)
 #include "chrome/browser/background/background_mode_manager.h"
@@ -83,19 +85,13 @@
 #if BUILDFLAG(IS_ANDROID)
 #include "base/android/jni_android.h"
 #include "chrome/android/chrome_jni_headers/PushMessagingServiceObserver_jni.h"
+#include "chrome/browser/android/shortcut_helper.h"
+#include "components/permissions/android/android_permission_util.h"
 #endif
 
 using instance_id::InstanceID;
 
 namespace {
-
-#ifdef TOOLKIT_QT
-GURL CreateCustomEndpoint(Profile *profile, const std::string& subscription_id) {
-  const GURL endpoint(profile->GetPushMessagingEndpoint() + subscription_id);
-  DCHECK(endpoint.is_valid());
-  return endpoint;
-}
-#endif
 
 // Scope passed to getToken to obtain GCM registration tokens.
 // Must match Java GoogleCloudMessaging.INSTANCE_ID_SCOPE.
@@ -125,6 +121,24 @@ const char kSenderIdRegistrationDeprecatedMessage[] =
     "will be supported in the future. For more information check "
     "https://crbug.com/979235.";
 
+#if BUILDFLAG(IS_ANDROID)
+// The serialized base::Time used for Notifications permission revocation grace
+// period checks. This is usually the time at which the first push message was
+// received without app-level Notifications permission. An empty
+// (default-constructed) base::Time if there is no known time without app-level
+// Notifications permission.
+const char kNotificationsPermissionRevocationGracePeriodDate[] =
+    "notifications_permission_revocation_grace_period";
+
+// The grace period that will be applied before site-level Notifications
+// permissions will be revoked and FCM unsubscribed.
+int GetNotificationsRevocationGracePeriodInDays() {
+  return base::GetFieldTrialParamByFeatureAsInt(
+      features::kRevokeNotificationsPermissionIfDisabledOnAppLevel,
+      features::kNotificationRevocationGracePeriodInDays, 3);
+}
+#endif
+
 void RecordDeliveryStatus(blink::mojom::PushEventStatus status) {
   UMA_HISTOGRAM_ENUMERATION("PushMessaging.DeliveryStatus", status);
 }
@@ -143,22 +157,6 @@ void RecordUnsubscribeGCMResult(gcm::GCMClient::Result result) {
 
 void RecordUnsubscribeIIDResult(InstanceID::Result result) {
   UMA_HISTOGRAM_ENUMERATION("PushMessaging.UnregistrationIIDResult", result);
-}
-
-blink::mojom::PermissionStatus ToPermissionStatus(
-    ContentSetting content_setting) {
-  switch (content_setting) {
-    case CONTENT_SETTING_ALLOW:
-      return blink::mojom::PermissionStatus::GRANTED;
-    case CONTENT_SETTING_BLOCK:
-      return blink::mojom::PermissionStatus::DENIED;
-    case CONTENT_SETTING_ASK:
-      return blink::mojom::PermissionStatus::ASK;
-    default:
-      break;
-  }
-  NOTREACHED();
-  return blink::mojom::PermissionStatus::DENIED;
 }
 
 void UnregisterCallbackToClosure(
@@ -280,10 +278,11 @@ PushMessagingServiceImpl::PushMessagingServiceImpl(Profile* profile)
   DCHECK(profile);
 #ifndef TOOLKIT_QT
   HostContentSettingsMapFactory::GetForProfile(profile_)->AddObserver(this);
-#endif
 
-  registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
-                 content::NotificationService::AllSources());
+  on_app_terminating_subscription_ =
+      browser_shutdown::AddAppTerminatingCallback(base::BindOnce(
+          &PushMessagingServiceImpl::OnAppTerminating, base::Unretained(this)));
+#endif
   refresh_observation_.Observe(&refresher_);
 }
 
@@ -380,8 +379,8 @@ void PushMessagingServiceImpl::OnMessage(const std::string& app_id,
         refresher_.FindActiveAppIdentifier(app_id);
     if (!refresh_identifier) {
       DeliverMessageCallback(app_id, GURL::EmptyGURL(),
-                             -1 /* kInvalidServiceWorkerRegistrationId */,
-                             message, false /* did_enqueue_message */,
+                             /*service_worker_registration_id=*/-1, message,
+                             /*did_enqueue_message=*/false,
                              blink::mojom::PushEventStatus::UNKNOWN_APP_ID);
       return;
     }
@@ -394,13 +393,22 @@ void PushMessagingServiceImpl::OnMessage(const std::string& app_id,
       /* was_encrypted= */ message.decrypted, std::string() /* error_message */,
       message.decrypted ? message.raw_data : std::string());
 
+#if BUILDFLAG(IS_ANDROID)
+  if (CheckAndRevokeNotificationPermissionIfNeeded(app_id, message,
+                                                   app_identifier)) {
+    // `message` is processed inside
+    // `CheckAndRevokeNotificationPermissionIfNeeded()`.
+    return;
+  }
+#endif
+
   if (IsPermissionSet(app_identifier.origin())) {
     messages_pending_permission_check_.emplace(app_id, message);
 #ifndef TOOLKIT_QT
-    // Start abusive origin verification only if no other verification is in
-    // progress.
-    if (!abusive_origin_revocation_request_)
-      CheckOriginForAbuseAndDispatchNextMessage();
+    // Start abusive and disruptive origin verifications only if no other
+    // respective verification is in progress.
+    if (!origin_revocation_request_)
+      CheckOriginAndDispatchNextMessage();
 #else
     DispatchNextMessage();
 #endif
@@ -408,13 +416,13 @@ void PushMessagingServiceImpl::OnMessage(const std::string& app_id,
     // Drop message and unregister if origin has lost push permission.
     DeliverMessageCallback(app_id, app_identifier.origin(),
                            app_identifier.service_worker_registration_id(),
-                           message, false /* did_enqueue_message */,
+                           message, /*did_enqueue_message=*/false,
                            blink::mojom::PushEventStatus::PERMISSION_DENIED);
   }
 }
 
 #ifndef TOOLKIT_QT
-void PushMessagingServiceImpl::CheckOriginForAbuseAndDispatchNextMessage() {
+void PushMessagingServiceImpl::CheckOriginAndDispatchNextMessage() {
   if (messages_pending_permission_check_.empty())
     return;
 
@@ -426,23 +434,93 @@ void PushMessagingServiceImpl::CheckOriginForAbuseAndDispatchNextMessage() {
       PushMessagingAppIdentifier::FindByAppId(profile_, message.app_id);
 
   if (app_identifier.is_null()) {
-    CheckOriginForAbuseAndDispatchNextMessage();
+    CheckOriginAndDispatchNextMessage();
     return;
   }
 
-  DCHECK(!abusive_origin_revocation_request_)
-      << "Create one Abusive Origin Revocation instance per request.";
-  abusive_origin_revocation_request_ =
-      std::make_unique<AbusiveOriginPermissionRevocationRequest>(
-          profile_, app_identifier.origin(),
-          base::BindOnce(&PushMessagingServiceImpl::OnCheckedOriginForAbuse,
-                         weak_factory_.GetWeakPtr(), std::move(message)));
+  DCHECK(!origin_revocation_request_)
+      << "Create one Origin Revocation instance per request.";
+  origin_revocation_request_ = std::make_unique<PermissionRevocationRequest>(
+      profile_, app_identifier.origin(),
+      base::BindOnce(&PushMessagingServiceImpl::OnCheckedOrigin,
+                     weak_factory_.GetWeakPtr(), std::move(message)));
 }
 
-void PushMessagingServiceImpl::OnCheckedOriginForAbuse(
+#if BUILDFLAG(IS_ANDROID)
+bool PushMessagingServiceImpl::CheckAndRevokeNotificationPermissionIfNeeded(
+    const std::string& app_id,
+    const gcm::IncomingMessage& message,
+    const PushMessagingAppIdentifier& app_identifier) {
+  if (!base::FeatureList::IsEnabled(
+          features::kRevokeNotificationsPermissionIfDisabledOnAppLevel)) {
+    return false;
+  }
+
+  bool has_app_level_notification_permission =
+      enabled_app_level_notification_permission_for_testing_.has_value()
+          ? enabled_app_level_notification_permission_for_testing_.value()
+          : permissions::AreAppLevelNotificationsEnabled();
+
+  bool contains_webapk = ShortcutHelper::DoesOriginContainAnyInstalledWebApk(
+      app_identifier.origin());
+  bool contains_twa =
+      ShortcutHelper::DoesOriginContainAnyInstalledTrustedWebActivity(
+          app_identifier.origin());
+  bool contains_installed_webapp = contains_twa || contains_webapk;
+
+  // If Notifications permission delegation is enabled, for the
+  // `app_identifier.origin()`, we should not revoke permissions because
+  // Notifications permissions are automatically synced with an installed app.
+  if (contains_installed_webapp)
+    return false;
+
+  PrefService* prefs = prefs_for_testing_.has_value()
+                           ? prefs_for_testing_.value()
+                           : g_browser_process->local_state();
+
+  if (has_app_level_notification_permission) {
+    // Chrome has app-level Notifications permission. Reset the grace period
+    // flag and continue as normal.
+    prefs->ClearPref(kNotificationsPermissionRevocationGracePeriodDate);
+    return false;
+  }
+
+  // Chrome has no app-level Notifications permission.
+  blink::mojom::PushEventStatus status;
+
+  if (prefs->GetTime(kNotificationsPermissionRevocationGracePeriodDate) ==
+      base::Time()) {
+    prefs->SetTime(kNotificationsPermissionRevocationGracePeriodDate,
+                   base::Time::Now());
+  }
+
+  base::TimeDelta permission_revocation_activated_duration =
+      base::Time::Now() -
+      prefs->GetTime(kNotificationsPermissionRevocationGracePeriodDate);
+  if (permission_revocation_activated_duration.InDays() <
+      GetNotificationsRevocationGracePeriodInDays()) {
+    // Ignore a push message during the grace period.
+    status = blink::mojom::PushEventStatus::NO_APP_LEVEL_PERMISSION_IGNORE;
+  } else {
+    // Revoke site-level Notifications permission & FCM.
+    status = blink::mojom::PushEventStatus::NO_APP_LEVEL_PERMISSION_UNSUBSCRIBE;
+
+    profile_->GetPermissionController()->ResetPermission(
+        blink::PermissionType::NOTIFICATIONS,
+        url::Origin::Create(app_identifier.origin()));
+  }
+
+  DeliverMessageCallback(app_id, app_identifier.origin(),
+                         app_identifier.service_worker_registration_id(),
+                         message, /*did_enqueue_message=*/false, status);
+  return true;
+}
+#endif
+
+void PushMessagingServiceImpl::OnCheckedOrigin(
     PendingMessage message,
-    AbusiveOriginPermissionRevocationRequest::Outcome outcome) {
-  abusive_origin_revocation_request_.reset();
+    PermissionRevocationRequest::Outcome outcome) {
+  origin_revocation_request_.reset();
 
   base::UmaHistogramLongTimes("PushMessaging.CheckOriginForAbuseTime",
                               base::Time::Now() - message.received_time);
@@ -451,7 +529,7 @@ void PushMessagingServiceImpl::OnCheckedOriginForAbuse(
       PushMessagingAppIdentifier::FindByAppId(profile_, message.app_id);
 
   if (app_identifier.is_null()) {
-    CheckOriginForAbuseAndDispatchNextMessage();
+    CheckOriginAndDispatchNextMessage();
     return;
   }
 
@@ -459,10 +537,9 @@ void PushMessagingServiceImpl::OnCheckedOriginForAbuse(
   int64_t service_worker_registration_id =
       app_identifier.service_worker_registration_id();
 
-  // It is possible that Notifications permission has been revoked by an user
+  // It is possible that Notifications permission has been revoked by a user
   // during abusive origin verification.
-  if (outcome == AbusiveOriginPermissionRevocationRequest::Outcome::
-                     PERMISSION_NOT_REVOKED &&
+  if (outcome == PermissionRevocationRequest::Outcome::PERMISSION_NOT_REVOKED &&
       IsPermissionSet(origin)) {
     std::queue<PendingMessage>& delivery_queue =
         message_delivery_queue_[{origin, service_worker_registration_id}];
@@ -476,18 +553,32 @@ void PushMessagingServiceImpl::OnCheckedOriginForAbuse(
           origin, service_worker_registration_id);
     }
   } else {
+    blink::mojom::PushEventStatus status;
+
+    switch (outcome) {
+      case PermissionRevocationRequest::Outcome::PERMISSION_NOT_REVOKED:
+        status = blink::mojom::PushEventStatus::PERMISSION_DENIED;
+        break;
+      case PermissionRevocationRequest::Outcome::
+          PERMISSION_REVOKED_DUE_TO_ABUSE:
+        status = blink::mojom::PushEventStatus::PERMISSION_REVOKED_ABUSIVE;
+        break;
+      case PermissionRevocationRequest::Outcome::
+          PERMISSION_REVOKED_DUE_TO_DISRUPTIVE_BEHAVIOR:
+        status = blink::mojom::PushEventStatus::PERMISSION_REVOKED_DISRUPTIVE;
+        break;
+      default:
+        NOTREACHED();
+    }
+
     // Drop message and unregister if origin has lost push permission.
-    DeliverMessageCallback(
-        message.app_id, origin, service_worker_registration_id, message.message,
-        false /* did_enqueue_message */,
-        outcome == AbusiveOriginPermissionRevocationRequest::Outcome::
-                       PERMISSION_NOT_REVOKED
-            ? blink::mojom::PushEventStatus::PERMISSION_DENIED
-            : blink::mojom::PushEventStatus::PERMISSION_REVOKED_ABUSIVE);
+    DeliverMessageCallback(message.app_id, origin,
+                           service_worker_registration_id, message.message,
+                           /* did_enqueue_message */ false, status);
   }
 
   // Verify the next message in the queue.
-  CheckOriginForAbuseAndDispatchNextMessage();
+  CheckOriginAndDispatchNextMessage();
 }
 #else
 void PushMessagingServiceImpl::DispatchNextMessage()
@@ -546,7 +637,7 @@ void PushMessagingServiceImpl::
   auto deliver_message_callback = base::BindOnce(
       &PushMessagingServiceImpl::DeliverMessageCallback,
       weak_factory_.GetWeakPtr(), app_id, origin,
-      service_worker_registration_id, message, true /* did_enqueue_message */);
+      service_worker_registration_id, message, /*did_enqueue_message=*/true);
 
   // It is possible that Notification permissions have been revoked by a user
   // while handling previous messages for |origin|.
@@ -629,6 +720,13 @@ void PushMessagingServiceImpl::DeliverMessageCallback(
     case blink::mojom::PushEventStatus::SERVICE_WORKER_ERROR:
       // Do nothing, and hope the error is transient.
       break;
+    case blink::mojom::PushEventStatus::NO_APP_LEVEL_PERMISSION_IGNORE:
+      // Do nothing, ignore push messages during the grace period.
+      break;
+    case blink::mojom::PushEventStatus::NO_APP_LEVEL_PERMISSION_UNSUBSCRIBE:
+      unsubscribe_reason =
+          blink::mojom::PushUnregistrationReason::NO_APP_LEVEL_PERMISSION;
+      break;
     case blink::mojom::PushEventStatus::UNKNOWN_APP_ID:
       unsubscribe_reason =
           blink::mojom::PushUnregistrationReason::DELIVERY_UNKNOWN_APP_ID;
@@ -644,6 +742,10 @@ void PushMessagingServiceImpl::DeliverMessageCallback(
     case blink::mojom::PushEventStatus::PERMISSION_REVOKED_ABUSIVE:
       unsubscribe_reason =
           blink::mojom::PushUnregistrationReason::PERMISSION_REVOKED_ABUSIVE;
+      break;
+    case blink::mojom::PushEventStatus::PERMISSION_REVOKED_DISRUPTIVE:
+      unsubscribe_reason =
+          blink::mojom::PushUnregistrationReason::PERMISSION_REVOKED_DISRUPTIVE;
       break;
   }
 
@@ -801,6 +903,7 @@ void PushMessagingServiceImpl::SubscribeFromDocument(
     blink::mojom::PushSubscriptionOptionsPtr options,
     bool user_gesture,
     RegisterCallback callback) {
+  render_process_id_ = render_process_id;
   PushMessagingAppIdentifier app_identifier =
       PushMessagingAppIdentifier::FindByServiceWorker(
           profile_, requesting_origin, service_worker_registration_id);
@@ -842,20 +945,28 @@ void PushMessagingServiceImpl::SubscribeFromDocument(
     return;
   }
 
-  // Push does not allow permission requests from iframes.
+  if (render_frame_host->GetLastCommittedOrigin().GetURL() !=
+      requesting_origin) {
+    SubscribeEndWithError(
+        std::move(callback),
+        blink::mojom::PushRegistrationStatus::PERMISSION_DENIED);
+    return;
+  }
+
+  // It is OK to ignore `requesting_origin` because it will be calculated from
+  // `render_frame_host` and we always use `requesting_origin` for
+  // NOTIFICATIONS.
 #ifndef TOOLKIT_QT
-  PermissionManagerFactory::GetForProfile(profile_)->RequestPermission(
-      ContentSettingsType::NOTIFICATIONS, render_frame_host, requesting_origin,
-      user_gesture,
+  profile_->GetPermissionController()->RequestPermissionFromCurrentDocument(
+      blink::PermissionType::NOTIFICATIONS, render_frame_host, user_gesture,
       base::BindOnce(&PushMessagingServiceImpl::DoSubscribe,
                      weak_factory_.GetWeakPtr(), std::move(app_identifier),
                      std::move(options), std::move(callback), render_process_id,
                      render_frame_id));
 #else
   if (!IsPermissionSet(requesting_origin)) {
-    profile_->GetPermissionControllerDelegate()->RequestPermission(
-      content::PermissionType::NOTIFICATIONS, render_frame_host, requesting_origin,
-      user_gesture,
+    profile_->GetPermissionController()->RequestPermissionFromCurrentDocument(
+      blink::PermissionType::NOTIFICATIONS, render_frame_host, user_gesture,
       base::BindOnce(&PushMessagingServiceImpl::DoSubscribe,
                      weak_factory_.GetWeakPtr(), std::move(app_identifier),
                      std::move(options), std::move(callback), render_process_id,
@@ -870,8 +981,10 @@ void PushMessagingServiceImpl::SubscribeFromDocument(
 void PushMessagingServiceImpl::SubscribeFromWorker(
     const GURL& requesting_origin,
     int64_t service_worker_registration_id,
+    int render_process_id,
     blink::mojom::PushSubscriptionOptionsPtr options,
     RegisterCallback register_callback) {
+  render_process_id_ = render_process_id;
   PushMessagingAppIdentifier app_identifier =
       PushMessagingAppIdentifier::FindByServiceWorker(
           profile_, requesting_origin, service_worker_registration_id);
@@ -900,11 +1013,7 @@ void PushMessagingServiceImpl::SubscribeFromWorker(
   DoSubscribe(std::move(app_identifier), std::move(options),
               std::move(register_callback),
               /* render_process_id= */ -1, /* render_frame_id= */ -1,
-#ifndef TOOLKIT_QT
-              CONTENT_SETTING_ALLOW);
-#else
               blink::mojom::PermissionStatus::GRANTED);
-#endif
 }
 
 blink::mojom::PermissionStatus PushMessagingServiceImpl::GetPermissionStatus(
@@ -917,17 +1026,32 @@ blink::mojom::PermissionStatus PushMessagingServiceImpl::GetPermissionStatus(
   // Because the Push API is tied to Service Workers, many usages of the API
   // won't have an embedding origin at all. Only consider the requesting
   // |origin| when checking whether permission to use the API has been granted.
-  return ToPermissionStatus(
-      PermissionManagerFactory::GetForProfile(profile_)
-          ->GetPermissionStatus(ContentSettingsType::NOTIFICATIONS, origin,
-                                origin)
-          .content_setting);
+  if (render_process_id_ != content::ChildProcessHost::kInvalidUniqueID) {
+    return profile_->GetPermissionController()->GetPermissionStatusForWorker(
+        blink::PermissionType::NOTIFICATIONS,
+        content::RenderProcessHost::FromID(render_process_id_),
+        url::Origin::Create(origin));
+  } else {
+    return profile_->GetPermissionController()
+        ->GetPermissionResultForOriginWithoutContext(
+            blink::PermissionType::NOTIFICATIONS, url::Origin::Create(origin))
+        .status;
+  }
 #else
-  return profile_->GetPermissionControllerDelegate()
-            ->GetPermissionStatus(content::PermissionType::NOTIFICATIONS,
-              origin, origin);
+  return profile_->GetPermissionController()
+      ->GetPermissionResultForOriginWithoutContext(
+          blink::PermissionType::NOTIFICATIONS, url::Origin::Create(origin))
+      .status;
 #endif
 }
+
+#if BUILDFLAG(IS_ANDROID)
+// static
+void PushMessagingServiceImpl::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterTimePref(kNotificationsPermissionRevocationGracePeriodDate,
+                             base::Time());
+}
+#endif
 
 bool PushMessagingServiceImpl::SupportNonVisibleMessages() {
   return false;
@@ -939,13 +1063,8 @@ void PushMessagingServiceImpl::DoSubscribe(
     RegisterCallback register_callback,
     int render_process_id,
     int render_frame_id,
-#ifndef TOOLKIT_QT
-    ContentSetting content_setting) {
-  if (content_setting != CONTENT_SETTING_ALLOW) {
-#else
     blink::mojom::PermissionStatus permission_status) {
   if (permission_status != blink::mojom::PermissionStatus::GRANTED) {
-#endif
     SubscribeEndWithError(
         std::move(register_callback),
         blink::mojom::PushRegistrationStatus::PERMISSION_DENIED);
@@ -1039,11 +1158,7 @@ void PushMessagingServiceImpl::DidSubscribe(
 
   switch (result) {
     case InstanceID::SUCCESS: {
-#ifndef TOOLKIT_QT
       const GURL endpoint = push_messaging::CreateEndpoint(subscription_id);
-#else
-      const GURL endpoint = CreateCustomEndpoint(profile_, subscription_id);
-#endif
 
       // Make sure that this subscription has associated encryption keys prior
       // to returning it to the developer - they'll need this information in
@@ -1118,11 +1233,7 @@ void PushMessagingServiceImpl::GetSubscriptionInfo(
     return;
   }
 
-#ifndef TOOLKIT_QT
   const GURL endpoint = push_messaging::CreateEndpoint(subscription_id);
-#else
-  const GURL endpoint = CreateCustomEndpoint(profile_, subscription_id);
-#endif
 
   const std::string& app_id = app_identifier.app_id();
   absl::optional<base::Time> expiration_time = app_identifier.expiration_time();
@@ -1561,13 +1672,7 @@ void PushMessagingServiceImpl::Shutdown() {
 #endif
 }
 
-// content::NotificationObserver methods ---------------------------------------
-
-void PushMessagingServiceImpl::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_APP_TERMINATING, type);
+void PushMessagingServiceImpl::OnAppTerminating() {
   shutdown_started_ = true;
 #if BUILDFLAG(ENABLE_BACKGROUND_MODE)
   in_flight_keep_alive_.reset();
@@ -1655,11 +1760,7 @@ void PushMessagingServiceImpl::UpdateSubscription(
   // the expiration time of |app_identifier|
   DoSubscribe(app_identifier, std::move(options), std::move(register_callback),
               -1 /* render_process_id */, -1 /* render_frame_id */,
-#ifndef TOOLKIT_QT
-              CONTENT_SETTING_ALLOW);
-#else
               blink::mojom::PermissionStatus::GRANTED);
-#endif
 }
 
 void PushMessagingServiceImpl::DidUpdateSubscription(

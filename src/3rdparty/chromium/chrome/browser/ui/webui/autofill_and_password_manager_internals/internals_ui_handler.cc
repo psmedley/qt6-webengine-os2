@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,10 @@
 #include "content/public/browser/browsing_data_filter_builder.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
+
+#if BUILDFLAG(IS_ANDROID)
+#include "components/password_manager/core/browser/password_manager_eviction_util.h"
+#endif
 
 using autofill::LogRouter;
 
@@ -91,12 +95,18 @@ InternalsUIHandler::~InternalsUIHandler() {
 }
 
 void InternalsUIHandler::RegisterMessages() {
-  web_ui()->RegisterDeprecatedMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "loaded", base::BindRepeating(&InternalsUIHandler::OnLoaded,
                                     base::Unretained(this)));
-  web_ui()->RegisterDeprecatedMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "resetCache", base::BindRepeating(&InternalsUIHandler::OnResetCache,
                                         base::Unretained(this)));
+#if BUILDFLAG(IS_ANDROID)
+  web_ui()->RegisterMessageCallback(
+      "resetUpmEviction",
+      base::BindRepeating(&InternalsUIHandler::OnResetUpmEviction,
+                          base::Unretained(this)));
+#endif
 }
 
 void InternalsUIHandler::OnJavascriptAllowed() {
@@ -107,7 +117,7 @@ void InternalsUIHandler::OnJavascriptDisallowed() {
   EndSubscription();
 }
 
-void InternalsUIHandler::OnLoaded(const base::ListValue* args) {
+void InternalsUIHandler::OnLoaded(const base::Value::List& args) {
   AllowJavascript();
   FireWebUIListener(call_on_load_, base::Value());
   // This is only available in contents, because the iOS BrowsingDataRemover
@@ -118,9 +128,17 @@ void InternalsUIHandler::OnLoaded(const base::ListValue* args) {
       "notify-about-incognito",
       base::Value(Profile::FromWebUI(web_ui())->IsIncognitoProfile()));
   FireWebUIListener("notify-about-variations", version_ui::GetVariationsList());
+
+#if BUILDFLAG(IS_ANDROID)
+  auto* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
+
+  FireWebUIListener(
+      "enable-reset-upm-eviction-button",
+      base::Value(password_manager_upm_eviction::IsCurrentUserEvicted(prefs)));
+#endif
 }
 
-void InternalsUIHandler::OnResetCache(const base::ListValue* args) {
+void InternalsUIHandler::OnResetCache(const base::Value::List& args) {
   if (!autofill_cache_resetter_) {
     content::BrowserContext* browser_context = Profile::FromWebUI(web_ui());
     autofill_cache_resetter_.emplace(browser_context);
@@ -133,6 +151,14 @@ void InternalsUIHandler::OnResetCacheDone(const std::string& message) {
   FireWebUIListener("notify-reset-done", base::Value(message));
 }
 
+#if BUILDFLAG(IS_ANDROID)
+void InternalsUIHandler::OnResetUpmEviction(const base::Value::List& args) {
+  auto* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
+  password_manager_upm_eviction::ReenrollCurrentUser(prefs);
+  FireWebUIListener("enable-reset-upm-eviction-button", base::Value(false));
+}
+#endif
+
 void InternalsUIHandler::StartSubscription() {
   LogRouter* log_router =
       get_log_router_function_.Run(Profile::FromWebUI(web_ui()));
@@ -140,10 +166,7 @@ void InternalsUIHandler::StartSubscription() {
     return;
 
   registered_with_log_router_ = true;
-
-  const auto& past_logs = log_router->RegisterReceiver(this);
-  for (const auto& entry : past_logs)
-    LogEntry(entry);
+  log_router->RegisterReceiver(this);
 }
 
 void InternalsUIHandler::EndSubscription() {
@@ -156,8 +179,8 @@ void InternalsUIHandler::EndSubscription() {
     log_router->UnregisterReceiver(this);
 }
 
-void InternalsUIHandler::LogEntry(const base::Value& entry) {
-  if (!registered_with_log_router_ || entry.is_none())
+void InternalsUIHandler::LogEntry(const base::Value::Dict& entry) {
+  if (!registered_with_log_router_)
     return;
   FireWebUIListener("add-structured-log", entry);
 }

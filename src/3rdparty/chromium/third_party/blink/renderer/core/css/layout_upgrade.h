@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@ namespace blink {
 
 class Node;
 class Document;
+class HTMLFrameOwnerElement;
 
 // Various APIs require that style information is updated immediately, e.g.
 // getComputedStyle. This is done by calling Document::UpdateStyleAndLayoutTree-
@@ -48,33 +49,24 @@ class ParentLayoutUpgrade : public LayoutUpgrade {
   STACK_ALLOCATED();
 
  public:
-  explicit ParentLayoutUpgrade(Document& document) : document_(document) {}
+  explicit ParentLayoutUpgrade(Document& document, HTMLFrameOwnerElement& owner)
+      : document_(document), owner_(owner) {}
 
   bool ShouldUpgrade() override;
 
  private:
+  // That the `document_` is the inner Document, i.e. inside the iframe.
   Document& document_;
+  HTMLFrameOwnerElement& owner_;
 };
 
-// Upgrades whenever the (inclusive) ancestor chain has a relevant upgrade
-// reason. Suitable when the style of a specific node will be accessed.
+// Upgrades whenever the (inclusive) ancestor chain contains an interleaving
+// root. Suitable when the style of a specific node will be accessed.
 class NodeLayoutUpgrade : public LayoutUpgrade {
   STACK_ALLOCATED();
 
  public:
   explicit NodeLayoutUpgrade(const Node& node) : node_(node) {}
-
-  using Reasons = unsigned;
-
-  enum Reason {
-    // The current ComputedStyle of this node depends on container queries.
-    kDependsOnContainerQueries = 1 << 0,
-    // The node is an interleaving root. This means that we *may* enter
-    // interleaved style recalc (via layout) on this node.
-    kInterleavingRoot = 1 << 1,
-  };
-
-  static Reasons GetReasons(const Node&);
 
   bool ShouldUpgrade() override;
 

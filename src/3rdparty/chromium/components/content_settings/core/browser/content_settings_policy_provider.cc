@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,6 +55,10 @@ constexpr PrefsForManagedContentSettingsMapEntry
          ContentSettingsType::JAVASCRIPT, CONTENT_SETTING_ALLOW},
         {prefs::kManagedJavaScriptBlockedForUrls,
          ContentSettingsType::JAVASCRIPT, CONTENT_SETTING_BLOCK},
+        {prefs::kManagedClipboardAllowedForUrls,
+         ContentSettingsType::CLIPBOARD_READ_WRITE, CONTENT_SETTING_ALLOW},
+        {prefs::kManagedClipboardBlockedForUrls,
+         ContentSettingsType::CLIPBOARD_READ_WRITE, CONTENT_SETTING_BLOCK},
         {prefs::kManagedNotificationsAllowedForUrls,
          ContentSettingsType::NOTIFICATIONS, CONTENT_SETTING_ALLOW},
         {prefs::kManagedNotificationsBlockedForUrls,
@@ -96,9 +100,9 @@ constexpr PrefsForManagedContentSettingsMapEntry
         {prefs::kManagedWebHidBlockedForUrls, ContentSettingsType::HID_GUARD,
          CONTENT_SETTING_BLOCK},
         {prefs::kManagedWindowPlacementAllowedForUrls,
-         ContentSettingsType::WINDOW_PLACEMENT, CONTENT_SETTING_ALLOW},
+         ContentSettingsType::WINDOW_MANAGEMENT, CONTENT_SETTING_ALLOW},
         {prefs::kManagedWindowPlacementBlockedForUrls,
-         ContentSettingsType::WINDOW_PLACEMENT, CONTENT_SETTING_BLOCK},
+         ContentSettingsType::WINDOW_MANAGEMENT, CONTENT_SETTING_BLOCK},
         {prefs::kManagedLocalFontsAllowedForUrls,
          ContentSettingsType::LOCAL_FONTS, CONTENT_SETTING_ALLOW},
         {prefs::kManagedLocalFontsBlockedForUrls,
@@ -107,6 +111,8 @@ constexpr PrefsForManagedContentSettingsMapEntry
 
 constexpr const char* kManagedPrefs[] = {
     prefs::kManagedAutoSelectCertificateForUrls,
+    prefs::kManagedClipboardAllowedForUrls,
+    prefs::kManagedClipboardBlockedForUrls,
     prefs::kManagedCookiesAllowedForUrls,
     prefs::kManagedCookiesBlockedForUrls,
     prefs::kManagedCookiesSessionOnlyForUrls,
@@ -152,6 +158,7 @@ constexpr const char* kManagedPrefs[] = {
 // is managed any user defined exceptions (patterns) for this type are ignored.
 constexpr const char* kManagedDefaultPrefs[] = {
     prefs::kManagedDefaultAdsSetting,
+    prefs::kManagedDefaultClipboardSetting,
     prefs::kManagedDefaultCookiesSetting,
     prefs::kManagedDefaultFileSystemReadGuardSetting,
     prefs::kManagedDefaultFileSystemWriteGuardSetting,
@@ -188,6 +195,8 @@ struct PolicyProvider::PrefsForManagedDefaultMapEntry {
 const PolicyProvider::PrefsForManagedDefaultMapEntry
     PolicyProvider::kPrefsForManagedDefault[] = {
         {ContentSettingsType::ADS, prefs::kManagedDefaultAdsSetting},
+        {ContentSettingsType::CLIPBOARD_READ_WRITE,
+         prefs::kManagedDefaultClipboardSetting},
         {ContentSettingsType::COOKIES, prefs::kManagedDefaultCookiesSetting},
         {ContentSettingsType::IMAGES, prefs::kManagedDefaultImagesSetting},
         {ContentSettingsType::GEOLOCATION,
@@ -220,7 +229,7 @@ const PolicyProvider::PrefsForManagedDefaultMapEntry
          prefs::kManagedDefaultJavaScriptJitSetting},
         {ContentSettingsType::HID_GUARD,
          prefs::kManagedDefaultWebHidGuardSetting},
-        {ContentSettingsType::WINDOW_PLACEMENT,
+        {ContentSettingsType::WINDOW_MANAGEMENT,
          prefs::kManagedDefaultWindowPlacementSetting},
         {ContentSettingsType::LOCAL_FONTS,
          prefs::kManagedDefaultLocalFontsSetting},
@@ -282,8 +291,7 @@ void PolicyProvider::GetContentSettingsFromPreferences(
       return;
     }
 
-    base::Value::ConstListView pattern_str_list =
-        pref->GetValue()->GetListDeprecated();
+    const base::Value::List& pattern_str_list = pref->GetValue()->GetList();
     for (size_t i = 0; i < pattern_str_list.size(); ++i) {
       if (!pattern_str_list[i].is_string()) {
         NOTREACHED() << "Could not read content settings pattern #" << i
@@ -324,8 +332,7 @@ void PolicyProvider::GetContentSettingsFromPreferences(
 
       // Don't set a timestamp for policy settings.
       value_map->SetValue(pattern_pair.first, secondary_pattern,
-                          entry.content_type, base::Time(),
-                          base::Value(entry.setting), {});
+                          entry.content_type, base::Value(entry.setting), {});
     }
   }
 }
@@ -366,7 +373,7 @@ void PolicyProvider::GetAutoSelectCertificateSettingsFromPreferences(
   //   }
   // }
   std::unordered_map<std::string, base::DictionaryValue> filters_map;
-  for (const auto& pattern_filter_str : pref->GetValue()->GetListDeprecated()) {
+  for (const auto& pattern_filter_str : pref->GetValue()->GetList()) {
     if (!pattern_filter_str.is_string()) {
       NOTREACHED();
       continue;
@@ -413,7 +420,7 @@ void PolicyProvider::GetAutoSelectCertificateSettingsFromPreferences(
 
     value_map->SetValue(pattern, ContentSettingsPattern::Wildcard(),
                         ContentSettingsType::AUTO_SELECT_CERTIFICATE,
-                        base::Time(), setting.Clone(), {});
+                        setting.Clone(), {});
   }
 }
 
@@ -449,7 +456,7 @@ void PolicyProvider::UpdateManagedDefaultSetting(
     // Don't set a timestamp for policy settings.
     value_map_.SetValue(ContentSettingsPattern::Wildcard(),
                         ContentSettingsPattern::Wildcard(), entry.content_type,
-                        base::Time(), base::Value(setting), {});
+                        base::Value(setting), {});
   }
 }
 

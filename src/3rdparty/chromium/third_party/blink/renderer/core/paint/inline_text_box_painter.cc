@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/core/layout/line/inline_text_box.h"
 #include "third_party/blink/renderer/core/layout/text_decoration_offset.h"
+#include "third_party/blink/renderer/core/mobile_metrics/mobile_friendliness_checker.h"
 #include "third_party/blink/renderer/core/paint/applied_decoration_painter.h"
 #include "third_party/blink/renderer/core/paint/document_marker_painter.h"
 #include "third_party/blink/renderer/core/paint/highlight_painting_utils.h"
@@ -159,6 +160,21 @@ void InlineTextBoxPainter::Paint(const PaintInfo& paint_info,
 
   physical_overflow.Move(paint_offset);
   gfx::Rect visual_rect = ToEnclosingRect(physical_overflow);
+
+  if (paint_info.phase == PaintPhase::kForeground) {
+    if (auto* mf_checker = MobileFriendlinessChecker::From(
+            inline_text_box_.GetLineLayoutItem().GetDocument())) {
+      if (const auto* text = DynamicTo<LayoutText>(InlineLayoutObject())) {
+        PhysicalRect clipped_rect = PhysicalRect(visual_rect);
+        clipped_rect.Intersect(PhysicalRect(paint_info.GetCullRect().Rect()));
+        mf_checker->NotifyPaintTextFragment(
+            clipped_rect, text->StyleRef().FontSize(),
+            paint_info.context.GetPaintController()
+                .CurrentPaintChunkProperties()
+                .Transform());
+      }
+    }
+  }
 
   GraphicsContext& context = paint_info.context;
   PhysicalOffset box_origin =
@@ -412,7 +428,6 @@ void InlineTextBoxPainter::Paint(const PaintInfo& paint_info,
   if (!paint_selected_text_only) {
     // Paint text decorations except line-through.
     absl::optional<TextDecorationInfo> decoration_info;
-    bool has_line_through_decoration = false;
     if (style_to_use.TextDecorationsInEffect() != TextDecorationLine::kNone &&
         inline_text_box_.Truncation() != kCFullTruncation) {
       PhysicalOffset local_origin = box_origin;
@@ -427,16 +442,16 @@ void InlineTextBoxPainter::Paint(const PaintInfo& paint_info,
               ? absl::optional<AppliedTextDecoration>(
                     selection_style.selection_text_decoration)
               : absl::nullopt;
-      decoration_info.emplace(local_origin, width,
-                              inline_text_box_.Root().BaselineType(),
-                              style_to_use, style_to_use.GetFont(),
-                              selection_text_decoration, decorating_box_style);
-      TextDecorationOffset decoration_offset(decoration_info->Style(),
+      decoration_info.emplace(
+          local_origin, width, style_to_use,
+          /* inline_context */ nullptr, selection_text_decoration,
+          /* font_override */ nullptr, MinimumThickness1(true), 1.0f,
+          inline_text_box_.Root().BaselineType(), decorating_box_style);
+      TextDecorationOffset decoration_offset(decoration_info->TargetStyle(),
                                              &inline_text_box_, decorating_box);
       text_painter.PaintDecorationsExceptLineThrough(
           decoration_offset, decoration_info.value(), paint_info,
-          style_to_use.AppliedTextDecorations(), text_style,
-          &has_line_through_decoration);
+          style_to_use.AppliedTextDecorations(), text_style);
     }
 
     int start_offset = 0;
@@ -457,7 +472,7 @@ void InlineTextBoxPainter::Paint(const PaintInfo& paint_info,
                        auto_dark_mode);
 
     // Paint line-through decoration if needed.
-    if (has_line_through_decoration) {
+    if (decoration_info.has_value()) {
       text_painter.PaintDecorationsOnlyLineThrough(
           decoration_info.value(), paint_info,
           style_to_use.AppliedTextDecorations(), text_style);
@@ -590,7 +605,7 @@ void InlineTextBoxPainter::PaintSingleMarkerBackgroundRun(
   context.DrawHighlightForText(
       font, inline_text_box_.ConstructTextRun(style), local_origin, sel_height,
       background_color,
-      PaintAutoDarkMode(style, DarkModeFilter::ElementRole::kBackground),
+      PaintAutoDarkMode(style, DarkModeFilter::ElementRole::kSelection),
       start_pos, end_pos);
 }
 
@@ -991,7 +1006,7 @@ void InlineTextBoxPainter::PaintTextMarkerBackground(
   context.Clip(gfx::RectF(box_rect));
   context.DrawHighlightForText(
       font, run, gfx::PointF(box_origin), box_rect.Height().ToInt(), color,
-      PaintAutoDarkMode(style, DarkModeFilter::ElementRole::kBackground),
+      PaintAutoDarkMode(style, DarkModeFilter::ElementRole::kSelection),
       paint_offsets.first, paint_offsets.second);
 }
 

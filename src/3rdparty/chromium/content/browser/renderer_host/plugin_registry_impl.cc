@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "content/public/browser/plugin_service_filter.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/webplugininfo.h"
 
 namespace content {
 
@@ -68,7 +69,8 @@ void PluginRegistryImpl::GetPluginsComplete(
 
   const int routing_id = MSG_ROUTING_NONE;
   for (const auto& plugin : all_plugins) {
-    if (!filter || filter->IsPluginAvailable(render_process_id_, routing_id, plugin)) {
+    if (!filter ||
+        filter->IsPluginAvailable(render_process_id_, routing_id, rph->GetBrowserContext(), plugin)) {
       auto plugin_blink = blink::mojom::PluginInfo::New();
       plugin_blink->name = plugin.name;
       plugin_blink->description = plugin.desc;

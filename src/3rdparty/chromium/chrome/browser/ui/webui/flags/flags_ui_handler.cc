@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,29 +30,29 @@ FlagsUIHandler::FlagsUIHandler()
 FlagsUIHandler::~FlagsUIHandler() {}
 
 void FlagsUIHandler::RegisterMessages() {
-  web_ui()->RegisterDeprecatedMessageCallback(
+  web_ui()->RegisterMessageCallback(
       flags_ui::kRequestExperimentalFeatures,
       base::BindRepeating(&FlagsUIHandler::HandleRequestExperimentalFeatures,
                           base::Unretained(this)));
-  web_ui()->RegisterDeprecatedMessageCallback(
+  web_ui()->RegisterMessageCallback(
       flags_ui::kEnableExperimentalFeature,
       base::BindRepeating(
           &FlagsUIHandler::HandleEnableExperimentalFeatureMessage,
           base::Unretained(this)));
-  web_ui()->RegisterDeprecatedMessageCallback(
+  web_ui()->RegisterMessageCallback(
       flags_ui::kSetOriginListFlag,
       base::BindRepeating(&FlagsUIHandler::HandleSetOriginListFlagMessage,
                           base::Unretained(this)));
-  web_ui()->RegisterDeprecatedMessageCallback(
+  web_ui()->RegisterMessageCallback(
       flags_ui::kRestartBrowser,
       base::BindRepeating(&FlagsUIHandler::HandleRestartBrowser,
                           base::Unretained(this)));
-  web_ui()->RegisterDeprecatedMessageCallback(
+  web_ui()->RegisterMessageCallback(
       flags_ui::kResetAllFlags,
       base::BindRepeating(&FlagsUIHandler::HandleResetAllFlags,
                           base::Unretained(this)));
 #if BUILDFLAG(IS_CHROMEOS)
-  web_ui()->RegisterDeprecatedMessageCallback(
+  web_ui()->RegisterMessageCallback(
       flags_ui::kCrosUrlFlagsRedirect,
       base::BindRepeating(&FlagsUIHandler::HandleCrosUrlFlagsRedirect,
                           base::Unretained(this)));
@@ -69,9 +69,9 @@ void FlagsUIHandler::Init(flags_ui::FlagsStorage* flags_storage,
 }
 
 void FlagsUIHandler::HandleRequestExperimentalFeatures(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
-  const base::Value& callback_id = args->GetListDeprecated()[0];
+  const base::Value& callback_id = args[0];
 
   experimental_features_callback_id_ = callback_id.GetString();
   // Bail out if the handler hasn't been initialized yet. The request will be
@@ -84,10 +84,10 @@ void FlagsUIHandler::HandleRequestExperimentalFeatures(
 }
 
 void FlagsUIHandler::SendExperimentalFeatures() {
-  base::DictionaryValue results;
+  base::Value::Dict results;
 
-  base::Value::ListStorage supported_features;
-  base::Value::ListStorage unsupported_features;
+  base::Value::List supported_features;
+  base::Value::List unsupported_features;
 
   if (deprecated_features_only_) {
     about_flags::GetFlagFeatureEntriesForDeprecatedPage(
@@ -99,32 +99,31 @@ void FlagsUIHandler::SendExperimentalFeatures() {
                                        unsupported_features);
   }
 
-  results.SetKey(flags_ui::kSupportedFeatures, base::Value(supported_features));
-  results.SetKey(flags_ui::kUnsupportedFeatures,
-                 base::Value(unsupported_features));
-  results.SetBoolKey(flags_ui::kNeedsRestart,
-                     about_flags::IsRestartNeededToCommitChanges());
-  results.SetBoolKey(flags_ui::kShowOwnerWarning,
-                     access_ == flags_ui::kGeneralAccessFlagsOnly);
+  results.Set(flags_ui::kSupportedFeatures, std::move(supported_features));
+  results.Set(flags_ui::kUnsupportedFeatures, std::move(unsupported_features));
+  results.Set(flags_ui::kNeedsRestart,
+              about_flags::IsRestartNeededToCommitChanges());
+  results.Set(flags_ui::kShowOwnerWarning,
+              access_ == flags_ui::kGeneralAccessFlagsOnly);
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  const bool showSystemFlagsLink = crosapi::browser_util::IsLacrosEnabled();
+  const bool show_system_flags_link = crosapi::browser_util::IsLacrosEnabled();
 #else
-  const bool showSystemFlagsLink = true;
+  const bool show_system_flags_link = true;
 #endif
-  results.SetBoolKey(flags_ui::kShowSystemFlagsLink, showSystemFlagsLink);
+  results.Set(flags_ui::kShowSystemFlagsLink, show_system_flags_link);
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS_ASH)
   version_info::Channel channel = chrome::GetChannel();
-  results.SetBoolKey(
+  results.Set(
       flags_ui::kShowBetaChannelPromotion,
       channel == version_info::Channel::STABLE && !deprecated_features_only_);
-  results.SetBoolKey(
+  results.Set(
       flags_ui::kShowDevChannelPromotion,
       channel == version_info::Channel::BETA && !deprecated_features_only_);
 #else
-  results.SetBoolKey(flags_ui::kShowBetaChannelPromotion, false);
-  results.SetBoolKey(flags_ui::kShowDevChannelPromotion, false);
+  results.Set(flags_ui::kShowBetaChannelPromotion, false);
+  results.Set(flags_ui::kShowDevChannelPromotion, false);
 #endif
   ResolveJavascriptCallback(base::Value(experimental_features_callback_id_),
                             results);
@@ -132,20 +131,18 @@ void FlagsUIHandler::SendExperimentalFeatures() {
 }
 
 void FlagsUIHandler::HandleEnableExperimentalFeatureMessage(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   DCHECK(flags_storage_);
-  DCHECK_EQ(2u, args->GetListDeprecated().size());
-  if (args->GetListDeprecated().size() != 2)
+  DCHECK_EQ(2u, args.size());
+  if (args.size() != 2)
     return;
 
-  if (!args->GetListDeprecated()[0].is_string() ||
-      !args->GetListDeprecated()[1].is_string()) {
+  if (!args[0].is_string() || !args[1].is_string()) {
     NOTREACHED();
     return;
   }
-  const std::string& entry_internal_name =
-      args->GetListDeprecated()[0].GetString();
-  const std::string& enable_str = args->GetListDeprecated()[1].GetString();
+  const std::string& entry_internal_name = args[0].GetString();
+  const std::string& enable_str = args[1].GetString();
   if (entry_internal_name.empty()) {
     NOTREACHED();
     return;
@@ -156,21 +153,19 @@ void FlagsUIHandler::HandleEnableExperimentalFeatureMessage(
 }
 
 void FlagsUIHandler::HandleSetOriginListFlagMessage(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   DCHECK(flags_storage_);
-  if (args->GetListDeprecated().size() != 2) {
+  if (args.size() != 2) {
     NOTREACHED();
     return;
   }
 
-  if (!args->GetListDeprecated()[0].is_string() ||
-      !args->GetListDeprecated()[1].is_string()) {
+  if (!args[0].is_string() || !args[1].is_string()) {
     NOTREACHED();
     return;
   }
-  const std::string& entry_internal_name =
-      args->GetListDeprecated()[0].GetString();
-  const std::string& value_str = args->GetListDeprecated()[1].GetString();
+  const std::string& entry_internal_name = args[0].GetString();
+  const std::string& value_str = args[1].GetString();
   if (entry_internal_name.empty()) {
     NOTREACHED();
     return;
@@ -180,7 +175,7 @@ void FlagsUIHandler::HandleSetOriginListFlagMessage(
                                  flags_storage_.get());
 }
 
-void FlagsUIHandler::HandleRestartBrowser(const base::ListValue* args) {
+void FlagsUIHandler::HandleRestartBrowser(const base::Value::List& args) {
   DCHECK(flags_storage_);
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   // On Chrome OS be less intrusive and restart inside the user session after
@@ -201,13 +196,13 @@ void FlagsUIHandler::HandleRestartBrowser(const base::ListValue* args) {
   chrome::AttemptRestart();
 }
 
-void FlagsUIHandler::HandleResetAllFlags(const base::ListValue* args) {
+void FlagsUIHandler::HandleResetAllFlags(const base::Value::List& args) {
   DCHECK(flags_storage_);
   about_flags::ResetAllFlags(flags_storage_.get());
 }
 
 #if BUILDFLAG(IS_CHROMEOS)
-void FlagsUIHandler::HandleCrosUrlFlagsRedirect(const base::ListValue* args) {
+void FlagsUIHandler::HandleCrosUrlFlagsRedirect(const base::Value::List& args) {
   about_flags::CrosUrlFlagsRedirect();
 }
 #endif

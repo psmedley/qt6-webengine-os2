@@ -182,6 +182,8 @@ util::Status FuchsiaTraceTokenizer::Parse(TraceBlobView blob) {
 // facilitate the parsing after sorting, a small view of the provider's string
 // and thread tables is passed alongside the record. See |FuchsiaProviderView|.
 void FuchsiaTraceTokenizer::ParseRecord(TraceBlobView tbv) {
+  using ftrace_utils::TaskState;
+
   TraceStorage* storage = context_->storage.get();
   ProcessTracker* procs = context_->process_tracker.get();
   TraceSorter* sorter = context_->sorter.get();
@@ -280,9 +282,8 @@ void FuchsiaTraceTokenizer::ParseRecord(TraceBlobView tbv) {
       // Build the FuchsiaRecord for the event, i.e. extract the thread
       // information if not inline, and any non-inline strings (name, category
       // for now, arg names and string values in the future).
-      auto record =
-          std::unique_ptr<FuchsiaRecord>(new FuchsiaRecord(std::move(tbv)));
-      record->set_ticks_per_second(current_provider_->ticks_per_second);
+      FuchsiaRecord record(std::move(tbv));
+      record.set_ticks_per_second(current_provider_->ticks_per_second);
 
       uint64_t ticks;
       if (!cursor.ReadUint64(&ticks)) {
@@ -300,23 +301,23 @@ void FuchsiaTraceTokenizer::ParseRecord(TraceBlobView tbv) {
         // Skip over inline thread
         cursor.ReadInlineThread(nullptr);
       } else {
-        record->InsertThread(thread_ref,
-                             current_provider_->thread_table[thread_ref]);
+        record.InsertThread(thread_ref,
+                            current_provider_->thread_table[thread_ref]);
       }
 
       if (fuchsia_trace_utils::IsInlineString(cat_ref)) {
         // Skip over inline string
         cursor.ReadInlineString(cat_ref, nullptr);
       } else {
-        record->InsertString(cat_ref, current_provider_->string_table[cat_ref]);
+        record.InsertString(cat_ref, current_provider_->string_table[cat_ref]);
       }
 
       if (fuchsia_trace_utils::IsInlineString(name_ref)) {
         // Skip over inline string
         cursor.ReadInlineString(name_ref, nullptr);
       } else {
-        record->InsertString(name_ref,
-                             current_provider_->string_table[name_ref]);
+        record.InsertString(name_ref,
+                            current_provider_->string_table[name_ref]);
       }
 
       uint32_t n_args =
@@ -339,8 +340,8 @@ void FuchsiaTraceTokenizer::ParseRecord(TraceBlobView tbv) {
           // Skip over inline string
           cursor.ReadInlineString(arg_name_ref, nullptr);
         } else {
-          record->InsertString(arg_name_ref,
-                               current_provider_->string_table[arg_name_ref]);
+          record.InsertString(arg_name_ref,
+                              current_provider_->string_table[arg_name_ref]);
         }
 
         if (arg_type == kArgString) {
@@ -350,8 +351,8 @@ void FuchsiaTraceTokenizer::ParseRecord(TraceBlobView tbv) {
             // Skip over inline string
             cursor.ReadInlineString(arg_value_ref, nullptr);
           } else {
-            record->InsertString(
-                arg_value_ref, current_provider_->string_table[arg_value_ref]);
+            record.InsertString(arg_value_ref,
+                                current_provider_->string_table[arg_value_ref]);
           }
         }
 
@@ -508,32 +509,28 @@ void FuchsiaTraceTokenizer::ParseRecord(TraceBlobView tbv) {
                                 static_cast<uint32_t>(outgoing_thread.pid));
         RunningThread previous_thread = cpu_threads_[cpu];
 
-        ftrace_utils::TaskState end_state;
+        base::Optional<TaskState> end_state;
         switch (outgoing_state) {
           case kThreadNew:
           case kThreadRunning: {
-            end_state =
-                ftrace_utils::TaskState(ftrace_utils::TaskState::kRunnable);
+            end_state = TaskState::FromParsedFlags(TaskState::kRunnable);
             break;
           }
           case kThreadBlocked: {
-            end_state = ftrace_utils::TaskState(
-                ftrace_utils::TaskState::kInterruptibleSleep);
+            end_state =
+                TaskState::FromParsedFlags(TaskState::kInterruptibleSleep);
             break;
           }
           case kThreadSuspended: {
-            end_state =
-                ftrace_utils::TaskState(ftrace_utils::TaskState::kStopped);
+            end_state = TaskState::FromParsedFlags(TaskState::kStopped);
             break;
           }
           case kThreadDying: {
-            end_state =
-                ftrace_utils::TaskState(ftrace_utils::TaskState::kExitZombie);
+            end_state = TaskState::FromParsedFlags(TaskState::kExitZombie);
             break;
           }
           case kThreadDead: {
-            end_state =
-                ftrace_utils::TaskState(ftrace_utils::TaskState::kExitDead);
+            end_state = TaskState::FromParsedFlags(TaskState::kExitDead);
             break;
           }
           default: {
@@ -542,8 +539,8 @@ void FuchsiaTraceTokenizer::ParseRecord(TraceBlobView tbv) {
         }
 
         auto id =
-            end_state.is_valid()
-                ? context_->storage->InternString(end_state.ToString().data())
+            end_state.has_value()
+                ? context_->storage->InternString(end_state->ToString().data())
                 : kNullStringId;
         storage->mutable_sched_slice_table()->Insert(
             {previous_thread.start_ts, ts - previous_thread.start_ts, cpu, utid,

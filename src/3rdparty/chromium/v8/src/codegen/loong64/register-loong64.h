@@ -151,8 +151,7 @@ constexpr Register cp = s7;
 constexpr Register kScratchReg = s3;
 constexpr Register kScratchReg2 = s4;
 constexpr DoubleRegister kScratchDoubleReg = f30;
-constexpr DoubleRegister kScratchDoubleReg1 = f30;
-constexpr DoubleRegister kScratchDoubleReg2 = f31;
+constexpr DoubleRegister kScratchDoubleReg1 = f31;
 // FPU zero reg is often used to hold 0.0, but it's not hardwired to 0.0.
 constexpr DoubleRegister kDoubleRegZero = f29;
 
@@ -187,6 +186,12 @@ DEFINE_REGISTER_NAMES(Register, GENERAL_REGISTERS)
 DEFINE_REGISTER_NAMES(FPURegister, DOUBLE_REGISTERS)
 
 // Give alias names to registers for calling conventions.
+
+constexpr Register arg_reg_1 = a0;
+constexpr Register arg_reg_2 = a1;
+constexpr Register arg_reg_3 = a2;
+constexpr Register arg_reg_4 = a3;
+
 constexpr Register kReturnRegister0 = a0;
 constexpr Register kReturnRegister1 = a1;
 constexpr Register kReturnRegister2 = a2;

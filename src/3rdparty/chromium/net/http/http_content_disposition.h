@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -72,9 +72,9 @@ class NET_EXPORT HttpContentDisposition {
   std::string::const_iterator ConsumeDispositionType(
       std::string::const_iterator begin, std::string::const_iterator end);
 
-  Type type_;
+  Type type_ = INLINE;
   std::string filename_;
-  int parse_result_flags_;
+  int parse_result_flags_ = INVALID;
 };
 
 }  // namespace net

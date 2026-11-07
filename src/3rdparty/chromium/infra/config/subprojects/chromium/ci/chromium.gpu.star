@@ -1,4 +1,4 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Definitions of builders in the chromium.gpu builder group."""
@@ -6,7 +6,7 @@
 load("//lib/args.star", "args")
 load("//lib/branches.star", "branches")
 load("//lib/builder_config.star", "builder_config")
-load("//lib/builders.star", "goma", "reclient", "sheriff_rotations")
+load("//lib/builders.star", "reclient", "sheriff_rotations")
 load("//lib/ci.star", "ci")
 load("//lib/consoles.star", "consoles")
 
@@ -14,13 +14,17 @@ ci.defaults.set(
     builder_group = "chromium.gpu",
     executable = ci.DEFAULT_EXECUTABLE,
     execution_timeout = ci.DEFAULT_EXECUTION_TIMEOUT,
-    goma_backend = goma.backend.RBE_PROD,
     pool = ci.gpu.POOL,
+    reclient_jobs = reclient.jobs.DEFAULT,
+    reclient_instance = reclient.instance.DEFAULT_TRUSTED,
     service_account = ci.DEFAULT_SERVICE_ACCOUNT,
     sheriff_rotations = sheriff_rotations.CHROMIUM_GPU,
     tree_closing = True,
     tree_closing_notifiers = ci.gpu.TREE_CLOSING_NOTIFIERS,
     thin_tester_cores = 2,
+
+    # TODO(crbug.com/1362440): remove this.
+    omit_python2 = False,
 )
 
 consoles.console_view(
@@ -38,7 +42,6 @@ ci.gpu.linux_builder(
             config = "chromium",
             apply_configs = [
                 "android",
-                "enable_reclient",
             ],
         ),
         chromium_config = builder_config.chromium_config(
@@ -61,9 +64,7 @@ ci.gpu.linux_builder(
         category = "Android",
     ),
     cq_mirrors_console_view = "mirrors",
-    goma_backend = None,
-    reclient_jobs = reclient.jobs.DEFAULT,
-    reclient_instance = reclient.instance.DEFAULT_TRUSTED,
+    sheriff_rotations = args.ignore_default(None),
 )
 
 ci.gpu.linux_builder(
@@ -74,7 +75,6 @@ ci.gpu.linux_builder(
             config = "chromium",
             apply_configs = [
                 "use_clang_coverage",
-                "enable_reclient",
             ],
         ),
         chromium_config = builder_config.chromium_config(
@@ -91,9 +91,6 @@ ci.gpu.linux_builder(
         category = "Linux",
     ),
     cq_mirrors_console_view = "mirrors",
-    goma_backend = None,
-    reclient_jobs = reclient.jobs.DEFAULT,
-    reclient_instance = reclient.instance.DEFAULT_TRUSTED,
 )
 
 ci.gpu.linux_builder(
@@ -102,9 +99,6 @@ ci.gpu.linux_builder(
         category = "Linux",
     ),
     tree_closing = False,
-    goma_backend = None,
-    reclient_jobs = reclient.jobs.DEFAULT,
-    reclient_instance = reclient.instance.DEFAULT_TRUSTED,
     sheriff_rotations = args.ignore_default(None),
 )
 
@@ -170,9 +164,7 @@ ci.gpu.windows_builder(
         category = "Windows",
     ),
     cq_mirrors_console_view = "mirrors",
-    goma_backend = None,
     reclient_jobs = reclient.jobs.LOW_JOBS_FOR_CI,
-    reclient_instance = reclient.instance.DEFAULT_TRUSTED,
 )
 
 ci.gpu.windows_builder(
@@ -182,9 +174,7 @@ ci.gpu.windows_builder(
     ),
     sheriff_rotations = args.ignore_default(None),
     tree_closing = False,
-    goma_backend = None,
     reclient_jobs = reclient.jobs.LOW_JOBS_FOR_CI,
-    reclient_instance = reclient.instance.DEFAULT_TRUSTED,
 )
 
 ci.thin_tester(

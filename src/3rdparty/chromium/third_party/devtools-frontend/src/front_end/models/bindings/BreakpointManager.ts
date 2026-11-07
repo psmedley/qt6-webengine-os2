@@ -29,6 +29,7 @@
  */
 
 import * as Common from '../../core/common/common.js';
+import * as Root from '../../core/root/root.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import type * as Platform from '../../core/platform/platform.js';
 import type * as Protocol from '../../generated/protocol.js';
@@ -36,18 +37,22 @@ import type * as TextUtils from '../text_utils/text_utils.js';
 import * as Workspace from '../workspace/workspace.js';
 
 import {DebuggerWorkspaceBinding} from './DebuggerWorkspaceBinding.js';
-import type {LiveLocation} from './LiveLocation.js';
-import {LiveLocationPool} from './LiveLocation.js';
+
+import {LiveLocationPool, type LiveLocation} from './LiveLocation.js';
+import {DefaultScriptMapping} from './DefaultScriptMapping.js';
+import {ResourceScriptMapping} from './ResourceScriptMapping.js';
 
 let breakpointManagerInstance: BreakpointManager;
 
-export class BreakpointManager extends Common.ObjectWrapper.ObjectWrapper<EventTypes> {
+export class BreakpointManager extends Common.ObjectWrapper.ObjectWrapper<EventTypes> implements
+    SDK.TargetManager.SDKModelObserver<SDK.DebuggerModel.DebuggerModel> {
   readonly storage: Storage;
   readonly #workspace: Workspace.Workspace.WorkspaceImpl;
   readonly targetManager: SDK.TargetManager.TargetManager;
   readonly debuggerWorkspaceBinding: DebuggerWorkspaceBinding;
   readonly #breakpointsForUISourceCode: Map<Workspace.UISourceCode.UISourceCode, Map<string, BreakpointLocation>>;
   readonly #breakpointByStorageId: Map<string, Breakpoint>;
+  #updateBindingsCallbacks: ((uiSourceCode: Workspace.UISourceCode.UISourceCode) => Promise<void>)[];
 
   private constructor(
       targetManager: SDK.TargetManager.TargetManager, workspace: Workspace.Workspace.WorkspaceImpl,
@@ -64,6 +69,9 @@ export class BreakpointManager extends Common.ObjectWrapper.ObjectWrapper<EventT
     this.#workspace.addEventListener(Workspace.Workspace.Events.UISourceCodeAdded, this.uiSourceCodeAdded, this);
     this.#workspace.addEventListener(Workspace.Workspace.Events.UISourceCodeRemoved, this.uiSourceCodeRemoved, this);
     this.#workspace.addEventListener(Workspace.Workspace.Events.ProjectRemoved, this.projectRemoved, this);
+
+    this.targetManager.observeModels(SDK.DebuggerModel.DebuggerModel, this);
+    this.#updateBindingsCallbacks = [];
   }
 
   static instance(opts: {
@@ -93,12 +101,122 @@ export class BreakpointManager extends Common.ObjectWrapper.ObjectWrapper<EventT
     return `${url}:${lineNumber}` + (typeof columnNumber === 'number' ? `:${columnNumber}` : '');
   }
 
+  modelAdded(debuggerModel: SDK.DebuggerModel.DebuggerModel): void {
+    if (Root.Runtime.experiments.isEnabled(Root.Runtime.ExperimentName.INSTRUMENTATION_BREAKPOINTS)) {
+      debuggerModel.setSynchronizeBreakpointsCallback(this.restoreBreakpointsForScript.bind(this));
+    }
+  }
+
+  modelRemoved(debuggerModel: SDK.DebuggerModel.DebuggerModel): void {
+    debuggerModel.setSynchronizeBreakpointsCallback(null);
+  }
+
+  addUpdateBindingsCallback(callback: ((uiSourceCode: Workspace.UISourceCode.UISourceCode) => Promise<void>)): void {
+    this.#updateBindingsCallbacks.push(callback);
+  }
+
   async copyBreakpoints(fromURL: Platform.DevToolsPath.UrlString, toSourceCode: Workspace.UISourceCode.UISourceCode):
       Promise<void> {
     const breakpointItems = this.storage.breakpointItems(fromURL);
     for (const item of breakpointItems) {
-      await this.setBreakpoint(toSourceCode, item.lineNumber, item.columnNumber, item.condition, item.enabled);
+      await this.setBreakpoint(
+          toSourceCode, item.lineNumber, item.columnNumber, item.condition, item.enabled, BreakpointOrigin.OTHER);
     }
+  }
+
+  // This method explicitly awaits the source map (if necessary) and the uiSourceCodes
+  // required to set all breakpoints that are related to this script.
+  async restoreBreakpointsForScript(script: SDK.Script.Script): Promise<void> {
+    if (!Root.Runtime.experiments.isEnabled(Root.Runtime.ExperimentName.INSTRUMENTATION_BREAKPOINTS)) {
+      return;
+    }
+    if (!script.sourceURL) {
+      return;
+    }
+
+    const debuggerModel = script.debuggerModel;
+    const uiSourceCode = await this.getUISourceCodeWithUpdatedBreakpointInfo(script);
+    if (this.#hasBreakpointsForUrl(script.sourceURL)) {
+      await this.#restoreBreakpointsForUrl(uiSourceCode);
+    }
+
+    // Handle source maps and the original sources.
+    const sourceMap = await debuggerModel.sourceMapManager().sourceMapForClientPromise(script);
+    if (sourceMap) {
+      for (const sourceURL of sourceMap.sourceURLs()) {
+        if (this.#hasBreakpointsForUrl(sourceURL)) {
+          const uiSourceCode = await Workspace.Workspace.WorkspaceImpl.instance().uiSourceCodeForURLPromise(sourceURL);
+          await this.#restoreBreakpointsForUrl(uiSourceCode);
+        }
+      }
+    }
+
+    // Handle language plugins
+    const {pluginManager} = this.debuggerWorkspaceBinding;
+    if (pluginManager) {
+      const sourceUrls = await pluginManager.getSourcesForScript(script);
+      if (Array.isArray(sourceUrls)) {
+        for (const sourceURL of sourceUrls) {
+          if (this.#hasBreakpointsForUrl(sourceURL)) {
+            const uiSourceCode =
+                await Workspace.Workspace.WorkspaceImpl.instance().uiSourceCodeForURLPromise(sourceURL);
+            await this.#restoreBreakpointsForUrl(uiSourceCode);
+          }
+        }
+      }
+    }
+  }
+
+  async getUISourceCodeWithUpdatedBreakpointInfo(script: SDK.Script.Script):
+      Promise<Workspace.UISourceCode.UISourceCode> {
+    const isSnippet = script.sourceURL.startsWith('snippet://');
+    const projectType = isSnippet ? Workspace.Workspace.projectTypes.Network : undefined;
+
+    // Some temporary workarounds that will probably be replaced by live locations.
+    // 1. Handle inline scripts without sourceURL comment separately:
+    // The UISourceCode of inline scripts without sourceURLs will not be availabe
+    // until a later point. Use the v8 script for setting the breakpoint.
+    // 2. Handle resources that have scripts differently: nowadays they don't use the
+    // sourceURL directly anymore, but are resolved relatively to the parents document's
+    // base URL; so resolve it before awaiting its uiSourceCode.
+    const isInlineScriptWithoutSourceURL = script.isInlineScript() && !script.hasSourceURL;
+    const hasResourceScriptMapping = !script.isLiveEdit() && script.sourceURL && script.hasSourceURL;
+    let sourceURL = script.sourceURL;
+    if (isInlineScriptWithoutSourceURL) {
+      sourceURL = DefaultScriptMapping.createV8ScriptURL(script);
+    } else if (hasResourceScriptMapping) {
+      sourceURL = ResourceScriptMapping.resolveRelativeSourceURL(script, script.sourceURL);
+    }
+
+    const uiSourceCode =
+        await Workspace.Workspace.WorkspaceImpl.instance().uiSourceCodeForURLPromise(sourceURL, projectType);
+
+    if (this.#updateBindingsCallbacks.length > 0) {
+      // It's possible to set breakpoints on files on the file system, and to have them
+      // hit whenever we navigate to a page that serves that file.
+      // To make sure that we have all breakpoint information moved from the file system
+      // to the served file, we need to update the bindings and await it. This will
+      // move the breakpoints from the FileSystem UISourceCode to the Network UiSourceCode.
+      const promises = [];
+      for (const callback of this.#updateBindingsCallbacks) {
+        promises.push(callback(uiSourceCode));
+      }
+      await Promise.all(promises);
+    }
+    return uiSourceCode;
+  }
+
+  async #restoreBreakpointsForUrl(uiSourceCode: Workspace.UISourceCode.UISourceCode): Promise<void> {
+    this.restoreBreakpoints(uiSourceCode);
+    const breakpoints = this.#breakpointByStorageId.values();
+    const affectedBreakpoints = Array.from(breakpoints).filter(x => x.uiSourceCodes.has(uiSourceCode));
+    // Make sure to properly await their updates
+    await Promise.all(affectedBreakpoints.map(bp => bp.updateBreakpoint()));
+  }
+
+  #hasBreakpointsForUrl(url: Platform.DevToolsPath.UrlString): boolean {
+    const breakpointItems = this.storage.breakpointItems(url);
+    return breakpointItems.length > 0;
   }
 
   private restoreBreakpoints(uiSourceCode: Workspace.UISourceCode.UISourceCode): void {
@@ -110,7 +228,8 @@ export class BreakpointManager extends Common.ObjectWrapper.ObjectWrapper<EventT
     this.storage.mute();
     const breakpointItems = this.storage.breakpointItems(url);
     for (const item of breakpointItems) {
-      this.innerSetBreakpoint(uiSourceCode, item.lineNumber, item.columnNumber, item.condition, item.enabled);
+      this.innerSetBreakpoint(
+          uiSourceCode, item.lineNumber, item.columnNumber, item.condition, item.enabled, BreakpointOrigin.OTHER);
     }
     this.storage.unmute();
   }
@@ -139,7 +258,7 @@ export class BreakpointManager extends Common.ObjectWrapper.ObjectWrapper<EventT
 
   async setBreakpoint(
       uiSourceCode: Workspace.UISourceCode.UISourceCode, lineNumber: number, columnNumber: number|undefined,
-      condition: string, enabled: boolean): Promise<Breakpoint> {
+      condition: string, enabled: boolean, origin: BreakpointOrigin): Promise<Breakpoint> {
     let uiLocation: Workspace.UISourceCode.UILocation =
         new Workspace.UISourceCode.UILocation(uiSourceCode, lineNumber, columnNumber);
     const normalizedLocation = await this.debuggerWorkspaceBinding.normalizeUILocation(uiLocation);
@@ -148,21 +267,22 @@ export class BreakpointManager extends Common.ObjectWrapper.ObjectWrapper<EventT
       uiLocation = normalizedLocation;
     }
     return this.innerSetBreakpoint(
-        uiLocation.uiSourceCode, uiLocation.lineNumber, uiLocation.columnNumber, condition, enabled);
+        uiLocation.uiSourceCode, uiLocation.lineNumber, uiLocation.columnNumber, condition, enabled, origin);
   }
 
   private innerSetBreakpoint(
       uiSourceCode: Workspace.UISourceCode.UISourceCode, lineNumber: number, columnNumber: number|undefined,
-      condition: string, enabled: boolean): Breakpoint {
+      condition: string, enabled: boolean, origin: BreakpointOrigin): Breakpoint {
     const itemId = BreakpointManager.breakpointStorageId(uiSourceCode.url(), lineNumber, columnNumber);
     let breakpoint = this.#breakpointByStorageId.get(itemId);
     if (breakpoint) {
       breakpoint.updateState(condition, enabled);
       breakpoint.addUISourceCode(uiSourceCode);
-      breakpoint.updateBreakpoint();
+      void breakpoint.updateBreakpoint();
       return breakpoint;
     }
-    breakpoint = new Breakpoint(this, uiSourceCode, uiSourceCode.url(), lineNumber, columnNumber, condition, enabled);
+    breakpoint =
+        new Breakpoint(this, uiSourceCode, uiSourceCode.url(), lineNumber, columnNumber, condition, enabled, origin);
     this.#breakpointByStorageId.set(itemId, breakpoint);
     return breakpoint;
   }
@@ -269,7 +389,7 @@ export class BreakpointManager extends Common.ObjectWrapper.ObjectWrapper<EventT
       breakpoints = new Map();
       this.#breakpointsForUISourceCode.set(uiLocation.uiSourceCode, breakpoints);
     }
-    const breakpointLocation = {breakpoint: breakpoint, uiLocation: uiLocation};
+    const breakpointLocation = new BreakpointLocation(breakpoint, uiLocation);
     breakpoints.set(uiLocation.id(), breakpointLocation);
     this.dispatchEventToListeners(Events.BreakpointAdded, breakpointLocation);
   }
@@ -287,7 +407,11 @@ export class BreakpointManager extends Common.ObjectWrapper.ObjectWrapper<EventT
     if (breakpoints.size === 0) {
       this.#breakpointsForUISourceCode.delete(uiLocation.uiSourceCode);
     }
-    this.dispatchEventToListeners(Events.BreakpointRemoved, {breakpoint: breakpoint, uiLocation: uiLocation});
+    this.dispatchEventToListeners(Events.BreakpointRemoved, breakpointLocation);
+  }
+
+  supportsConditionalBreakpoints(uiSourceCode: Workspace.UISourceCode.UISourceCode): boolean {
+    return this.debuggerWorkspaceBinding.supportsConditionalBreakpoints(uiSourceCode);
   }
 }
 
@@ -303,6 +427,23 @@ export type EventTypes = {
   [Events.BreakpointRemoved]: BreakpointLocation,
 };
 
+export const enum DebuggerUpdateResult {
+  OK = 'OK',
+  ERROR_BREAKPOINT_CLASH = 'ERROR_BREAKPOINT_CLASH',
+  ERROR_BACKEND = 'ERROR_BACKEND',
+
+  // PENDING implies that the current update requires another re-run.
+  PENDING = 'PENDING',
+}
+
+export type ScheduleUpdateResult =
+    DebuggerUpdateResult.OK|DebuggerUpdateResult.ERROR_BACKEND|DebuggerUpdateResult.ERROR_BREAKPOINT_CLASH;
+
+const enum ResolveLocationResult {
+  OK = 'OK',
+  ERROR = 'ERROR',
+}
+
 export class Breakpoint implements SDK.TargetManager.SDKModelObserver<SDK.DebuggerModel.DebuggerModel> {
   readonly breakpointManager: BreakpointManager;
   urlInternal: Platform.DevToolsPath.UrlString;
@@ -312,18 +453,20 @@ export class Breakpoint implements SDK.TargetManager.SDKModelObserver<SDK.Debugg
   uiSourceCodes: Set<Workspace.UISourceCode.UISourceCode>;
   #conditionInternal!: string;
   #enabledInternal!: boolean;
-  isRemoved!: boolean;
+  #origin: BreakpointOrigin;
+  isRemoved = false;
   currentState: Breakpoint.State|null;
   readonly #modelBreakpoints: Map<SDK.DebuggerModel.DebuggerModel, ModelBreakpoint>;
 
   constructor(
       breakpointManager: BreakpointManager, primaryUISourceCode: Workspace.UISourceCode.UISourceCode,
       url: Platform.DevToolsPath.UrlString, lineNumber: number, columnNumber: number|undefined, condition: string,
-      enabled: boolean) {
+      enabled: boolean, origin: BreakpointOrigin) {
     this.breakpointManager = breakpointManager;
     this.urlInternal = url;
     this.#lineNumberInternal = lineNumber;
     this.#columnNumberInternal = columnNumber;
+    this.#origin = origin;
 
     this.#uiLocations = new Set();   // Bound locations
     this.uiSourceCodes = new Set();  // All known UISourceCodes with this url
@@ -336,27 +479,59 @@ export class Breakpoint implements SDK.TargetManager.SDKModelObserver<SDK.Debugg
     this.breakpointManager.targetManager.observeModels(SDK.DebuggerModel.DebuggerModel, this);
   }
 
+  get origin(): BreakpointOrigin {
+    return this.#origin;
+  }
+
   async refreshInDebugger(): Promise<void> {
     if (!this.isRemoved) {
-      const breakpoints = Array.from(this.#modelBreakpoints.values());
-      await Promise.all(breakpoints.map(breakpoint => breakpoint.refreshBreakpoint()));
+      const modelBreakpoints = Array.from(this.#modelBreakpoints.values());
+      await Promise.all(modelBreakpoints.map(async modelBreakpoint => {
+        await modelBreakpoint.resetBreakpoint();
+        return this.#updateModel(modelBreakpoint);
+      }));
     }
   }
 
   modelAdded(debuggerModel: SDK.DebuggerModel.DebuggerModel): void {
     const debuggerWorkspaceBinding = this.breakpointManager.debuggerWorkspaceBinding;
-    this.#modelBreakpoints.set(debuggerModel, new ModelBreakpoint(debuggerModel, this, debuggerWorkspaceBinding));
+    const modelBreakpoint = new ModelBreakpoint(debuggerModel, this, debuggerWorkspaceBinding);
+    this.#modelBreakpoints.set(debuggerModel, modelBreakpoint);
+    void this.#updateModel(modelBreakpoint);
+
+    debuggerModel.addEventListener(SDK.DebuggerModel.Events.DebuggerWasEnabled, this.#onDebuggerEnabled, this);
+    debuggerModel.addEventListener(SDK.DebuggerModel.Events.DebuggerWasDisabled, this.#onDebuggerDisabled, this);
   }
 
   modelRemoved(debuggerModel: SDK.DebuggerModel.DebuggerModel): void {
     const modelBreakpoint = this.#modelBreakpoints.get(debuggerModel);
+    modelBreakpoint?.cleanUpAfterDebuggerIsGone();
     this.#modelBreakpoints.delete(debuggerModel);
 
-    if (!modelBreakpoint) {
-      return;
+    this.#removeDebuggerModelListeners(debuggerModel);
+  }
+
+  #removeDebuggerModelListeners(debuggerModel: SDK.DebuggerModel.DebuggerModel): void {
+    debuggerModel.removeEventListener(SDK.DebuggerModel.Events.DebuggerWasEnabled, this.#onDebuggerEnabled, this);
+    debuggerModel.removeEventListener(SDK.DebuggerModel.Events.DebuggerWasDisabled, this.#onDebuggerDisabled, this);
+  }
+
+  #onDebuggerEnabled(event: Common.EventTarget.EventTargetEvent<SDK.DebuggerModel.DebuggerModel>): void {
+    const debuggerModel = event.data;
+    const model = this.#modelBreakpoints.get(debuggerModel);
+    if (model) {
+      void this.#updateModel(model);
     }
-    modelBreakpoint.cleanUpAfterDebuggerIsGone();
-    modelBreakpoint.removeEventListeners();
+  }
+
+  #onDebuggerDisabled(event: Common.EventTarget.EventTargetEvent<SDK.DebuggerModel.DebuggerModel>): void {
+    const debuggerModel = event.data;
+    const model = this.#modelBreakpoints.get(debuggerModel);
+    model?.cleanUpAfterDebuggerIsGone();
+  }
+
+  modelBreakpoint(debuggerModel: SDK.DebuggerModel.DebuggerModel): ModelBreakpoint|undefined {
+    return this.#modelBreakpoints.get(debuggerModel);
   }
 
   addUISourceCode(uiSourceCode: Workspace.UISourceCode.UISourceCode): void {
@@ -469,28 +644,30 @@ export class Breakpoint implements SDK.TargetManager.SDKModelObserver<SDK.Debugg
     this.#enabledInternal = enabled;
     this.#conditionInternal = condition;
     this.breakpointManager.storage.updateBreakpoint(this);
-    this.updateBreakpoint();
+    void this.updateBreakpoint();
   }
 
-  updateBreakpoint(): void {
+  async updateBreakpoint(): Promise<void> {
     if (!this.bound()) {
       this.removeAllUnboundLocations();
       if (!this.isRemoved) {
         this.addAllUnboundLocations();
       }
     }
-    for (const modelBreakpoint of this.#modelBreakpoints.values()) {
-      void modelBreakpoint.scheduleUpdateInDebugger();
-    }
+    return this.#updateModels();
   }
 
-  remove(keepInStorage: boolean): void {
+  async remove(keepInStorage: boolean): Promise<void> {
+    if (this.getIsRemoved()) {
+      return;
+    }
     this.isRemoved = true;
     const removeFromStorage = !keepInStorage;
-    for (const modelBreakpoint of this.#modelBreakpoints.values()) {
-      void modelBreakpoint.scheduleUpdateInDebugger();
-      modelBreakpoint.removeEventListeners();
+
+    for (const debuggerModel of this.#modelBreakpoints.keys()) {
+      this.#removeDebuggerModelListeners(debuggerModel);
     }
+    await this.#updateModels();
 
     this.breakpointManager.removeBreakpoint(this, removeFromStorage);
     this.breakpointManager.targetManager.unobserveModels(SDK.DebuggerModel.DebuggerModel, this);
@@ -500,13 +677,6 @@ export class Breakpoint implements SDK.TargetManager.SDKModelObserver<SDK.Debugg
   breakpointStorageId(): string {
     return BreakpointManager.breakpointStorageId(
         this.urlInternal, this.#lineNumberInternal, this.#columnNumberInternal);
-  }
-
-  private resetLocations(): void {
-    this.clearUISourceCodes();
-    for (const modelBreakpoint of this.#modelBreakpoints.values()) {
-      modelBreakpoint.resetLocations();
-    }
   }
 
   private defaultUILocation(uiSourceCode: Workspace.UISourceCode.UISourceCode): Workspace.UISourceCode.UILocation {
@@ -532,6 +702,19 @@ export class Breakpoint implements SDK.TargetManager.SDKModelObserver<SDK.Debugg
   getIsRemoved(): boolean {
     return this.isRemoved;
   }
+
+  async #updateModels(): Promise<void> {
+    await Promise.all(Array.from(this.#modelBreakpoints.values()).map(model => this.#updateModel(model)));
+  }
+
+  async #updateModel(model: ModelBreakpoint): Promise<void> {
+    const result = await model.scheduleUpdateInDebugger();
+    if (result === DebuggerUpdateResult.ERROR_BACKEND) {
+      await this.remove(true /* keepInStorage */);
+    } else if (result === DebuggerUpdateResult.ERROR_BREAKPOINT_CLASH) {
+      await this.remove(false /* keepInStorage */);
+    }
+  }
 }
 
 export class ModelBreakpoint {
@@ -540,8 +723,7 @@ export class ModelBreakpoint {
   readonly #debuggerWorkspaceBinding: DebuggerWorkspaceBinding;
   readonly #liveLocations: LiveLocationPool;
   readonly #uiLocations: Map<LiveLocation, Workspace.UISourceCode.UILocation>;
-  #hasPendingUpdate: boolean;
-  #updatePromise: Promise<void>|null;
+  #updateMutex = new Common.Mutex.Mutex();
   #cancelCallback: boolean;
   #currentState: Breakpoint.State|null;
   #breakpointIds: Protocol.Debugger.BreakpointId[];
@@ -556,18 +738,13 @@ export class ModelBreakpoint {
     this.#liveLocations = new LiveLocationPool();
 
     this.#uiLocations = new Map();
-    this.#debuggerModel.addEventListener(
-        SDK.DebuggerModel.Events.DebuggerWasDisabled, this.cleanUpAfterDebuggerIsGone, this);
-    this.#debuggerModel.addEventListener(
-        SDK.DebuggerModel.Events.DebuggerWasEnabled, this.scheduleUpdateInDebugger, this);
-    this.#hasPendingUpdate = false;
-    this.#updatePromise = null;
     this.#cancelCallback = false;
     this.#currentState = null;
     this.#breakpointIds = [];
-    if (this.#debuggerModel.debuggerEnabled()) {
-      void this.scheduleUpdateInDebugger();
-    }
+  }
+
+  get currentState(): Breakpoint.State|null {
+    return this.#currentState;
   }
 
   resetLocations(): void {
@@ -579,18 +756,18 @@ export class ModelBreakpoint {
     this.#liveLocations.disposeAll();
   }
 
-  scheduleUpdateInDebugger(): Promise<void> {
-    this.#hasPendingUpdate = true;
-    if (!this.#updatePromise) {
-      this.#updatePromise = (async(): Promise<void> => {
-        while (this.#hasPendingUpdate) {
-          this.#hasPendingUpdate = false;
-          await this.updateInDebugger();
-        }
-        this.#updatePromise = null;
-      })();
+  async scheduleUpdateInDebugger(): Promise<ScheduleUpdateResult> {
+    if (!this.#debuggerModel.debuggerEnabled()) {
+      return DebuggerUpdateResult.OK;
     }
-    return this.#updatePromise;
+
+    const release = await this.#updateMutex.acquire();
+    let result = DebuggerUpdateResult.PENDING;
+    while (result === DebuggerUpdateResult.PENDING) {
+      result = await this.#updateInDebugger();
+    }
+    release();
+    return result;
   }
 
   private scriptDiverged(): boolean {
@@ -603,16 +780,16 @@ export class ModelBreakpoint {
     return false;
   }
 
-  private async updateInDebugger(): Promise<void> {
+  async #updateInDebugger(): Promise<DebuggerUpdateResult> {
     if (this.#debuggerModel.target().isDisposed()) {
       this.cleanUpAfterDebuggerIsGone();
-      return;
+      return DebuggerUpdateResult.OK;
     }
-
     const lineNumber = this.#breakpoint.lineNumber();
     const columnNumber = this.#breakpoint.columnNumber();
     const condition = this.#breakpoint.condition();
 
+    // Calculate the new state.
     let newState: Breakpoint.State|null = null;
     if (!this.#breakpoint.getIsRemoved() && this.#breakpoint.enabled() && !this.scriptDiverged()) {
       let debuggerLocations: SDK.DebuggerModel.Location[] = [];
@@ -629,90 +806,122 @@ export class ModelBreakpoint {
           const script = loc.script() as SDK.Script.Script;
           return {
             url: script.sourceURL,
-            scriptId: script.scriptId,
             scriptHash: script.hash,
             lineNumber: loc.lineNumber,
             columnNumber: loc.columnNumber,
           };
         });
         newState = new Breakpoint.State(positions, condition);
-      } else if (this.#breakpoint.currentState) {
-        newState = new Breakpoint.State(this.#breakpoint.currentState.positions, condition);
-      } else {
-        // TODO(bmeurer): This fallback doesn't make a whole lot of sense, we should
-        // at least signal a warning to the developer that this #breakpoint wasn't
-        // really resolved.
-        const position = {
-          url: this.#breakpoint.url(),
-          scriptId: '' as Protocol.Runtime.ScriptId,
-          scriptHash: '',
-          lineNumber,
-          columnNumber,
-        };
-        newState = new Breakpoint.State([position], condition);
+      } else if (!Root.Runtime.experiments.isEnabled(Root.Runtime.ExperimentName.INSTRUMENTATION_BREAKPOINTS)) {
+        // Use this fallback if we do not have instrumentation breakpoints enabled yet. This currently makes
+        // sure that v8 knows about the breakpoint and is able to restore it whenever the script is parsed.
+        if (this.#breakpoint.currentState) {
+          newState = new Breakpoint.State(this.#breakpoint.currentState.positions, condition);
+        } else {
+          // TODO(bmeurer): This fallback doesn't make a whole lot of sense, we should
+          // at least signal a warning to the developer that this #breakpoint wasn't
+          // really resolved.
+          const position = {
+            url: this.#breakpoint.url(),
+            scriptHash: '',
+            lineNumber,
+            columnNumber,
+          };
+          newState = new Breakpoint.State([position], condition);
+        }
       }
     }
+    const hasBackendState = this.#breakpointIds.length;
 
-    if (this.#breakpointIds.length && Breakpoint.State.equals(newState, this.#currentState)) {
-      return;
+    // Case 1: State hasn't changed, and back-end is up to date and has information
+    // on some breakpoints.
+    if (hasBackendState && Breakpoint.State.equals(newState, this.#currentState)) {
+      return DebuggerUpdateResult.OK;
     }
+
     this.#breakpoint.currentState = newState;
 
-    if (this.#breakpointIds.length) {
-      await this.refreshBreakpoint();
-      return;
+    // Case 2: State has changed, and the back-end has outdated information on old
+    // breakpoints.
+    if (hasBackendState) {
+      // Reset the current state.
+      await this.resetBreakpoint();
+      // Schedule another run of updates, to finally update to the new state.
+      return DebuggerUpdateResult.PENDING;
     }
 
+    // Case 3: State is null (no breakpoints to set), and back-end is up to date
+    // (no info on breakpoints).
     if (!newState) {
-      return;
+      return DebuggerUpdateResult.OK;
     }
 
-    const results = await Promise.all(newState.positions.map(pos => {
-      if (pos.url) {
-        return this.#debuggerModel.setBreakpointByURL(pos.url, pos.lineNumber, pos.columnNumber, condition);
-      }
-      return this.#debuggerModel.setBreakpointInAnonymousScript(
-          pos.scriptId, pos.scriptHash as string, pos.lineNumber, pos.columnNumber, condition);
-    }));
-    const breakpointIds: Protocol.Debugger.BreakpointId[] = [];
-    let locations: SDK.DebuggerModel.Location[] = [];
-    let maybeRescheduleUpdate = false;
-    for (const result of results) {
-      if (result.breakpointId) {
-        breakpointIds.push(result.breakpointId);
-        locations = locations.concat(result.locations);
-      } else if (this.#debuggerModel.debuggerEnabled() && !this.#debuggerModel.isReadyToPause()) {
-        maybeRescheduleUpdate = true;
-      }
-    }
+    // Case 4: State is not null, so we have breakpoints to set and the back-end
+    // has no information on breakpoints yet. Set the breakpoints.
+    const {breakpointIds, locations, serverError} = await this.#setBreakpointOnBackend(newState);
 
+    const maybeRescheduleUpdate =
+        serverError && this.#debuggerModel.debuggerEnabled() && !this.#debuggerModel.isReadyToPause();
     if (!breakpointIds.length && maybeRescheduleUpdate) {
       // TODO(crbug.com/1229541): This is a quickfix to prevent #breakpoints from
       // disappearing if the Debugger is actually not enabled
       // yet. This quickfix should be removed as soon as we have a solution
       // to correctly synchronize the front-end with the inspector back-end.
-      void this.scheduleUpdateInDebugger();
-      return;
+      return DebuggerUpdateResult.PENDING;
     }
 
     this.#currentState = newState;
     if (this.#cancelCallback) {
       this.#cancelCallback = false;
-      return;
+      return DebuggerUpdateResult.OK;
     }
 
+    // Something went wrong: we expect to have a non-null state, but have not received any
+    // breakpointIds from the back-end.
     if (!breakpointIds.length) {
-      this.#breakpoint.remove(true);
-      return;
+      return DebuggerUpdateResult.ERROR_BACKEND;
     }
 
     this.#breakpointIds = breakpointIds;
     this.#breakpointIds.forEach(
         breakpointId => this.#debuggerModel.addBreakpointListener(breakpointId, this.breakpointResolved, this));
-    await Promise.all(locations.map(location => this.addResolvedLocation(location)));
+    const resolvedResults = await Promise.all(locations.map(location => this.addResolvedLocation(location)));
+
+    // Breakpoint clash: the resolved location resolves to a different breakpoint, report an error.
+    if (resolvedResults.includes(ResolveLocationResult.ERROR)) {
+      return DebuggerUpdateResult.ERROR_BREAKPOINT_CLASH;
+    }
+    return DebuggerUpdateResult.OK;
   }
 
-  async refreshBreakpoint(): Promise<void> {
+  async #setBreakpointOnBackend(newState: Breakpoint.State): Promise<{
+    breakpointIds: Protocol.Debugger.BreakpointId[],
+    locations: SDK.DebuggerModel.Location[],
+    serverError: boolean,
+  }> {
+    const condition = this.#breakpoint.condition();
+    const results = await Promise.all(newState.positions.map(pos => {
+      if (pos.url) {
+        return this.#debuggerModel.setBreakpointByURL(pos.url, pos.lineNumber, pos.columnNumber, condition);
+      }
+      return this.#debuggerModel.setBreakpointInAnonymousScript(
+          pos.scriptHash as string, pos.lineNumber, pos.columnNumber, condition);
+    }));
+    const breakpointIds: Protocol.Debugger.BreakpointId[] = [];
+    let locations: SDK.DebuggerModel.Location[] = [];
+    let serverError = false;
+    for (const result of results) {
+      if (result.breakpointId) {
+        breakpointIds.push(result.breakpointId);
+        locations = locations.concat(result.locations);
+      } else {
+        serverError = true;
+      }
+    }
+    return {breakpointIds, locations, serverError};
+  }
+
+  async resetBreakpoint(): Promise<void> {
     if (!this.#breakpointIds.length) {
       return;
     }
@@ -720,7 +929,6 @@ export class ModelBreakpoint {
     await Promise.all(this.#breakpointIds.map(id => this.#debuggerModel.removeBreakpoint(id)));
     this.didRemoveFromDebugger();
     this.#currentState = null;
-    void this.scheduleUpdateInDebugger();
   }
 
   private didRemoveFromDebugger(): void {
@@ -737,7 +945,10 @@ export class ModelBreakpoint {
 
   private async breakpointResolved({data: location}: Common.EventTarget.EventTargetEvent<SDK.DebuggerModel.Location>):
       Promise<void> {
-    await this.addResolvedLocation(location);
+    const result = await this.addResolvedLocation(location);
+    if (result === ResolveLocationResult.ERROR) {
+      await this.#breakpoint.remove(false /* keepInStorage */);
+    }
   }
 
   private async locationUpdated(liveLocation: LiveLocation): Promise<void> {
@@ -756,47 +967,41 @@ export class ModelBreakpoint {
     }
   }
 
-  private async addResolvedLocation(location: SDK.DebuggerModel.Location): Promise<void> {
+  private async addResolvedLocation(location: SDK.DebuggerModel.Location): Promise<ResolveLocationResult> {
     const uiLocation = await this.#debuggerWorkspaceBinding.rawLocationToUILocation(location);
     if (!uiLocation) {
-      return;
+      return ResolveLocationResult.OK;
     }
     const breakpointLocation = this.#breakpoint.breakpointManager.findBreakpoint(uiLocation);
     if (breakpointLocation && breakpointLocation.breakpoint !== this.#breakpoint) {
       // location clash
-      this.#breakpoint.remove(false /* keepInStorage */);
-      return;
+      return ResolveLocationResult.ERROR;
     }
     await this.#debuggerWorkspaceBinding.createLiveLocation(
         location, this.locationUpdated.bind(this), this.#liveLocations);
+    return ResolveLocationResult.OK;
   }
 
   cleanUpAfterDebuggerIsGone(): void {
-    if (this.#updatePromise) {
-      this.#cancelCallback = true;
-    }
-    this.#hasPendingUpdate = false;
+    this.#cancelCallback = true;
     this.resetLocations();
     this.#currentState = null;
     if (this.#breakpointIds.length) {
       this.didRemoveFromDebugger();
     }
   }
-
-  removeEventListeners(): void {
-    this.#debuggerModel.removeEventListener(
-        SDK.DebuggerModel.Events.DebuggerWasDisabled, this.cleanUpAfterDebuggerIsGone, this);
-    this.#debuggerModel.removeEventListener(
-        SDK.DebuggerModel.Events.DebuggerWasEnabled, this.scheduleUpdateInDebugger, this);
-  }
 }
 
 interface Position {
   url: Platform.DevToolsPath.UrlString;
-  scriptId: Protocol.Runtime.ScriptId;
   scriptHash: string;
   lineNumber: number;
   columnNumber?: number;
+}
+
+export const enum BreakpointOrigin {
+  USER_ACTION = 'USER_ACTION',
+  OTHER = 'RESTORED',
 }
 
 export namespace Breakpoint {
@@ -823,9 +1028,6 @@ export namespace Breakpoint {
         const positionA = stateA.positions[i];
         const positionB = stateB.positions[i];
         if (positionA.url !== positionB.url) {
-          return false;
-        }
-        if (positionA.scriptId !== positionB.scriptId) {
           return false;
         }
         if (positionA.scriptHash !== positionB.scriptHash) {
@@ -911,7 +1113,12 @@ namespace Storage {
   }
 }
 
-export interface BreakpointLocation {
-  breakpoint: Breakpoint;
-  uiLocation: Workspace.UISourceCode.UILocation;
+export class BreakpointLocation {
+  readonly breakpoint: Breakpoint;
+  readonly uiLocation: Workspace.UISourceCode.UILocation;
+
+  constructor(breakpoint: Breakpoint, uiLocation: Workspace.UISourceCode.UILocation) {
+    this.breakpoint = breakpoint;
+    this.uiLocation = uiLocation;
+  }
 }

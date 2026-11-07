@@ -359,6 +359,10 @@
         "mode": "PrimitiveMode",
         "type": "DrawElementsType"
     },
+    "glDrawElementsInstancedBaseInstance": {
+        "mode": "PrimitiveMode",
+        "type": "DrawElementsType"
+    },
     "glDrawElementsInstancedBaseVertexBaseInstance": {
         "mode": "PrimitiveMode",
         "type": "DrawElementsType"
@@ -438,6 +442,9 @@
     },
     "glFramebufferTextureMultiview": {
         "texture": "TextureID"
+    },
+    "glFramebufferTexturePixelLocalStorage": {
+        "backingtexture": "TextureID"
     },
     "glGenBuffers": {
         "buffers": "BufferID *"
@@ -1016,6 +1023,9 @@
         "program": "ShaderProgramID"
     },
     "glLogicOp": {
+        "opcode": "LogicalOperation"
+    },
+    "glLogicOpANGLE": {
         "opcode": "LogicalOperation"
     },
     "glLoseContext": {

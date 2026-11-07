@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -265,7 +265,7 @@ def CreateUniqueSymbols(elf_path, section_ranges):
     sym.section_name = section_name
 
     if i + 1 < len(sorted_symbols):
-      next_addr = sorted_symbols[i + 1].address
+      next_addr = min(section_end, sorted_symbols[i + 1].address)
     else:
       next_addr = section_end
 

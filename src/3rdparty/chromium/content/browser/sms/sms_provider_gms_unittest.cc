@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
+#include "base/command_line.h"
 #include "base/test/scoped_feature_list.h"
 #include "content/browser/sms/sms_provider.h"
 #include "content/browser/sms/sms_provider_gms.h"
@@ -59,9 +60,9 @@ class SmsProviderGmsBaseTest : public RenderViewHostTestHarness {
 
  protected:
   SmsProviderGmsBaseTest() = default;
-  virtual ~SmsProviderGmsBaseTest() override = default;
+  ~SmsProviderGmsBaseTest() override = default;
 
-  void SetUp() {
+  void SetUp() override {
     RenderViewHostTestHarness::SetUp();
 
     base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
@@ -80,7 +81,7 @@ class SmsProviderGmsBaseTest : public RenderViewHostTestHarness {
     provider_->AddObserver(&observer_);
   }
 
-  void TearDown() { RenderViewHostTestHarness::TearDown(); }
+  void TearDown() override { RenderViewHostTestHarness::TearDown(); }
 
   void TriggerSms(const std::string& sms) {
     if (GetSwitch() == switches::kWebOtpBackendUserConsent) {

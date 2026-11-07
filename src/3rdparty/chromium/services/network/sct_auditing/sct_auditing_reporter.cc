@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,16 @@
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/json/json_reader.h"
 #include "base/json/values_util.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/rand_util.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
-#include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/request_priority.h"
@@ -146,18 +147,19 @@ constexpr int kMaxRetries = 15;
 // static
 absl::optional<SCTAuditingReporter::SCTHashdanceMetadata>
 SCTAuditingReporter::SCTHashdanceMetadata::FromValue(const base::Value& value) {
-  if (!value.is_dict()) {
+  const base::Value::Dict* dict = value.GetIfDict();
+  if (!dict) {
     return absl::nullopt;
   }
 
-  const std::string* encoded_leaf_hash = value.FindStringKey(kLeafHashKey);
+  const std::string* encoded_leaf_hash = dict->FindString(kLeafHashKey);
   const absl::optional<base::Time> issued =
-      base::ValueToTime(value.FindKey(kIssuedKey));
-  const std::string* encoded_log_id = value.FindStringKey(kLogIdKey);
+      base::ValueToTime(dict->Find(kIssuedKey));
+  const std::string* encoded_log_id = dict->FindString(kLogIdKey);
   const absl::optional<base::TimeDelta> log_mmd =
-      base::ValueToTimeDelta(value.FindKey(kLogMMDKey));
+      base::ValueToTimeDelta(dict->Find(kLogMMDKey));
   const absl::optional<base::Time> certificate_expiry =
-      base::ValueToTime(value.FindKey(kCertificateExpiry));
+      base::ValueToTime(dict->Find(kCertificateExpiry));
   if (!encoded_leaf_hash || !encoded_log_id || !log_mmd || !issued ||
       !certificate_expiry) {
     return absl::nullopt;
@@ -186,16 +188,15 @@ SCTAuditingReporter::SCTHashdanceMetadata::operator=(SCTHashdanceMetadata&&) =
     default;
 
 base::Value SCTAuditingReporter::SCTHashdanceMetadata::ToValue() const {
-  base::DictionaryValue value;
-  value.SetStringKey(
-      kLeafHashKey,
-      base::Base64Encode(base::as_bytes(base::make_span(leaf_hash))));
-  value.SetKey(kIssuedKey, base::TimeToValue(issued));
-  value.SetStringKey(
-      kLogIdKey, base::Base64Encode(base::as_bytes(base::make_span(log_id))));
-  value.SetKey(kLogMMDKey, base::TimeDeltaToValue(log_mmd));
-  value.SetKey(kCertificateExpiry, base::TimeToValue(certificate_expiry));
-  return std::move(value);
+  base::Value::Dict dict;
+  dict.Set(kLeafHashKey,
+           base::Base64Encode(base::as_bytes(base::make_span(leaf_hash))));
+  dict.Set(kIssuedKey, base::TimeToValue(issued));
+  dict.Set(kLogIdKey,
+           base::Base64Encode(base::as_bytes(base::make_span(log_id))));
+  dict.Set(kLogMMDKey, base::TimeDeltaToValue(log_mmd));
+  dict.Set(kCertificateExpiry, base::TimeToValue(certificate_expiry));
+  return base::Value(std::move(dict));
 }
 
 // static
@@ -214,7 +215,8 @@ SCTAuditingReporter::SCTAuditingReporter(
     mojom::URLLoaderFactory* url_loader_factory,
     ReporterUpdatedCallback update_callback,
     ReporterDoneCallback done_callback,
-    std::unique_ptr<net::BackoffEntry> persisted_backoff_entry)
+    std::unique_ptr<net::BackoffEntry> persisted_backoff_entry,
+    bool counted_towards_report_limit)
     : owner_network_context_(owner_network_context),
       reporter_key_(reporter_key),
       report_(std::move(report)),
@@ -223,7 +225,8 @@ SCTAuditingReporter::SCTAuditingReporter(
       configuration_(std::move(configuration)),
       update_callback_(std::move(update_callback)),
       done_callback_(std::move(done_callback)),
-      max_retries_(kMaxRetries) {
+      max_retries_(kMaxRetries),
+      counted_towards_report_limit_(counted_towards_report_limit) {
   // Clone the URLLoaderFactory to avoid any dependencies on its lifetime. The
   // Reporter instance can maintain its own copy.
   // Relatively few Reporters are expected to exist at a time (due to sampling
@@ -266,16 +269,17 @@ void SCTAuditingReporter::Start() {
   }
 
   // Entrypoint for checking whether the max-reports limit has been reached.
-  // This should only get called once for the lifetime of the Reporter.
-  // TODO(crbug.com/1144205): Once reports are persisted to disk, the Reporter
-  // state should include whether it has been "counted" yet, otherwise if a
-  // Reporter gets persisted and restored many times it would cause the report
-  // cap to trigger. This can likely just be a boolean flag on the Reporter and
-  // the persisted state -- if `true`, this check (and incrementing the report
-  // count) can be skipped.
-  owner_network_context_->CanSendSCTAuditingReport(
-      base::BindOnce(&SCTAuditingReporter::OnCheckReportAllowedStatusComplete,
-                     weak_factory_.GetWeakPtr()));
+  // This should only get called once for the lifetime of the Reporter. If the
+  // report has already been counted towards the max-reports limit, we skip the
+  // check (and don't increment the report count later when trying to send the
+  // full report).
+  if (counted_towards_report_limit_) {
+    OnCheckReportAllowedStatusComplete(true);
+  } else {
+    owner_network_context_->CanSendSCTAuditingReport(
+        base::BindOnce(&SCTAuditingReporter::OnCheckReportAllowedStatusComplete,
+                       weak_factory_.GetWeakPtr()));
+  }
 }
 
 void SCTAuditingReporter::OnCheckReportAllowedStatusComplete(bool allowed) {
@@ -368,13 +372,14 @@ void SCTAuditingReporter::OnSendLookupQueryComplete(
   }
 
   absl::optional<base::Value> result = base::JSONReader::Read(*response_body);
-  if (!result) {
+  if (!result || !result->is_dict()) {
     RecordLookupQueryResult(LookupQueryResult::kInvalidJson);
     MaybeRetryRequest();
     return;
   }
 
-  const std::string* status = result->FindStringKey(kLookupStatusKey);
+  const base::Value::Dict& result_dict = result->GetDict();
+  const std::string* status = result_dict.FindString(kLookupStatusKey);
   if (!status) {
     RecordLookupQueryResult(LookupQueryResult::kInvalidJson);
     MaybeRetryRequest();
@@ -387,7 +392,7 @@ void SCTAuditingReporter::OnSendLookupQueryComplete(
   }
 
   const std::string* server_timestamp_string =
-      result->FindStringKey(kLookupTimestampKey);
+      result_dict.FindString(kLookupTimestampKey);
   if (!server_timestamp_string) {
     RecordLookupQueryResult(LookupQueryResult::kInvalidJson);
     MaybeRetryRequest();
@@ -410,16 +415,22 @@ void SCTAuditingReporter::OnSendLookupQueryComplete(
   }
 
   // Find the corresponding log entry.
-  const base::Value* logs = result->FindListKey(kLookupLogStatusKey);
+  const base::Value::List* logs = result_dict.FindList(kLookupLogStatusKey);
   if (!logs) {
     RecordLookupQueryResult(LookupQueryResult::kInvalidJson);
     MaybeRetryRequest();
     return;
   }
 
-  const base::Value* found_log = nullptr;
-  for (const auto& log : logs->GetListDeprecated()) {
-    const std::string* encoded_log_id = log.FindStringKey(kLookupLogIdKey);
+  const base::Value::Dict* found_log = nullptr;
+  for (const auto& log : *logs) {
+    const base::Value::Dict* log_dict = log.GetIfDict();
+    if (!log_dict) {
+      RecordLookupQueryResult(LookupQueryResult::kInvalidJson);
+      MaybeRetryRequest();
+      return;
+    }
+    const std::string* encoded_log_id = log_dict->FindString(kLookupLogIdKey);
     std::string log_id;
     if (!encoded_log_id || !base::Base64Decode(*encoded_log_id, &log_id)) {
       RecordLookupQueryResult(LookupQueryResult::kInvalidJson);
@@ -427,7 +438,7 @@ void SCTAuditingReporter::OnSendLookupQueryComplete(
       return;
     }
     if (log_id == sct_hashdance_metadata_->log_id) {
-      found_log = &log;
+      found_log = log_dict;
       break;
     }
   }
@@ -440,7 +451,7 @@ void SCTAuditingReporter::OnSendLookupQueryComplete(
   }
 
   const std::string* ingested_until_string =
-      found_log->FindStringKey(kLookupIngestedUntilKey);
+      found_log->FindString(kLookupIngestedUntilKey);
   if (!ingested_until_string) {
     RecordLookupQueryResult(LookupQueryResult::kInvalidJson);
     MaybeRetryRequest();
@@ -462,7 +473,8 @@ void SCTAuditingReporter::OnSendLookupQueryComplete(
     return;
   }
 
-  const base::Value* suffix_value = result->FindListKey(kLookupHashSuffixKey);
+  const base::Value::List* suffix_value =
+      result_dict.FindList(kLookupHashSuffixKey);
   if (!suffix_value) {
     RecordLookupQueryResult(LookupQueryResult::kInvalidJson);
     MaybeRetryRequest();
@@ -476,11 +488,9 @@ void SCTAuditingReporter::OnSendLookupQueryComplete(
   hash_suffix =
       base::Base64Encode(base::as_bytes(base::make_span(hash_suffix)));
   base::Value hash_suffix_value(std::move(hash_suffix));
-  const auto suffixes = suffix_value->GetListDeprecated();
   // TODO(nsatragno): it would be neat if the backend returned a sorted list and
   // we could binary search it instead.
-  if (std::find(suffixes.begin(), suffixes.end(), hash_suffix_value) !=
-      suffixes.end()) {
+  if (base::Contains(*suffix_value, hash_suffix_value)) {
     // Found the SCT in the suffix list, all done.
     RecordLookupQueryResult(LookupQueryResult::kSCTSuffixFound);
     std::move(done_callback_).Run(reporter_key_);
@@ -488,8 +498,16 @@ void SCTAuditingReporter::OnSendLookupQueryComplete(
   }
 
   // The server does not know about this SCT, and it should. Notify the
-  // embedder and start sending the full report.
-  owner_network_context_->OnNewSCTAuditingReportSent();
+  // embedder (ensuring we only do this once per report) and then start sending
+  // the full report.
+  if (!counted_towards_report_limit_) {
+    owner_network_context_->OnNewSCTAuditingReportSent();
+    // Mark this reporter as already counted towards the max report limit. This
+    // prevents counting the same report multiple times in case of retries (and
+    // retries across browser restarts with persisted reports).
+    counted_towards_report_limit_ = true;
+  }
+
   RecordLookupQueryResult(LookupQueryResult::kSCTSuffixNotFound);
   SendReport();
 }

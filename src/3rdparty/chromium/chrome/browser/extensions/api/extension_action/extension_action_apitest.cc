@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/extensions/extension_action_test_helper.h"
+#include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -27,6 +28,7 @@
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/background_script_executor.h"
 #include "extensions/browser/browsertest_util.h"
 #include "extensions/browser/extension_action.h"
 #include "extensions/browser/extension_action_manager.h"
@@ -38,6 +40,8 @@
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
 #include "extensions/test/test_extension_dir.h"
+#include "net/dns/mock_host_resolver.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/color_utils.h"
 
@@ -200,7 +204,16 @@ void FlushStateStore(Profile* profile) {
 
 }  // namespace
 
-using ExtensionActionAPITest = ExtensionApiTest;
+// A class that allows for cross-origin navigations with embedded test server.
+class ExtensionActionAPITest : public ExtensionApiTest {
+ protected:
+  void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
+    host_resolver()->AddRule("*", "127.0.0.1");
+    embedded_test_server()->ServeFilesFromSourceDirectory("chrome/test/data");
+    ASSERT_TRUE(StartEmbeddedTestServer());
+  }
+};
 
 // Alias these for readability, when a test only exercises one type of action.
 using BrowserActionAPITest = ExtensionActionAPITest;
@@ -270,7 +283,7 @@ class MultiActionAPICanvasTest : public MultiActionAPITest {
 // cause a disk write (since we only persist the defaults).
 // Only browser actions persist settings.
 IN_PROC_BROWSER_TEST_F(BrowserActionAPITest, TestNoUnnecessaryIO) {
-  ExtensionTestMessageListener ready_listener("ready", false);
+  ExtensionTestMessageListener ready_listener("ready");
 
   TestExtensionDir test_dir;
   test_dir.WriteManifest(
@@ -340,8 +353,6 @@ IN_PROC_BROWSER_TEST_F(BrowserActionAPITest, TestNoUnnecessaryIO) {
 // removal. Regression test for https://crbug.com/834033.
 IN_PROC_BROWSER_TEST_P(MultiActionAPITest,
                        ValuesAreClearedOnNavigationAndTabRemoval) {
-  ASSERT_TRUE(StartEmbeddedTestServer());
-
   TestExtensionDir test_dir;
   constexpr char kManifestTemplate[] =
       R"({
@@ -388,7 +399,7 @@ IN_PROC_BROWSER_TEST_P(MultiActionAPITest,
   {
     content::WebContentsDestroyedWatcher destroyed_watcher(web_contents);
     tab_strip_model->CloseWebContentsAt(tab_strip_model->active_index(),
-                                        TabStripModel::CLOSE_NONE);
+                                        TabCloseTypes::CLOSE_NONE);
     destroyed_watcher.Wait();
   }
   // The title should have been cleared on tab removal as well.
@@ -738,7 +749,8 @@ IN_PROC_BROWSER_TEST_P(ActionAndBrowserActionAPITest, ValuesArePersisted) {
 }
 
 // Tests setting the icon dynamically from the background page.
-IN_PROC_BROWSER_TEST_P(MultiActionAPICanvasTest, DynamicSetIcon) {
+// TODO(crbug.com/1340330): flaky.
+IN_PROC_BROWSER_TEST_P(MultiActionAPICanvasTest, DISABLED_DynamicSetIcon) {
   constexpr char kManifestTemplate[] =
       R"({
            "name": "Test Clicking",
@@ -1437,6 +1449,87 @@ IN_PROC_BROWSER_TEST_P(MultiActionAPITest, EnableAndDisable) {
   }
 }
 
+// Tests that the check for enabled and disabled status are correctly reported.
+IN_PROC_BROWSER_TEST_F(ExtensionActionAPITest, IsEnabled) {
+  ASSERT_TRUE(RunExtensionTest("extension_action/is_enabled")) << message_;
+}
+
+// Tests that isEnabled correctly ignores declarativeContent rules for enable.
+IN_PROC_BROWSER_TEST_F(ExtensionActionAPITest, IsEnabledIgnoreDeclarative) {
+  constexpr char kManifestTemplate[] =
+      R"({
+           "name": "Declarative content ignored test",
+           "version": "0.1",
+           "manifest_version": 3,
+           "permissions": ["activeTab", "declarativeContent"],
+           "background": {
+             "service_worker" : "background.js"
+           },
+           "action": {}
+         })";
+  constexpr char kSetupDeclarativeContent[] =
+      R"(
+          let rule1 = {
+            conditions: [
+              new chrome.declarativeContent.PageStateMatcher({
+                pageUrl: { hostContains: 'google'},
+              })
+            ],
+            actions: [ new chrome.declarativeContent.ShowAction() ]
+          };
+          chrome.runtime.onInstalled.addListener(function(details) {
+            chrome.declarativeContent.onPageChanged.removeRules(
+              undefined, function() {
+                chrome.declarativeContent.onPageChanged.addRules(
+                  [rule1], () => {
+                    chrome.test.sendMessage('ready');
+                });
+            });
+          });
+          // Set tab disabled globally so that we can assert that the extension
+          // cannot know enable status for declarativeContent tabs it is
+          // registered for.
+          chrome.action.disable();
+        )";
+
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(kManifestTemplate);
+  test_dir.WriteFile(FILE_PATH_LITERAL("background.js"),
+                     kSetupDeclarativeContent);
+
+  ExtensionTestMessageListener listener("ready");
+  const Extension* extension = LoadExtension(test_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+  auto* action_manager = ExtensionActionManager::Get(profile());
+  ExtensionAction* action = action_manager->GetExtensionAction(*extension);
+  ASSERT_TRUE(action);
+  ASSERT_TRUE(listener.WaitUntilSatisfied());
+
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  GURL url(embedded_test_server()->GetURL("google.com", "/title1.html"));
+
+  EXPECT_TRUE(NavigateToURL(web_contents, url));
+  EXPECT_TRUE(WaitForLoadStop(web_contents));
+  const int tab_id = sessions::SessionTabHelper::IdForTab(web_contents).id();
+
+  // Confirm the tab is only visible for declarativeContent.
+  ASSERT_TRUE(action->GetIsVisible(tab_id));
+  ASSERT_FALSE(action->GetIsVisibleIgnoringDeclarative(tab_id));
+
+  constexpr char kCheckIsEnabledStatusForTabId[] =
+      R"(
+        chrome.action.isEnabled(%d, (enabled) => {
+          chrome.test.sendScriptResult(enabled);
+        });
+      )";
+  base::Value script_result = BackgroundScriptExecutor::ExecuteScript(
+      profile(), extension->id(),
+      base::StringPrintf(kCheckIsEnabledStatusForTabId, tab_id),
+      BackgroundScriptExecutor::ResultCapture::kSendScriptResult);
+  EXPECT_FALSE(script_result.GetBool());
+}
+
 using ActionAPITest = ExtensionApiTest;
 
 IN_PROC_BROWSER_TEST_F(ActionAPITest, TestGetUserSettings) {
@@ -1461,7 +1554,7 @@ IN_PROC_BROWSER_TEST_F(ActionAPITest, TestGetUserSettings) {
 
   const Extension* extension = nullptr;
   {
-    ExtensionTestMessageListener listener("ready", /*will_reply=*/false);
+    ExtensionTestMessageListener listener("ready");
     extension = LoadExtension(test_dir.UnpackedPath());
     ASSERT_TRUE(extension);
     ASSERT_TRUE(listener.WaitUntilSatisfied());
@@ -1475,7 +1568,7 @@ IN_PROC_BROWSER_TEST_F(ActionAPITest, TestGetUserSettings) {
       ExtensionActionTestHelper::Create(browser());
 
   auto get_response = [extension, toolbar_helper = toolbar_helper.get()]() {
-    ExtensionTestMessageListener listener(/*will_reply=*/false);
+    ExtensionTestMessageListener listener;
     listener.set_extension_id(extension->id());
     toolbar_helper->Press(extension->id());
     EXPECT_TRUE(listener.WaitUntilSatisfied());

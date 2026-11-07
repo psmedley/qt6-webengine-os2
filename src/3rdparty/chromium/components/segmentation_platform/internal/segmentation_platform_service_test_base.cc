@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,22 @@
 #include "components/segmentation_platform/internal/segmentation_platform_service_impl.h"
 #include "components/segmentation_platform/internal/ukm_data_manager.h"
 #include "components/segmentation_platform/public/config.h"
+#include "components/segmentation_platform/public/field_trial_register.h"
 
 namespace segmentation_platform {
 
 namespace {
+
+class MockFieldTrialRegister : public FieldTrialRegister {
+ public:
+  MOCK_METHOD2(RegisterFieldTrial,
+               void(base::StringPiece trial_name,
+                    base::StringPiece group_name));
+  MOCK_METHOD3(RegisterSubsegmentFieldTrialIfNeeded,
+               void(base::StringPiece trial_name,
+                    proto::SegmentId segment_id,
+                    int subsegment_rank));
+};
 
 std::vector<std::unique_ptr<Config>> CreateTestConfigs() {
   std::vector<std::unique_ptr<Config>> configs;
@@ -25,26 +37,23 @@ std::vector<std::unique_ptr<Config>> CreateTestConfigs() {
     std::unique_ptr<Config> config = std::make_unique<Config>();
     config->segmentation_key = kTestSegmentationKey1;
     config->segment_selection_ttl = base::Days(28);
-    config->segment_ids = {
-        OptimizationTarget::OPTIMIZATION_TARGET_SEGMENTATION_NEW_TAB,
-        OptimizationTarget::OPTIMIZATION_TARGET_SEGMENTATION_SHARE};
+    config->AddSegmentId(SegmentId::OPTIMIZATION_TARGET_SEGMENTATION_NEW_TAB);
+    config->AddSegmentId(SegmentId::OPTIMIZATION_TARGET_SEGMENTATION_SHARE);
     configs.push_back(std::move(config));
   }
   {
     std::unique_ptr<Config> config = std::make_unique<Config>();
     config->segmentation_key = kTestSegmentationKey2;
     config->segment_selection_ttl = base::Days(10);
-    config->segment_ids = {
-        OptimizationTarget::OPTIMIZATION_TARGET_SEGMENTATION_SHARE,
-        OptimizationTarget::OPTIMIZATION_TARGET_SEGMENTATION_VOICE};
+    config->AddSegmentId(SegmentId::OPTIMIZATION_TARGET_SEGMENTATION_SHARE);
+    config->AddSegmentId(SegmentId::OPTIMIZATION_TARGET_SEGMENTATION_VOICE);
     configs.push_back(std::move(config));
   }
   {
     std::unique_ptr<Config> config = std::make_unique<Config>();
     config->segmentation_key = kTestSegmentationKey3;
     config->segment_selection_ttl = base::Days(14);
-    config->segment_ids = {
-        OptimizationTarget::OPTIMIZATION_TARGET_SEGMENTATION_NEW_TAB};
+    config->AddSegmentId(SegmentId::OPTIMIZATION_TARGET_SEGMENTATION_NEW_TAB);
     configs.push_back(std::move(config));
   }
   {
@@ -92,22 +101,28 @@ void SegmentationPlatformServiceTestBase::InitPlatform(
   SetUpPrefs();
 
   std::vector<std::unique_ptr<Config>> configs = CreateTestConfigs();
-  base::flat_set<OptimizationTarget> all_segment_ids;
+  base::flat_set<SegmentId> all_segment_ids;
   for (const auto& config : configs) {
-    for (const auto& segment_id : config->segment_ids)
-      all_segment_ids.insert(segment_id);
+    for (const auto& segment_id : config->segments)
+      all_segment_ids.insert(segment_id.first);
   }
   auto storage_service = std::make_unique<StorageService>(
       std::move(segment_db), std::move(signal_db),
       std::move(segment_storage_config_db), &test_clock_, ukm_data_manager,
-      all_segment_ids, model_provider_factory.get());
+      all_segment_ids, model_provider_factory.get(), &pref_service_);
 
+  auto params = std::make_unique<SegmentationPlatformServiceImpl::InitParams>();
+  params->storage_service = std::move(storage_service);
+  params->model_provider =
+      std::make_unique<TestModelProviderFactory>(&model_provider_data_);
+  params->profile_prefs = &pref_service_;
+  params->history_service = history_service;
+  params->task_runner = task_runner_;
+  params->clock = &test_clock_;
+  params->configs = std::move(configs);
+  params->field_trial_register = std::make_unique<MockFieldTrialRegister>();
   segmentation_platform_service_impl_ =
-      std::make_unique<SegmentationPlatformServiceImpl>(
-          std::move(storage_service),
-          std::make_unique<TestModelProviderFactory>(&model_provider_data_),
-          &pref_service_, history_service, task_runner_, &test_clock_,
-          std::move(configs));
+      std::make_unique<SegmentationPlatformServiceImpl>(std::move(params));
 }
 
 void SegmentationPlatformServiceTestBase::DestroyPlatform() {
@@ -118,13 +133,13 @@ void SegmentationPlatformServiceTestBase::DestroyPlatform() {
 }
 
 void SegmentationPlatformServiceTestBase::SetUpPrefs() {
-  DictionaryPrefUpdate update(&pref_service_, kSegmentationResultPref);
-  base::Value* dictionary = update.Get();
+  ScopedDictPrefUpdate update(&pref_service_, kSegmentationResultPref);
+  base::Value::Dict& dictionary = update.Get();
 
-  base::Value segmentation_result(base::Value::Type::DICTIONARY);
-  segmentation_result.SetIntKey(
-      "segment_id", OptimizationTarget::OPTIMIZATION_TARGET_SEGMENTATION_SHARE);
-  dictionary->SetKey(kTestSegmentationKey1, std::move(segmentation_result));
+  base::Value::Dict segmentation_result;
+  segmentation_result.Set("segment_id",
+                          SegmentId::OPTIMIZATION_TARGET_SEGMENTATION_SHARE);
+  dictionary.Set(kTestSegmentationKey1, std::move(segmentation_result));
 }
 
 std::vector<std::unique_ptr<Config>>

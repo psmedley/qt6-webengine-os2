@@ -8,7 +8,7 @@ $$ MAX_ARITY controls the number of arguments that MockCallback supports.
 $$ It is choosen to match the number GMock supports.
 $var MAX_ARITY = 10
 $$
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -78,7 +78,7 @@ class MockCallback<RepeatingCallback<$run_type>> {
   MOCK_METHOD$(i)_T(Run, $run_type);
 
   RepeatingCallback<$run_type> Get() {
-    return BindRepeating(&MockCallback::Run, Unretained(this));
+    return ::base::BindRepeating(&MockCallback::Run, ::base::Unretained(this));
   }
 };
 
@@ -93,7 +93,7 @@ class MockCallback<OnceCallback<$run_type>> {
   MOCK_METHOD$(i)_T(Run, $run_type);
 
   OnceCallback<$run_type> Get() {
-    return BindOnce(&MockCallback::Run, Unretained(this));
+    return ::base::BindOnce(&MockCallback::Run, ::base::Unretained(this));
   }
 };
 

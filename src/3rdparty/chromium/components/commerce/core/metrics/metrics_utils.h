@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,8 @@
 #include "components/prefs/pref_service.h"
 
 namespace commerce::metrics {
+
+extern const char kPDPStateHistogramName[];
 
 // Possible options for the stat of a product details page (PDP). These must be
 // kept in sync with the values in enums.xml.

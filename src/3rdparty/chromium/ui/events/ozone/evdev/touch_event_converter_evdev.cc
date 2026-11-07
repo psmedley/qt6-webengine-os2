@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -97,8 +97,9 @@ const int kTrackingIdForUnusedSlot = -1;
 
 namespace ui {
 
-const base::Feature kEnableSingleCancelTouch{"EnableSingleTouchCancel",
-                                             base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kEnableSingleCancelTouch,
+             "EnableSingleTouchCancel",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 TouchEventConverterEvdev::TouchEventConverterEvdev(
     base::ScopedFD fd,
@@ -532,7 +533,7 @@ void TouchEventConverterEvdev::ReportTouchEvent(
   ui::PointerDetails details(event.reported_tool_type, /* pointer_id*/ 0,
                              event.radius_x, event.radius_y, event.pressure,
                              /* twist */ 0, event.tilt_x, event.tilt_y);
-  int flags = event.stylus_button ? ui::EventFlags::EF_LEFT_MOUSE_BUTTON : 0;
+  int flags = event.stylus_button ? ui::EF_LEFT_MOUSE_BUTTON : 0;
   dispatcher_->DispatchTouchEvent(TouchEventParams(
       input_device_.id, event.slot, event_type, gfx::PointF(event.x, event.y),
       details, timestamp, flags));

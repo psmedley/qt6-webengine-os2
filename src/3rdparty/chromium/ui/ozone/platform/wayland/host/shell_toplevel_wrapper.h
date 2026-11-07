@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@ class Rect;
 namespace ui {
 
 class WaylandConnection;
+enum class ZOrderLevel;
 
 // A wrapper around different versions of xdg toplevels. Allows
 // WaylandToplevelWindow to set window-like properties such as maximize,
@@ -101,6 +102,14 @@ class ShellToplevelWrapper {
   // with this top level window.
   virtual void SetDecoration(DecorationMode decoration) = 0;
 
+  // Set session id and restore id for the top level.
+  virtual void SetRestoreInfo(int32_t restore_session_id,
+                              int32_t restore_window_id) = 0;
+
+  virtual void SetRestoreInfoWithWindowIdSource(
+      int32_t restore_session_id,
+      const std::string& restore_window_id_source) = 0;
+
   // Request that the server set the orientation lock to the provided lock type.
   // This is only accepted if the requesting window is running in immersive
   // fullscreen mode and in a tablet configuration.
@@ -108,6 +117,31 @@ class ShellToplevelWrapper {
 
   // Request that the server remove the applied orientation lock.
   virtual void Unlock() = 0;
+
+  // Request that the window be made a system modal.
+  virtual void SetSystemModal(bool modal) = 0;
+
+  // Checks if the server supports chrome to control the window position in
+  // screen coordinates.
+  virtual bool SupportsScreenCoordinates() const = 0;
+
+  // Enables screen coordinates support. This is no-op if the server does not
+  // support the screen coordinates.
+  virtual void EnableScreenCoordinates() = 0;
+
+  // Sets/usets a native window to float state. This places it on top of other
+  // windows.
+  virtual void SetFloat() = 0;
+  virtual void UnSetFloat() = 0;
+
+  // Sets the z order of the window.
+  virtual void SetZOrder(ZOrderLevel z_order) = 0;
+
+  // Activation brings a window to the foreground. Deactivation makes a window
+  // non-foregrounded.
+  virtual bool SupportsActivation() = 0;
+  virtual void Activate() = 0;
+  virtual void Deactivate() = 0;
 };
 
 // Look for |value| in |wl_array| in C++ style.

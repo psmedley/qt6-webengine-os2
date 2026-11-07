@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,13 +17,19 @@ namespace gl {
 void* QueryDeviceObjectFromANGLE(int object_type) {
   TRACE_EVENT0("gpu", "QueryDeviceObjectFromANGLE");
 
-  EGLDisplay egl_display = gl::GLSurfaceEGL::GetHardwareDisplay();
+  GLDisplayEGL *gl_display  = gl::GLSurfaceEGL::GetGLDisplayEGL();
+  if (!gl_display) {
+    DVLOG(1) << "Failed to retrieve GLDisplayEGL";
+    return nullptr;
+  }
+
+  EGLDisplay egl_display = gl_display->GetDisplay();
   if (egl_display == EGL_NO_DISPLAY) {
     DVLOG(1) << "Failed to retrieve EGLDisplay";
     return nullptr;
   }
 
-  if (!gl::GLSurfaceEGL::IsEGLQueryDeviceSupported()) {
+  if (!gl::g_driver_egl.client_ext.b_EGL_EXT_device_query) {
     DVLOG(1) << "EGL_EXT_device_query not supported";
     return nullptr;
   }

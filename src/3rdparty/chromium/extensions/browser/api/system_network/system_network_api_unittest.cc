@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,14 +37,13 @@ TEST_F(SystemNetworkApiUnitTest, MAYBE_GetNetworkInterfaces) {
 
   std::unique_ptr<base::Value> result(RunFunctionAndReturnSingleResult(
       socket_function.get(), "[]", browser_context()));
-  ASSERT_EQ(base::Value::Type::LIST, result->type());
+  ASSERT_TRUE(result->is_list());
 
   // All we can confirm is that we have at least one address, but not what it
   // is.
-  base::ListValue* value = static_cast<base::ListValue*>(result.get());
-  ASSERT_TRUE(value->GetListDeprecated().size() > 0);
+  ASSERT_FALSE(result->GetList().empty());
 
-  for (const auto& network_interface_value : value->GetListDeprecated()) {
+  for (const auto& network_interface_value : result->GetList()) {
     NetworkInterface network_interface;
     ASSERT_TRUE(NetworkInterface::Populate(network_interface_value,
                                            &network_interface));

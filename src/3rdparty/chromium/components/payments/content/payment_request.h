@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "components/payments/content/payment_request_spec.h"
 #include "components/payments/content/payment_request_state.h"
 #include "components/payments/content/service_worker_payment_app.h"
+#include "components/payments/core/csp_checker.h"
 #include "components/payments/core/journey_logger.h"
 #include "content/public/browser/document_service.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -57,6 +58,7 @@ class PaymentRequest : public content::DocumentService<mojom::PaymentRequest>,
                        public PaymentRequestSpec::Observer,
                        public PaymentRequestState::Delegate,
                        public InitializationTask::Observer,
+                       public CSPChecker,
                        public content::WebContentsObserver {
  public:
   class ObserverForTest {
@@ -77,7 +79,7 @@ class PaymentRequest : public content::DocumentService<mojom::PaymentRequest>,
     virtual ~ObserverForTest() {}
   };
 
-  PaymentRequest(content::RenderFrameHost* render_frame_host,
+  PaymentRequest(content::RenderFrameHost& render_frame_host,
                  std::unique_ptr<ContentPaymentRequestDelegate> delegate,
                  base::WeakPtr<PaymentRequestDisplayManager> display_manager,
                  mojo::PendingReceiver<mojom::PaymentRequest> receiver,
@@ -94,7 +96,7 @@ class PaymentRequest : public content::DocumentService<mojom::PaymentRequest>,
             std::vector<mojom::PaymentMethodDataPtr> method_data,
             mojom::PaymentDetailsPtr details,
             mojom::PaymentOptionsPtr options) override;
-  void Show(bool is_user_gesture, bool wait_for_updated_details) override;
+  void Show(bool wait_for_updated_details) override;
   void Retry(mojom::PaymentValidationErrorsPtr errors) override;
   void UpdateWith(mojom::PaymentDetailsPtr details) override;
   void OnPaymentDetailsNotUpdated() override;
@@ -128,6 +130,10 @@ class PaymentRequest : public content::DocumentService<mojom::PaymentRequest>,
   // object and close any related connections.
   void OnUserCancelled();
 
+  // Called when the user explicitly opts out of the flow. Only used for
+  // SecurePaymentConfirmation currently.
+  void OnUserOptedOut();
+
   // Called when the PaymentRequest is about to be destroyed. This reports
   // the reason for destruction.
   void WillBeDestroyed(content::DocumentServiceDestructionReason reason) final;
@@ -142,7 +148,6 @@ class PaymentRequest : public content::DocumentService<mojom::PaymentRequest>,
   void OnPaymentHandlerOpenWindowCalled();
 
   bool skipped_payment_request_ui() { return skipped_payment_request_ui_; }
-  bool is_show_user_gesture() const { return is_show_user_gesture_; }
   SPCTransactionMode spc_transaction_mode() const {
     return spc_transaction_mode_;
   }
@@ -158,6 +163,13 @@ class PaymentRequest : public content::DocumentService<mojom::PaymentRequest>,
   base::WeakPtr<PaymentRequest> GetWeakPtr();
 
  private:
+  // CSPChecker.
+  void AllowConnectToSource(
+      const GURL& url,
+      const GURL& url_before_redirects,
+      bool did_follow_redirect,
+      base::OnceCallback<void(bool)> result_callback) override;
+
   // InitializationTask::Observer.
   void OnInitialized(InitializationTask* initialization_task) override;
 
@@ -254,11 +266,6 @@ class PaymentRequest : public content::DocumentService<mojom::PaymentRequest>,
 
   // Whether a completion was already recorded for this Payment Request.
   bool has_recorded_completion_ = false;
-
-  // Whether PaymentRequest.show() was invoked with a user gesture.
-  // TODO(crbug.com/825270): Remove this member now that user gesture is always
-  // required for show().
-  bool is_show_user_gesture_ = false;
 
   // Whether PaymentRequest.show() was invoked by skipping payment request UI.
   bool skipped_payment_request_ui_ = false;

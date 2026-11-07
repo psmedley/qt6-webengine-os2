@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,9 +19,7 @@
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 
-namespace net {
-
-namespace test_server {
+namespace net::test_server {
 
 // A response that can be manually controlled on the current test thread. It is
 // used for waiting for a connection, sending data and closing it. It will
@@ -64,6 +62,9 @@ class ControllableHttpResponse {
   // Returns the HttpRequest after a call to WaitForRequest.
   const HttpRequest* http_request() const { return http_request_.get(); }
 
+  // Returns whether or not the request has been received yet.
+  bool has_received_request();
+
  private:
   class Interceptor;
 
@@ -93,8 +94,6 @@ class ControllableHttpResponse {
   base::WeakPtrFactory<ControllableHttpResponse> weak_ptr_factory_{this};
 };
 
-}  // namespace test_server
-
-}  // namespace net
+}  // namespace net::test_server
 
 #endif  //  NET_TEST_EMBEDDED_TEST_SERVER_CONTROLLABLE_HTTP_RESPONSE_H_

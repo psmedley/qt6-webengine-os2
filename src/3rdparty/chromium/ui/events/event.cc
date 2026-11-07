@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -162,38 +162,6 @@ bool IsNearZero(const float num) {
 
 ////////////////////////////////////////////////////////////////////////////////
 // Event
-
-// static
-std::unique_ptr<Event> Event::Clone(const Event& event) {
-  if (event.IsKeyEvent()) {
-    return std::make_unique<KeyEvent>(static_cast<const KeyEvent&>(event));
-  }
-
-  if (event.IsMouseEvent()) {
-    if (event.IsMouseWheelEvent()) {
-      return std::make_unique<MouseWheelEvent>(
-          static_cast<const MouseWheelEvent&>(event));
-    }
-
-    return std::make_unique<MouseEvent>(static_cast<const MouseEvent&>(event));
-  }
-
-  if (event.IsTouchEvent()) {
-    return std::make_unique<TouchEvent>(static_cast<const TouchEvent&>(event));
-  }
-
-  if (event.IsGestureEvent()) {
-    return std::make_unique<GestureEvent>(
-        static_cast<const GestureEvent&>(event));
-  }
-
-  if (event.IsScrollEvent()) {
-    return std::make_unique<ScrollEvent>(
-        static_cast<const ScrollEvent&>(event));
-  }
-
-  return base::WrapUnique(new Event(event));
-}
 
 Event::~Event() {
   if (delete_native_event_)
@@ -400,6 +368,10 @@ CancelModeEvent::CancelModeEvent()
 
 CancelModeEvent::~CancelModeEvent() = default;
 
+std::unique_ptr<Event> CancelModeEvent::Clone() const {
+  return std::make_unique<CancelModeEvent>(*this);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // LocatedEvent
 
@@ -427,18 +399,12 @@ void LocatedEvent::UpdateForRootTransform(
     const gfx::Transform& reversed_root_transform,
     const gfx::Transform& reversed_local_transform) {
   if (target()) {
-    gfx::Point3F transformed_location(location_);
-    reversed_local_transform.TransformPoint(&transformed_location);
-    location_ = transformed_location.AsPointF();
-
-    gfx::Point3F transformed_root_location(root_location_);
-    reversed_root_transform.TransformPoint(&transformed_root_location);
-    root_location_ = transformed_root_location.AsPointF();
+    location_ = reversed_local_transform.MapPoint(location_);
+    root_location_ = reversed_root_transform.MapPoint(root_location_);
   } else {
     // This mirrors what the code previously did.
-    gfx::Point3F transformed_location(location_);
-    reversed_root_transform.TransformPoint(&transformed_location);
-    root_location_ = location_ = transformed_location.AsPointF();
+    location_ = reversed_root_transform.MapPoint(location_);
+    root_location_ = location_;
   }
 }
 
@@ -625,6 +591,10 @@ std::string MouseEvent::ToString() const {
                         " | ")});
 }
 
+std::unique_ptr<Event> MouseEvent::Clone() const {
+  return std::make_unique<MouseEvent>(*this);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // MouseWheelEvent
 
@@ -700,6 +670,10 @@ MouseWheelEvent::MouseWheelEvent(const gfx::Vector2d& offset,
 
 MouseWheelEvent::~MouseWheelEvent() = default;
 
+std::unique_ptr<Event> MouseWheelEvent::Clone() const {
+  return std::make_unique<MouseWheelEvent>(*this);
+}
+
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_FUCHSIA)
 // This value matches Windows and Fuchsia WHEEL_DELTA.
 // static
@@ -764,16 +738,17 @@ void TouchEvent::UpdateForRootTransform(
   LocatedEvent::UpdateForRootTransform(inverted_root_transform,
                                        inverted_local_transform);
 
-  // We could create a vector and then rely on Transform::TransformVector , but
+  // We could create a vector and then rely on Transform::MapVector, but
   // that ends up creating a 4 dimensional vector and applying a 4 dim
   // transform. Really what we're looking at is only in the (x,y) plane, and
   // given that we can run this relatively frequently we will inline execute the
   // matrix here.
-  const auto& matrix = inverted_root_transform.matrix();
-  const double new_x = fabs(pointer_details_.radius_x * matrix.rc(0, 0) +
-                            pointer_details_.radius_y * matrix.rc(0, 1));
-  const double new_y = fabs(pointer_details_.radius_x * matrix.rc(1, 0) +
-                            pointer_details_.radius_y * matrix.rc(1, 1));
+  const double new_x =
+      fabs(pointer_details_.radius_x * inverted_root_transform.rc(0, 0) +
+           pointer_details_.radius_y * inverted_root_transform.rc(0, 1));
+  const double new_y =
+      fabs(pointer_details_.radius_x * inverted_root_transform.rc(1, 0) +
+           pointer_details_.radius_y * inverted_root_transform.rc(1, 1));
   pointer_details_.radius_x = new_x;
   pointer_details_.radius_y = new_y;
 
@@ -784,14 +759,18 @@ void TouchEvent::UpdateForRootTransform(
   // section.
   if (!IsNearZero(pointer_details_.tilt_x) ||
       !IsNearZero(pointer_details_.tilt_y)) {
-    if (IsNearZero(matrix.rc(0, 1)) && IsNearZero(matrix.rc(1, 0))) {
-      pointer_details_.tilt_x *= std::copysign(1, matrix.rc(0, 0));
-      pointer_details_.tilt_y *= std::copysign(1, matrix.rc(1, 1));
-    } else if (IsNearZero(matrix.rc(0, 0)) && IsNearZero(matrix.rc(1, 1))) {
-      double new_tilt_x =
-          pointer_details_.tilt_y * std::copysign(1, matrix.rc(0, 1));
-      double new_tilt_y =
-          pointer_details_.tilt_x * std::copysign(1, matrix.rc(1, 0));
+    if (IsNearZero(inverted_root_transform.rc(0, 1)) &&
+        IsNearZero(inverted_root_transform.rc(1, 0))) {
+      pointer_details_.tilt_x *=
+          std::copysign(1, inverted_root_transform.rc(0, 0));
+      pointer_details_.tilt_y *=
+          std::copysign(1, inverted_root_transform.rc(1, 1));
+    } else if (IsNearZero(inverted_root_transform.rc(0, 0)) &&
+               IsNearZero(inverted_root_transform.rc(1, 1))) {
+      double new_tilt_x = pointer_details_.tilt_y *
+                          std::copysign(1, inverted_root_transform.rc(0, 1));
+      double new_tilt_y = pointer_details_.tilt_x *
+                          std::copysign(1, inverted_root_transform.rc(1, 0));
       pointer_details_.tilt_x = new_tilt_x;
       pointer_details_.tilt_y = new_tilt_y;
     }
@@ -817,6 +796,10 @@ float TouchEvent::ComputeRotationAngle() const {
   while (rotation_angle >= 180)
     rotation_angle -= 180.f;
   return rotation_angle;
+}
+
+std::unique_ptr<Event> TouchEvent::Clone() const {
+  return std::make_unique<TouchEvent>(*this);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1157,6 +1140,10 @@ std::string KeyEvent::ToString() const {
        base::JoinString(base::make_span(KeyEventFlagsNames(flags())), " | ")});
 }
 
+std::unique_ptr<Event> KeyEvent::Clone() const {
+  return std::make_unique<KeyEvent>(*this);
+}
+
 KeyboardCode KeyEvent::GetLocatedWindowsKeyboardCode() const {
   return NonLocatedToLocatedKeyboardCode(key_code_, code_);
 }
@@ -1269,6 +1256,10 @@ std::string ScrollEvent::ToString() const {
       ScrollEventPhaseToString(scroll_event_phase_).c_str());
 }
 
+std::unique_ptr<Event> ScrollEvent::Clone() const {
+  return std::make_unique<ScrollEvent>(*this);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // GestureEvent
 
@@ -1301,6 +1292,10 @@ std::string GestureEvent::ToString() const {
   return base::StringPrintf("%s touch_event_id %d",
                             LocatedEvent::ToString().c_str(),
                             unique_touch_event_id_);
+}
+
+std::unique_ptr<Event> GestureEvent::Clone() const {
+  return std::make_unique<GestureEvent>(*this);
 }
 
 }  // namespace ui

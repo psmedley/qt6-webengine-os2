@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,116 +8,182 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/callback_helpers.h"
-#include "base/containers/contains.h"
-#include "base/containers/flat_map.h"
-#include "base/containers/flat_set.h"
 #include "base/files/file.h"
-#include "base/files/file_util.h"
-#include "base/files/important_file_writer.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/task/thread_pool.h"
-#include "base/time/time.h"
-#include "base/timer/elapsed_timer.h"
+#include "base/types/optional_util.h"
 #include "base/values.h"
 #include "content/browser/first_party_sets/first_party_set_parser.h"
 #include "content/browser/first_party_sets/first_party_sets_loader.h"
+#include "content/browser/first_party_sets/first_party_sets_site_data_remover.h"
+#include "content/browser/first_party_sets/local_set_declaration.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/first_party_sets_handler.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
+#include "net/first_party_sets/first_party_sets_context_config.h"
+#include "net/first_party_sets/global_first_party_sets.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+
+namespace net {
+class SchemefulSite;
+}  // namespace net
 
 namespace content {
 
 namespace {
 
-constexpr base::FilePath::CharType kPersistedFirstPartySetsFileName[] =
-    FILE_PATH_LITERAL("persisted_first_party_sets.json");
+constexpr base::FilePath::CharType kFirstPartySetsDatabase[] =
+    FILE_PATH_LITERAL("first_party_sets.db");
 
-// Reads the sets as raw JSON from their storage file, returning the raw sets on
-// success and empty string on failure.
-std::string LoadSetsFromDisk(const base::FilePath& path) {
-  DCHECK(!path.empty());
+using ClearSiteDataOutcomeType =
+    FirstPartySetsHandlerImpl::ClearSiteDataOutcomeType;
 
-  std::string result;
-  if (!base::ReadFileToString(path, &result)) {
-    VLOG(1) << "Failed loading serialized First-Party Sets file from "
-            << path.MaybeAsASCII();
-    return "";
+// `failed_data_types` is a bitmask used to indicate data types from
+// BrowsingDataRemover::DataType enum that were failed to remove.
+ClearSiteDataOutcomeType ComputeClearSiteDataOutcome(
+    uint64_t failed_data_types) {
+  ClearSiteDataOutcomeType outcome = ClearSiteDataOutcomeType::kSuccess;
+  if (failed_data_types & BrowsingDataRemover::DATA_TYPE_COOKIES) {
+    outcome = ClearSiteDataOutcomeType::kCookieFailed;
   }
-  return result;
+  if (failed_data_types & BrowsingDataRemover::DATA_TYPE_DOM_STORAGE) {
+    outcome = outcome == ClearSiteDataOutcomeType::kCookieFailed
+                  ? ClearSiteDataOutcomeType::kCookieAndStorageFailed
+                  : ClearSiteDataOutcomeType::kStorageFailed;
+  }
+  return outcome;
 }
 
-// Writes the sets as raw JSON to the storage file.
-void MaybeWriteSetsToDisk(const base::FilePath& path, base::StringPiece sets) {
-  DCHECK(!path.empty());
-  if (!base::ImportantFileWriter::WriteFileAtomically(path, sets)) {
-    VLOG(1) << "Failed writing serialized First-Party Sets to file "
-            << path.MaybeAsASCII();
-  }
+void RecordClearSiteDataOutcome(ClearSiteDataOutcomeType outcome) {
+  base::UmaHistogramEnumeration(
+      "FirstPartySets.Initialization.ClearSiteDataOutcomeType", outcome);
 }
+
+// Global FirstPartySetsHandler instance for testing.
+FirstPartySetsHandler* g_test_instance = nullptr;
 
 }  // namespace
 
-bool FirstPartySetsHandler::PolicyParsingError::operator==(
-    const FirstPartySetsHandler::PolicyParsingError& other) const {
-  return std::tie(error, set_type, error_index) ==
-         std::tie(other.error, other.set_type, other.error_index);
+// static
+void FirstPartySetsHandler::SetInstanceForTesting(
+    FirstPartySetsHandler* test_instance) {
+  g_test_instance = test_instance;
 }
 
 // static
 FirstPartySetsHandler* FirstPartySetsHandler::GetInstance() {
+  if (g_test_instance)
+    return g_test_instance;
+
   return FirstPartySetsHandlerImpl::GetInstance();
 }
 
 // static
 FirstPartySetsHandlerImpl* FirstPartySetsHandlerImpl::GetInstance() {
   static base::NoDestructor<FirstPartySetsHandlerImpl> instance(
-      GetContentClient()->browser()->IsFirstPartySetsEnabled());
+      GetContentClient()->browser()->IsFirstPartySetsEnabled(),
+      GetContentClient()->browser()->WillProvidePublicFirstPartySets());
   return instance.get();
 }
 
 // static
-absl::optional<FirstPartySetsHandler::PolicyParsingError>
+std::pair<absl::optional<FirstPartySetsHandler::ParseError>,
+          std::vector<FirstPartySetsHandler::ParseWarning>>
 FirstPartySetsHandler::ValidateEnterprisePolicy(
     const base::Value::Dict& policy) {
-  // Call ParseSetsFromEnterprisePolicy to determine if the all sets in the
-  // policy are valid First-Party Sets. A nullptr is provided since we don't
-  // have use for the actual parsed sets.
-  return FirstPartySetParser::ParseSetsFromEnterprisePolicy(
-      policy, /*out_sets=*/nullptr);
+  FirstPartySetParser::PolicyParseResult parsed_or_error =
+      FirstPartySetParser::ParseSetsFromEnterprisePolicy(policy);
+  if (!parsed_or_error.has_value()) {
+    return {parsed_or_error.error().first, parsed_or_error.error().second};
+  }
+  return {absl::nullopt, parsed_or_error.value().second};
 }
 
-FirstPartySetsHandlerImpl::FirstPartySetsHandlerImpl(bool enabled)
-    : enabled_(enabled) {
+void FirstPartySetsHandlerImpl::GetContextConfigForPolicy(
+    const base::Value::Dict* policy,
+    base::OnceCallback<void(net::FirstPartySetsContextConfig)> callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (!policy || !enabled_) {
+    std::move(callback).Run(net::FirstPartySetsContextConfig());
+    return;
+  }
+  if (global_sets_.has_value()) {
+    std::move(callback).Run(GetContextConfigForPolicyInternal(*policy));
+    return;
+  }
+  // Add to the deque of callbacks that will be processed once the list
+  // of First-Party Sets has been fully initialized.
+  on_sets_ready_callbacks_.push_back(
+      base::BindOnce(
+          &FirstPartySetsHandlerImpl::GetContextConfigForPolicyInternal,
+          // base::Unretained(this) is safe here because this is a static
+          // singleton.
+          base::Unretained(this), policy->Clone())
+          .Then(std::move(callback)));
+}
+
+net::FirstPartySetsContextConfig
+FirstPartySetsHandlerImpl::ComputeEnterpriseContextConfig(
+    const net::GlobalFirstPartySets& global_sets,
+    const FirstPartySetParser::ParsedPolicySetLists& policy) {
+  return global_sets.ComputeConfig(
+      /*replacement_sets=*/policy.replacements,
+      /*addition_sets=*/
+      policy.additions);
+}
+
+FirstPartySetsHandlerImpl::FirstPartySetsHandlerImpl(
+    bool enabled,
+    bool embedder_will_provide_public_sets)
+    : enabled_(enabled),
+      embedder_will_provide_public_sets_(enabled &&
+                                         embedder_will_provide_public_sets) {
   sets_loader_ = std::make_unique<FirstPartySetsLoader>(
       base::BindOnce(&FirstPartySetsHandlerImpl::SetCompleteSets,
                      // base::Unretained(this) is safe here because
                      // this is a static singleton.
-                     base::Unretained(this)),
-      IsEnabled() ? GetContentClient()->browser()->GetFirstPartySetsOverrides()
-                  : base::Value::Dict());
+                     base::Unretained(this)));
 }
 
 FirstPartySetsHandlerImpl::~FirstPartySetsHandlerImpl() = default;
 
-absl::optional<FirstPartySetsHandlerImpl::FlattenedSets>
-FirstPartySetsHandlerImpl::GetSetsIfEnabledAndReady() const {
+absl::optional<net::GlobalFirstPartySets> FirstPartySetsHandlerImpl::GetSets(
+    SetsReadyOnceCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return IsEnabledAndReady() ? sets_ : absl::nullopt;
+  DCHECK(IsEnabled());
+  if (global_sets_.has_value())
+    return global_sets_->Clone();
+
+  if (!callback.is_null()) {
+    // base::Unretained(this) is safe here because this is a static singleton.
+    on_sets_ready_callbacks_.push_back(
+        base::BindOnce(&FirstPartySetsHandlerImpl::GetGlobalSetsSync,
+                       base::Unretained(this))
+            .Then(std::move(callback)));
+  }
+
+  return absl::nullopt;
 }
 
 void FirstPartySetsHandlerImpl::Init(const base::FilePath& user_data_dir,
-                                     const std::string& flag_value,
-                                     SetsReadyOnceCallback on_sets_ready) {
+                                     const LocalSetDeclaration& local_set) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  on_sets_ready_ = std::move(on_sets_ready);
-  SetPersistedSets(user_data_dir);
-  SetManuallySpecifiedSet(flag_value);
+  DCHECK(!initialized_);
 
-  if (!IsEnabled())
-    SetCompleteSets({});
+  initialized_ = true;
+  SetDatabase(user_data_dir);
+
+  if (IsEnabled()) {
+    sets_loader_->SetManuallySpecifiedSet(local_set);
+    if (!embedder_will_provide_public_sets_) {
+      sets_loader_->SetComponentSets(base::File());
+    }
+  } else {
+    SetCompleteSets(net::GlobalFirstPartySets());
+  }
 }
 
 bool FirstPartySetsHandlerImpl::IsEnabled() const {
@@ -125,18 +191,24 @@ bool FirstPartySetsHandlerImpl::IsEnabled() const {
   return enabled_;
 }
 
-void FirstPartySetsHandlerImpl::SetPublicFirstPartySets(base::File sets_file) {
+void FirstPartySetsHandlerImpl::SetPublicFirstPartySets(
+    const base::Version& version,
+    base::File sets_file) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (!IsEnabled()) {
-    sets_loader_->DisposeFile(std::move(sets_file));
-    return;
-  }
+  DCHECK(enabled_);
+  DCHECK(embedder_will_provide_public_sets_);
+
+  // TODO(crbug.com/1219656): Use this value to compute sets diff.
+  version_ = version;
   sets_loader_->SetComponentSets(std::move(sets_file));
 }
 
 void FirstPartySetsHandlerImpl::ResetForTesting() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  initialized_ = false;
   enabled_ = GetContentClient()->browser()->IsFirstPartySetsEnabled();
+  embedder_will_provide_public_sets_ =
+      GetContentClient()->browser()->WillProvidePublicFirstPartySets();
 
   // Initializes the `sets_loader_` member with a callback to SetCompleteSets
   // and the result of content::GetFirstPartySetsOverrides.
@@ -144,116 +216,242 @@ void FirstPartySetsHandlerImpl::ResetForTesting() {
       base::BindOnce(&FirstPartySetsHandlerImpl::SetCompleteSets,
                      // base::Unretained(this) is safe here because
                      // this is a static singleton.
-                     base::Unretained(this)),
-      IsEnabled() ? GetContentClient()->browser()->GetFirstPartySetsOverrides()
-                  : base::Value::Dict());
-  on_sets_ready_.Reset();
-  persisted_sets_path_ = base::FilePath();
-  sets_ = absl::nullopt;
-  raw_persisted_sets_ = absl::nullopt;
+                     base::Unretained(this)));
+  on_sets_ready_callbacks_.clear();
+  global_sets_ = absl::nullopt;
+  db_helper_.Reset();
 }
 
-void FirstPartySetsHandlerImpl::SetManuallySpecifiedSet(
-    const std::string& flag_value) {
+void FirstPartySetsHandlerImpl::SetGlobalSetsForTesting(
+    net::GlobalFirstPartySets global_sets) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (!IsEnabled())
-    return;
-  sets_loader_->SetManuallySpecifiedSet(flag_value);
+  global_sets_ = std::move(global_sets);
 }
 
-void FirstPartySetsHandlerImpl::SetPersistedSets(
-    const base::FilePath& user_data_dir) {
+void FirstPartySetsHandlerImpl::GetPersistedGlobalSetsForTesting(
+    const std::string& browser_context_id,
+    base::OnceCallback<void(absl::optional<net::GlobalFirstPartySets>)>
+        callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (user_data_dir.empty()) {
-    VLOG(1) << "Empty path. Failed loading serialized First-Party Sets file.";
+  DCHECK(!browser_context_id.empty());
+  if (db_helper_.is_null()) {
+    std::move(callback).Run(absl::nullopt);
     return;
   }
-  persisted_sets_path_ = user_data_dir.Append(kPersistedFirstPartySetsFileName);
-
-  // We use USER_BLOCKING here since First-Party Set initialization blocks
-  // network navigations at startup.
-  //
-  // base::Unretained(this) is safe because this is a static singleton.
-  base::ThreadPool::PostTaskAndReplyWithResult(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
-      base::BindOnce(&LoadSetsFromDisk, persisted_sets_path_),
-      base::BindOnce(&FirstPartySetsHandlerImpl::OnReadPersistedSetsFile,
-                     base::Unretained(this)));
+  db_helper_
+      .AsyncCall(&FirstPartySetsHandlerDatabaseHelper::GetPersistedGlobalSets)
+      .WithArgs(browser_context_id)
+      .Then(std::move(callback));
 }
 
-void FirstPartySetsHandlerImpl::OnReadPersistedSetsFile(
-    const std::string& raw_persisted_sets) {
+void FirstPartySetsHandlerImpl::HasBrowserContextClearedForTesting(
+    const std::string& browser_context_id,
+    base::OnceCallback<void(absl::optional<bool>)> callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(!persisted_sets_path_.empty());
-  raw_persisted_sets_ = raw_persisted_sets;
-  UmaHistogramTimes(
-      "Cookie.FirstPartySets.InitializationDuration.ReadPersistedSets",
-      construction_timer_.Elapsed());
-  ClearSiteDataOnChangedSetsIfReady();
+  DCHECK(!browser_context_id.empty());
+  if (db_helper_.is_null()) {
+    std::move(callback).Run(absl::nullopt);
+    return;
+  }
+  db_helper_
+      .AsyncCall(&FirstPartySetsHandlerDatabaseHelper::
+                     HasEntryInBrowserContextsClearedForTesting)  // IN-TEST
+      .WithArgs(browser_context_id)
+      .Then(std::move(callback));
 }
 
 void FirstPartySetsHandlerImpl::SetCompleteSets(
-    base::flat_map<net::SchemefulSite, net::SchemefulSite> sets) {
+    net::GlobalFirstPartySets sets) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  sets_ = std::move(sets);
-  ClearSiteDataOnChangedSetsIfReady();
+  DCHECK(!global_sets_.has_value());
+  global_sets_ = std::move(sets);
+
+  if (IsEnabled())
+    InvokePendingQueries();
 }
 
-// static
-base::flat_set<net::SchemefulSite> FirstPartySetsHandlerImpl::ComputeSetsDiff(
-    const base::flat_map<net::SchemefulSite, net::SchemefulSite>& old_sets,
-    const base::flat_map<net::SchemefulSite, net::SchemefulSite>&
-        current_sets) {
-  if (old_sets.empty())
-    return {};
-
-  std::vector<net::SchemefulSite> result;
-  if (current_sets.empty()) {
-    result.reserve(old_sets.size());
-    for (const auto& pair : old_sets) {
-      result.push_back(pair.first);
-    }
-    return result;
-  }
-  for (const auto& old_pair : old_sets) {
-    const net::SchemefulSite& old_member = old_pair.first;
-    const net::SchemefulSite& old_owner = old_pair.second;
-
-    const auto current_pair = current_sets.find(old_member);
-    // Look for the removed sites and the ones have owner changed.
-    if (current_pair == current_sets.end() ||
-        current_pair->second != old_owner) {
-      result.push_back(old_member);
-    }
-  }
-  return result;
-}
-
-void FirstPartySetsHandlerImpl::ClearSiteDataOnChangedSetsIfReady() {
+void FirstPartySetsHandlerImpl::SetDatabase(
+    const base::FilePath& user_data_dir) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (!raw_persisted_sets_.has_value() || !sets_.has_value())
+  DCHECK(db_helper_.is_null());
+
+  if (user_data_dir.empty()) {
+    VLOG(1) << "Empty path. Failed initializing First-Party Sets database.";
     return;
-
-  base::flat_set<net::SchemefulSite> diff =
-      ComputeSetsDiff(FirstPartySetParser::DeserializeFirstPartySets(
-                          raw_persisted_sets_.value()),
-                      sets_.value());
-
-  // TODO(shuuran@chromium.org): Implement site state clearing.
-
-  if (!on_sets_ready_.is_null() && IsEnabledAndReady())
-    std::move(on_sets_ready_).Run(sets_.value());
-
-  base::ThreadPool::PostTask(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-      base::BindOnce(
-          &MaybeWriteSetsToDisk, persisted_sets_path_,
-          FirstPartySetParser::SerializeFirstPartySets(sets_.value())));
+  }
+  db_helper_.emplace(base::ThreadPool::CreateSequencedTaskRunner(
+                         {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
+                          base::TaskShutdownBehavior::BLOCK_SHUTDOWN}),
+                     user_data_dir.Append(kFirstPartySetsDatabase));
 }
 
-bool FirstPartySetsHandlerImpl::IsEnabledAndReady() const {
+void FirstPartySetsHandlerImpl::InvokePendingQueries() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return IsEnabled() && sets_.has_value();
+  DCHECK(enabled_);
+  base::circular_deque<base::OnceClosure> queue;
+  queue.swap(on_sets_ready_callbacks_);
+  while (!queue.empty()) {
+    base::OnceCallback callback = std::move(queue.front());
+    queue.pop_front();
+    std::move(callback).Run();
+  }
+}
+
+absl::optional<net::FirstPartySetEntry> FirstPartySetsHandlerImpl::FindEntry(
+    const net::SchemefulSite& site,
+    const net::FirstPartySetsContextConfig& config) const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (!base::FeatureList::IsEnabled(::features::kFirstPartySets) ||
+      !global_sets_.has_value()) {
+    return absl::nullopt;
+  }
+  return global_sets_->FindEntry(site, config);
+}
+
+net::GlobalFirstPartySets FirstPartySetsHandlerImpl::GetGlobalSetsSync() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(global_sets_.has_value());
+  return global_sets_->Clone();
+}
+
+void FirstPartySetsHandlerImpl::ClearSiteDataOnChangedSetsForContext(
+    base::RepeatingCallback<BrowserContext*()> browser_context_getter,
+    const std::string& browser_context_id,
+    net::FirstPartySetsContextConfig context_config,
+    base::OnceCallback<void(net::FirstPartySetsContextConfig,
+                            net::FirstPartySetsCacheFilter)> callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (!enabled_ || !::features::kFirstPartySetsClearSiteDataOnChangedSets.Get()) {
+    std::move(callback).Run(std::move(context_config),
+                            net::FirstPartySetsCacheFilter());
+    return;
+  }
+
+  if (global_sets_.has_value()) {
+    ClearSiteDataOnChangedSetsForContextInternal(
+        browser_context_getter, browser_context_id, std::move(context_config),
+        std::move(callback));
+    return;
+  }
+
+  // base::Unretained(this) is safe because this is a static singleton.
+  on_sets_ready_callbacks_.push_back(base::BindOnce(
+      &FirstPartySetsHandlerImpl::ClearSiteDataOnChangedSetsForContextInternal,
+      base::Unretained(this), browser_context_getter, browser_context_id,
+      std::move(context_config), std::move(callback)));
+}
+
+void FirstPartySetsHandlerImpl::ClearSiteDataOnChangedSetsForContextInternal(
+    base::RepeatingCallback<BrowserContext*()> browser_context_getter,
+    const std::string& browser_context_id,
+    net::FirstPartySetsContextConfig context_config,
+    base::OnceCallback<void(net::FirstPartySetsContextConfig,
+                            net::FirstPartySetsCacheFilter)> callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(global_sets_.has_value());
+  DCHECK(!browser_context_id.empty());
+  DCHECK(enabled_ && ::features::kFirstPartySetsClearSiteDataOnChangedSets.Get());
+
+  if (db_helper_.is_null()) {
+    VLOG(1) << "Invalid First-Party Sets database. Failed to clear site data "
+               "for browser_context_id="
+            << browser_context_id;
+    std::move(callback).Run(std::move(context_config),
+                            net::FirstPartySetsCacheFilter());
+    return;
+  }
+
+  // Extract the callback into a variable and pass it into DB async call args,
+  // to prevent the case that `context_config` gets used after it's moved. This
+  // is because C++ does not have a defined evaluation order for function
+  // parameters.
+  base::OnceCallback<void(std::pair<std::vector<net::SchemefulSite>,
+                                    net::FirstPartySetsCacheFilter>)>
+      on_get_sites_to_clear = base::BindOnce(
+          &FirstPartySetsHandlerImpl::OnGetSitesToClear,
+          // base::Unretained(this) is safe here because this
+          // is a static singleton.
+          base::Unretained(this), browser_context_getter, browser_context_id,
+          context_config.Clone(), std::move(callback));
+
+  db_helper_
+      .AsyncCall(&FirstPartySetsHandlerDatabaseHelper::
+                     UpdateAndGetSitesToClearForContext)
+      .WithArgs(browser_context_id, global_sets_->Clone(),
+                std::move(context_config))
+      .Then(std::move(on_get_sites_to_clear));
+}
+
+void FirstPartySetsHandlerImpl::OnGetSitesToClear(
+    base::RepeatingCallback<BrowserContext*()> browser_context_getter,
+    const std::string& browser_context_id,
+    net::FirstPartySetsContextConfig context_config,
+    base::OnceCallback<void(net::FirstPartySetsContextConfig,
+                            net::FirstPartySetsCacheFilter)> callback,
+    std::pair<std::vector<net::SchemefulSite>, net::FirstPartySetsCacheFilter>
+        sites_to_clear) const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  BrowserContext* browser_context = browser_context_getter.Run();
+  if (!browser_context) {
+    DVLOG(1) << "Invalid Browser Context. Failed to clear site data for "
+                "browser_context_id="
+             << browser_context_id;
+
+    std::move(callback).Run(std::move(context_config),
+                            net::FirstPartySetsCacheFilter());
+    return;
+  }
+
+  FirstPartySetsSiteDataRemover::RemoveSiteData(
+      *browser_context->GetBrowsingDataRemover(),
+      std::move(sites_to_clear.first),
+      base::BindOnce(
+          &FirstPartySetsHandlerImpl::DidClearSiteDataOnChangedSetsForContext,
+          // base::Unretained(this) is safe here because
+          // this is a static singleton.
+          base::Unretained(this), browser_context_id, std::move(context_config),
+          std::move(sites_to_clear.second), std::move(callback)));
+}
+
+void FirstPartySetsHandlerImpl::DidClearSiteDataOnChangedSetsForContext(
+    const std::string& browser_context_id,
+    net::FirstPartySetsContextConfig context_config,
+    net::FirstPartySetsCacheFilter cache_filter,
+    base::OnceCallback<void(net::FirstPartySetsContextConfig,
+                            net::FirstPartySetsCacheFilter)> callback,
+    uint64_t failed_data_types) const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(!db_helper_.is_null());
+
+  ClearSiteDataOutcomeType outcome =
+      ComputeClearSiteDataOutcome(failed_data_types);
+  RecordClearSiteDataOutcome(outcome);
+  if (outcome == ClearSiteDataOutcomeType::kSuccess) {
+    db_helper_
+        .AsyncCall(
+            &FirstPartySetsHandlerDatabaseHelper::UpdateClearStatusForContext)
+        .WithArgs(browser_context_id);
+  }
+
+  db_helper_.AsyncCall(&FirstPartySetsHandlerDatabaseHelper::PersistSets)
+      .WithArgs(browser_context_id, version_, global_sets_->Clone(),
+                context_config.Clone());
+  std::move(callback).Run(std::move(context_config), std::move(cache_filter));
+}
+
+net::FirstPartySetsContextConfig
+FirstPartySetsHandlerImpl::GetContextConfigForPolicyInternal(
+    const base::Value::Dict& policy) const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  FirstPartySetParser::PolicyParseResult parsed_or_error =
+      FirstPartySetParser::ParseSetsFromEnterprisePolicy(policy);
+  // Provide empty customization if the policy is malformed.
+  return parsed_or_error.has_value()
+             ? FirstPartySetsHandlerImpl::ComputeEnterpriseContextConfig(
+                   global_sets_.value(), parsed_or_error.value().first)
+             : net::FirstPartySetsContextConfig();
 }
 
 }  // namespace content
