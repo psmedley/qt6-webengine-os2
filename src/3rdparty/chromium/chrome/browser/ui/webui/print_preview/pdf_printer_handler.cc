@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -70,7 +70,7 @@ constexpr base::FilePath::CharType kPdfExtension[] = FILE_PATH_LITERAL("pdf");
 class PrintingContextDelegate : public PrintingContext::Delegate {
  public:
   // PrintingContext::Delegate methods.
-  gfx::NativeView GetParentView() override { return NULL; }
+  gfx::NativeView GetParentView() override { return nullptr; }
   std::string GetAppLocale() override {
     return g_browser_process->GetApplicationLocale();
   }
@@ -91,10 +91,7 @@ gfx::Size GetDefaultPdfMediaSizeMicrons() {
   // calls.
   auto printing_context(
       PrintingContext::Create(&delegate, /*skip_system_calls=*/false));
-  if (mojom::ResultCode::kSuccess != printing_context->UsePdfSettings() ||
-      printing_context->settings().device_units_per_inch() <= 0) {
-    return gfx::Size();
-  }
+  printing_context->UsePdfSettings();
   gfx::Size pdf_media_size = printing_context->GetPdfPaperSizeDeviceUnits();
   float device_microns_per_device_unit =
       static_cast<float>(kMicronsPerInch) /
@@ -103,7 +100,7 @@ gfx::Size GetDefaultPdfMediaSizeMicrons() {
                    pdf_media_size.height() * device_microns_per_device_unit);
 }
 
-base::Value GetPdfCapabilities(
+base::Value::Dict GetPdfCapabilities(
     const std::string& locale,
     PrinterSemanticCapsAndDefaults::Papers custom_papers) {
   using cloud_devices::printer::MediaType;
@@ -151,7 +148,15 @@ base::Value GetPdfCapabilities(
   }
   media.SaveTo(&description);
 
-  return std::move(description).ToValue();
+  // DPI value should match PrintingContext::UsePdfSettings().
+  cloud_devices::printer::DpiCapability dpi;
+  dpi.AddDefaultOption(
+      cloud_devices::printer::Dpi(kDefaultPdfDpi, kDefaultPdfDpi),
+      /*is_default=*/true);
+  dpi.SaveTo(&description);
+
+  base::Value capabilities = std::move(description).ToValue();
+  return std::move(capabilities).TakeDict();
 }
 
 // Callback that stores a PDF file on disk.
@@ -201,12 +206,11 @@ void ConstructCapabilitiesAndCompleteCallback(
     PrinterSemanticCapsAndDefaults::Papers custom_papers) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  base::Value printer_info(base::Value::Type::DICTIONARY);
-  printer_info.SetStringKey(kSettingDeviceName, destination_id);
-  printer_info.SetKey(
-      kSettingCapabilities,
-      GetPdfCapabilities(g_browser_process->GetApplicationLocale(),
-                         custom_papers));
+  base::Value::Dict printer_info;
+  printer_info.Set(kSettingDeviceName, destination_id);
+  printer_info.Set(kSettingCapabilities,
+                   GetPdfCapabilities(g_browser_process->GetApplicationLocale(),
+                                      custom_papers));
   std::move(callback).Run(std::move(printer_info));
 }
 
@@ -499,7 +503,8 @@ void PdfPrinterHandler::OnDirectorySelected(const base::FilePath& filename,
   select_file_dialog_->SelectFile(
       ui::SelectFileDialog::SELECT_SAVEAS_FILE, std::u16string(), path,
       &file_type_info, 0, base::FilePath::StringType(),
-      platform_util::GetTopLevel(preview_web_contents_->GetNativeView()), NULL);
+      platform_util::GetTopLevel(preview_web_contents_->GetNativeView()),
+      nullptr);
 }
 
 base::FilePath PdfPrinterHandler::GetSaveLocation() const {

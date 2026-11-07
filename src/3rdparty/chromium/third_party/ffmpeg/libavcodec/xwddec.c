@@ -26,13 +26,12 @@
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include "xwd.h"
 
-static int xwd_decode_frame(AVCodecContext *avctx, void *data,
+static int xwd_decode_frame(AVCodecContext *avctx, AVFrame *p,
                             int *got_frame, AVPacket *avpkt)
 {
-    AVFrame *p = data;
     const uint8_t *buf = avpkt->data;
     int i, ret, buf_size = avpkt->size;
     uint32_t version, header_size, vclass, ncolors;
@@ -250,9 +249,9 @@ static int xwd_decode_frame(AVCodecContext *avctx, void *data,
 
 const FFCodec ff_xwd_decoder = {
     .p.name         = "xwd",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("XWD (X Window Dump) image"),
+    CODEC_LONG_NAME("XWD (X Window Dump) image"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_XWD,
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .decode         = xwd_decode_frame,
+    FF_CODEC_DECODE_CB(xwd_decode_frame),
 };

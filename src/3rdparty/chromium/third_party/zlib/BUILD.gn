@@ -1,4 +1,4 @@
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -40,7 +40,7 @@ config("zlib_internal_config") {
     defines += [ "ZLIB_DEBUG" ]
   }
 
-  if (is_win && !is_clang) {
+  if (is_win && !is_clang && !is_mingw) {
     # V8 supports building with msvc, these silence some warnings that
     # causes compilation to fail (https://crbug.com/1255096).
     cflags = [
@@ -79,7 +79,7 @@ if ((current_cpu == "arm" || current_cpu == "arm64") &&
 }
 
 use_x86_x64_optimizations =
-    (current_cpu == "x86" || current_cpu == "x64") && !is_ios
+    (current_cpu == "x86" || current_cpu == "x64") && !is_ios && !is_mingw
 
 config("zlib_adler32_simd_config") {
   if (use_x86_x64_optimizations) {
@@ -129,7 +129,7 @@ if (use_arm_neon_optimizations) {
     # Disabled for iPhone, as described in DDI0487C_a_armv8_arm:
     #  "All implementations of the ARMv8.1 architecture are required to
     #   implement the CRC32* instructions. These are optional in ARMv8.0."
-    if (!is_ios && !use_qt) {
+    if (!is_ios && !is_qtwebengine) {
       defines = [ "CRC32_ARMV8_CRC32" ]
       if (is_android) {
         defines += [ "ARMV8_OS_ANDROID" ]
@@ -150,13 +150,13 @@ if (use_arm_neon_optimizations) {
   source_set("zlib_arm_crc32") {
     visibility = [ ":*" ]
 
-    if (!is_ios && !use_qt) {
+    if (!is_ios && !is_qtwebengine) {
       include_dirs = [ "." ]
 
       if (!is_win && !is_clang) {
         assert(!use_thin_lto,
                "ThinLTO fails mixing different module-level targets")
-        cflags_c = [ "-march=armv8-a+crc" ]
+        cflags_c = [ "-march=armv8-a+aes+crc" ]
       }
 
       sources = [

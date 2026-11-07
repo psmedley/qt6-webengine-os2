@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,4 +77,12 @@ struct DesktopSize {
 struct DesktopVector {
   int32 x;
   int32 y;
+};
+
+// Original WebRTC class can be found at:
+// //third_party/webrtc/modules/desktop_capture/mouse_cursor.h
+struct MouseCursor {
+  DesktopSize image_size;
+  array<uint8> image_data;
+  DesktopVector hotspot;
 };

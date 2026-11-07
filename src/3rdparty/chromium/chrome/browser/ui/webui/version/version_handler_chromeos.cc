@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,11 @@
 #include "url/gurl.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ash/crosapi/browser_manager.h"
 #include "chrome/browser/ash/crosapi/browser_util.h"
+#include "chromeos/strings/grit/chromeos_strings.h"
+#include "ui/base/l10n/l10n_util.h"
 #elif BUILDFLAG(IS_CHROMEOS_LACROS)
 #include "chrome/browser/lacros/lacros_url_handling.h"
 #endif
@@ -54,8 +57,8 @@ void VersionHandlerChromeOS::HandleRequestVersionInfo(
                      weak_factory_.GetWeakPtr()));
   base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-      base::BindOnce(&chromeos::version_loader::GetARCVersion),
-      base::BindOnce(&VersionHandlerChromeOS::OnARCVersion,
+      base::BindOnce(&VersionHandlerChromeOS::GetArcAndArcAndroidSdkVersions),
+      base::BindOnce(&VersionHandlerChromeOS::OnArcAndArcAndroidSdkVersions,
                      weak_factory_.GetWeakPtr()));
 
   const bool showSystemFlagsLink = crosapi::browser_util::IsLacrosEnabled();
@@ -83,20 +86,43 @@ void VersionHandlerChromeOS::HandleCrosUrlVersionRedirect(
   // Note: This will only be called by the UI when Lacros is available.
   DCHECK(crosapi::BrowserManager::Get());
   crosapi::BrowserManager::Get()->SwitchToTab(
-      GURL(chrome::kChromeUIVersionURL));
+      GURL(chrome::kChromeUIVersionURL),
+      /*path_behavior=*/NavigateParams::RESPECT);
 #endif
 }
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-void VersionHandlerChromeOS::OnVersion(const std::string& version) {
-  FireWebUIListener("return-os-version", base::Value(version));
+void VersionHandlerChromeOS::OnVersion(
+    const absl::optional<std::string>& version) {
+  FireWebUIListener("return-os-version",
+                    base::Value(version.value_or("0.0.0.0")));
 }
 
 void VersionHandlerChromeOS::OnOSFirmware(const std::string& version) {
   FireWebUIListener("return-os-firmware-version", base::Value(version));
 }
 
-void VersionHandlerChromeOS::OnARCVersion(const std::string& version) {
-  FireWebUIListener("return-arc-version", base::Value(version));
+void VersionHandlerChromeOS::OnArcAndArcAndroidSdkVersions(
+    const std::string& version) {
+  FireWebUIListener("return-arc-and-arc-android-sdk-versions",
+                    base::Value(version));
 }
+
+// static
+std::string VersionHandlerChromeOS::GetArcAndArcAndroidSdkVersions() {
+  std::string arc_version = chromeos::version_loader::GetArcVersion();
+  absl::optional<std::string> arc_android_sdk_version =
+      chromeos::version_loader::GetArcAndroidSdkVersion();
+  if (!arc_android_sdk_version.has_value()) {
+    arc_android_sdk_version = base::UTF16ToUTF8(
+        l10n_util::GetStringUTF16(IDS_ARC_SDK_VERSION_UNKNOWN));
+  }
+  std::string sdk_label =
+      base::UTF16ToUTF8(l10n_util::GetStringUTF16(IDS_ARC_SDK_VERSION_LABEL));
+  std::string labeled_version =
+      base::StringPrintf("%s %s %s", arc_version.c_str(), sdk_label.c_str(),
+                         arc_android_sdk_version->c_str());
+  return labeled_version;
+}
+
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)

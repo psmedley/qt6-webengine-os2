@@ -7,6 +7,7 @@
 #include "compiler/translator/ValidateTypeSizeLimitations.h"
 
 #include "angle_gl.h"
+#include "common/mathutil.h"
 #include "compiler/translator/Diagnostics.h"
 #include "compiler/translator/Symbol.h"
 #include "compiler/translator/SymbolTable.h"
@@ -20,9 +21,14 @@ namespace sh
 namespace
 {
 
-// Arbitrarily enforce that types - even local variables' - declared
-// with a size in bytes of over 2 GB will cause compilation failure.
-constexpr size_t kMaxTypeSizeInBytes = static_cast<size_t>(2) * 1024 * 1024 * 1024;
+// Arbitrarily enforce that all types declared with a size in bytes of over 2 GB will cause
+// compilation failure.
+//
+// For local and global variables, the limit is much lower (64KB) as that much memory won't fit in
+// the GPU registers anyway.
+constexpr size_t kMaxVariableSizeInBytes             = static_cast<size_t>(2) * 1024 * 1024 * 1024;
+constexpr size_t kMaxPrivateVariableSizeInBytes      = static_cast<size_t>(64) * 1024;
+constexpr size_t kMaxTotalPrivateVariableSizeInBytes = static_cast<size_t>(16) * 1024 * 1024;
 
 // Traverses intermediate tree to ensure that the shader does not
 // exceed certain implementation-defined limits on the sizes of types.
@@ -31,7 +37,9 @@ class ValidateTypeSizeLimitationsTraverser : public TIntermTraverser
 {
   public:
     ValidateTypeSizeLimitationsTraverser(TSymbolTable *symbolTable, TDiagnostics *diagnostics)
-        : TIntermTraverser(true, false, false, symbolTable), mDiagnostics(diagnostics)
+        : TIntermTraverser(true, false, false, symbolTable),
+          mDiagnostics(diagnostics),
+          mTotalPrivateVariablesSize(0)
     {
         ASSERT(diagnostics);
     }
@@ -63,31 +71,126 @@ class ValidateTypeSizeLimitationsTraverser : public TIntermTraverser
                 continue;
             }
 
-            const TType &variableType = asSymbol->getType();
-
-            // Create a ShaderVariable from which to compute
-            // (conservative) sizing information.
-            ShaderVariable shaderVar;
-            setCommonVariableProperties(variableType, variable, &shaderVar);
-
-            // Compute the std140 layout of this variable, assuming
-            // it's a member of a block (which it might not be).
-            Std140BlockEncoder layoutEncoder;
-            BlockEncoderVisitor visitor("", "", &layoutEncoder);
-            // Since the size limit's arbitrary, it doesn't matter
-            // whether the row-major layout is correctly determined.
-            bool isRowMajorLayout = false;
-            TraverseShaderVariable(shaderVar, isRowMajorLayout, &visitor);
-            if (layoutEncoder.getCurrentOffset() > kMaxTypeSizeInBytes)
+            if (!validateVariableSize(variable, asSymbol->getLine()))
             {
-                error(asSymbol->getLine(),
-                      "Size of declared variable exceeds implementation-defined limit",
-                      asSymbol->getName());
                 return false;
             }
         }
 
         return true;
+    }
+
+    void visitFunctionPrototype(TIntermFunctionPrototype *node) override
+    {
+        const TFunction *function = node->getFunction();
+        const size_t paramCount   = function->getParamCount();
+
+        for (size_t paramIndex = 0; paramIndex < paramCount; ++paramIndex)
+        {
+            validateVariableSize(*function->getParam(paramIndex), node->getLine());
+        }
+    }
+
+    bool validateVariableSize(const TVariable &variable, const TSourceLoc &location)
+    {
+        const TType &variableType = variable.getType();
+
+        // Create a ShaderVariable from which to compute
+        // (conservative) sizing information.
+        ShaderVariable shaderVar;
+        setCommonVariableProperties(variableType, variable, &shaderVar);
+
+        // Compute the std140 layout of this variable, assuming
+        // it's a member of a block (which it might not be).
+        Std140BlockEncoder layoutEncoder;
+        BlockEncoderVisitor visitor("", "", &layoutEncoder);
+        // Since the size limit's arbitrary, it doesn't matter
+        // whether the row-major layout is correctly determined.
+        bool isRowMajorLayout = false;
+        TraverseShaderVariable(shaderVar, isRowMajorLayout, &visitor);
+        if (layoutEncoder.getCurrentOffset() > kMaxVariableSizeInBytes)
+        {
+            error(location, "Size of declared variable exceeds implementation-defined limit",
+                  variable.name());
+            return false;
+        }
+
+        // Skip over struct declarations.  As long as they are not used (or if they are used later
+        // in a less-restricted context (such as a UBO or SSBO)), they can be larger than
+        // kMaxPrivateVariableSizeInBytes.
+        if (variable.symbolType() == SymbolType::Empty && variableType.isStructSpecifier())
+        {
+            return true;
+        }
+
+        switch (variableType.getQualifier())
+        {
+            // List of all types that need to be limited (for example because they cause overflows
+            // in drivers, or create trouble for the SPIR-V gen as the number of an instruction's
+            // arguments cannot be more than 64KB (see OutputSPIRVTraverser::cast)).
+
+            // Local/global variables
+            case EvqTemporary:
+            case EvqGlobal:
+            case EvqConst:
+
+            // Function arguments
+            case EvqParamIn:
+            case EvqParamOut:
+            case EvqParamInOut:
+            case EvqParamConst:
+
+            // Varyings
+            case EvqVaryingIn:
+            case EvqVaryingOut:
+            case EvqSmoothOut:
+            case EvqFlatOut:
+            case EvqNoPerspectiveOut:
+            case EvqCentroidOut:
+            case EvqSampleOut:
+            case EvqSmoothIn:
+            case EvqFlatIn:
+            case EvqNoPerspectiveIn:
+            case EvqCentroidIn:
+            case EvqVertexOut:
+            case EvqFragmentIn:
+            case EvqGeometryIn:
+            case EvqGeometryOut:
+            case EvqPerVertexIn:
+            case EvqPerVertexOut:
+            case EvqPatchIn:
+            case EvqPatchOut:
+            case EvqTessControlIn:
+            case EvqTessControlOut:
+            case EvqTessEvaluationIn:
+            case EvqTessEvaluationOut:
+
+                if (layoutEncoder.getCurrentOffset() > kMaxPrivateVariableSizeInBytes)
+                {
+                    error(location,
+                          "Size of declared private variable exceeds implementation-defined limit",
+                          variable.name());
+                    return false;
+                }
+                mTotalPrivateVariablesSize += layoutEncoder.getCurrentOffset();
+                break;
+            default:
+                break;
+        }
+
+        return true;
+    }
+
+    void validateTotalPrivateVariableSize()
+    {
+        if (mTotalPrivateVariablesSize.ValueOrDefault(std::numeric_limits<size_t>::max()) >
+            kMaxTotalPrivateVariableSizeInBytes)
+        {
+            mDiagnostics->error(
+                TSourceLoc{},
+                "Total size of declared private variables exceeds implementation-defined limit",
+                "");
+        }
     }
 
   private:
@@ -198,6 +301,8 @@ class ValidateTypeSizeLimitationsTraverser : public TIntermTraverser
 
     TDiagnostics *mDiagnostics;
     std::vector<int> mLoopSymbolIds;
+
+    angle::base::CheckedNumeric<size_t> mTotalPrivateVariablesSize;
 };
 
 }  // namespace
@@ -208,6 +313,7 @@ bool ValidateTypeSizeLimitations(TIntermNode *root,
 {
     ValidateTypeSizeLimitationsTraverser validate(symbolTable, diagnostics);
     root->traverse(&validate);
+    validate.validateTotalPrivateVariableSize();
     return diagnostics->numErrors() == 0;
 }
 

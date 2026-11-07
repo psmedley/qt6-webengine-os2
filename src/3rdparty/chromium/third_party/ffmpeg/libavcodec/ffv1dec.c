@@ -187,6 +187,9 @@ static int decode_slice_header(const FFV1Context *f, FFV1Context *fs)
          || (unsigned)fs->slice_y + (uint64_t)fs->slice_height > f->height)
         return -1;
 
+    if (fs->ac == AC_GOLOMB_RICE && fs->slice_width >= (1<<23))
+        return AVERROR_INVALIDDATA;
+
     for (i = 0; i < f->plane_count; i++) {
         PlaneContext * const p = &fs->plane[i];
         int idx = get_symbol(c, state, 0);
@@ -356,8 +359,6 @@ static int decode_slice(AVCodecContext *c, void *arg)
             fs->slice_damaged = 1;
         }
     }
-
-    emms_c();
 
     ff_thread_report_progress(&f->picture, si, 0);
 
@@ -822,6 +823,11 @@ static av_cold int decode_init(AVCodecContext *avctx)
     if ((ret = ff_ffv1_common_init(avctx)) < 0)
         return ret;
 
+    f->picture.f      = av_frame_alloc();
+    f->last_picture.f = av_frame_alloc();
+    if (!f->picture.f || !f->last_picture.f)
+        return AVERROR(ENOMEM);
+
     if (avctx->extradata_size > 0 && (ret = read_extra_header(f)) < 0)
         return ret;
 
@@ -831,7 +837,8 @@ static av_cold int decode_init(AVCodecContext *avctx)
     return 0;
 }
 
-static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame, AVPacket *avpkt)
+static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
+                        int *got_frame, AVPacket *avpkt)
 {
     uint8_t *buf        = avpkt->data;
     int buf_size        = avpkt->size;
@@ -873,6 +880,21 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame, AVPac
             return AVERROR_INVALIDDATA;
         }
         p->key_frame = 0;
+    }
+
+    if (f->ac != AC_GOLOMB_RICE) {
+        if (buf_size < avctx->width * avctx->height / (128*8))
+            return AVERROR_INVALIDDATA;
+    } else {
+        int w = avctx->width;
+        int s = 1 + w / (1<<23);
+
+        w /= s;
+
+        for (i = 0; w > (1<<ff_log2_run[i]); i++)
+            w -= ff_log2_run[i];
+        if (buf_size < (avctx->height + i + 6) / 8 * s)
+            return AVERROR_INVALIDDATA;
     }
 
     ret = ff_thread_get_ext_buffer(avctx, &f->picture, AV_GET_BUFFER_FLAG_REF);
@@ -969,7 +991,7 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame, AVPac
 
     if (f->last_picture.f)
         ff_thread_release_ext_buffer(avctx, &f->last_picture);
-    if ((ret = av_frame_ref(data, f->picture.f)) < 0)
+    if ((ret = av_frame_ref(rframe, f->picture.f)) < 0)
         return ret;
 
     *got_frame = 1;
@@ -1051,18 +1073,34 @@ static int update_thread_context(AVCodecContext *dst, const AVCodecContext *src)
 }
 #endif
 
+static av_cold int ffv1_decode_close(AVCodecContext *avctx)
+{
+    FFV1Context *const s = avctx->priv_data;
+
+    if (s->picture.f) {
+        ff_thread_release_ext_buffer(avctx, &s->picture);
+        av_frame_free(&s->picture.f);
+    }
+
+    if (s->last_picture.f) {
+        ff_thread_release_ext_buffer(avctx, &s->last_picture);
+        av_frame_free(&s->last_picture.f);
+    }
+    return ff_ffv1_close(avctx);
+}
+
 const FFCodec ff_ffv1_decoder = {
     .p.name         = "ffv1",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("FFmpeg video codec #1"),
+    CODEC_LONG_NAME("FFmpeg video codec #1"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_FFV1,
     .priv_data_size = sizeof(FFV1Context),
     .init           = decode_init,
-    .close          = ff_ffv1_close,
-    .decode         = decode_frame,
-    .update_thread_context = ONLY_IF_THREADS_ENABLED(update_thread_context),
+    .close          = ffv1_decode_close,
+    FF_CODEC_DECODE_CB(decode_frame),
+    UPDATE_THREAD_CONTEXT(update_thread_context),
     .p.capabilities = AV_CODEC_CAP_DR1 /*| AV_CODEC_CAP_DRAW_HORIZ_BAND*/ |
                       AV_CODEC_CAP_FRAME_THREADS | AV_CODEC_CAP_SLICE_THREADS,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP |
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP |
                       FF_CODEC_CAP_ALLOCATE_PROGRESS,
 };

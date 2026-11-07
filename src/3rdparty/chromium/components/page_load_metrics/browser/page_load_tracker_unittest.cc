@@ -1,17 +1,16 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/page_load_metrics/browser/page_load_tracker.h"
 
 #include "base/containers/flat_map.h"
-#include "base/test/scoped_feature_list.h"
 #include "components/page_load_metrics/browser/observers/page_load_metrics_observer_content_test_harness.h"
 #include "content/public/test/navigation_simulator.h"
+#include "content/public/test/prerender_test_util.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/web_contents_tester.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
-#include "third_party/blink/public/common/features.h"
 
 namespace page_load_metrics {
 
@@ -20,14 +19,18 @@ namespace {
 const char kTestUrl[] = "https://a.test/";
 
 struct PageLoadMetricsObserverEvents final {
-  bool was_ready_to_commit_next_navigation = false;
+  size_t ready_to_commit_next_navigation_count = 0;
   bool was_started = false;
   bool was_fenced_frames_started = false;
   bool was_prerender_started = false;
   bool was_committed = false;
-  bool was_sub_frame_deleted = false;
+  size_t render_frame_deleted_count = 0;
+  size_t sub_frame_deleted_count = 0;
+  bool was_prerendered_page_activated = false;
   size_t sub_frame_navigation_count = 0;
 };
+
+using content::test::ScopedPrerenderWebContentsDelegate;
 
 class TestPageLoadMetricsObserver final : public PageLoadMetricsObserver {
  public:
@@ -40,27 +43,31 @@ class TestPageLoadMetricsObserver final : public PageLoadMetricsObserver {
  private:
   void ReadyToCommitNextNavigation(
       content::NavigationHandle* navigation_handle) override {
-    events_->was_ready_to_commit_next_navigation = true;
+    events_->ready_to_commit_next_navigation_count++;
   }
   ObservePolicy OnStart(content::NavigationHandle* navigation_handle,
                         const GURL& currently_committed_url,
                         bool started_in_foreground) override {
+    EXPECT_FALSE(events_->was_started);
     events_->was_started = true;
     return CONTINUE_OBSERVING;
   }
   ObservePolicy OnFencedFramesStart(
       content::NavigationHandle* navigation_handle,
       const GURL& currently_committed_url) override {
+    EXPECT_FALSE(events_->was_fenced_frames_started);
     events_->was_fenced_frames_started = true;
     return stop_on_fenced_frames_ ? STOP_OBSERVING : CONTINUE_OBSERVING;
   }
   ObservePolicy OnPrerenderStart(content::NavigationHandle* navigation_handle,
                                  const GURL& currently_committed_url) override {
+    EXPECT_FALSE(events_->was_prerender_started);
     events_->was_prerender_started = true;
     return stop_on_prerender_ ? STOP_OBSERVING : CONTINUE_OBSERVING;
   }
   ObservePolicy OnCommit(
       content::NavigationHandle* navigation_handle) override {
+    EXPECT_FALSE(events_->was_committed);
     events_->was_committed = true;
     return CONTINUE_OBSERVING;
   }
@@ -68,8 +75,18 @@ class TestPageLoadMetricsObserver final : public PageLoadMetricsObserver {
       content::NavigationHandle* navigation_handle) override {
     events_->sub_frame_navigation_count++;
   }
+  void OnRenderFrameDeleted(content::RenderFrameHost* rfh) override {
+    events_->render_frame_deleted_count++;
+  }
   void OnSubFrameDeleted(int frame_tree_node_id) override {
-    events_->was_sub_frame_deleted = true;
+    events_->sub_frame_deleted_count++;
+  }
+  void DidActivatePrerenderedPage(
+      content::NavigationHandle* navigation_handle) override {
+    EXPECT_FALSE(events_->was_prerendered_page_activated);
+    events_->was_prerendered_page_activated = true;
+
+    EXPECT_NE(ukm::kInvalidSourceId, GetDelegate().GetPageUkmSourceId());
   }
 
   bool stop_on_prerender_ = false;
@@ -82,17 +99,8 @@ class TestPageLoadMetricsObserver final : public PageLoadMetricsObserver {
 
 class PageLoadTrackerTest : public PageLoadMetricsObserverContentTestHarness {
  public:
-  PageLoadTrackerTest() : observer_(new TestPageLoadMetricsObserver(&events_)) {
-    scoped_feature_list_.InitWithFeaturesAndParameters(
-        {
-            {blink::features::kPrerender2, {}},
-            {blink::features::kPrerender2MemoryControls, {}},
-            {blink::features::kFencedFrames,
-             {{"implementation_type", "mparch"}}},
-            {blink::features::kInitialNavigationEntry, {}},
-        },
-        {});
-  }
+  PageLoadTrackerTest()
+      : observer_(new TestPageLoadMetricsObserver(&events_)) {}
 
  protected:
   void SetTargetUrl(const std::string& url) { target_url_ = GURL(url); }
@@ -109,13 +117,14 @@ class PageLoadTrackerTest : public PageLoadMetricsObserverContentTestHarness {
  private:
   void RegisterObservers(PageLoadTracker* tracker) override {
     ukm_source_ids_.emplace(tracker->GetUrl().spec(),
-                            tracker->GetPageUkmSourceId());
+                            tracker->GetPageUkmSourceIdForTesting());
 
     if (tracker->GetUrl() != target_url_)
       return;
 
-    DCHECK(!is_observer_passed_);
-    tracker->AddObserver(std::unique_ptr<PageLoadMetricsObserver>(observer_));
+    EXPECT_FALSE(is_observer_passed_);
+    tracker->AddObserver(
+        std::unique_ptr<PageLoadMetricsObserverInterface>(observer_));
     is_observer_passed_ = true;
   }
 
@@ -125,11 +134,12 @@ class PageLoadTrackerTest : public PageLoadMetricsObserverContentTestHarness {
   raw_ptr<TestPageLoadMetricsObserver> observer_;
   bool is_observer_passed_ = false;
 
-  base::test::ScopedFeatureList scoped_feature_list_;
   GURL target_url_;
 };
 
 TEST_F(PageLoadTrackerTest, PrimaryPageType) {
+  ScopedPrerenderWebContentsDelegate web_contents_delegate(*web_contents());
+
   // Target URL to monitor the tracker via the test observer.
   SetTargetUrl(kTestUrl);
 
@@ -151,25 +161,38 @@ TEST_F(PageLoadTrackerTest, PrimaryPageType) {
   tester()->NavigateToUntrackedUrl();
 
   // Check observer behaviors.
-  EXPECT_TRUE(GetEvents().was_ready_to_commit_next_navigation);
+  EXPECT_EQ(1u, GetEvents().ready_to_commit_next_navigation_count);
+
+  // Check ukm::SourceId.
+  EXPECT_NE(ukm::kInvalidSourceId, GetObservedUkmSourceIdFor(kTestUrl));
 }
 
 TEST_F(PageLoadTrackerTest, EventForwarding) {
+  ScopedPrerenderWebContentsDelegate web_contents_delegate(*web_contents());
+
+  // In the end, we'll construct frame trees as the following:
+  //
+  //   A     : primary main frame
+  //   +- B' : outer dummy node of B
+  //
+  //   B     : fenced frame
+  //   +- C  : iframe
+
   // Target URL to monitor the tracker via the test observer.
   SetTargetUrl(kTestUrl);
   StopObservingOnFencedFrames();
 
-  // Navigate in.
+  // A: Navigate in.
   NavigateAndCommit(GURL(kTestUrl));
 
-  // Add a fenced frame.
-  content::RenderFrameHost* fenced_frame_root =
-      content::RenderFrameHostTester::For(web_contents()->GetMainFrame())
+  // B: Add and navigate in.
+  content::RenderFrameHost* rfh_b =
+      content::RenderFrameHostTester::For(web_contents()->GetPrimaryMainFrame())
           ->AppendFencedFrame();
   {
-    const char kFencedFramesUrl[] = "https://a.test/fenced_frames";
-    auto simulator = content::NavigationSimulator::CreateForFencedFrame(
-        GURL(kFencedFramesUrl), fenced_frame_root);
+    const char kURL[] = "https://a.test/fenced_frames";
+    auto simulator = content::NavigationSimulator::CreateRendererInitiated(
+        GURL(kURL), rfh_b);
     ASSERT_NE(nullptr, simulator);
     simulator->Commit();
   }
@@ -181,33 +204,94 @@ TEST_F(PageLoadTrackerTest, EventForwarding) {
   EXPECT_FALSE(GetEvents().was_fenced_frames_started);
   EXPECT_FALSE(GetEvents().was_prerender_started);
   EXPECT_TRUE(GetEvents().was_committed);
-  EXPECT_FALSE(GetEvents().was_sub_frame_deleted);
   EXPECT_EQ(1u, GetEvents().sub_frame_navigation_count);
+  // MetricsWebContentsObserver::RenderFrameDeleted is called in the first
+  // navigation for iframes but not for fenced frames.
+  // TODO(https://crbug.com/1301880): Make a reason clear.
+  EXPECT_EQ(0u, GetEvents().render_frame_deleted_count);
+  EXPECT_EQ(0u, GetEvents().sub_frame_deleted_count);
 
-  // Navigate out.
+  // B: Navigate out.
+  content::RenderFrameHost* rfh_b_last = nullptr;
   {
-    const char kFencedFramesNavigationUrl[] = "https://b.test/fenced_frames";
-    auto simulator = content::NavigationSimulator::CreateForFencedFrame(
-        GURL(kFencedFramesNavigationUrl), fenced_frame_root);
+    const char kURL[] = "https://b.test/fenced_frames";
+    auto simulator = content::NavigationSimulator::CreateRendererInitiated(
+        GURL(kURL), rfh_b);
     ASSERT_NE(nullptr, simulator);
     simulator->Commit();
+
+    rfh_b_last = simulator->GetFinalRenderFrameHost();
   }
 
-  // Check observer behaviors again after the render frame's deletion.
-  // TODO(https://crbug.com/1301880): RenderFrameDeleted() doesn't seem called
-  // and following check fails. Revisit this issue later to clarify the
-  // expectations.
-  // EXPECT_TRUE(GetEvents().was_sub_frame_deleted);
-  EXPECT_EQ(2u, GetEvents().sub_frame_navigation_count);
+  // Note that deletion of RenderFrameHost depends on some conditions, e.g. Site
+  // Isolation and Back/Forward Cache. In unit tests, NavigationSimulator does
+  // delete them when a navigation commits. On Android, the two RenderFrameHost
+  // has same SiteInstance and the old one will be not deleted.
+#if BUILDFLAG(IS_ANDROID)
+  EXPECT_EQ(0u, GetEvents().render_frame_deleted_count);
+#else
+  EXPECT_EQ(1u, GetEvents().render_frame_deleted_count);
+#endif
+  EXPECT_EQ(0u, GetEvents().sub_frame_deleted_count);
+
+  // C: Add and navigate in.
+  content::RenderFrameHost* rfh_c =
+      content::RenderFrameHostTester::For(rfh_b_last)->AppendChild("c");
+  content::RenderFrameHost* rfh_c_last = nullptr;
+  {
+    const char kURL[] = "https://a.test/iframe";
+    auto simulator = content::NavigationSimulator::CreateRendererInitiated(
+        GURL(kURL), rfh_c);
+    ASSERT_NE(nullptr, simulator);
+    simulator->Commit();
+
+    rfh_c_last = simulator->GetFinalRenderFrameHost();
+  }
+
+#if BUILDFLAG(IS_ANDROID)
+  EXPECT_EQ(0u, GetEvents().render_frame_deleted_count);
+#else
+  EXPECT_EQ(2u, GetEvents().render_frame_deleted_count);
+#endif
+  EXPECT_EQ(0u, GetEvents().sub_frame_deleted_count);
+
+  // Remove C.
+  content::RenderFrameHostTester::For(rfh_c_last)->Detach();
+
+#if BUILDFLAG(IS_ANDROID)
+  EXPECT_EQ(1u, GetEvents().render_frame_deleted_count);
+#else
+  EXPECT_EQ(3u, GetEvents().render_frame_deleted_count);
+#endif
+  EXPECT_EQ(1u, GetEvents().sub_frame_deleted_count);
+
+  // Remove B.
+  content::RenderFrameHostTester::For(rfh_b_last)->Detach();
+
+#if BUILDFLAG(IS_ANDROID)
+  EXPECT_EQ(2u, GetEvents().render_frame_deleted_count);
+#else
+  EXPECT_EQ(4u, GetEvents().render_frame_deleted_count);
+#endif
+  // "2" may look good, but it is wrong, indeed. "1" is correct.
+  //
+  // When deleting a FF root node, methods of MetricsWebContentsObserver will be
+  // called in the order RenderFrameDeleted -> FrameDeleted. The former
+  // unregister PageLoadTracker corresponding to the given RenderFrameHost. The
+  // later shouldn't trigger an event because the target PageLoadTracker has
+  // gone already. Although, `sub_frame_deleted_count` is incremented because
+  // the logic of MetricsWebContentsObserver::GetPageLoadTracker is wrong: See
+  // comment of the method. (This behavior can be observerved by putting printf
+  // in PageLoadTracker::FrameTreeNodeDeleted and inspecting forwarding doesn't
+  // occur.)
+  // TODO(https://crbug.com/1301880): Fix
+  // MetricsWebContentsObserver::GetPageLoadTracker
+  EXPECT_EQ(2u, GetEvents().sub_frame_deleted_count);
 }
 
-// TODO(https://crbug.com/1312096): Enable the test on Android.
-#if BUILDFLAG(IS_ANDROID)
-#define MAYBE_PrerenderPageType DISABLED_PrerenderPageType
-#else
-#define MAYBE_PrerenderPageType PrerenderPageType
-#endif
-TEST_F(PageLoadTrackerTest, MAYBE_PrerenderPageType) {
+TEST_F(PageLoadTrackerTest, PrerenderPageType) {
+  ScopedPrerenderWebContentsDelegate web_contents_delegate(*web_contents());
+
   // Target URL to monitor the tracker via the test observer.
   const char kPrerenderingUrl[] = "https://a.test/prerender";
   SetTargetUrl(kPrerenderingUrl);
@@ -232,11 +316,15 @@ TEST_F(PageLoadTrackerTest, MAYBE_PrerenderPageType) {
   tester()->histogram_tester().ExpectBucketCount(
       internal::kPageLoadTrackerPageType,
       internal::PageLoadTrackerPageType::kPrerenderPage, 1);
-  EXPECT_NE(GetObservedUkmSourceIdFor(kTestUrl),
-            GetObservedUkmSourceIdFor(kPrerenderingUrl));
+
+  // Check ukm::SourceId.
+  EXPECT_NE(ukm::kInvalidSourceId, GetObservedUkmSourceIdFor(kTestUrl));
+  EXPECT_EQ(ukm::kInvalidSourceId, GetObservedUkmSourceIdFor(kPrerenderingUrl));
 }
 
 TEST_F(PageLoadTrackerTest, FencedFramesPageType) {
+  ScopedPrerenderWebContentsDelegate web_contents_delegate(*web_contents());
+
   // Target URL to monitor the tracker via the test observer.
   const char kFencedFramesUrl[] = "https://a.test/fenced_frames";
   SetTargetUrl(kFencedFramesUrl);
@@ -246,10 +334,10 @@ TEST_F(PageLoadTrackerTest, FencedFramesPageType) {
 
   // Add a fenced frame.
   content::RenderFrameHost* fenced_frame_root =
-      content::RenderFrameHostTester::For(web_contents()->GetMainFrame())
+      content::RenderFrameHostTester::For(web_contents()->GetPrimaryMainFrame())
           ->AppendFencedFrame();
   {
-    auto simulator = content::NavigationSimulator::CreateForFencedFrame(
+    auto simulator = content::NavigationSimulator::CreateRendererInitiated(
         GURL(kFencedFramesUrl), fenced_frame_root);
     ASSERT_NE(nullptr, simulator);
     simulator->Commit();
@@ -269,28 +357,27 @@ TEST_F(PageLoadTrackerTest, FencedFramesPageType) {
   tester()->histogram_tester().ExpectBucketCount(
       internal::kPageLoadTrackerPageType,
       internal::PageLoadTrackerPageType::kFencedFramesPage, 1);
+
+  // Check ukm::SourceId.
+  EXPECT_NE(ukm::kInvalidSourceId, GetObservedUkmSourceIdFor(kTestUrl));
   EXPECT_EQ(GetObservedUkmSourceIdFor(kTestUrl),
             GetObservedUkmSourceIdFor(kFencedFramesUrl));
 
   // Navigate out.
   {
-    auto simulator = content::NavigationSimulator::CreateForFencedFrame(
+    auto simulator = content::NavigationSimulator::CreateRendererInitiated(
         GURL(kTestUrl), fenced_frame_root);
     ASSERT_NE(nullptr, simulator);
     simulator->Commit();
   }
 
   // Check observer behaviors.
-  EXPECT_TRUE(GetEvents().was_ready_to_commit_next_navigation);
+  EXPECT_EQ(1u, GetEvents().ready_to_commit_next_navigation_count);
 }
 
-// TODO(https://crbug.com/1312096): Enable the test on Android.
-#if BUILDFLAG(IS_ANDROID)
-#define MAYBE_StopObservingOnPrerender DISABLED_StopObservingOnPrerender
-#else
-#define MAYBE_StopObservingOnPrerender StopObservingOnPrerender
-#endif
-TEST_F(PageLoadTrackerTest, MAYBE_StopObservingOnPrerender) {
+TEST_F(PageLoadTrackerTest, StopObservingOnPrerender) {
+  ScopedPrerenderWebContentsDelegate web_contents_delegate(*web_contents());
+
   // Target URL to monitor the tracker via the test observer.
   const char kPrerenderingUrl[] = "https://a.test/prerender";
   SetTargetUrl(kPrerenderingUrl);
@@ -311,6 +398,8 @@ TEST_F(PageLoadTrackerTest, MAYBE_StopObservingOnPrerender) {
 }
 
 TEST_F(PageLoadTrackerTest, StopObservingOnFencedFrames) {
+  ScopedPrerenderWebContentsDelegate web_contents_delegate(*web_contents());
+
   // Target URL to monitor the tracker via the test observer.
   const char kFencedFramesUrl[] = "https://a.test/fenced_frames";
   SetTargetUrl(kFencedFramesUrl);
@@ -321,9 +410,9 @@ TEST_F(PageLoadTrackerTest, StopObservingOnFencedFrames) {
 
   // Add a fenced frame.
   content::RenderFrameHost* fenced_frame_root =
-      content::RenderFrameHostTester::For(web_contents()->GetMainFrame())
+      content::RenderFrameHostTester::For(web_contents()->GetPrimaryMainFrame())
           ->AppendFencedFrame();
-  auto simulator = content::NavigationSimulator::CreateForFencedFrame(
+  auto simulator = content::NavigationSimulator::CreateRendererInitiated(
       GURL(kFencedFramesUrl), fenced_frame_root);
   ASSERT_NE(nullptr, simulator);
   simulator->Commit();
@@ -333,6 +422,34 @@ TEST_F(PageLoadTrackerTest, StopObservingOnFencedFrames) {
   EXPECT_TRUE(GetEvents().was_fenced_frames_started);
   EXPECT_FALSE(GetEvents().was_prerender_started);
   EXPECT_FALSE(GetEvents().was_committed);
+}
+
+TEST_F(PageLoadTrackerTest, ResumeOnPrerenderActivation) {
+  ScopedPrerenderWebContentsDelegate web_contents_delegate(*web_contents());
+
+  // Target URL to monitor the tracker via the test observer.
+  const char kPrerenderingUrl[] = "https://a.test/prerender";
+  SetTargetUrl(kPrerenderingUrl);
+
+  // Navigate in.
+  NavigateAndCommit(GURL(kTestUrl));
+
+  // Add a prerender page.
+  content::WebContentsTester::For(web_contents())
+      ->AddPrerenderAndCommitNavigation(GURL(kPrerenderingUrl));
+
+  // Check observer behaviors.
+  EXPECT_FALSE(GetEvents().was_started);
+  EXPECT_FALSE(GetEvents().was_fenced_frames_started);
+  EXPECT_TRUE(GetEvents().was_prerender_started);
+  EXPECT_TRUE(GetEvents().was_committed);
+  EXPECT_FALSE(GetEvents().was_prerendered_page_activated);
+
+  // Activate the prerendered page.
+  content::WebContentsTester::For(web_contents())
+      ->ActivatePrerenderedPage(GURL(kPrerenderingUrl));
+
+  EXPECT_TRUE(GetEvents().was_prerendered_page_activated);
 }
 
 }  // namespace

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,7 @@ namespace policy {
 class RequestHandlerForUnregister
     : public EmbeddedPolicyTestServer::RequestHandler {
  public:
-  RequestHandlerForUnregister(ClientStorage* client_storage,
-                              PolicyStorage* policy_storage);
+  explicit RequestHandlerForUnregister(EmbeddedPolicyTestServer* parent);
   RequestHandlerForUnregister(RequestHandlerForUnregister&& handler) = delete;
   RequestHandlerForUnregister& operator=(
       RequestHandlerForUnregister&& handler) = delete;

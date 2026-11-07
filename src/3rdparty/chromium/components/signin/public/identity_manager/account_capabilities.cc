@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,6 +75,14 @@ signin::Tribool AccountCapabilities::can_stop_parental_supervision() const {
 
 signin::Tribool AccountCapabilities::is_subject_to_parental_controls() const {
   return GetCapabilityByName(kIsSubjectToParentalControlsCapabilityName);
+}
+
+signin::Tribool AccountCapabilities::is_allowed_for_machine_learning() const {
+  return GetCapabilityByName(kIsAllowedForMachineLearningCapabilityName);
+}
+
+signin::Tribool AccountCapabilities::can_toggle_auto_updates() const {
+  return GetCapabilityByName(kCanToggleAutoUpdatesName);
 }
 
 bool AccountCapabilities::UpdateWith(const AccountCapabilities& other) {

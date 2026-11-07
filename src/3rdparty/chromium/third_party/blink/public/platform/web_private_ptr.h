@@ -39,6 +39,7 @@
 
 #if INSIDE_BLINK
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/renderer/platform/heap/cross_thread_persistent.h"  // nogncheck
 #include "third_party/blink/renderer/platform/heap/persistent.h"  // nogncheck
 #include "third_party/blink/renderer/platform/wtf/type_traits.h"  // nogncheck
 #endif
@@ -222,7 +223,11 @@ class PtrStorageImpl<T,
   void Release() { handle_.Clear(); }
 
  private:
-  BlinkPtrType handle_;
+  union {
+    BlinkPtrType handle_;
+    [[maybe_unused]] std::aligned_storage_t<kMaxWebPrivatePtrSize, alignof(T*)>
+        unused_;
+  };
 };
 
 template <typename T,

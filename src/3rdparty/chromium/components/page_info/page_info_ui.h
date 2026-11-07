@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -72,6 +72,8 @@ class PageInfoUI {
 
   // |CookieInfo| contains information about the cookies from a specific source.
   // A source can for example be a specific origin or an entire wildcard domain.
+  // TODO(crbug.com/1346305): Remove after finishing cookies subpage
+  // implementation.
   struct CookieInfo {
     CookieInfo();
 
@@ -83,6 +85,41 @@ class PageInfoUI {
     // Whether these cookies are from the current top-level origin as seen by
     // the user, or from third-party origins.
     bool is_first_party;
+  };
+
+  // |CookiesFpsInfo| contains information about a specific First-Party Set.
+  struct CookiesFpsInfo {
+    explicit CookiesFpsInfo(const std::u16string& owner_name);
+    ~CookiesFpsInfo();
+
+    // The name of the owner of the FPS.
+    std::u16string owner_name;
+
+    // Whether the Fps are managed by the company.
+    bool is_managed = false;
+  };
+
+  // |CookiesNewInfo| contains information about the sites that are allowed
+  // to access cookies and fps cookies info for new UI.
+  // TODO(crbug.com/1346305):  Change the name to "CookieInfo" after finishing
+  // cookies subpage implementation
+  struct CookiesNewInfo {
+    CookiesNewInfo();
+    ~CookiesNewInfo();
+
+    // The number of third-party sites blocked.
+    int blocked_sites_count = -1;
+
+    // The number of sites allowed to access cookies.
+    int allowed_sites_count = -1;
+
+    // The status of blocking third-party cookies.
+    CookieControlsStatus status;
+
+    // The status of enforcement of blocking third-party cookies.
+    CookieControlsEnforcement enforcement;
+
+    absl::optional<CookiesFpsInfo> fps_info;
   };
 
   // |ChosenObjectInfo| contains information about a single |chooser_object| of
@@ -195,12 +232,6 @@ class PageInfoUI {
       content_settings::SettingSource source,
       bool is_one_time);
 
-  // Returns a string indicating whether the permission was blocked via an
-  // extension, enterprise policy, or embargo.
-  static std::u16string PermissionDecisionReasonToUIString(
-      PageInfoUiDelegate* delegate,
-      const PageInfo::PermissionInfo& permission);
-
   static std::u16string PermissionStateToUIString(
       PageInfoUiDelegate* delegate,
       const PageInfo::PermissionInfo& permission);
@@ -247,12 +278,11 @@ class PageInfoUI {
   static std::unique_ptr<SecurityDescription>
   CreateSafetyTipSecurityDescription(const security_state::SafetyTipInfo& info);
 
-  // Ensures the cookie information UI is present, with placeholder information
-  // if necessary.
-  virtual void EnsureCookieInfo() {}
-
   // Sets cookie information.
+  // TODO(crbug.com/1346305) remove unused function overload after finished
+  // project. Sets cookie information.
   virtual void SetCookieInfo(const CookieInfoList& cookie_info_list) {}
+  virtual void SetCookieInfo(const CookiesNewInfo& cookie_info) {}
 
   // Sets permission information.
   virtual void SetPermissionInfo(const PermissionInfoList& permission_info_list,

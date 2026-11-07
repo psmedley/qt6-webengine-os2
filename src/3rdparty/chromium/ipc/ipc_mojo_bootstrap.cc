@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -803,13 +803,12 @@ class ChannelAssociatedGroupController
         // handle.
         DCHECK(!endpoint->client());
         DCHECK(endpoint->peer_closed());
-        MarkClosedAndMaybeRemove(endpoint);
+        MarkClosed(endpoint);
       } else {
-        MarkPeerClosedAndMaybeRemove(endpoint);
+        MarkPeerClosed(endpoint);
       }
     }
-
-    DCHECK(endpoints_.empty());
+    endpoints_.clear();
 
     GetMemoryDumpProvider().RemoveController(this);
   }
@@ -856,15 +855,19 @@ class ChannelAssociatedGroupController
     base::AutoLock locker(lock_);
     encountered_error_ = true;
 
+    std::vector<uint32_t> endpoints_to_remove;
     std::vector<scoped_refptr<Endpoint>> endpoints_to_notify;
     for (auto iter = endpoints_.begin(); iter != endpoints_.end();) {
       Endpoint* endpoint = iter->second.get();
       ++iter;
 
-      if (endpoint->client())
+      if (endpoint->client()) {
         endpoints_to_notify.push_back(endpoint);
+      }
 
-      MarkPeerClosedAndMaybeRemove(endpoint);
+      if (MarkPeerClosed(endpoint)) {
+        endpoints_to_remove.push_back(endpoint->id());
+      }
     }
 
     for (auto& endpoint : endpoints_to_notify) {
@@ -872,6 +875,10 @@ class ChannelAssociatedGroupController
       // check each client again here.
       if (endpoint->client())
         NotifyEndpointOfError(endpoint.get(), false /* force_async */);
+    }
+
+    for (uint32_t id : endpoints_to_remove) {
+      endpoints_.erase(id);
     }
   }
 
@@ -887,10 +894,10 @@ class ChannelAssociatedGroupController
       client->NotifyError(reason);
     } else {
       endpoint->task_runner()->PostTask(
-          FROM_HERE,
-          base::BindOnce(&ChannelAssociatedGroupController::
-                             NotifyEndpointOfErrorOnEndpointThread,
-                         this, endpoint->id(), base::Unretained(endpoint)));
+          FROM_HERE, base::BindOnce(&ChannelAssociatedGroupController::
+                                        NotifyEndpointOfErrorOnEndpointThread,
+                                    this, endpoint->id(),
+                                    base::UnsafeDanglingUntriaged(endpoint)));
     }
   }
 
@@ -907,19 +914,33 @@ class ChannelAssociatedGroupController
     NotifyEndpointOfError(endpoint, false /* force_async */);
   }
 
-  void MarkClosedAndMaybeRemove(Endpoint* endpoint) {
+  // Marks `endpoint` as closed and returns true if and only if its peer was
+  // also already closed.
+  bool MarkClosed(Endpoint* endpoint) {
     lock_.AssertAcquired();
     endpoint->set_closed();
-    if (endpoint->closed() && endpoint->peer_closed())
-      endpoints_.erase(endpoint->id());
+    return endpoint->peer_closed();
   }
 
-  void MarkPeerClosedAndMaybeRemove(Endpoint* endpoint) {
+  // Marks `endpoint` as having a closed peer and returns true if and only if
+  // `endpoint` itself was also already closed.
+  bool MarkPeerClosed(Endpoint* endpoint) {
     lock_.AssertAcquired();
     endpoint->set_peer_closed();
     endpoint->SignalSyncMessageEvent();
-    if (endpoint->closed() && endpoint->peer_closed())
+    return endpoint->closed();
+  }
+
+  void MarkClosedAndMaybeRemove(Endpoint* endpoint) {
+    if (MarkClosed(endpoint)) {
       endpoints_.erase(endpoint->id());
+    }
+  }
+
+  void MarkPeerClosedAndMaybeRemove(Endpoint* endpoint) {
+    if (MarkPeerClosed(endpoint)) {
+      endpoints_.erase(endpoint->id());
+    }
   }
 
   Endpoint* FindOrInsertEndpoint(mojo::InterfaceId id, bool* inserted) {

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "base/test/mock_callback.h"
 #include "components/autofill_assistant/browser/actions/action_test_utils.h"
 #include "components/autofill_assistant/browser/client_status.h"
-#include "components/autofill_assistant/browser/web/element_finder.h"
+#include "components/autofill_assistant/browser/web/element_finder_result.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_renderer_host.h"
@@ -17,6 +17,9 @@
 
 namespace autofill_assistant {
 namespace {
+
+using ::testing::IsEmpty;
+using ::testing::Not;
 
 class ElementStoreTest : public testing::Test {
  public:
@@ -31,8 +34,11 @@ class ElementStoreTest : public testing::Test {
       const std::string& object_id) {
     auto element = std::make_unique<ElementFinderResult>();
     element->SetObjectId(object_id);
-    element->SetNodeFrameId(
-        web_contents_->GetMainFrame()->GetDevToolsFrameToken().ToString());
+    element->SetNodeFrameId(web_contents_->GetPrimaryMainFrame()
+                                ->GetDevToolsFrameToken()
+                                .ToString());
+    element->SetRenderFrameHostGlobalId(
+        web_contents_->GetPrimaryMainFrame()->GetGlobalId());
     return element;
   }
 
@@ -60,15 +66,19 @@ TEST_F(ElementStoreTest, AddElementToStore) {
 
 TEST_F(ElementStoreTest, GetElementFromStore) {
   auto element = CreateElement("1");
+  element->SetBackendNodeId(1);
   AddElement("1", std::move(element));
 
   ElementFinderResult result;
   EXPECT_EQ(ACTION_APPLIED,
             element_store_->GetElement("1", &result).proto_status());
   EXPECT_EQ("1", result.object_id());
+  EXPECT_EQ(1, *result.backend_node_id());
+  EXPECT_THAT(result.node_frame_id(), Not(IsEmpty()));
+  EXPECT_EQ(web_contents_->GetPrimaryMainFrame(), result.render_frame_host());
 }
 
-TEST_F(ElementStoreTest, GetElementFromStoreWithBadFrameHost) {
+TEST_F(ElementStoreTest, GetElementFromStoreWithBadNodeFrameId) {
   auto element = std::make_unique<ElementFinderResult>();
   element->SetObjectId("1");
   element->SetNodeFrameId("unknown");
@@ -79,15 +89,29 @@ TEST_F(ElementStoreTest, GetElementFromStoreWithBadFrameHost) {
             element_store_->GetElement("1", &result).proto_status());
 }
 
-TEST_F(ElementStoreTest, GetElementFromStoreWithNoFrameId) {
+TEST_F(ElementStoreTest, GetElementFromStoreWithNoNodeFrameId) {
   auto element = std::make_unique<ElementFinderResult>();
   element->SetObjectId("1");
+  element->SetRenderFrameHostGlobalId(
+      web_contents_->GetPrimaryMainFrame()->GetGlobalId());
   AddElement("1", std::move(element));
 
   ElementFinderResult result;
   EXPECT_EQ(ACTION_APPLIED,
             element_store_->GetElement("1", &result).proto_status());
-  EXPECT_EQ(web_contents_->GetMainFrame(), result.render_frame_host());
+  EXPECT_EQ(web_contents_->GetPrimaryMainFrame(), result.render_frame_host());
+}
+
+TEST_F(ElementStoreTest, GetElementFromStoreWithNoGlobalFrameId) {
+  auto element = std::make_unique<ElementFinderResult>();
+  element->SetObjectId("1");
+  element->SetNodeFrameId(
+      web_contents_->GetPrimaryMainFrame()->GetDevToolsFrameToken().ToString());
+  AddElement("1", std::move(element));
+
+  ElementFinderResult result;
+  EXPECT_EQ(CLIENT_ID_RESOLUTION_FAILED,
+            element_store_->GetElement("1", &result).proto_status());
 }
 
 TEST_F(ElementStoreTest, AddElementToStoreOverwrites) {

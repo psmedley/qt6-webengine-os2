@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "third_party/blink/public/mojom/frame/frame.mojom-blink.h"
 #include "third_party/blink/public/mojom/media/fullscreen_video_element.mojom-blink.h"
 #include "third_party/blink/public/mojom/reporting/reporting.mojom-blink.h"
+#include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink-forward.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_associated_receiver.h"
@@ -119,6 +120,9 @@ class LocalFrameMojoHandler
   void RenderFallbackContentWithResourceTiming(
       mojom::blink::ResourceTimingInfoPtr timing,
       const String& server_timing_values) final;
+  void AddResourceTimingEntryFromNonNavigatedFrame(
+      mojom::blink::ResourceTimingInfoPtr timing,
+      blink::FrameOwnerElementType parent_frame_owner_element_type) final;
   void BeforeUnload(bool is_reload, BeforeUnloadCallback callback) final;
   void MediaPlayerActionAt(
       const gfx::Point& window_point,
@@ -191,9 +195,14 @@ class LocalFrameMojoHandler
   void HandleRendererDebugURL(const KURL& url) final;
   void GetCanonicalUrlForSharing(
       GetCanonicalUrlForSharingCallback callback) final;
+  void GetOpenGraphMetadata(GetOpenGraphMetadataCallback callback) final;
 
   void SetNavigationApiHistoryEntriesForRestore(
       mojom::blink::NavigationApiHistoryEntryArraysPtr) final;
+  void NotifyNavigationApiOfDisposedEntries(
+      const WTF::Vector<WTF::String>&) final;
+  void TraverseCancelled(const String& navigation_api_key,
+                         mojom::blink::TraverseCancelledReason reason) final;
 
   // blink::mojom::LocalMainFrame overrides:
   void AnimateDoubleTapZoom(const gfx::Point& point,
@@ -201,6 +210,8 @@ class LocalFrameMojoHandler
   void SetScaleFactor(float scale) override;
   void ClosePage(
       mojom::blink::LocalMainFrame::ClosePageCallback callback) override;
+  void GetFullPageSize(
+      mojom::blink::LocalMainFrame::GetFullPageSizeCallback callback) override;
   void PluginActionAt(const gfx::Point& location,
                       mojom::blink::PluginActionType action) override;
   void SetInitialFocus(bool reverse) override;

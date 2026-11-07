@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -109,8 +109,9 @@ PrefServiceSyncable::CreateIncognitoPrefService(
   auto incognito_pref_store = base::MakeRefCounted<OverlayUserPrefStore>(
       overlay.get(), user_pref_store_.get());
 
-  for (const char* persistent_pref_name : persistent_pref_names)
+  for (const char* persistent_pref_name : persistent_pref_names) {
     incognito_pref_store->RegisterPersistentPref(persistent_pref_name);
+  }
 
   auto pref_value_store = pref_value_store_->CloneAndSpecialize(
       nullptr,  // managed
@@ -120,8 +121,7 @@ PrefServiceSyncable::CreateIncognitoPrefService(
       nullptr,  // command_line_prefs
       incognito_pref_store.get(),
       nullptr,  // recommended
-      forked_registry->defaults().get(), pref_notifier.get(),
-      /*delegate=*/nullptr);
+      forked_registry->defaults().get(), pref_notifier.get());
   return std::make_unique<PrefServiceSyncable>(
       std::move(pref_notifier), std::move(pref_value_store),
       std::move(incognito_pref_store),
@@ -219,36 +219,25 @@ void PrefServiceSyncable::AddRegisteredSyncablePreference(
   }
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   if (flags & user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF) {
-    if (chromeos::features::IsSyncSettingsCategorizationEnabled()) {
-      // Register the pref under the new ModelType::OS_PREFERENCES.
-      os_pref_sync_associator_.RegisterPref(path);
-      // Also register under the old ModelType::PREFERENCES. This ensures that
-      // local changes to OS prefs are also synced to old clients that have the
-      // pref registered as a browser SYNCABLE_PREF.
-      pref_sync_associator_.RegisterPrefWithLegacyModelType(path);
-    } else {
-      // Behave like an old client and treat this pref like it was registered
-      // as a SYNCABLE_PREF under ModelType::PREFERENCES.
-      pref_sync_associator_.RegisterPref(path);
-    }
+    os_pref_sync_associator_.RegisterPref(path);
+    // Also register under the old ModelType::PREFERENCES. This ensures that
+    // local changes to OS prefs are also synced to old clients that have the
+    // pref registered as a browser SYNCABLE_PREF.
+    pref_sync_associator_.RegisterPrefWithLegacyModelType(path);
     return;
   }
   if (flags & user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF) {
-    // See comments for SYNCABLE_OS_PREF above.
-    if (chromeos::features::IsSyncSettingsCategorizationEnabled()) {
-      os_priority_pref_sync_associator_.RegisterPref(path);
-      priority_pref_sync_associator_.RegisterPrefWithLegacyModelType(path);
-    } else {
-      priority_pref_sync_associator_.RegisterPref(path);
-    }
+    os_priority_pref_sync_associator_.RegisterPref(path);
+    priority_pref_sync_associator_.RegisterPrefWithLegacyModelType(path);
     return;
   }
 #endif
 }
 
 void PrefServiceSyncable::OnIsSyncingChanged() {
-  for (auto& observer : observer_list_)
+  for (auto& observer : observer_list_) {
     observer.OnIsSyncingChanged();
+  }
 }
 
 void PrefServiceSyncable::ProcessPrefChange(const std::string& name) {

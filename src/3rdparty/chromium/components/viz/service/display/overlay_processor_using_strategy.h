@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -154,7 +154,7 @@ class VIZ_SERVICE_EXPORT OverlayProcessorUsingStrategy
     gfx::Rect overlay_rect;
     gfx::RectF damage_rect;
     uint32_t damage_index;
-    int damage_area_estimate;
+    float damage_area_estimate;
     bool has_mask_filter;
     int plane_z_order;
     bool is_underlay;

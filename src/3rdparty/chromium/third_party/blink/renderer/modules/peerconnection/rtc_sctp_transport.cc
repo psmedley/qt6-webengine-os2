@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,7 +84,7 @@ RTCSctpTransport::RTCSctpTransport(
       current_state_(webrtc::SctpTransportState::kNew),
       native_transport_(native_transport),
       proxy_(CreateProxy(context,
-                         native_transport,
+                         native_transport.get(),
                          this,
                          main_thread,
                          worker_thread)) {}

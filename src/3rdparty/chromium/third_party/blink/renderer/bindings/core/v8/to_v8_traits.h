@@ -1,10 +1,11 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_TO_V8_TRAITS_H_
 #define THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_TO_V8_TRAITS_H_
 
+#include "base/numerics/safe_conversions.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
@@ -325,7 +326,7 @@ struct ToV8Traits<
   // TODO(crbug.com/1184543): Remove this overload.
   [[nodiscard]] static v8::MaybeLocal<v8::Value> ToV8(ScriptState* script_state,
                                                       const String& value) {
-    DCHECK(!value.IsEmpty());
+    DCHECK(!value.empty());
     return V8String(script_state->GetIsolate(), value);
   }
 
@@ -333,7 +334,7 @@ struct ToV8Traits<
   [[nodiscard]] static v8::MaybeLocal<v8::Value> ToV8(
       ScriptState* script_state,
       const AtomicString& value) {
-    DCHECK(!value.IsEmpty());
+    DCHECK(!value.empty());
     return V8String(script_state->GetIsolate(), value);
   }
 };
@@ -356,14 +357,6 @@ struct ToV8Traits<NotShared<T>> {
     if (!value)
       return v8::Null(script_state->GetIsolate());
     return ToV8Traits<T>::ToV8(script_state, value);
-  }
-
-  // TODO(canonmukai): Remove this overload.
-  [[nodiscard]] static v8::MaybeLocal<v8::Value> ToV8(
-      ScriptState* script_state,
-      const ScriptValue& script_value) {
-    DCHECK(!script_value.IsEmpty());
-    return ToV8Traits<IDLAny>::ToV8(script_state, script_value);
   }
 };
 
@@ -388,7 +381,7 @@ inline v8::MaybeLocal<v8::Value> ToV8HelperSequence(ScriptState* script_state,
   v8::Local<v8::Array> array;
   {
     v8::Context::Scope context_scope(script_state->GetContext());
-    array = v8::Array::New(isolate, SafeCast<int>(vector.size()));
+    array = v8::Array::New(isolate, base::checked_cast<int>(vector.size()));
   }
   v8::Local<v8::Context> context = script_state->GetContext();
   uint32_t index = 0;
@@ -849,15 +842,6 @@ struct ToV8Traits<IDLNullable<NotShared<T>>> {
     if (!value)
       return v8::Null(script_state->GetIsolate());
     return ToV8Traits<NotShared<T>>::ToV8(script_state, value);
-  }
-
-  // TODO(canonmukai): Remove this overload.
-  [[nodiscard]] static v8::MaybeLocal<v8::Value> ToV8(
-      ScriptState* script_state,
-      const ScriptValue& script_value) {
-    if (script_value.IsEmpty())
-      return v8::Null(script_state->GetIsolate());
-    return ToV8Traits<NotShared<T>>::ToV8(script_state, script_value);
   }
 };
 

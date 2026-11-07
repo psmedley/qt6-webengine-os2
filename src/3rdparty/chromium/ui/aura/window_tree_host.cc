@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -156,7 +156,7 @@ class WindowTreeHost::HideHelper {
     // WARNING: this has been deleted.
   }
 
-  raw_ptr<WindowTreeHost> host_;
+  raw_ptr<WindowTreeHost, DanglingUntriaged> host_;
   scoped_refptr<cc::Layer> compositor_root_layer_;
   std::unique_ptr<ui::Layer> layer_for_transition_;
   base::WeakPtrFactory<HideHelper> weak_ptr_factory_{this};
@@ -175,10 +175,6 @@ WindowTreeHost::VideoCaptureLock::VideoCaptureLock(WindowTreeHost* host)
 
 WindowTreeHost::~WindowTreeHost() {
   DCHECK(!compositor_) << "compositor must be destroyed before root window";
-  if (owned_input_method_) {
-    delete input_method_;
-    input_method_ = nullptr;
-  }
 }
 
 // static
@@ -193,7 +189,7 @@ void WindowTreeHost::InitHost() {
       display::Screen::GetScreen()->GetDisplayNearestWindow(window());
   device_scale_factor_ = display.device_scale_factor();
 
-  UpdateRootWindowSizeInPixels();
+  UpdateRootWindowSize();
   InitCompositor();
   Env::GetInstance()->NotifyHostInitialized(this);
 }
@@ -223,7 +219,7 @@ gfx::Transform WindowTreeHost::GetRootTransform() const {
 
 void WindowTreeHost::SetRootTransform(const gfx::Transform& transform) {
   window()->SetTransform(transform);
-  UpdateRootWindowSizeInPixels();
+  UpdateRootWindowSize();
 }
 
 gfx::Transform WindowTreeHost::GetInverseRootTransform() const {
@@ -256,16 +252,6 @@ gfx::Transform WindowTreeHost::GetInverseRootTransformForLocalEventCoordinates()
   return invert;
 }
 
-void WindowTreeHost::UpdateRootWindowSizeInPixels() {
-  // Validate that the LocalSurfaceId does not change.
-  bool compositor_inited = !!compositor()->root_layer();
-  ScopedLocalSurfaceIdValidator lsi_validator(compositor_inited ? window()
-                                                                : nullptr);
-  gfx::Rect transformed_bounds_in_pixels =
-      GetTransformedRootWindowBoundsInPixels(GetBoundsInPixels().size());
-  window()->SetBounds(transformed_bounds_in_pixels);
-}
-
 void WindowTreeHost::UpdateCompositorScaleAndSize(
     const gfx::Size& new_size_in_pixels) {
   gfx::Rect new_bounds(new_size_in_pixels);
@@ -296,15 +282,23 @@ void WindowTreeHost::ConvertScreenInPixelsToDIP(gfx::Point* point) const {
 }
 
 void WindowTreeHost::ConvertDIPToPixels(gfx::Point* point) const {
-  auto point_3f = gfx::Point3F(gfx::PointF(*point));
-  GetRootTransform().TransformPoint(&point_3f);
-  *point = gfx::ToFlooredPoint(point_3f.AsPointF());
+  gfx::PointF point_f{*point};
+  ConvertDIPToPixels(&point_f);
+  *point = gfx::ToFlooredPoint(point_f);
+}
+
+void WindowTreeHost::ConvertDIPToPixels(gfx::PointF* point) const {
+  *point = GetRootTransform().MapPoint(*point);
 }
 
 void WindowTreeHost::ConvertPixelsToDIP(gfx::Point* point) const {
-  auto point_3f = gfx::Point3F(gfx::PointF(*point));
-  GetInverseRootTransform().TransformPoint(&point_3f);
-  *point = gfx::ToFlooredPoint(point_3f.AsPointF());
+  gfx::PointF point_f{*point};
+  ConvertPixelsToDIP(&point_f);
+  *point = gfx::ToFlooredPoint(point_f);
+}
+
+void WindowTreeHost::ConvertPixelsToDIP(gfx::PointF* point) const {
+  *point = GetInverseRootTransform().MapPoint(*point);
 }
 
 void WindowTreeHost::SetCursor(gfx::NativeCursor cursor) {
@@ -346,18 +340,15 @@ void WindowTreeHost::MoveCursorToLocationInPixels(
 
 ui::InputMethod* WindowTreeHost::GetInputMethod() {
   if (!input_method_) {
-    input_method_ =
-        ui::CreateInputMethod(this, GetAcceleratedWidget()).release();
-    owned_input_method_ = true;
+    input_method_owned_ = ui::CreateInputMethod(this, GetAcceleratedWidget());
+    input_method_ = input_method_owned_.get();
   }
   return input_method_;
 }
 
 void WindowTreeHost::SetSharedInputMethod(ui::InputMethod* input_method) {
-  if (input_method_ && owned_input_method_)
-    delete input_method_;
   input_method_ = input_method;
-  owned_input_method_ = false;
+  input_method_owned_.reset();
 }
 
 ui::EventDispatchDetails WindowTreeHost::DispatchKeyEventPostIME(
@@ -401,6 +392,13 @@ void WindowTreeHost::Hide() {
   OnAcceleratedWidgetMadeVisible(false);
 }
 
+gfx::Rect WindowTreeHost::GetBoundsInDIP() const {
+  aura::Window* root_window = const_cast<aura::Window*>(window());
+  display::Screen* screen = display::Screen::GetScreen();
+  gfx::Rect screen_bounds = GetBoundsInPixels();
+  return screen->ScreenToDIPRectInWindow(root_window, screen_bounds);
+}
+
 gfx::Rect WindowTreeHost::GetBoundsInAcceleratedWidgetPixelCoordinates() {
   return gfx::Rect(GetBoundsInPixels().size());
 }
@@ -431,6 +429,7 @@ void WindowTreeHost::SetNativeWindowOcclusionState(
     return;
 
   occlusion_state_ = state;
+  occluded_region_ = occluded_region;
 
   if (compositor() && accelerated_widget_made_visible_ &&
       NativeWindowOcclusionTracker::
@@ -453,6 +452,19 @@ void WindowTreeHost::SetNativeWindowOcclusionState(
 
   for (WindowTreeHostObserver& observer : observers_)
     observer.OnOcclusionStateChanged(this, state, occluded_region);
+}
+
+void WindowTreeHost::UpdateRootWindowSize() {
+  // Validate that the LocalSurfaceId does not change.
+  bool compositor_inited = !!compositor()->root_layer();
+  ScopedLocalSurfaceIdValidator lsi_validator(compositor_inited ? window()
+                                                                : nullptr);
+  window()->SetBounds(CalculateRootWindowBounds());
+}
+
+gfx::Rect WindowTreeHost::CalculateRootWindowBounds() const {
+  return GetTransformedRootWindowBoundsFromPixelSize(
+      GetBoundsInPixels().size());
 }
 
 std::unique_ptr<ScopedEnableUnadjustedMouseEvents>
@@ -524,11 +536,6 @@ WindowTreeHost::WindowTreeHost(std::unique_ptr<Window> window)
 #endif
 }
 
-void WindowTreeHost::IntializeDeviceScaleFactor(float device_scale_factor) {
-  DCHECK(!compositor_->root_layer()) << "Only call this before InitHost()";
-  device_scale_factor_ = device_scale_factor;
-}
-
 void WindowTreeHost::UpdateCompositorVisibility(bool visible) {
   if (!compositor())
     return;
@@ -589,7 +596,7 @@ void WindowTreeHost::DestroyDispatcher() {
   // ~Window, but by that time any calls to virtual methods overriden here (such
   // as GetRootWindow()) result in Window's implementation. By destroying here
   // we ensure GetRootWindow() still returns this.
-  //window()->RemoveOrDestroyChildren();
+  // window()->RemoveOrDestroyChildren();
 }
 
 void WindowTreeHost::OnAcceleratedWidgetMadeVisible(bool value) {
@@ -647,13 +654,11 @@ void WindowTreeHost::OnAcceleratedWidgetAvailable() {
   }
 }
 
-void WindowTreeHost::OnHostMovedInPixels(
-    const gfx::Point& new_location_in_pixels) {
-  TRACE_EVENT1("ui", "WindowTreeHost::OnHostMovedInPixels", "origin",
-               new_location_in_pixels.ToString());
+void WindowTreeHost::OnHostMovedInPixels() {
+  TRACE_EVENT0("ui", "WindowTreeHost::OnHostMovedInPixels");
 
   for (WindowTreeHostObserver& observer : observers_)
-    observer.OnHostMovedInPixels(this, new_location_in_pixels);
+    observer.OnHostMovedInPixels(this);
 }
 
 void WindowTreeHost::OnHostResizedInPixels(
@@ -671,7 +676,7 @@ void WindowTreeHost::OnHostResizedInPixels(
   if (display.is_valid())
     device_scale_factor_ = display.device_scale_factor();
 
-  UpdateRootWindowSizeInPixels();
+  UpdateRootWindowSize();
 
   // Passing |new_size_in_pixels| to set compositor size. It could be different
   // from GetBoundsInPixels() on Windows to contain extra space for window
@@ -729,11 +734,9 @@ void WindowTreeHost::OnDisplayMetricsChanged(const display::Display& display,
 #endif
 }
 
-gfx::Rect WindowTreeHost::GetTransformedRootWindowBoundsInPixels(
+gfx::Rect WindowTreeHost::GetTransformedRootWindowBoundsFromPixelSize(
     const gfx::Size& size_in_pixels) const {
-  gfx::RectF new_bounds = gfx::RectF(gfx::Rect(size_in_pixels));
-  GetInverseRootTransform().TransformRect(&new_bounds);
-  return gfx::ToEnclosingRect(new_bounds);
+  return GetInverseRootTransform().MapRect(gfx::Rect(size_in_pixels));
 }
 
 void WindowTreeHost::SetNativeWindowOcclusionEnabled(bool enable) {

@@ -1,10 +1,11 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <string>
 
 #include "base/values.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/media/webrtc/capture_policy_utils.h"
 #include "chrome/browser/media/webrtc/webrtc_browsertest_base.h"
 #include "chrome/browser/policy/policy_test_utils.h"
@@ -44,30 +45,14 @@ class SelectAllScreensTest : public InProcessBrowserTest {
         true /* is_initialization_complete_return */,
         true /* is_first_policy_load_complete_return */);
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
-    SetUpGeneralMockExpectations();
-  }
-
-  void SetUpGeneralMockExpectations() {
-    testing::ExpectationSet allowed_initial_calls;
-    allowed_initial_calls +=
-        EXPECT_CALL(provider_, IsInitializationComplete(testing::_))
-            .Times(testing::AnyNumber());
-    allowed_initial_calls +=
-        EXPECT_CALL(provider_, IsFirstPolicyLoadComplete(testing::_))
-            .Times(testing::AnyNumber());
-    EXPECT_CALL(initialization_end_checkpoint, Call())
-        .After(allowed_initial_calls);
   }
 
  protected:
-  testing::MockFunction<void()> initialization_end_checkpoint;
-  testing::StrictMock<policy::MockConfigurationPolicyProvider> provider_;
+  testing::NiceMock<policy::MockConfigurationPolicyProvider> provider_;
 };
 
 IN_PROC_BROWSER_TEST_F(SelectAllScreensTest,
                        SelectAllScreensDisabledByDefault) {
-  initialization_end_checkpoint.Call();
-
   Browser* current_browser = browser();
   TabStripModel* current_tab_strip_model = current_browser->tab_strip_model();
   content::WebContents* current_web_contents =
@@ -76,14 +61,9 @@ IN_PROC_BROWSER_TEST_F(SelectAllScreensTest,
       current_web_contents->GetBrowserContext(), GURL("")));
 }
 
+#if BUILDFLAG(IS_CHROMEOS)
 IN_PROC_BROWSER_TEST_F(SelectAllScreensTest,
                        SelectAllScreensDisabledWithEmptyPolicy) {
-  initialization_end_checkpoint.Call();
-  EXPECT_CALL(provider_, IsInitializationComplete(
-                             policy::PolicyDomain::POLICY_DOMAIN_CHROME));
-  EXPECT_CALL(provider_, IsFirstPolicyLoadComplete(
-                             policy::PolicyDomain::POLICY_DOMAIN_CHROME));
-
   policy::PolicyMap policies;
   policies.Set(policy::key::kGetDisplayMediaSetSelectAllScreensAllowedForUrls,
                policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
@@ -101,12 +81,6 @@ IN_PROC_BROWSER_TEST_F(SelectAllScreensTest,
 
 IN_PROC_BROWSER_TEST_F(SelectAllScreensTest,
                        SelectAllScreensEnabledWithCorrectUrl) {
-  initialization_end_checkpoint.Call();
-  EXPECT_CALL(provider_, IsInitializationComplete(
-                             policy::PolicyDomain::POLICY_DOMAIN_CHROME));
-  EXPECT_CALL(provider_, IsFirstPolicyLoadComplete(
-                             policy::PolicyDomain::POLICY_DOMAIN_CHROME));
-
   policy::PolicyMap policies;
   base::Value::List allowed_origins;
   allowed_origins.Append(base::Value("https://www.chromium.org"));
@@ -131,12 +105,6 @@ IN_PROC_BROWSER_TEST_F(SelectAllScreensTest,
 
 IN_PROC_BROWSER_TEST_F(SelectAllScreensTest,
                        SelectAllScreensEnabledWithCorrectUrlWildcard) {
-  initialization_end_checkpoint.Call();
-  EXPECT_CALL(provider_, IsInitializationComplete(
-                             policy::PolicyDomain::POLICY_DOMAIN_CHROME));
-  EXPECT_CALL(provider_, IsFirstPolicyLoadComplete(
-                             policy::PolicyDomain::POLICY_DOMAIN_CHROME));
-
   policy::PolicyMap policies;
   base::Value::List allowed_origins;
   allowed_origins.Append(base::Value("[*.]chromium.org"));
@@ -161,12 +129,6 @@ IN_PROC_BROWSER_TEST_F(SelectAllScreensTest,
 
 IN_PROC_BROWSER_TEST_F(SelectAllScreensTest,
                        SelectAllScreensDisabledWithWrongUrlWildCard) {
-  initialization_end_checkpoint.Call();
-  EXPECT_CALL(provider_, IsInitializationComplete(
-                             policy::PolicyDomain::POLICY_DOMAIN_CHROME));
-  EXPECT_CALL(provider_, IsFirstPolicyLoadComplete(
-                             policy::PolicyDomain::POLICY_DOMAIN_CHROME));
-
   policy::PolicyMap policies;
   base::Value::List allowed_origins;
   allowed_origins.Append(base::Value("[*.]chrome.org"));
@@ -190,12 +152,6 @@ IN_PROC_BROWSER_TEST_F(SelectAllScreensTest,
 
 IN_PROC_BROWSER_TEST_F(SelectAllScreensTest,
                        SelectAllScreensEnabledWithMultipleAllowedOrigins) {
-  initialization_end_checkpoint.Call();
-  EXPECT_CALL(provider_, IsInitializationComplete(
-                             policy::PolicyDomain::POLICY_DOMAIN_CHROME));
-  EXPECT_CALL(provider_, IsFirstPolicyLoadComplete(
-                             policy::PolicyDomain::POLICY_DOMAIN_CHROME));
-
   policy::PolicyMap policies;
   base::Value::List allowed_origins;
   allowed_origins.Append(base::Value("[*.]chrome.org"));
@@ -222,12 +178,6 @@ IN_PROC_BROWSER_TEST_F(SelectAllScreensTest,
 IN_PROC_BROWSER_TEST_F(
     SelectAllScreensTest,
     SelectAllScreensEnabledWithMultipleAllowedOriginsDynamicRefresh) {
-  initialization_end_checkpoint.Call();
-  EXPECT_CALL(provider_, IsInitializationComplete(
-                             policy::PolicyDomain::POLICY_DOMAIN_CHROME));
-  EXPECT_CALL(provider_, IsFirstPolicyLoadComplete(
-                             policy::PolicyDomain::POLICY_DOMAIN_CHROME));
-
   policy::PolicyMap policies;
   base::Value::List allowed_origins;
   allowed_origins.Append(base::Value("[*.]chrome.org"));
@@ -249,11 +199,6 @@ IN_PROC_BROWSER_TEST_F(
           GURL("https://www.chromium.org"));
   EXPECT_FALSE(multi_capture_allowed);
 
-  EXPECT_CALL(provider_, IsInitializationComplete(
-                             policy::PolicyDomain::POLICY_DOMAIN_CHROME));
-  EXPECT_CALL(provider_, IsFirstPolicyLoadComplete(
-                             policy::PolicyDomain::POLICY_DOMAIN_CHROME));
-
   policies.Clear();
   base::Value::List new_allowed_origins;
   new_allowed_origins.Append(base::Value("[*.]chrome.org"));
@@ -272,3 +217,4 @@ IN_PROC_BROWSER_TEST_F(
           GURL("https://www.chromium.org"));
   EXPECT_EQ(multi_capture_allowed, MULTI_CAPTURE_SUPPORTED_ON_PLATFORM);
 }
+#endif  // BUILDFLAG(IS_CHROMEOS)

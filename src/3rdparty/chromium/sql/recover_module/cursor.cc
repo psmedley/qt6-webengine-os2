@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -72,8 +72,9 @@ int VirtualCursor::Next() {
       continue;
     }
     int next_page_id = inner_decoder->TryAdvance();
-    if (next_page_id == DatabasePageReader::kInvalidPageId)
+    if (!DatabasePageReader::IsValidPageId(next_page_id)) {
       continue;
+    }
     AppendPageDecoder(next_page_id);
   }
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@
 #include "third_party/metrics_proto/system_profile.pb.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chromeos/network/network_handler_test_helper.h"
+#include "chromeos/ash/components/network/network_handler_test_helper.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 #if BUILDFLAG(IS_IOS)
@@ -44,7 +44,7 @@ class NetworkMetricsProviderTest : public testing::Test {
  private:
   MetricsTaskEnvironment task_environment_;
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  chromeos::NetworkHandlerTestHelper network_handler_test_helper_;
+  ash::NetworkHandlerTestHelper network_handler_test_helper_;
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 };
 

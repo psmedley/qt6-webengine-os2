@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import os
 import sys
 
@@ -23,7 +25,7 @@ def create_parser_update():
 
 
 def update_expectations(_, **kwargs):
-    from wptrunner import metadata, products, wptcommandline
+    from wptrunner import metadata, wptcommandline
 
     commandline.setup_logging("web-platform-tests",
                               kwargs,
@@ -37,20 +39,12 @@ def update_expectations(_, **kwargs):
     if not kwargs["manifest_path"]:
         kwargs["manifest_path"] = os.path.join(wpt_root, "MANIFEST.json")
 
-    if "product" not in kwargs["extra_property"]:
-        kwargs["extra_property"].append("product")
-
-    # By default update according to product.
-    # If we passed in the name of a product, then use the configured update properties
-    # for that product.
-    if kwargs["product"]:
-        update_properties = products.load_product_update(kwargs["config"], kwargs["product"])
-        if kwargs["extra_property"]:
-            update_properties[0].extend(kwargs["extra_property"])
-    else:
-        update_properties = (kwargs["extra_property"], {})
-
     kwargs = wptcommandline.check_args_metadata_update(kwargs)
+
+    update_properties = metadata.get_properties(properties_file=kwargs["properties_file"],
+                                                extra_properties=kwargs["extra_property"],
+                                                config=kwargs["config"],
+                                                product=kwargs["product"])
 
     manifest_update(kwargs["test_paths"])
     metadata.update_expected(kwargs["test_paths"],

@@ -4,16 +4,22 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
+#include "src/pathops/SkPathOpsCubic.h"
+
 #include "include/private/SkTPin.h"
 #include "src/core/SkGeometry.h"
 #include "src/core/SkTSort.h"
+#include "src/pathops/SkIntersections.h"
 #include "src/pathops/SkLineParameters.h"
 #include "src/pathops/SkPathOpsConic.h"
-#include "src/pathops/SkPathOpsCubic.h"
-#include "src/pathops/SkPathOpsCurve.h"
-#include "src/pathops/SkPathOpsLine.h"
 #include "src/pathops/SkPathOpsQuad.h"
 #include "src/pathops/SkPathOpsRect.h"
+#include "src/pathops/SkPathOpsTypes.h"
+
+#include <algorithm>
+#include <cmath>
+
+struct SkDLine;
 
 const int SkDCubic::gPrecisionUnit = 256;  // FIXME: test different values in test framework
 
@@ -514,7 +520,7 @@ SkDVector SkDCubic::dxdyAtT(double t) const {
 }
 
 // OPTIMIZE? share code with formulate_F1DotF2
-int SkDCubic::findInflections(double tValues[]) const {
+int SkDCubic::findInflections(double tValues[2]) const {
     double Ax = fPts[1].fX - fPts[0].fX;
     double Ay = fPts[1].fY - fPts[0].fY;
     double Bx = fPts[2].fX - 2 * fPts[1].fX + fPts[0].fX;

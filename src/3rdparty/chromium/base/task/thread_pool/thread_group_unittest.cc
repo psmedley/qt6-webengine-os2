@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -124,7 +124,7 @@ class ThreadGroupTestBase : public testing::Test, public ThreadGroup::Delegate {
     switch (GetGroupType()) {
       case test::GroupType::GENERIC:
         thread_group_ = std::make_unique<ThreadGroupImpl>(
-            "TestThreadGroup", "A", ThreadPriority::NORMAL,
+            "TestThreadGroup", "A", ThreadType::kDefault,
             task_tracker_.GetTrackedRef(),
             tracked_ref_factory_.GetTrackedRef());
         break;
@@ -132,7 +132,7 @@ class ThreadGroupTestBase : public testing::Test, public ThreadGroup::Delegate {
       case test::GroupType::NATIVE:
         thread_group_ = std::make_unique<ThreadGroupNativeType>(
 #if BUILDFLAG(IS_APPLE)
-            ThreadPriority::NORMAL,
+            ThreadType::kDefault, service_thread_.task_runner(),
 #endif
             task_tracker_.GetTrackedRef(),
             tracked_ref_factory_.GetTrackedRef());

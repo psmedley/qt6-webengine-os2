@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,6 +63,11 @@ std::string FromNativeString(const std::string& string) {
 #endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace
+
+// This switch is passed from the browser to the first renderer process it
+// creates. Useful for performing some actions only once, from one renderer
+// process.
+const char kFirstRendererProcess[] = "first-renderer-process";
 
 bool IsPinchToZoomEnabled() {
   const base::CommandLine& command_line =

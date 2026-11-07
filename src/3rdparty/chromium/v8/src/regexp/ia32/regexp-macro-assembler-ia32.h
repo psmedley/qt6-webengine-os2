@@ -58,8 +58,8 @@ class V8_EXPORT_PRIVATE RegExpMacroAssemblerIA32
   // Checks whether the given offset from the current position is before
   // the end of the string.
   void CheckPosition(int cp_offset, Label* on_outside_input) override;
-  bool CheckSpecialCharacterClass(StandardCharacterSet type,
-                                  Label* on_no_match) override;
+  bool CheckSpecialClassRanges(StandardCharacterSet type,
+                               Label* on_no_match) override;
   void Fail() override;
   Handle<HeapObject> GetCode(Handle<String> source) override;
   void GoTo(Label* label) override;
@@ -89,7 +89,7 @@ class V8_EXPORT_PRIVATE RegExpMacroAssemblerIA32
   // returning.
   // {raw_code} is an Address because this is called via ExternalReference.
   static int CheckStackGuardState(Address* return_address, Address raw_code,
-                                  Address re_frame);
+                                  Address re_frame, uintptr_t extra_space);
 
  private:
   Operand StaticVariable(const ExternalReference& ext);
@@ -143,7 +143,8 @@ class V8_EXPORT_PRIVATE RegExpMacroAssemblerIA32
   // Check whether we are exceeding the stack limit on the backtrack stack.
   void CheckStackLimit();
 
-  void CallCheckStackGuardState(Register scratch);
+  void CallCheckStackGuardState(Register scratch,
+                                Immediate extra_space = Immediate(0));
   void CallIsCharacterInRangeArray(const ZoneList<CharacterRange>* ranges);
 
   // The ebp-relative location of a regexp register.
@@ -158,6 +159,10 @@ class V8_EXPORT_PRIVATE RegExpMacroAssemblerIA32
 
   // Byte size of chars in the string to match (decided by the Mode argument)
   inline int char_size() const { return static_cast<int>(mode_); }
+
+  // Equivalent to an unconditional branch to the label, unless the label
+  // is nullptr, in which case it is a Backtrack.
+  void BranchOrBacktrack(Label* to);
 
   // Equivalent to a conditional branch to the label, unless the label
   // is nullptr, in which case it is a conditional Backtrack.

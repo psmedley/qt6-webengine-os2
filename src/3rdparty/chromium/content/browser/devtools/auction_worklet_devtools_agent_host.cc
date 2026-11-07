@@ -1,11 +1,10 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/devtools/auction_worklet_devtools_agent_host.h"
 
 #include "base/bind.h"
-#include "base/guid.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/no_destructor.h"
 #include "base/notreached.h"
@@ -81,7 +80,7 @@ bool AuctionWorkletDevToolsAgentHost::AttachSession(DevToolsSession* session,
 
 AuctionWorkletDevToolsAgentHost::AuctionWorkletDevToolsAgentHost(
     DebuggableAuctionWorklet* worklet)
-    : DevToolsAgentHostImpl(base::GenerateGUID()), worklet_(worklet) {
+    : DevToolsAgentHostImpl(worklet->UniqueId()), worklet_(worklet) {
   mojo::PendingAssociatedRemote<blink::mojom::DevToolsAgent> agent;
   worklet->ConnectDevToolsAgent(agent.InitWithNewEndpointAndPassReceiver());
   NotifyCreated();

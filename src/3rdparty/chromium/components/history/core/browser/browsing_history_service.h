@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -159,6 +159,9 @@ class BrowsingHistoryService : public HistoryServiceObserver,
       base::OnceCallback<void(base::Time)> callback);
 
   // Removes `items` from history.
+  // TODO(tommycli): Update this API to take only URLs and timestamps, because
+  // callers only have that information, and only that information is used by
+  // the actual implementation.
   void RemoveVisits(const std::vector<HistoryEntry>& items);
 
   // SyncServiceObserver implementation.

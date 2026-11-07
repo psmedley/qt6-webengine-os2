@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,12 +17,12 @@
 #include "components/variations/service/variations_service.h"
 #include "content/public/common/url_constants.h"
 #include "url/gurl.h"
+#include "weblayer/browser/accept_languages_service_factory.h"
 #include "weblayer/browser/browser_context_impl.h"
 #include "weblayer/browser/feature_list_creator.h"
 #include "weblayer/browser/navigation_controller_impl.h"
 #include "weblayer/browser/page_impl.h"
 #include "weblayer/browser/tab_impl.h"
-#include "weblayer/browser/translate_accept_languages_factory.h"
 #include "weblayer/browser/translate_ranker_factory.h"
 
 #if BUILDFLAG(IS_ANDROID)
@@ -74,20 +74,18 @@ const translate::LanguageState& TranslateClientImpl::GetLanguageState() {
   return *translate_manager_->GetLanguageState();
 }
 
-bool TranslateClientImpl::ShowTranslateUI(
-    translate::TranslateStep step,
-    const std::string& source_language,
-    const std::string& target_language,
-    translate::TranslateErrors::Type error_type,
-    bool triggered_from_menu) {
+bool TranslateClientImpl::ShowTranslateUI(translate::TranslateStep step,
+                                          const std::string& source_language,
+                                          const std::string& target_language,
+                                          translate::TranslateErrors error_type,
+                                          bool triggered_from_menu) {
 #if BUILDFLAG(IS_ANDROID)
   if (error_type != translate::TranslateErrors::NONE)
     step = translate::TRANSLATE_STEP_TRANSLATE_ERROR;
   translate::TranslateInfoBarDelegate::Create(
       step != translate::TRANSLATE_STEP_BEFORE_TRANSLATE,
       translate_manager_->GetWeakPtr(),
-      infobars::ContentInfoBarManager::FromWebContents(web_contents()),
-      web_contents()->GetBrowserContext()->IsOffTheRecord(), step,
+      infobars::ContentInfoBarManager::FromWebContents(web_contents()), step,
       source_language, target_language, error_type, triggered_from_menu);
   return true;
 #else
@@ -114,9 +112,9 @@ TranslateClientImpl::GetTranslatePrefs() {
   return CreateTranslatePrefs(GetPrefs());
 }
 
-translate::TranslateAcceptLanguages*
-TranslateClientImpl::GetTranslateAcceptLanguages() {
-  return TranslateAcceptLanguagesFactory::GetForBrowserContext(
+language::AcceptLanguagesService*
+TranslateClientImpl::GetAcceptLanguagesService() {
+  return AcceptLanguagesServiceFactory::GetForBrowserContext(
       web_contents()->GetBrowserContext());
 }
 
@@ -148,16 +146,16 @@ void TranslateClientImpl::OnLanguageDetermined(
   // to the most recently committed primary main-frame navigation, if one exists
   // (see the call to SetPageLanguageInNavigation() in
   // ContentTranslateDriver::RegisterPage()); this corresponds to
-  // WebContents::GetMainFrame()::GetPage(). Note also that in certain corner
-  // cases (e.g., tab startup) there might not be such a committed primary
-  // main-frame navigation; in those cases there won't be a weblayer::Page
-  // corresponding to the primary page, as weblayer::Page objects are created
-  // only at navigation commit.
+  // WebContents::GetPrimaryMainFrame()::GetPage(). Note also that in certain
+  // corner cases (e.g., tab startup) there might not be such a committed
+  // primary main-frame navigation; in those cases there won't be a
+  // weblayer::Page corresponding to the primary page, as weblayer::Page objects
+  // are created only at navigation commit.
   // TODO(crbug.com/1231889): Rearchitect translate's renderer-browser Mojo
   // connection to be able to explicitly determine the document/content::Page
   // with which this language determination event is associated.
   PageImpl* page =
-      PageImpl::GetForPage(web_contents()->GetMainFrame()->GetPage());
+      PageImpl::GetForPage(web_contents()->GetPrimaryMainFrame()->GetPage());
   if (page) {
     std::string language = details.adopted_language;
 

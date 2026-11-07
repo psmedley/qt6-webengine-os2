@@ -34,13 +34,9 @@
  * Supports: BGR8,BGR555,BGR24 - only BGR8 and BGR555 tested
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "decode.h"
-#include "internal.h"
 #include "msrledec.h"
 #include "zlib_wrapper.h"
 
@@ -64,8 +60,8 @@ typedef struct TsccContext {
     uint32_t pal[256];
 } CamtasiaContext;
 
-static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
-                        AVPacket *avpkt)
+static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
+                        int *got_frame, AVPacket *avpkt)
 {
     const uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
@@ -114,7 +110,7 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         memcpy(frame->data[1], c->pal, AVPALETTE_SIZE);
     }
 
-    if ((ret = av_frame_ref(data, frame)) < 0)
+    if ((ret = av_frame_ref(rframe, frame)) < 0)
         return ret;
     *got_frame      = 1;
 
@@ -172,13 +168,13 @@ static av_cold int decode_end(AVCodecContext *avctx)
 
 const FFCodec ff_tscc_decoder = {
     .p.name         = "camtasia",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("TechSmith Screen Capture Codec"),
+    CODEC_LONG_NAME("TechSmith Screen Capture Codec"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_TSCC,
     .priv_data_size = sizeof(CamtasiaContext),
     .init           = decode_init,
     .close          = decode_end,
-    .decode         = decode_frame,
+    FF_CODEC_DECODE_CB(decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

@@ -1,7 +1,8 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//components/services/screen_ai/buildflags/features.gni")
 import("//pdf/features.gni")
 import("//printing/buildflags/buildflags.gni")
 
@@ -30,10 +31,13 @@ static_library("renderer") {
     "//base",
     "//components/resources:components_resources",
     "//components/resources:components_scaled_resources",
+    "//components/services/screen_ai/buildflags",
+    "//components/services/screen_ai/public/mojom",
     "//components/strings",
     "//content/public/common",
     "//gin",
     "//ipc",
+    "//net",
     "//pdf:accessibility",
     "//pdf:buildflags",
     "//pdf:features",
@@ -43,6 +47,8 @@ static_library("renderer") {
     "//third_party/blink/public:blink",
     "//third_party/blink/public/strings:accessibility_strings",
     "//third_party/icu",
+    "//ui/display",
+    "//ui/gfx/geometry",
     "//url",
     "//v8",
   ]

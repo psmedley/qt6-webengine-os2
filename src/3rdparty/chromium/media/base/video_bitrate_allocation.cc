@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -96,6 +96,10 @@ uint32_t VideoBitrateAllocation::GetSumBps() const {
 
 const Bitrate VideoBitrateAllocation::GetSumBitrate() const {
   return sum_bitrate_;
+}
+
+Bitrate::Mode VideoBitrateAllocation::GetMode() const {
+  return sum_bitrate_.mode();
 }
 
 std::string VideoBitrateAllocation::ToString() const {

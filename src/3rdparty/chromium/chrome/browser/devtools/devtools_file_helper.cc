@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -194,7 +194,7 @@ std::string RegisterFileSystem(WebContents* web_contents,
   content::ChildProcessSecurityPolicy* policy =
       content::ChildProcessSecurityPolicy::GetInstance();
   RenderViewHost* render_view_host =
-      web_contents->GetMainFrame()->GetRenderViewHost();
+      web_contents->GetPrimaryMainFrame()->GetRenderViewHost();
   int renderer_id = render_view_host->GetProcess()->GetID();
   policy->GrantReadFileSystem(renderer_id, file_system.id());
   policy->GrantWriteFileSystem(renderer_id, file_system.id());
@@ -226,15 +226,13 @@ DevToolsFileHelper::FileSystem CreateFileSystemStruct(
 
 using PathToType = std::map<std::string, std::string>;
 PathToType GetAddedFileSystemPaths(Profile* profile) {
-  const base::DictionaryValue* file_systems_paths_value =
-      &base::Value::AsDictionaryValue(
-          *profile->GetPrefs()->GetDictionary(prefs::kDevToolsFileSystemPaths));
+  const base::Value::Dict& file_systems_paths_value =
+      profile->GetPrefs()->GetDict(prefs::kDevToolsFileSystemPaths);
   PathToType result;
-  for (base::DictionaryValue::Iterator it(*file_systems_paths_value);
-       !it.IsAtEnd(); it.Advance()) {
+  for (auto pair : file_systems_paths_value) {
     std::string type =
-        it.value().is_string() ? it.value().GetString() : std::string();
-    result[it.key()] = type;
+        pair.second.is_string() ? pair.second.GetString() : std::string();
+    result[pair.first] = type;
   }
   return result;
 }
@@ -280,12 +278,11 @@ void DevToolsFileHelper::Save(const std::string& url,
     return;
   }
 
-  const base::DictionaryValue* file_map = &base::Value::AsDictionaryValue(
-      *profile_->GetPrefs()->GetDictionary(prefs::kDevToolsEditedFiles));
+  const base::Value::Dict& file_map =
+      profile_->GetPrefs()->GetDict(prefs::kDevToolsEditedFiles);
   base::FilePath initial_path;
 
-  const base::Value* path_value;
-  if (file_map->Get(base::MD5String(url), &path_value)) {
+  if (const base::Value* path_value = file_map.Find(base::MD5String(url))) {
     absl::optional<base::FilePath> path = base::ValueToFilePath(*path_value);
     if (path)
       initial_path = std::move(*path);
@@ -293,12 +290,26 @@ void DevToolsFileHelper::Save(const std::string& url,
 
   if (initial_path.empty()) {
     GURL gurl(url);
-    std::string suggested_file_name = gurl.is_valid() ?
-        gurl.ExtractFileName() : url;
-
+    std::string suggested_file_name;
+    if (gurl.is_valid()) {
+      url::RawCanonOutputW<1024> unescaped_content;
+      std::string escaped_content = gurl.ExtractFileName();
+      url::DecodeURLEscapeSequences(
+          escaped_content.c_str(), escaped_content.length(),
+          url::DecodeURLMode::kUTF8OrIsomorphic, &unescaped_content);
+      // TODO(crbug.com/1324254): Due to filename encoding on Windows we can't
+      // expect to always be able to convert to UTF8 and back
+      std::string unescaped_content_string =
+          base::UTF16ToUTF8(base::StringPiece16(unescaped_content.data(),
+                                                unescaped_content.length()));
+      suggested_file_name = unescaped_content_string;
+    } else {
+      suggested_file_name = url;
+    }
+    // TODO(crbug.com/1324254): Truncate a UTF8 string in a better way
     if (suggested_file_name.length() > 64)
       suggested_file_name = suggested_file_name.substr(0, 64);
-
+    // TODO(crbug.com/1324254): Ensure suggested_file_name is an ASCII string
     if (!g_last_save_path.Pointer()->empty()) {
       initial_path = g_last_save_path.Pointer()->DirName().AppendASCII(
           suggested_file_name);
@@ -344,10 +355,10 @@ void DevToolsFileHelper::SaveAsFileSelected(const std::string& url,
   *g_last_save_path.Pointer() = path;
   saved_files_[url] = path;
 
-  DictionaryPrefUpdate update(profile_->GetPrefs(),
+  ScopedDictPrefUpdate update(profile_->GetPrefs(),
                               prefs::kDevToolsEditedFiles);
-  base::Value* files_map = update.Get();
-  files_map->SetKey(base::MD5String(url), base::FilePathToValue(path));
+  base::Value::Dict& files_map = update.Get();
+  files_map.Set(base::MD5String(url), base::FilePathToValue(path));
   std::string file_system_path = path.AsUTF8Unsafe();
   std::move(callback).Run(file_system_path);
   file_task_runner_->PostTask(FROM_HERE, BindOnce(&WriteToFile, path, content));
@@ -416,10 +427,10 @@ void DevToolsFileHelper::AddUserConfirmedFileSystem(const std::string& type,
   std::string file_system_id = RegisterFileSystem(web_contents_, path);
   std::string file_system_path = path.AsUTF8Unsafe();
 
-  DictionaryPrefUpdate update(profile_->GetPrefs(),
+  ScopedDictPrefUpdate update(profile_->GetPrefs(),
                               prefs::kDevToolsFileSystemPaths);
-  base::Value* file_systems_paths_value = update.Get();
-  file_systems_paths_value->SetKey(file_system_path, base::Value(type));
+  base::Value::Dict& file_systems_paths_value = update.Get();
+  file_systems_paths_value.Set(file_system_path, type);
 }
 
 void DevToolsFileHelper::FailedToAddFileSystem(const std::string& error) {
@@ -468,19 +479,19 @@ void DevToolsFileHelper::RemoveFileSystem(const std::string& file_system_path) {
   base::FilePath path = base::FilePath::FromUTF8Unsafe(file_system_path);
   isolated_context()->RevokeFileSystemByPath(path);
 
-  DictionaryPrefUpdate update(profile_->GetPrefs(),
+  ScopedDictPrefUpdate update(profile_->GetPrefs(),
                               prefs::kDevToolsFileSystemPaths);
-  base::Value* file_systems_paths_value = update.Get();
-  file_systems_paths_value->RemoveKey(file_system_path);
+  base::Value::Dict& file_systems_paths_value = update.Get();
+  file_systems_paths_value.Remove(file_system_path);
 }
 
 bool DevToolsFileHelper::IsFileSystemAdded(
     const std::string& file_system_path) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  const base::Value* file_systems_paths_value =
-      profile_->GetPrefs()->GetDictionary(prefs::kDevToolsFileSystemPaths);
-  return file_systems_paths_value->FindKey(file_system_path);
+  const base::Value::Dict& file_systems_paths_value =
+      profile_->GetPrefs()->GetDict(prefs::kDevToolsFileSystemPaths);
+  return file_systems_paths_value.Find(file_system_path);
 }
 
 #if !defined(TOOLKIT_QT)

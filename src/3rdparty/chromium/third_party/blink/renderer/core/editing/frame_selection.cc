@@ -28,6 +28,7 @@
 #include <stdio.h>
 
 #include "base/auto_reset.h"
+#include "third_party/blink/public/mojom/scroll/scroll_into_view_params.mojom-blink.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/accessibility/blink_ax_event_intent.h"
 #include "third_party/blink/renderer/core/accessibility/scoped_blink_ax_event_intent.h"
@@ -85,6 +86,7 @@
 #include "third_party/blink/renderer/core/page/page_animator.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/core/scroll/scroll_into_view_util.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
@@ -152,7 +154,10 @@ wtf_size_t FrameSelection::CharacterIndexForPoint(
     return kNotFound;
   Element* const editable = RootEditableElementOrDocumentElement();
   DCHECK(editable);
-  return PlainTextRange::Create(*editable, range).Start();
+  PlainTextRange plain_text_range = PlainTextRange::Create(*editable, range);
+  if (plain_text_range.IsNull())
+    return kNotFound;
+  return plain_text_range.Start();
 }
 
 VisibleSelection FrameSelection::ComputeVisibleSelectionInDOMTreeDeprecated()
@@ -517,11 +522,11 @@ bool FrameSelection::SelectionHasFocus() const {
       ComputeVisibleSelectionInFlatTree().End() >= focused_position)
     return true;
 
-  bool has_editable_style = HasEditableStyle(*current);
+  bool is_editable = IsEditable(*current);
   do {
     // If the selection is within an editable sub tree and that sub tree
     // doesn't have focus, the selection doesn't have focus either.
-    if (has_editable_style && !HasEditableStyle(*current))
+    if (is_editable && !IsEditable(*current))
       return false;
 
     // Selection has focus if its sub tree has focus.
@@ -719,7 +724,7 @@ void FrameSelection::SelectFrameElementInParentIfFullySelected() {
 
   // This method's purpose is it to make it easier to select iframes (in order
   // to delete them).  Don't do anything if the iframe isn't deletable.
-  if (!blink::HasEditableStyle(*owner_element_parent))
+  if (!blink::IsEditable(*owner_element_parent))
     return;
 
   // Focus on the parent frame, and then select from before this element to
@@ -1087,8 +1092,8 @@ void FrameSelection::RevealSelection(
       !start.AnchorNode()->GetLayoutObject()->EnclosingBox())
     return;
 
-  start.AnchorNode()->GetLayoutObject()->ScrollRectToVisible(
-      selection_rect,
+  scroll_into_view_util::ScrollRectToVisible(
+      *start.AnchorNode()->GetLayoutObject(), selection_rect,
       ScrollAlignment::CreateScrollIntoViewParams(alignment, alignment));
   UpdateAppearance();
 }
@@ -1099,7 +1104,7 @@ void FrameSelection::SetSelectionFromNone() {
 
   Document* document = frame_->GetDocument();
   if (!ComputeVisibleSelectionInDOMTreeDeprecated().IsNone() ||
-      !(blink::HasEditableStyle(*document)))
+      !(blink::IsEditable(*document)))
     return;
 
   Element* document_element = document->documentElement();
@@ -1303,9 +1308,9 @@ LayoutSelectionStatus FrameSelection::ComputeLayoutSelectionStatus(
   return layout_selection_->ComputeSelectionStatus(cursor);
 }
 
-SelectionState FrameSelection::ComputeLayoutSelectionStateForCursor(
+SelectionState FrameSelection::ComputePaintingSelectionStateForCursor(
     const NGInlineCursorPosition& position) const {
-  return layout_selection_->ComputeSelectionStateForCursor(position);
+  return layout_selection_->ComputePaintingSelectionStateForCursor(position);
 }
 
 SelectionState FrameSelection::ComputeLayoutSelectionStateForInlineTextBox(
@@ -1364,7 +1369,7 @@ EphemeralRange FrameSelection::GetSelectionRangeAroundCaret(
     }
 
     String text = PlainText(EphemeralRange(start, end));
-    if (text.IsEmpty() || IsSeparator(text.CharacterStartingAt(0))) {
+    if (text.empty() || IsSeparator(text.CharacterStartingAt(0))) {
       continue;
     }
 

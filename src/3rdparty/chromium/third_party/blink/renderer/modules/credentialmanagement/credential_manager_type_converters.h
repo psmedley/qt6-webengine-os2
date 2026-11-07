@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,11 +15,13 @@
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
+class AuthenticationExtensionsDevicePublicKeyInputs;
 class AuthenticatorSelectionCriteria;
 class CableAuthenticationData;
 class CableRegistrationData;
 class Credential;
-class FederatedCredentialLogoutRpsRequest;
+class IdentityCredentialLogoutRPsRequest;
+class IdentityProvider;
 class PublicKeyCredentialCreationOptions;
 class PublicKeyCredentialDescriptor;
 class PublicKeyCredentialParameters;
@@ -83,24 +85,26 @@ struct TypeConverter<
 };
 
 template <>
-struct TypeConverter<blink::mojom::blink::UserVerificationRequirement, String> {
-  static blink::mojom::blink::UserVerificationRequirement Convert(
-      const String&);
+struct TypeConverter<
+    absl::optional<blink::mojom::blink::UserVerificationRequirement>,
+    String> {
+  static absl::optional<blink::mojom::blink::UserVerificationRequirement>
+  Convert(const String&);
 };
 
 template <>
-struct TypeConverter<blink::mojom::blink::AttestationConveyancePreference,
-                     String> {
-  static blink::mojom::blink::AttestationConveyancePreference Convert(
-      const String&);
+struct TypeConverter<
+    absl::optional<blink::mojom::blink::AttestationConveyancePreference>,
+    String> {
+  static absl::optional<blink::mojom::blink::AttestationConveyancePreference>
+  Convert(const String&);
 };
 
-// TODO(crbug.com/1092328): Second template parameter should be
-// absl::optional<blink::V8AuthenticatorAttachment>.
 template <>
-struct TypeConverter<blink::mojom::blink::AuthenticatorAttachment,
-                     absl::optional<String>> {
-  static blink::mojom::blink::AuthenticatorAttachment Convert(
+struct TypeConverter<
+    absl::optional<blink::mojom::blink::AuthenticatorAttachment>,
+    absl::optional<String>> {
+  static absl::optional<blink::mojom::blink::AuthenticatorAttachment> Convert(
       const absl::optional<String>&);
 };
 
@@ -120,9 +124,9 @@ struct TypeConverter<blink::mojom::blink::AuthenticatorSelectionCriteriaPtr,
 
 template <>
 struct TypeConverter<blink::mojom::blink::LogoutRpsRequestPtr,
-                     blink::FederatedCredentialLogoutRpsRequest> {
+                     blink::IdentityCredentialLogoutRPsRequest> {
   static blink::mojom::blink::LogoutRpsRequestPtr Convert(
-      const blink::FederatedCredentialLogoutRpsRequest&);
+      const blink::IdentityCredentialLogoutRPsRequest&);
 };
 
 template <>
@@ -186,6 +190,20 @@ struct TypeConverter<blink::mojom::blink::RemoteDesktopClientOverridePtr,
                      blink::RemoteDesktopClientOverride> {
   static blink::mojom::blink::RemoteDesktopClientOverridePtr Convert(
       const blink::RemoteDesktopClientOverride&);
+};
+
+template <>
+struct TypeConverter<blink::mojom::blink::IdentityProviderPtr,
+                     blink::IdentityProvider> {
+  static blink::mojom::blink::IdentityProviderPtr Convert(
+      const blink::IdentityProvider&);
+};
+
+template <>
+struct TypeConverter<blink::mojom::blink::DevicePublicKeyRequestPtr,
+                     blink::AuthenticationExtensionsDevicePublicKeyInputs> {
+  static blink::mojom::blink::DevicePublicKeyRequestPtr Convert(
+      const blink::AuthenticationExtensionsDevicePublicKeyInputs&);
 };
 
 }  // namespace mojo

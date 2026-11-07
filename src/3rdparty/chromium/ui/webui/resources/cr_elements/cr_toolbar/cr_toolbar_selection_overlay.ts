@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,15 +13,17 @@
  * tab-traversal.
  */
 
-import '../cr_button/cr_button.m.js';
-import '../cr_icon_button/cr_icon_button.m.js';
-import '../icons.m.js';
-import '../shared_vars_css.m.js';
+import '../cr_button/cr_button.js';
+import '../cr_icon_button/cr_icon_button.js';
+import '../cr_shared_vars.css.js';
+import '../icons.html.js';
 
 import {IronA11yAnnouncer} from '//resources/polymer/v3_0/iron-a11y-announcer/iron-a11y-announcer.js';
-import {Debouncer, html, microTask, PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {Debouncer, microTask, PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {CrButtonElement} from '../cr_button/cr_button.m.js';
+import {CrButtonElement} from '../cr_button/cr_button.js';
+
+import {getTemplate} from './cr_toolbar_selection_overlay.html.js';
 
 export class CrToolbarSelectionOverlayElement extends PolymerElement {
   static get is() {
@@ -29,7 +31,7 @@ export class CrToolbarSelectionOverlayElement extends PolymerElement {
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   static get properties() {

@@ -21,7 +21,8 @@ public:
                                               SkISize dimensions,
                                               MTLPixelFormat format,
                                               uint32_t mipLevels,
-                                              GrMipmapStatus);
+                                              GrMipmapStatus,
+                                              std::string_view label);
 
     static sk_sp<GrMtlTexture> MakeWrappedTexture(GrMtlGpu*,
                                                   SkISize,
@@ -63,6 +64,8 @@ protected:
      bool onStealBackendTexture(GrBackendTexture*, SkImage::BackendTextureReleaseProc*) override {
          return false;
      }
+
+    void onSetLabel() override;
 
 private:
     enum Wrapped { kWrapped };

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,8 @@
 #include "services/network/public/cpp/cors/cors.h"
 #include "services/network/public/cpp/cors/cors_error_status.h"
 #include "services/network/public/cpp/devtools_observer_util.h"
+#include "services/network/public/cpp/features.h"
+#include "services/network/public/cpp/header_util.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/simple_url_loader.h"
@@ -36,9 +38,7 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
-namespace network {
-
-namespace cors {
+namespace network::cors {
 
 namespace {
 
@@ -56,6 +56,19 @@ absl::optional<std::string> GetHeaderString(
   if (!headers || !headers->GetNormalizedHeader(header_name, &header_value))
     return absl::nullopt;
   return header_value;
+}
+
+bool ShouldEnforcePrivateNetworkAccessHeader(
+    PrivateNetworkAccessPreflightBehavior behavior) {
+  // Use a switch statement to guarantee this is updated when the enum
+  // definition changes.
+  switch (behavior) {
+    case PrivateNetworkAccessPreflightBehavior::kEnforce:
+      return true;
+    case PrivateNetworkAccessPreflightBehavior::kWarnWithTimeout:
+    case PrivateNetworkAccessPreflightBehavior::kWarn:
+      return false;
+  }
 }
 
 // Algorithm step 3 of the CORS-preflight fetch,
@@ -131,6 +144,22 @@ std::unique_ptr<ResourceRequest> CreatePreflightRequest(
         header_names::kAccessControlRequestPrivateNetwork, "true");
   }
 
+  // Copy the client security state as well, if set in the request's trusted
+  // params. Note that the we clone the pointer unconditionally if the original
+  // request has trusted params, but that the cloned pointer may be null. It is
+  // unclear whether it is safe to copy all the trusted params, so we only copy
+  // what we need for PNA.
+  //
+  // This is useful when the client security state is not specified through the
+  // URL loader factory params, typically when a single URL loader factory is
+  // shared by a few different client contexts. This is the case for
+  // navigations and interest group auctions.
+  if (request.trusted_params.has_value()) {
+    preflight_request->trusted_params = ResourceRequest::TrustedParams();
+    preflight_request->trusted_params->client_security_state =
+        request.trusted_params->client_security_state.Clone();
+  }
+
   DCHECK(request.request_initiator);
   preflight_request->request_initiator = request.request_initiator;
   preflight_request->headers.SetHeader(
@@ -184,7 +213,7 @@ std::unique_ptr<ResourceRequest> CreatePreflightRequest(
 // According to the note at https://fetch.spec.whatwg.org/#cors-preflight-fetch
 // step 6, even for a preflight check, `credentials_mode` should be checked on
 // the actual request rather than preflight one.
-absl::optional<CorsErrorStatus> CheckPreflightAccess(
+base::expected<void, CorsErrorStatus> CheckPreflightAccess(
     const GURL& response_url,
     const int response_status_code,
     const absl::optional<std::string>& allow_origin_header,
@@ -192,12 +221,12 @@ absl::optional<CorsErrorStatus> CheckPreflightAccess(
     mojom::CredentialsMode actual_credentials_mode,
     const url::Origin& origin) {
   // Step 7 of https://fetch.spec.whatwg.org/#cors-preflight-fetch
-  auto error_status =
+  auto cors_result =
       CheckAccess(response_url, allow_origin_header, allow_credentials_header,
                   actual_credentials_mode, origin);
-  const bool has_ok_status = IsOkStatus(response_status_code);
+  const bool has_ok_status = IsSuccessfulStatus(response_status_code);
 
-  AccessCheckResult result = (error_status || !has_ok_status)
+  AccessCheckResult result = (!cors_result.has_value() || !has_ok_status)
                                  ? AccessCheckResult::kNotPermittedInPreflight
                                  : AccessCheckResult::kPermittedInPreflight;
   UMA_HISTOGRAM_ENUMERATION("Net.Cors.AccessCheckResult", result);
@@ -207,30 +236,30 @@ absl::optional<CorsErrorStatus> CheckPreflightAccess(
   }
 
   // Prefer using a preflight specific error code.
-  if (error_status) {
-    switch (error_status->cors_error) {
+  if (!cors_result.has_value()) {
+    switch (cors_result.error().cors_error) {
       case mojom::CorsError::kWildcardOriginNotAllowed:
-        error_status->cors_error =
+        cors_result.error().cors_error =
             mojom::CorsError::kPreflightWildcardOriginNotAllowed;
         break;
       case mojom::CorsError::kMissingAllowOriginHeader:
-        error_status->cors_error =
+        cors_result.error().cors_error =
             mojom::CorsError::kPreflightMissingAllowOriginHeader;
         break;
       case mojom::CorsError::kMultipleAllowOriginValues:
-        error_status->cors_error =
+        cors_result.error().cors_error =
             mojom::CorsError::kPreflightMultipleAllowOriginValues;
         break;
       case mojom::CorsError::kInvalidAllowOriginValue:
-        error_status->cors_error =
+        cors_result.error().cors_error =
             mojom::CorsError::kPreflightInvalidAllowOriginValue;
         break;
       case mojom::CorsError::kAllowOriginMismatch:
-        error_status->cors_error =
+        cors_result.error().cors_error =
             mojom::CorsError::kPreflightAllowOriginMismatch;
         break;
       case mojom::CorsError::kInvalidAllowCredentials:
-        error_status->cors_error =
+        cors_result.error().cors_error =
             mojom::CorsError::kPreflightInvalidAllowCredentials;
         break;
       default:
@@ -238,13 +267,13 @@ absl::optional<CorsErrorStatus> CheckPreflightAccess(
         break;
     }
   } else if (!has_ok_status) {
-    error_status = absl::make_optional<CorsErrorStatus>(
+    cors_result = base::unexpected<CorsErrorStatus>(
         mojom::CorsError::kPreflightInvalidStatus);
   } else {
-    return absl::nullopt;
+    base::expected<void, CorsErrorStatus>();
   }
 
-  return error_status;
+  return cors_result;
 }
 
 // Checks errors for the "Access-Control-Allow-Private-Network" header.
@@ -285,27 +314,30 @@ std::unique_ptr<PreflightResult> CreatePreflightResult(
     const mojom::URLResponseHead& head,
     const ResourceRequest& original_request,
     bool tainted,
-    PreflightController::EnforcePrivateNetworkAccessHeader
-        enforce_private_network_access_header,
+    PrivateNetworkAccessPreflightBehavior private_network_access_behavior,
     const mojom::ClientSecurityStatePtr& client_security_state,
     mojom::DevToolsObserver* devtools_observer,
     absl::optional<CorsErrorStatus>* detected_error_status) {
   DCHECK(detected_error_status);
 
-  *detected_error_status = CheckPreflightAccess(
+  auto check_result = CheckPreflightAccess(
       final_url, head.headers ? head.headers->response_code() : 0,
       GetHeaderString(head.headers, header_names::kAccessControlAllowOrigin),
       GetHeaderString(head.headers,
                       header_names::kAccessControlAllowCredentials),
       original_request.credentials_mode,
       tainted ? url::Origin() : *original_request.request_initiator);
-  if (*detected_error_status)
+  if (!check_result.has_value()) {
+    *detected_error_status = std::move(check_result.error());
     return nullptr;
+  }
+  *detected_error_status = absl::nullopt;
 
   absl::optional<CorsErrorStatus> status =
       CheckAllowPrivateNetworkHeader(head, original_request);
   if (status) {
-    if (enforce_private_network_access_header) {
+    if (ShouldEnforcePrivateNetworkAccessHeader(
+            private_network_access_behavior)) {
       *detected_error_status = std::move(status);
       return nullptr;
     }
@@ -364,7 +396,7 @@ class PreflightController::PreflightLoader final {
       const ResourceRequest& request,
       WithTrustedHeaderClient with_trusted_header_client,
       NonWildcardRequestHeadersSupport non_wildcard_request_headers_support,
-      EnforcePrivateNetworkAccessHeader enforce_private_network_access_header,
+      PrivateNetworkAccessPreflightBehavior private_network_access_behavior,
       bool tainted,
       const net::NetworkTrafficAnnotationTag& annotation_tag,
       const net::NetworkIsolationKey& network_isolation_key,
@@ -376,8 +408,7 @@ class PreflightController::PreflightLoader final {
         original_request_(request),
         non_wildcard_request_headers_support_(
             non_wildcard_request_headers_support),
-        enforce_private_network_access_header_(
-            enforce_private_network_access_header),
+        private_network_access_behavior_(private_network_access_behavior),
         tainted_(tainted),
         network_isolation_key_(network_isolation_key),
         client_security_state_(std::move(client_security_state)),
@@ -409,11 +440,11 @@ class PreflightController::PreflightLoader final {
     // should not wait around forever for a response. Certain servers never
     // respond, and that should not fail the overall request. Instead, we should
     // wait a short while then move on. See also https://crbug.com/1299382.
-    if (request.target_ip_address_space != mojom::IPAddressSpace::kUnknown &&
-        client_security_state_ &&
-        client_security_state_->private_network_request_policy ==
-            mojom::PrivateNetworkRequestPolicy::kPreflightWarn) {
-      loader_->SetTimeoutDuration(base::Milliseconds(100));
+    if (private_network_access_behavior_ ==
+            PrivateNetworkAccessPreflightBehavior::kWarnWithTimeout &&
+        base::FeatureList::IsEnabled(
+            features::kPrivateNetworkAccessPreflightShortTimeout)) {
+      loader_->SetTimeoutDuration(base::Milliseconds(200));
     }
   }
 
@@ -471,7 +502,7 @@ class PreflightController::PreflightLoader final {
     bool has_authorization_covered_by_wildcard = false;
     std::unique_ptr<PreflightResult> result = CreatePreflightResult(
         final_url, head, original_request_, tainted_,
-        enforce_private_network_access_header_, client_security_state_,
+        private_network_access_behavior_, client_security_state_,
         devtools_observer_ ? devtools_observer_.get() : nullptr,
         &detected_error_status);
 
@@ -540,8 +571,7 @@ class PreflightController::PreflightLoader final {
   const ResourceRequest original_request_;
 
   const NonWildcardRequestHeadersSupport non_wildcard_request_headers_support_;
-  const EnforcePrivateNetworkAccessHeader
-      enforce_private_network_access_header_;
+  const PrivateNetworkAccessPreflightBehavior private_network_access_behavior_;
   const bool tainted_;
   absl::optional<base::UnguessableToken> devtools_request_id_;
   const net::NetworkIsolationKey network_isolation_key_;
@@ -569,17 +599,17 @@ PreflightController::CreatePreflightResultForTesting(
     const mojom::URLResponseHead& head,
     const ResourceRequest& original_request,
     bool tainted,
-    EnforcePrivateNetworkAccessHeader enforce_private_network_access_header,
+    PrivateNetworkAccessPreflightBehavior private_network_access_behavior,
     absl::optional<CorsErrorStatus>* detected_error_status) {
   return CreatePreflightResult(final_url, head, original_request, tainted,
-                               enforce_private_network_access_header,
+                               private_network_access_behavior,
                                /*client_security_state=*/nullptr,
                                /*devtools_observer=*/nullptr,
                                detected_error_status);
 }
 
 // static
-absl::optional<CorsErrorStatus>
+base::expected<void, CorsErrorStatus>
 PreflightController::CheckPreflightAccessForTesting(
     const GURL& response_url,
     const int response_status_code,
@@ -602,7 +632,7 @@ void PreflightController::PerformPreflightCheck(
     const ResourceRequest& request,
     WithTrustedHeaderClient with_trusted_header_client,
     NonWildcardRequestHeadersSupport non_wildcard_request_headers_support,
-    EnforcePrivateNetworkAccessHeader enforce_private_network_access_header,
+    PrivateNetworkAccessPreflightBehavior private_network_access_behavior,
     bool tainted,
     const net::NetworkTrafficAnnotationTag& annotation_tag,
     mojom::URLLoaderFactory* loader_factory,
@@ -629,10 +659,9 @@ void PreflightController::PerformPreflightCheck(
 
   auto emplaced_pair = loaders_.emplace(std::make_unique<PreflightLoader>(
       this, std::move(callback), request, with_trusted_header_client,
-      non_wildcard_request_headers_support,
-      enforce_private_network_access_header, tainted, annotation_tag,
-      network_isolation_key, std::move(client_security_state),
-      std::move(devtools_observer), net_log));
+      non_wildcard_request_headers_support, private_network_access_behavior,
+      tainted, annotation_tag, network_isolation_key,
+      std::move(client_security_state), std::move(devtools_observer), net_log));
   (*emplaced_pair.first)->Request(loader_factory);
 }
 
@@ -652,6 +681,4 @@ void PreflightController::AppendToCache(
                      target_ip_address_space, std::move(result));
 }
 
-}  // namespace cors
-
-}  // namespace network
+}  // namespace network::cors

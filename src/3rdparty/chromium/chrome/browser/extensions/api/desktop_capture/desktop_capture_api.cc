@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -92,7 +92,7 @@ DesktopCaptureChooseDesktopMediaFunction::Run() {
     }
     // The |target_render_frame_host| is the main frame of the tab that
     // was requested for capture.
-    target_render_frame_host = web_contents->GetMainFrame();
+    target_render_frame_host = web_contents->GetPrimaryMainFrame();
   } else {
     origin = extension()->url();
     target_name = base::UTF8ToUTF16(GetExtensionTargetName());
@@ -102,8 +102,24 @@ DesktopCaptureChooseDesktopMediaFunction::Run() {
   if (!target_render_frame_host)
     return RespondNow(Error(kTargetTabRequiredFromServiceWorker));
 
-  return Execute(params->sources, target_render_frame_host, origin,
-                 target_name);
+  const bool exclude_system_audio =
+      params->options &&
+      params->options->system_audio ==
+          api::desktop_capture::SYSTEM_AUDIO_PREFERENCE_ENUM_EXCLUDE;
+
+  const bool exclude_self_browser_surface =
+      params->options &&
+      params->options->self_browser_surface ==
+          api::desktop_capture::SELF_CAPTURE_PREFERENCE_ENUM_EXCLUDE;
+
+  const bool suppress_local_audio_playback_intended =
+      params->options &&
+      params->options->suppress_local_audio_playback_intended;
+
+  return Execute(params->sources, exclude_system_audio,
+                 exclude_self_browser_surface,
+                 suppress_local_audio_playback_intended,
+                 target_render_frame_host, origin, target_name);
 }
 
 std::string DesktopCaptureChooseDesktopMediaFunction::GetExtensionTargetName()

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,16 +13,15 @@
 #include "content/browser/attribution_reporting/attribution_report.h"
 #include "content/browser/attribution_reporting/attribution_utils.h"
 #include "content/browser/attribution_reporting/send_result.h"
-#include "content/public/browser/storage_partition.h"
 #include "net/base/isolation_info.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
-#include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/resource_request_body.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "url/gurl.h"
 
@@ -44,8 +43,10 @@ enum class Status {
 }  // namespace
 
 AttributionReportNetworkSender::AttributionReportNetworkSender(
-    StoragePartition* storage_partition)
-    : storage_partition_(storage_partition) {}
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
+    : url_loader_factory_(std::move(url_loader_factory)) {
+  DCHECK(url_loader_factory_);
+}
 
 AttributionReportNetworkSender::~AttributionReportNetworkSender() = default;
 
@@ -53,13 +54,6 @@ void AttributionReportNetworkSender::SendReport(
     AttributionReport report,
     bool is_debug_report,
     ReportSentCallback sent_callback) {
-  // The browser process URLLoaderFactory is not created by default, so don't
-  // create it until it is directly needed.
-  if (!url_loader_factory_) {
-    url_loader_factory_ =
-        storage_partition_->GetURLLoaderFactoryForBrowserProcess();
-  }
-
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = report.ReportURL(is_debug_report);
   resource_request->method = net::HttpRequestHeaders::kPostMethod;
@@ -112,8 +106,6 @@ void AttributionReportNetworkSender::SendReport(
   // Retry once on network change. A network change during DNS resolution
   // results in a DNS error rather than a network change error, so retry in
   // those cases as well.
-  // TODO(http://crbug.com/1181106): Consider logging metrics for how often this
-  // retry succeeds/fails.
   int retry_mode = network::SimpleURLLoader::RETRY_ON_NETWORK_CHANGE |
                    network::SimpleURLLoader::RETRY_ON_NAME_NOT_RESOLVED;
   simple_url_loader_ptr->SetRetryOptions(/*max_retries=*/1, retry_mode);
@@ -125,11 +117,6 @@ void AttributionReportNetworkSender::SendReport(
       base::BindOnce(&AttributionReportNetworkSender::OnReportSent,
                      base::Unretained(this), std::move(it), std::move(report),
                      is_debug_report, std::move(sent_callback)));
-}
-
-void AttributionReportNetworkSender::SetURLLoaderFactoryForTesting(
-    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
-  url_loader_factory_ = url_loader_factory;
 }
 
 void AttributionReportNetworkSender::OnReportSent(
@@ -146,25 +133,29 @@ void AttributionReportNetworkSender::OnReportSent(
       net_error == net::OK || net_error == net::ERR_HTTP_RESPONSE_CODE_FAILURE;
 
   int response_code = headers ? headers->response_code() : -1;
-  bool external_ok = response_code == net::HTTP_OK;
+  bool external_ok = response_code >= 200 && response_code <= 299;
   Status status =
       internal_ok && external_ok
           ? Status::kOk
           : !internal_ok ? Status::kInternalError : Status::kExternalError;
 
-  // TODO(apaseltiner): Consider recording separate metrics for debug reports.
-  if (!is_debug_report) {
-    base::UmaHistogramEnumeration("Conversions.ReportStatus", status);
+  base::UmaHistogramEnumeration(is_debug_report
+                                    ? "Conversions.DebugReport.ReportStatus"
+                                    : "Conversions.ReportStatus2",
+                                status);
 
-    // Since net errors are always negative and HTTP errors are always positive,
-    // it is fine to combine these in a single histogram.
-    base::UmaHistogramSparse("Conversions.Report.HttpResponseOrNetErrorCode",
-                             internal_ok ? response_code : net_error);
+  // Since net errors are always negative and HTTP errors are always positive,
+  // it is fine to combine these in a single histogram.
+  base::UmaHistogramSparse(
+      is_debug_report ? "Conversions.DebugReport.HttpResponseOrNetErrorCode"
+                      : "Conversions.Report.HttpResponseOrNetErrorCode",
+      internal_ok ? response_code : net_error);
 
-    if (loader->GetNumRetries() > 0) {
-      base::UmaHistogramBoolean("Conversions.ReportRetrySucceed",
-                                status == Status::kOk);
-    }
+  if (loader->GetNumRetries() > 0) {
+    base::UmaHistogramBoolean(is_debug_report
+                                  ? "Conversions.DebugReport.ReportRetrySucceed"
+                                  : "Conversions.ReportRetrySucceed2",
+                              status == Status::kOk);
   }
 
   loaders_in_progress_.erase(it);

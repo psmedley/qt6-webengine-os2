@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,11 +26,12 @@ class WebLayerPermissionsClient : public permissions::PermissionsClient {
       content::BrowserContext* browser_context) override;
   bool IsSubresourceFilterActivated(content::BrowserContext* browser_context,
                                     const GURL& url) override;
+  permissions::OriginKeyedPermissionActionService*
+  GetOriginKeyedPermissionActionService(
+      content::BrowserContext* browser_context) override;
   permissions::PermissionActionsHistory* GetPermissionActionsHistory(
       content::BrowserContext* browser_context) override;
   permissions::PermissionDecisionAutoBlocker* GetPermissionDecisionAutoBlocker(
-      content::BrowserContext* browser_context) override;
-  permissions::PermissionManager* GetPermissionManager(
       content::BrowserContext* browser_context) override;
   permissions::ObjectPermissionContextBase* GetChooserContext(
       content::BrowserContext* browser_context,

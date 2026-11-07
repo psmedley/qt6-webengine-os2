@@ -11,6 +11,7 @@
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <GLSLANG/ShaderLang.h>
 
 #include <math.h>
 #include <string>
@@ -25,6 +26,12 @@
 namespace sh
 {
 struct ShaderVariable;
+}
+
+constexpr bool ShPixelLocalStorageTypeUsesImages(ShPixelLocalStorageType type)
+{
+    return type == ShPixelLocalStorageType::ImageStoreR32PackedFormats ||
+           type == ShPixelLocalStorageType::ImageStoreNativeFormats;
 }
 
 namespace gl
@@ -210,6 +217,8 @@ const char *GetGenericErrorMessage(GLenum error);
 
 unsigned int ElementTypeSize(GLenum elementType);
 
+bool IsMipmapFiltered(GLenum minFilterMode);
+
 template <typename T>
 T GetClampedVertexCount(size_t vertexCount)
 {
@@ -256,6 +265,15 @@ enum class SrgbWriteControlMode
     Linear  = 1
 };
 
+// For use with EXT_YUV_target
+// A sampler of external YUV textures may either implicitly perform RGB conversion (regular
+// samplerExternalOES) or skip the conversion and sample raw YUV values (__samplerExternal2DY2Y).
+enum class YuvSamplingMode
+{
+    Default = 0,
+    Y2Y     = 1
+};
+
 ShaderType GetShaderTypeFromBitfield(size_t singleShaderType);
 GLbitfield GetBitfieldFromShaderType(ShaderType shaderType);
 bool ShaderTypeSupportsTransformFeedback(ShaderType shaderType);
@@ -290,8 +308,15 @@ EGLenum GLComponentTypeToEGLColorComponentType(GLenum glComponentType);
 EGLClientBuffer GLObjectHandleToEGLClientBuffer(GLuint handle);
 }  // namespace gl_egl
 
+namespace angle
+{
+bool IsDrawEntryPoint(EntryPoint entryPoint);
+bool IsDispatchEntryPoint(EntryPoint entryPoint);
+bool IsClearEntryPoint(EntryPoint entryPoint);
+bool IsQueryEntryPoint(EntryPoint entryPoint);
+}  // namespace angle
+
 #if !defined(ANGLE_ENABLE_WINDOWS_UWP)
-std::string getTempPath();
 void writeFile(const char *path, const void *data, size_t size);
 #endif
 

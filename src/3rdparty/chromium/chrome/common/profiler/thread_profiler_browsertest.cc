@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -154,6 +154,14 @@ bool WaitForProfile(metrics::SampledProfile::TriggerEvent trigger_event,
 
 }  // namespace
 
+#if BUILDFLAG(IS_ANDROID) && defined(ARCH_CPU_ARMEL)
+// Android doesn't have a network service process.
+#define MAYBE_NetworkServiceProcessIOThread \
+  DISABLED_NetworkServiceProcessIOThread
+#else
+#define MAYBE_NetworkServiceProcessIOThread NetworkServiceProcessIOThread
+#endif
+
 // Check that we receive startup profiles in the browser process for profiled
 // processes/threads. We've seen multiple breakages previously where profiles
 // were dropped as a result of bugs introduced by mojo refactorings.
@@ -200,13 +208,6 @@ IN_PROC_BROWSER_TEST_F(ThreadProfilerBrowserTest,
                              metrics::COMPOSITOR_THREAD));
 }
 
-// Android doesn't have a network service process.
-#if BUILDFLAG(IS_ANDROID)
-#define MAYBE_NetworkServiceProcessIOThread \
-  DISABLED_NetworkServiceProcessIOThread
-#else
-#define MAYBE_NetworkServiceProcessIOThread NetworkServiceProcessIOThread
-#endif
 IN_PROC_BROWSER_TEST_F(ThreadProfilerBrowserTest,
                        MAYBE_NetworkServiceProcessIOThread) {
   EXPECT_TRUE(WaitForProfile(metrics::SampledProfile::PROCESS_STARTUP,

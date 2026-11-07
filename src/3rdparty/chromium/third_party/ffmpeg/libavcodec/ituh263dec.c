@@ -48,7 +48,9 @@
 #include "rv10dec.h"
 #include "mpeg4video.h"
 #include "mpegvideodata.h"
+#include "mpegvideodec.h"
 #include "mpeg4videodec.h"
+#include "mpeg4videodefs.h"
 
 // The defines below define the number of bits that are read at once for
 // reading vlc values. Changing these may improve speed and data cache needs

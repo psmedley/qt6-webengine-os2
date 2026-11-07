@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,7 +26,6 @@ enum AuthenticatorStatus {
   PENDING_REQUEST,
   NOT_ALLOWED_ERROR,
   INVALID_DOMAIN,
-  INVALID_ICON_URL,
   CREDENTIAL_EXCLUDED,
   NOT_IMPLEMENTED,
   NOT_FOCUSED,
@@ -43,6 +42,8 @@ enum AuthenticatorStatus {
   CANNOT_READ_AND_WRITE_LARGE_BLOB,
   INVALID_ALLOW_CREDENTIALS_FOR_LARGE_BLOB,
   FAILED_TO_SAVE_CREDENTIAL_ID_FOR_PAYMENT_EXTENSION,
+  REMOTE_DESKTOP_CLIENT_OVERRIDE_NOT_AUTHORIZED,
+  DEVICE_PUBLIC_KEY_ATTESTATION_REJECTED,
 
   // ERROR_WITH_DOM_EXCEPTION_DETAILS indicates that the error will be
   // described in a `WebAuthnDOMExceptionDetails` structure.
@@ -56,7 +57,7 @@ enum AuthenticatorTransport {
   USB,
   NFC,
   BLE,
-  CABLE,
+  HYBRID,
   INTERNAL,
 };
 
@@ -87,6 +88,12 @@ struct UvmEntry {
   uint32 user_verification_method;
   uint16 key_protection_type;
   uint16 matcher_protection_type;
+};
+
+// The output for the `devicePubKey` extension.
+struct DevicePublicKeyResponse {
+  array<uint8> authenticator_output;
+  array<uint8> signature;
 };
 
 // The public key and attestation returned by Authenticator::MakeCredential.
@@ -143,6 +150,8 @@ struct MakeCredentialAuthenticatorResponse {
   // extension output should be.
   bool echo_large_blob;
   bool supports_large_blob;
+
+  DevicePublicKeyResponse? device_public_key;
 };
 
 struct GetAssertionAuthenticatorResponse {
@@ -197,12 +206,11 @@ struct GetAssertionAuthenticatorResponse {
   bool echo_large_blob_written;
   bool large_blob_written;
 
-  // True if getClientExtensionResults() called on the returned
-  // PublicKeyCredential instance should contain a `getCredBlob` extension
-  // output.
-  bool echo_get_cred_blob;
-  // The value of the `getCredBlob` extension output, or empty if none.
+  // The value of the `getCredBlob` extension output, which maybe empty, or
+  // null if none.
   array<uint8>? get_cred_blob;
+
+  DevicePublicKeyResponse? device_public_key;
 };
 
 // Information about the relying party. These fields take arbitrary input.
@@ -213,9 +221,6 @@ struct PublicKeyCredentialRpEntity {
   // Friendly name associated with the relying party intended for display.
   // e.g. "Acme Corporation".
   string name;
-
-  // Image associated with the entity. e.g. a relying party's logo.
-  url.mojom.Url? icon;
 };
 
 // Informatiom about the account held by the user. These fields take
@@ -228,9 +233,6 @@ struct PublicKeyCredentialUserEntity {
   // Friendly name associated with the entity intended for display.
   // e.g."john.p.smith@example.com" or "+14255551234" for a user.
   string name;
-
-  // Image associated with the entity. For example, a user’s avatar.
-  url.mojom.Url? icon;
 
   // Contains a friendly name for the user account (e.g., "John P. Smith").
   string display_name;
@@ -272,6 +274,10 @@ struct CableAuthentication {
   // device.
   // (Present iff version == 2.)
   array<uint8>? server_link_data;
+
+  // caBLEv2 experiment numbers.
+  // (Present iff version == 2.)
+  array<uint8>? experiments;
 };
 
 // Cloud-assisted BLE extension data for makeCredential.
@@ -323,6 +329,11 @@ struct PaymentCredentialInstrument {
 struct RemoteDesktopClientOverride {
   url.mojom.Origin origin;
   bool same_origin_with_ancestors;
+};
+
+struct DevicePublicKeyRequest {
+  AttestationConveyancePreference attestation;
+  array<string> attestation_formats;
 };
 
 // Parameters passed into calls to GetAssertion.
@@ -393,16 +404,10 @@ struct PublicKeyCredentialRequestOptions {
   // Indicates that a remote desktop client is making a forwarded request on
   // behalf of another origin.
   RemoteDesktopClientOverride? remote_desktop_client_override;
-};
 
-// See https://w3c.github.io/webauthn/#enumdef-attestationconveyancepreference
-enum AttestationConveyancePreference {
-  NONE,
-  INDIRECT,
-  DIRECT,
-  // A non-standard addition that we hope will become standard. This indicates
-  // that the RP desires individual attestaion from the device.
-  ENTERPRISE,
+  // If present, reflects the contents of the "devicePubKey" extension.
+  // https://github.com/w3c/webauthn/pull/1663
+  DevicePublicKeyRequest? device_public_key;
 };
 
 // https://w3c.github.io/webauthn/#enum-residentKeyRequirement
@@ -532,6 +537,20 @@ struct PublicKeyCredentialCreationOptions {
   // Indicates that a remote desktop client is making a forwarded request on
   // behalf of another origin.
   RemoteDesktopClientOverride? remote_desktop_client_override;
+
+  // If present, reflects the contents of the "devicePubKey" extension.
+  // https://github.com/w3c/webauthn/pull/1663
+  DevicePublicKeyRequest? device_public_key;
+};
+
+// See https://w3c.github.io/webauthn/#enumdef-attestationconveyancepreference
+enum AttestationConveyancePreference {
+  NONE,
+  INDIRECT,
+  DIRECT,
+  // A non-standard addition that we hope will become standard. This indicates
+  // that the RP desires individual attestation from the device.
+  ENTERPRISE,
 };
 
 enum PublicKeyCredentialType {
@@ -584,6 +603,12 @@ interface Authenticator {
   // Parties use this method to determine whether they can create a new
   // credential using a user-verifying platform authenticator.
   IsUserVerifyingPlatformAuthenticatorAvailable() => (bool available);
+
+  // Returns true if Conditional Mediation is available. Relying Parties can use
+  // this method to determine whether they can pass "conditional" to the
+  // "mediation" parameter of a webauthn get call and have the browser autofill
+  // webauthn credentials on form inputs.
+  IsConditionalMediationAvailable() => (bool available);
 
   // Cancel an ongoing MakeCredential or GetAssertion request
   // Only one MakeCredential or GetAssertion call at a time is allowed,

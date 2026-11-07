@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,14 @@
 #include <fcntl.h>
 #include <stddef.h>
 #include <xf86drm.h>
+
 #include <memory>
 #include <utility>
 
 #include "base/bind.h"
-#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/thread_pool.h"
@@ -27,11 +28,12 @@
 #include "ui/ozone/platform/drm/host/drm_display_host.h"
 #include "ui/ozone/platform/drm/host/drm_native_display_delegate.h"
 #include "ui/ozone/platform/drm/host/gpu_thread_adapter.h"
-#include "ui/ozone/public/ozone_switches.h"
 
 namespace ui {
 
 namespace {
+
+constexpr int kDriverReadySleepMs = 100;
 
 typedef base::OnceCallback<void(const base::FilePath&,
                                 const base::FilePath&,
@@ -103,14 +105,16 @@ struct DisplayCard {
   absl::optional<std::string> driver;
 };
 
-base::FilePath GetPrimaryDisplayCardPath() {
-  struct drm_mode_card_res res;
+std::vector<DisplayCard> GetValidDisplayCards() {
   std::vector<DisplayCard> cards;
-  for (int i = 0; /* end on first card# that does not exist */; i++) {
-    std::string card_path = base::StringPrintf(kDefaultGraphicsCardPattern, i);
+
+  for (int card_number = 0; /* end on first card# that does not exist */;
+       card_number++) {
+    std::string card_path =
+        base::StringPrintf(kDefaultGraphicsCardPattern, card_number);
 
     if (access(card_path.c_str(), F_OK) != 0) {
-      if (i == 0) /* card paths may start with 0 or 1 */
+      if (card_number == 0) /* card paths may start with 0 or 1 */
         continue;
       else
         break;
@@ -122,44 +126,48 @@ base::FilePath GetPrimaryDisplayCardPath() {
       continue;
     }
 
+    struct drm_mode_card_res res;
     memset(&res, 0, sizeof(struct drm_mode_card_res));
     int ret = drmIoctl(fd.get(), DRM_IOCTL_MODE_GETRESOURCES, &res);
     VPLOG_IF(1, ret) << "Failed to get DRM resources for '" << card_path << "'";
 
-    if (ret == 0 && res.count_crtcs > 0)
+    if (ret == 0 && res.count_crtcs > 0) {
       cards.push_back(
           {base::FilePath(card_path), GetDrmDriverNameFromFd(fd.get())});
-  }
-
-  // Find the card with the most preferred driver.
-  const auto preferred_drivers = GetPreferredDrmDrivers();
-  for (const auto* preferred_driver : preferred_drivers) {
-    for (const auto& card : cards) {
-      if (card.driver == preferred_driver)
-        return card.path;
     }
   }
 
-  // Fall back to the first usable card.
-  if (!cards.empty())
-    return cards[0].path;
+  return cards;
+}
+
+base::FilePath GetPrimaryDisplayCardPath() {
+  // The kernel might not have the DRM driver ready yet. This can happen when
+  // the DRM driver binding has been deferred, waiting on dependencies to be
+  // ready. Instead of failing if the driver isn't ready, retry until it's
+  // there before crashing.
+  for (int i = 0; i < 10; ++i) {
+    std::vector<DisplayCard> cards = GetValidDisplayCards();
+
+    // Find the card with the most preferred driver.
+    const auto preferred_drivers = GetPreferredDrmDrivers();
+    for (const auto* preferred_driver : preferred_drivers) {
+      for (const auto& card : cards) {
+        if (card.driver == preferred_driver)
+          return card.path;
+      }
+    }
+
+    // Fall back to the first usable card.
+    if (!cards.empty())
+      return cards[0].path;
+
+    // If no card is ready, sleep and try again.
+    usleep(kDriverReadySleepMs * 1000);
+  }
 
   LOG(FATAL) << "Failed to open primary graphics device.";
   return base::FilePath();  // Not reached.
 }
-
-class FindDrmDisplayHostById {
- public:
-  explicit FindDrmDisplayHostById(int64_t display_id)
-      : display_id_(display_id) {}
-
-  bool operator()(const std::unique_ptr<DrmDisplayHost>& display) const {
-    return display->snapshot()->display_id() == display_id_;
-  }
-
- private:
-  int64_t display_id_;
-};
 
 }  // namespace
 
@@ -189,15 +197,6 @@ DrmDisplayHostManager::DrmDisplayHostManager(
     }
     host_properties->supports_overlays =
         primary_drm_device_handle_->has_atomic_capabilities();
-    // TODO(b/192563524): The legacy video decoder wraps its frames with legacy
-    // mailboxes instead of SharedImages. The display compositor can composite
-    // these quads, but does not support promoting them to overlays. Thus, we
-    // disable overlays on platforms using the legacy video decoder.
-    auto* command_line = base::CommandLine::ForCurrentProcess();
-    if (command_line->HasSwitch(
-            switches::kPlatformDisallowsChromeOSDirectVideoDecoder)) {
-      host_properties->supports_overlays = false;
-    }
     drm_devices_[primary_graphics_card_path_] =
         primary_graphics_card_path_sysfs;
   }
@@ -225,9 +224,25 @@ DrmDisplayHostManager::~DrmDisplayHostManager() {
   proxy_->RemoveGpuThreadObserver(this);
 }
 
+DrmDisplayHostManager::DisplayEvent::DisplayEvent(
+    DeviceEvent::ActionType action_type,
+    const base::FilePath& path,
+    const EventPropertyMap& properties)
+    : action_type(action_type), path(path), display_event_props(properties) {}
+
+DrmDisplayHostManager::DisplayEvent::DisplayEvent(const DisplayEvent&) =
+    default;
+DrmDisplayHostManager::DisplayEvent&
+DrmDisplayHostManager::DisplayEvent::operator=(const DisplayEvent&) = default;
+
+DrmDisplayHostManager::DisplayEvent::~DisplayEvent() = default;
+
 DrmDisplayHost* DrmDisplayHostManager::GetDisplay(int64_t display_id) {
-  auto it = std::find_if(displays_.begin(), displays_.end(),
-                         FindDrmDisplayHostById(display_id));
+  auto it =
+      base::ranges::find(displays_, display_id,
+                         [](const std::unique_ptr<DrmDisplayHost>& display) {
+                           return display->snapshot()->display_id();
+                         });
   if (it == displays_.end())
     return nullptr;
 
@@ -298,7 +313,8 @@ void DrmDisplayHostManager::UpdateDisplays(
 
 void DrmDisplayHostManager::ConfigureDisplays(
     const std::vector<display::DisplayConfigurationParams>& config_requests,
-    display::ConfigureCallback callback) {
+    display::ConfigureCallback callback,
+    uint32_t modeset_flag) {
   for (auto& config : config_requests) {
     if (GetDisplay(config.id)->is_dummy()) {
       std::move(callback).Run(true);
@@ -306,14 +322,16 @@ void DrmDisplayHostManager::ConfigureDisplays(
     }
   }
 
-  proxy_->GpuConfigureNativeDisplays(config_requests, std::move(callback));
+  proxy_->GpuConfigureNativeDisplays(config_requests, std::move(callback),
+                                     modeset_flag);
 }
 
 void DrmDisplayHostManager::OnDeviceEvent(const DeviceEvent& event) {
   if (event.device_type() != DeviceEvent::DISPLAY)
     return;
 
-  event_queue_.push(DisplayEvent(event.action_type(), event.path()));
+  event_queue_.push(
+      DisplayEvent(event.action_type(), event.path(), event.properties()));
   ProcessEvent();
 }
 
@@ -321,8 +339,12 @@ void DrmDisplayHostManager::ProcessEvent() {
   while (!event_queue_.empty() && !task_pending_) {
     DisplayEvent event = event_queue_.front();
     event_queue_.pop();
+    auto seqnum_it = event.display_event_props.find("SEQNUM");
+    const std::string seqnum = seqnum_it == event.display_event_props.end()
+                                   ? ""
+                                   : ("(SEQNUM:" + seqnum_it->second + ")");
     VLOG(1) << "Got display event " << kDisplayActionString[event.action_type]
-            << " for " << event.path.value();
+            << seqnum << " for " << event.path.value();
     switch (event.action_type) {
       case DeviceEvent::ADD:
         if (drm_devices_.find(event.path) == drm_devices_.end()) {
@@ -342,7 +364,8 @@ void DrmDisplayHostManager::ProcessEvent() {
         task_pending_ = base::ThreadTaskRunnerHandle::Get()->PostTask(
             FROM_HERE,
             base::BindOnce(&DrmDisplayHostManager::OnUpdateGraphicsDevice,
-                           weak_ptr_factory_.GetWeakPtr()));
+                           weak_ptr_factory_.GetWeakPtr(),
+                           event.display_event_props));
         break;
       case DeviceEvent::REMOVE:
         DCHECK(event.path != primary_graphics_card_path_)
@@ -374,10 +397,9 @@ void DrmDisplayHostManager::OnAddGraphicsDevice(
   ProcessEvent();
 }
 
-void DrmDisplayHostManager::OnUpdateGraphicsDevice() {
-  NotifyDisplayDelegate();
-  task_pending_ = false;
-  ProcessEvent();
+void DrmDisplayHostManager::OnUpdateGraphicsDevice(
+    const EventPropertyMap& udev_event_props) {
+  proxy_->GpuShouldDisplayEventTriggerConfiguration(udev_event_props);
 }
 
 void DrmDisplayHostManager::OnRemoveGraphicsDevice(
@@ -448,8 +470,11 @@ void DrmDisplayHostManager::GpuHasUpdatedNativeDisplays(
   std::vector<std::unique_ptr<DrmDisplayHost>> old_displays;
   displays_.swap(old_displays);
   for (auto& display : displays) {
-    auto it = std::find_if(old_displays.begin(), old_displays.end(),
-                           FindDrmDisplayHostById(display->display_id()));
+    auto it =
+        base::ranges::find(old_displays, display->display_id(),
+                           [](const std::unique_ptr<DrmDisplayHost>& display) {
+                             return display->snapshot()->display_id();
+                           });
     if (it == old_displays.end()) {
       displays_.push_back(std::make_unique<DrmDisplayHost>(
           proxy_, std::move(display), false /* is_dummy */));
@@ -531,6 +556,15 @@ void DrmDisplayHostManager::GpuRelinquishedDisplayControl(bool status) {
       base::BindOnce(std::move(relinquish_display_control_callback_), status));
   relinquish_display_control_callback_.Reset();
   display_control_change_pending_ = false;
+}
+
+void DrmDisplayHostManager::GpuShouldDisplayEventTriggerConfiguration(
+    bool should_trigger) {
+  if (should_trigger)
+    NotifyDisplayDelegate();
+
+  task_pending_ = false;
+  ProcessEvent();
 }
 
 void DrmDisplayHostManager::RunUpdateDisplaysCallback(

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -255,7 +255,7 @@ TEST(HTTPParsersTest, ParseHTTPRefresh) {
 
   EXPECT_TRUE(ParseHTTPRefresh("123 ", nullptr, delay, url));
   EXPECT_EQ(base::Seconds(123), delay);
-  EXPECT_TRUE(url.IsEmpty());
+  EXPECT_TRUE(url.empty());
 
   EXPECT_TRUE(ParseHTTPRefresh("1 ; url=dest", nullptr, delay, url));
   EXPECT_EQ(base::Seconds(1), delay);
@@ -557,8 +557,10 @@ TEST(HTTPParsersTest, ParseServerTimingHeader) {
                          {{"metric1", "0", "d1"}, {"metric2", "0", ""}});
 
   // nonsense - extraneous characters after entry name token
-  testServerTimingHeader("metric==   \"\"foo;dur=123.4", {{"metric", "0", ""}});
-  testServerTimingHeader("metric1==   \"\"foo,metric2", {{"metric1", "0", ""}});
+  testServerTimingHeader("metric==   \"\"foo;dur=123.4",
+                         {{"metric", "123.4", ""}});
+  testServerTimingHeader("metric1==   \"\"foo,metric2",
+                         {{"metric1", "0", ""}, {"metric2", "0", ""}});
 
   // nonsense - extraneous characters after param name token
   testServerTimingHeader("metric;dur foo=12", {{"metric", "0", ""}});
@@ -588,7 +590,8 @@ TEST(HTTPParsersTest, ParseServerTimingHeader) {
   testServerTimingHeader("{", {{"{", "0", ""}});
   testServerTimingHeader("}", {{"}", "0", ""}});
   testServerTimingHeader("{}", {{"{}", "0", ""}});
-  testServerTimingHeader("{\"foo\":\"bar\"},metric", {{"{", "0", ""}});
+  testServerTimingHeader("{\"foo\":\"bar\"},metric",
+                         {{"{", "0", ""}, {"metric", "0", ""}});
 }
 
 TEST(HTTPParsersTest, ParseContentTypeOptionsTest) {
@@ -629,7 +632,7 @@ TEST(HTTPParsersTest, ParseContentSecurityPoliciesmpty) {
       "", network::mojom::blink::ContentSecurityPolicyType::kEnforce,
       network::mojom::blink::ContentSecurityPolicySource::kHTTP,
       KURL("http://example.com"));
-  EXPECT_TRUE(csp.IsEmpty());
+  EXPECT_TRUE(csp.empty());
 }
 
 TEST(HTTPParsersTest, ParseContentSecurityPoliciesMultiple) {

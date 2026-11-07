@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
 #include "base/threading/thread.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -87,13 +88,15 @@ class NetworkingPrivateLinux : public NetworkingPrivateDelegate {
                                    const std::string& network_id,
                                    VoidCallback success_callback,
                                    FailureCallback failure_callback) override;
-  base::Value GetEnabledNetworkTypes() override;
-  std::unique_ptr<DeviceStateList> GetDeviceStateList() override;
-  base::Value GetGlobalPolicy() override;
-  base::Value GetCertificateLists() override;
-  bool EnableNetworkType(const std::string& type) override;
-  bool DisableNetworkType(const std::string& type) override;
-  bool RequestScan(const std::string& type) override;
+  void GetEnabledNetworkTypes(EnabledNetworkTypesCallback callback) override;
+  void GetDeviceStateList(DeviceStateListCallback callback) override;
+  void GetGlobalPolicy(GetGlobalPolicyCallback callback) override;
+  void GetCertificateLists(GetCertificateListsCallback callback) override;
+  void EnableNetworkType(const std::string& type,
+                         BoolCallback callback) override;
+  void DisableNetworkType(const std::string& type,
+                          BoolCallback callback) override;
+  void RequestScan(const std::string& type, BoolCallback callback) override;
   void AddObserver(NetworkingPrivateDelegateObserver* observer) override;
   void RemoveObserver(NetworkingPrivateDelegateObserver* observer) override;
 
@@ -257,7 +260,7 @@ class NetworkingPrivateLinux : public NetworkingPrivateDelegate {
   // Task runner used by the |dbus_| object.
   scoped_refptr<base::SequencedTaskRunner> dbus_task_runner_;
   // This is owned by |dbus_| object. Only access on |dbus_thread_|.
-  dbus::ObjectProxy* network_manager_proxy_;
+  raw_ptr<dbus::ObjectProxy> network_manager_proxy_;
   // Holds the current mapping of known networks. Only access on |dbus_thread_|.
   std::unique_ptr<NetworkMap> network_map_;
   // Observers to Network Events.

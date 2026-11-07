@@ -111,7 +111,7 @@ void TransformState::ApplyTransform(
 void TransformState::ApplyTransform(
     const TransformationMatrix& transform_from_container,
     TransformAccumulation accumulate) {
-  if (transform_from_container.IsIntegerTranslation()) {
+  if (transform_from_container.IsInteger2DTranslation()) {
     Move(PhysicalOffset::FromVector2dFRound(
              transform_from_container.To2DTranslation()),
          accumulate);
@@ -127,7 +127,7 @@ void TransformState::ApplyTransform(
       accumulated_transform_ = std::make_unique<TransformationMatrix>(
           transform_from_container * *accumulated_transform_);
     else
-      accumulated_transform_->Multiply(transform_from_container);
+      accumulated_transform_->PreConcat(transform_from_container);
   } else if (accumulate == kAccumulateTransform) {
     // Make one if we started to accumulate
     accumulated_transform_ =

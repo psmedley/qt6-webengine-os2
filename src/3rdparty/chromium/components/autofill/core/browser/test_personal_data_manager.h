@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,6 +59,7 @@ class TestPersonalDataManager : public PersonalDataManager {
   void LoadProfiles() override;
   void LoadCreditCards() override;
   void LoadCreditCardCloudTokenData() override;
+  void LoadIBANs() override;
   void LoadUpiIds() override;
   bool IsAutofillEnabled() const override;
   bool IsAutofillProfileEnabled() const override;

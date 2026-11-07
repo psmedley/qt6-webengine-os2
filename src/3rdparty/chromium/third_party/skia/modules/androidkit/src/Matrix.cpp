@@ -9,6 +9,8 @@
 
 #include "include/core/SkM44.h"
 
+#include <algorithm>
+
 namespace {
 
 static jlong Matrix_Create(JNIEnv* env, jobject, jfloat m0, jfloat m4, jfloat m8,  jfloat m12,
@@ -123,6 +125,6 @@ int register_androidkit_Matrix(JNIEnv* env) {
 
     const auto clazz = env->FindClass("org/skia/androidkit/Matrix");
     return clazz
-        ? env->RegisterNatives(clazz, methods, SK_ARRAY_COUNT(methods))
+        ? env->RegisterNatives(clazz, methods, std::size(methods))
         : JNI_ERR;
 }

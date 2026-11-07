@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_item.h"
 #include "components/download/public/common/download_item_rename_handler.h"
-#include "components/download/public/common/download_schedule.h"
 #include "components/download/public/common/download_url_parameters.h"
 #include "components/download/public/common/quarantine_connection.h"
 #include "content/common/content_export.h"
@@ -71,7 +70,7 @@ using DownloadTargetCallback = base::OnceCallback<void(
     download::DownloadItem::MixedContentStatus mixed_content_status,
     const base::FilePath& intermediate_path,
     const base::FilePath& display_name,
-    absl::optional<download::DownloadSchedule> download_schedule,
+    const std::string& mime_type,
     download::DownloadInterruptReason interrupt_reason)>;
 
 // Called when a download delayed by the delegate has completed.

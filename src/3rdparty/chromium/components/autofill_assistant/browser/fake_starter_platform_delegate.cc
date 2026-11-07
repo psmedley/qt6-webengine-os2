@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,9 @@
 
 namespace autofill_assistant {
 
-FakeStarterPlatformDelegate::FakeStarterPlatformDelegate() = default;
+FakeStarterPlatformDelegate::FakeStarterPlatformDelegate(
+    std::unique_ptr<FakeCommonDependencies> fake_common_dependencies)
+    : fake_common_dependencies_(std::move(fake_common_dependencies)) {}
 FakeStarterPlatformDelegate::~FakeStarterPlatformDelegate() = default;
 
 std::unique_ptr<TriggerScriptCoordinator::UiDelegate>
@@ -98,13 +100,16 @@ void FakeStarterPlatformDelegate::SetProactiveHelpSettingEnabled(bool enabled) {
   proactive_help_enabled_ = enabled;
 }
 
-bool FakeStarterPlatformDelegate::GetMakeSearchesAndBrowsingBetterEnabled()
-    const {
-  return msbb_enabled_;
-}
-
 bool FakeStarterPlatformDelegate::GetIsLoggedIn() {
   return is_logged_in_;
+}
+
+bool FakeStarterPlatformDelegate::GetIsSupervisedUser() {
+  return is_supervised_user_;
+}
+
+bool FakeStarterPlatformDelegate::GetIsAllowedForMachineLearning() {
+  return is_allowed_for_machine_learning_;
 }
 
 bool FakeStarterPlatformDelegate::GetIsCustomTab() const {
@@ -129,6 +134,16 @@ FakeStarterPlatformDelegate::CreateFieldTrialUtil() {
 
 bool FakeStarterPlatformDelegate::IsAttached() {
   return is_attached_;
+}
+
+const FakeCommonDependencies*
+FakeStarterPlatformDelegate::GetCommonDependencies() const {
+  return fake_common_dependencies_.get();
+}
+
+const PlatformDependencies*
+FakeStarterPlatformDelegate::GetPlatformDependencies() const {
+  return &fake_platform_dependencies_;
 }
 
 base::WeakPtr<StarterPlatformDelegate>

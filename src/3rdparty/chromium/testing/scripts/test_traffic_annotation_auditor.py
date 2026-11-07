@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -15,12 +15,15 @@ import sys
 import tempfile
 import traceback
 
-import common
+# Add src/testing/ into sys.path for importing common without pylint errors.
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
+from scripts import common
 
 WINDOWS_SHEET_CONFIG = {
   "spreadsheet_id": "1TmBr9jnf1-hrjntiVBzT9EtkINGrtoBYFMWad2MBeaY",
   "annotations_sheet_name": "Annotations",
-  "changes_sheet_name": "Changes Stats",
+  "chrome_version_sheet_name": "Chrome Version",
   "silent_change_columns": [],
   "last_update_column_name": "Last Update",
 }
@@ -29,7 +32,7 @@ WINDOWS_SHEET_CONFIG = {
 CHROMEOS_SHEET_CONFIG = {
   "spreadsheet_id": "1928goWKy6LVdF9Nl5nV1OD260YC10dHsdrnHEGdGsg8",
   "annotations_sheet_name": "Annotations",
-  "changes_sheet_name": "Changes Stats",
+  "chrome_version_sheet_name": "Chrome Version",
   "silent_change_columns": [],
   "last_update_column_name": "Last Update",
 }
@@ -92,17 +95,17 @@ def main_run(args):
     if rc == 0 and sheet_config is not None:
       print("Tests succeeded. Updating annotations sheet...")
 
-      config_file = tempfile.NamedTemporaryFile(delete=False)
+      config_file = tempfile.NamedTemporaryFile(delete=False, mode='w+')
       json.dump(sheet_config, config_file, indent=4)
       config_filename = config_file.name
       config_file.close()
-      vpython_path = 'vpython.bat' if is_windows() else 'vpython'
+      vpython_path = 'vpython3.bat' if is_windows() else 'vpython3'
 
       command_line = [
         vpython_path,
         os.path.join(common.SRC_DIR, 'tools', 'traffic_annotation', 'scripts',
                    'update_annotations_sheet.py'),
-        '--force',
+        '--yes',
         '--config-file',
         config_filename,
         '--annotations-file',

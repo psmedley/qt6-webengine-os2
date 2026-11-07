@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,7 @@ namespace tab_count_metrics {
 // entry for the new suffixes and marking the old suffixes obsolete.
 constexpr size_t kTabCountBucketMins[] = {0, 1, 2, 3, 5, 8, 20, 40};
 
-constexpr const char* kTabBucketNamePrefix[]{".ByTabCount", ".ByLiveTabCount"};
+constexpr const char* kTabBucketNamePrefix[]{".ByTabCount", ".ByLiveTabCount2"};
 
 // Text for the tab count portion of metric names. These need to be kept
 // in sync with |kTabCountBucketMins|.

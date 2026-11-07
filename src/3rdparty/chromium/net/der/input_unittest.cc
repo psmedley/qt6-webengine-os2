@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,7 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace net {
-namespace der {
-namespace test {
+namespace net::der::test {
 
 constexpr uint8_t kInput[] = {'t', 'e', 's', 't'};
 const uint8_t kInput2[] = {'t', 'e', 'a', 'l'};
@@ -64,14 +62,11 @@ TEST(InputTest, ConstExpr) {
   constexpr Input const_array_input(kInput);
   static_assert(const_array_input.Length() == 4);
   static_assert(const_array_input.UnsafeData() == kInput);
-  static_assert(default_input != const_array_input);
-  static_assert(!(default_input == const_array_input));
   static_assert(default_input < const_array_input);
 
   constexpr Input ptr_len_input(kInput, 2);
   static_assert(ptr_len_input.Length() == 2);
   static_assert(ptr_len_input.UnsafeData() == kInput);
-  static_assert(ptr_len_input != const_array_input);
   static_assert(ptr_len_input < const_array_input);
 
   Input runtime_input(kInput2, 2);
@@ -109,6 +104,4 @@ TEST(ByteReaderTest, HasMore) {
   ASSERT_FALSE(reader.HasMore());
 }
 
-}  // namespace test
-}  // namespace der
-}  // namespace net
+}  // namespace net::der::test

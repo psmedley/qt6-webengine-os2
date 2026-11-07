@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/as_const.h"
 #include "base/callback.h"
 #include "base/callback_list.h"
 #include "base/gtest_prod_util.h"
@@ -29,6 +28,7 @@
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/class_property.h"
 #include "ui/base/clipboard/clipboard_format_type.h"
+#include "ui/base/cursor/cursor.h"
 #include "ui/base/dragdrop/drop_target_event.h"
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom-forward.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
@@ -86,6 +86,7 @@ class FocusManager;
 class FocusTraversable;
 class LayoutProvider;
 class ScrollView;
+class SizeBounds;
 class ViewAccessibility;
 class ViewMaskLayer;
 class ViewObserver;
@@ -113,9 +114,9 @@ struct VIEWS_EXPORT ViewHierarchyChangedDetails {
 
   bool is_add = false;
   // New parent if |is_add| is true, old parent if |is_add| is false.
-  View* parent = nullptr;
+  raw_ptr<View> parent = nullptr;
   // The view being added or removed.
-  View* child = nullptr;
+  raw_ptr<View> child = nullptr;
   // If this is a move (reparent), meaning AddChildViewAt() is invoked with an
   // existing parent, then a notification for the remove is sent first,
   // followed by one for the add.  This case can be distinguished by a
@@ -124,7 +125,7 @@ struct VIEWS_EXPORT ViewHierarchyChangedDetails {
   // being removed.
   // For the add part of move, |move_view| is the old parent of the View being
   // added.
-  View* move_view = nullptr;
+  raw_ptr<View> move_view = nullptr;
 };
 
 using PropertyChangedCallback = ui::metadata::PropertyChangedCallback;
@@ -412,7 +413,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
     return AddChildView<T>(view.release());
   }
   template <typename T>
-  T* AddChildViewAt(std::unique_ptr<T> view, int index) {
+  T* AddChildViewAt(std::unique_ptr<T> view, size_t index) {
     DCHECK(!view->owned_by_client())
         << "This should only be called if the client is passing ownership of "
            "|view| to the parent View.";
@@ -423,18 +424,18 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // for new code.
   template <typename T>
   T* AddChildView(T* view) {
-    AddChildViewAtImpl(view, static_cast<int>(children_.size()));
+    AddChildViewAtImpl(view, children_.size());
     return view;
   }
   template <typename T>
-  T* AddChildViewAt(T* view, int index) {
+  T* AddChildViewAt(T* view, size_t index) {
     AddChildViewAtImpl(view, index);
     return view;
   }
 
-  // Moves |view| to the specified |index|. A negative value for |index| moves
-  // the view at the end.
-  void ReorderChildView(View* view, int index);
+  // Moves |view| to the specified |index|. An |index| at least as large as that
+  // of the last child moves the view to the end.
+  void ReorderChildView(View* view, size_t index);
 
   // Removes |view| from this view. The view's parent will change to null.
   void RemoveChildView(View* view);
@@ -483,8 +484,9 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // not a child of this view.
   Views::const_iterator FindChild(const View* view) const;
 
-  // Returns the index of |view|, or -1 if |view| is not a child of this view.
-  int GetIndexOf(const View* view) const;
+  // Returns the index of |view|, or nullopt if |view| is not a child of this
+  // view.
+  absl::optional<size_t> GetIndexOf(const View* view) const;
 
   // Size and disposition ------------------------------------------------------
   // Methods for obtaining and modifying the position and size of the view.
@@ -545,14 +547,21 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // return value is relative to the preferred height.
   virtual int GetBaseline() const;
 
-  // Get the size the View would like to be, if enough space were available.
-  // First checks |preferred_size_|, then CalculatePreferredSize().
+  // Get the size the View would like to be under the current bounds.
+  // If the View is never laid out before, assume it to be laid out in an
+  // unbounded space.
+  // TODO(crbug.com/1346889): Don't use this. Use the size-constrained
+  //                          GetPreferredSize(const SizeBounds&) instead.
   gfx::Size GetPreferredSize() const;
 
-  // Sets the size that this View will request during layout. The actual size
-  // may differ. It should rarely be necessary to set this; usually the right
-  // approach is controlling the parent's layout via a LayoutManager.
-  void SetPreferredSize(const gfx::Size& size);
+  // Get the size the View would like to be given `available_size`, ignoring the
+  // current bounds.
+  gfx::Size GetPreferredSize(const SizeBounds& available_size) const;
+
+  // Sets or unsets the size that this View will request during layout. The
+  // actual size may differ. It should rarely be necessary to set this; usually
+  // the right approach is controlling the parent's layout via a LayoutManager.
+  void SetPreferredSize(absl::optional<gfx::Size> size);
 
   // Convenience method that sizes this view to its preferred size.
   void SizeToPreferredSize();
@@ -748,6 +757,8 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // specific to the current Layout Manager)
   virtual void Layout();
 
+  bool needs_layout() const { return needs_layout_; }
+
   // Mark this view and all parents to require a relayout. This ensures the
   // next call to Layout() will propagate to this view, even if the bounds of
   // parent views do not change.
@@ -848,6 +859,10 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
                                    const View* target,
                                    gfx::Point* point);
 
+  [[nodiscard]] static gfx::Point ConvertPointToTarget(const View* source,
+                                                       const View* target,
+                                                       const gfx::Point& point);
+
   // Convert |rect| from the coordinate system of |source| to the coordinate
   // system of |target|.
   //
@@ -857,6 +872,9 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   static void ConvertRectToTarget(const View* source,
                                   const View* target,
                                   gfx::RectF* rect);
+  [[nodiscard]] static gfx::RectF ConvertRectToTarget(const View* source,
+                                                      const View* target,
+                                                      const gfx::RectF& rect);
 
   // Convert a point from a View's coordinate system to that of its Widget.
   static void ConvertPointToWidget(const View* src, gfx::Point* point);
@@ -916,7 +934,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Returns the ColorProvider from the ColorProviderManager.
   ui::ColorProvider* GetColorProvider() {
     return const_cast<ui::ColorProvider*>(
-        base::as_const(*this).GetColorProvider());
+        std::as_const(*this).GetColorProvider());
   }
   const ui::ColorProvider* GetColorProvider() const;
 
@@ -926,7 +944,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // set. Warning: the default theme might not be correct; you should probably
   // override OnThemeChanged().
   ui::NativeTheme* GetNativeTheme() {
-    return const_cast<ui::NativeTheme*>(base::as_const(*this).GetNativeTheme());
+    return const_cast<ui::NativeTheme*>(std::as_const(*this).GetNativeTheme());
   }
   const ui::NativeTheme* GetNativeTheme() const;
 
@@ -994,7 +1012,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // responsible for managing the lifetime of the returned object, though that
   // lifetime may vary from platform to platform. On Windows and Aura,
   // the cursor is a shared resource.
-  virtual gfx::NativeCursor GetCursor(const ui::MouseEvent& event);
+  virtual ui::Cursor GetCursor(const ui::MouseEvent& event);
 
   // A convenience function which calls HitTestRect() with a rect of size
   // 1x1 and an origin of |point|. |point| is in the local coordinate space
@@ -1116,7 +1134,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Convenience method to retrieve the InputMethod associated with the
   // Widget that contains this view.
   ui::InputMethod* GetInputMethod() {
-    return const_cast<ui::InputMethod*>(base::as_const(*this).GetInputMethod());
+    return const_cast<ui::InputMethod*>(std::as_const(*this).GetInputMethod());
   }
   const ui::InputMethod* GetInputMethod() const;
 
@@ -1431,6 +1449,16 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   void RemoveObserver(ViewObserver* observer);
   bool HasObserver(const ViewObserver* observer) const;
 
+  // http://crbug.com/1162949 : Instrumentation that indicates if this is alive.
+  // Callers should not depend on this as it is meant to be temporary.
+  enum class LifeCycleState : uint32_t {
+    kAlive = 0x600D600D,
+    kDestroying = 0x90141013,
+    kDestroyed = 0xBAADBAAD,
+  };
+
+  LifeCycleState life_cycle_state() const { return life_cycle_state_; }
+
  protected:
   // Used to track a drag. RootView passes this into
   // ProcessMousePressed/Dragged.
@@ -1455,7 +1483,15 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Calculates the natural size for the View, to be taken into consideration
   // when the parent is performing layout.
+  // `preferred_size_` will take precedence over CalculatePreferredSize() if
+  // it exists.
   virtual gfx::Size CalculatePreferredSize() const;
+
+  // Calculates the preferred size for the View given `available_size`.
+  // `preferred_size_` will take precedence over CalculatePreferredSize() if
+  // it exists.
+  virtual gfx::Size CalculatePreferredSize(
+      const SizeBounds& available_size) const;
 
   // Override to be notified when the bounds of the view have changed.
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) {}
@@ -1482,8 +1518,6 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // have changed. The visible bounds are the region of the View not clipped by
   // its ancestors. This is used for clipping NativeViewHost.
   virtual void OnVisibleBoundsChanged();
-
-  bool needs_layout() const { return needs_layout_; }
 
   // Tree operations -----------------------------------------------------------
 
@@ -1684,12 +1718,6 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   FRIEND_TEST_ALL_PREFIXES(ViewTest, PaintWithMovedViewUsesCacheInRTL);
   FRIEND_TEST_ALL_PREFIXES(ViewTest, PaintWithUnknownInvalidation);
 
-  // http://crbug.com/1162949 : Instrumentation that indicates if this is alive.
-  enum class LifeCycleState : uint32_t {
-    kAlive = 0x600D600D,
-    kDestroyed = 0xBAADBAAD,
-  };
-
   // This is the default view layout. It is a very simple version of FillLayout,
   // which merely sets the bounds of the children to the content bounds. The
   // actual FillLayout isn't used here because it supports a couple of features
@@ -1754,7 +1782,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Tree operations -----------------------------------------------------------
 
   // Adds |view| as a child of this view at |index|.
-  void AddChildViewAtImpl(View* view, int index);
+  void AddChildViewAtImpl(View* view, size_t index);
 
   // Removes |view| from the hierarchy tree. If |update_tool_tip| is
   // true, the tooltip is updated. If |delete_removed_view| is true, the
@@ -2083,11 +2111,12 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Painting ------------------------------------------------------------------
 
-  // Background
-  std::unique_ptr<Background> background_;
-
   // Border.
   std::unique_ptr<Border> border_;
+
+  // Background may rely on Border, so it must be declared last and destroyed
+  // first.
+  std::unique_ptr<Background> background_;
 
   // Cached output of painting to be reused in future frames until invalidated.
   ui::PaintCache paint_cache_;

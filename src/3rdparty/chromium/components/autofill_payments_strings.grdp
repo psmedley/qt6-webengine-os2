@@ -105,6 +105,9 @@
     <message name="IDS_AUTOFILL_MOBILE_SAVE_CARD_TO_CLOUD_CONFIRMATION_DIALOG_EXPLANATION" desc="Explanation of the effect of the Autofill save card prompt when the card is to be saved by uploading it to Google Payments." formatter_data="android_java">
       Save your card and billing info to your Google Account for secure and faster checkouts
     </message>
+    <message name="IDS_AUTOFILL_MOBILE_SAVE_CARD_TO_CLOUD_CONFIRMATION_DIALOG_EXPLANATION_WITH_ACCOUNT_NAME" desc="Explanation of the effect of the Autofill save card prompt when the card is to be saved by uploading it to Google Payments. Includes Google account reference." formatter_data="android_java">
+      Save your card and billing info to your Google Account <ph name="USER_EMAIL">^1<ex>user@gmail.com</ex></ph> for secure and faster checkouts
+    </message>
   </if>
   <if expr="is_ios">
     <then>
@@ -124,7 +127,7 @@
   <message name="IDS_AUTOFILL_FIX_FLOW_PROMPT_SAVE_CARD_LABEL" desc="Text to show on the button to save the card to Google when the fix flow dialog is shown after the Autofill save card prompt." formatter_data="android_java">
     Save card
   </message>
-  <if expr="is_linux and not chromeos_ash">
+  <if expr="is_linux">
     <then>
       <message name="IDS_AUTOFILL_SAVE_CARD_PROMPT_TITLE_TO_CLOUD" desc="Title text for the Autofill save card prompt when the card is to be saved by uploading it to Google Payments and also saved locally. The prompt can be either a bubble or an infobar.">
         Do you want to save this card to your Google Account?
@@ -136,6 +139,12 @@
       </message>
     </else>
   </if>
+  <message name="IDS_AUTOFILL_SAVE_CARD_PROMPT_TITLE_EXPERIMENT_ENCRYPTED_AND_SECURE" desc="Title text for the Autofill save card prompt when the card is to be saved by uploading it to Google Payments. The prompt can be either a bubble or an infobar. This is an experiment text and may change in the future.">
+    Save card securely
+  </message>
+  <message name="IDS_AUTOFILL_SAVE_CARD_PROMPT_TITLE_EXPERIMENT_FASTER_AND_PROTECTED" desc="Title text for the Autofill save card prompt when the card is to be saved by uploading it to Google Payments. The prompt can be either a bubble or an infobar. This is an experiment text and may change in the future.">
+    Save card?
+  </message>
   <message name="IDS_AUTOFILL_SAVE_CARD_PROMPT_TITLE_TO_CLOUD_V3" desc="Title text for the Autofill save card prompt when the card is to be saved by uploading it to Google Payments, according to January 2018 UI guidelines. The prompt can be either a bubble or an infobar.">
     Save card?
   </message>
@@ -162,6 +171,12 @@
   </message>
   <message name="IDS_AUTOFILL_SAVE_CARD_PROMPT_UPLOAD_EXPLANATION_V3" desc="Explanation of the effect of the Autofill save card prompt when the card is to be saved by uploading it to Google Payments, according to April 2018 UI guidelines. The prompt will be shown in a bubble below the omnibox.">
     To pay faster next time, save your card and billing address to your Google Account.
+  </message>
+  <message name="IDS_AUTOFILL_SAVE_CARD_PROMPT_UPLOAD_EXPLANATION_EXPERIMENT_ENCRYPTED_AND_SECURE" desc="Explanation of the effect of the Autofill save card prompt when the card is to be saved by uploading it to Google Payments. The prompt will be shown in a bubble below the omnibox. This is an experiment text and may change in the future.">
+    It’ll be encrypted, saved securely and the CVC is never stored.
+  </message>
+  <message name="IDS_AUTOFILL_SAVE_CARD_PROMPT_UPLOAD_EXPLANATION_EXPERIMENT_FASTER_AND_PROTECTED" desc="Explanation of the effect of the Autofill save card prompt when the card is to be saved by uploading it to Google Payments. The prompt will be shown in a bubble below the omnibox. This is an experiment text and may change in the future.">
+    Pay faster next time and protect your card with Google’s industry-leading security.
   </message>
   <message name="IDS_AUTOFILL_SAVE_CARD_PROMPT_UPLOAD_EXPLANATION_V3_WITH_NAME" desc="Explanation of the effect of the Autofill save card prompt when the card is to be saved by uploading it to Google Payments, according to April 2018 UI guidelines. The prompt will be shown in a bubble below the omnibox.">
     To pay faster next time, save your card, name, and billing address to your Google Account.
@@ -342,6 +357,18 @@
     <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_INSTRUCTIONS_EXPIRED_LOCAL_CARD" desc="Text explaining what the user should do in the card unmasking dialog to update an expired card.  Appears specifically for local cards already stored on the device.">
       Enter the expiration date and CVC for <ph name="CREDIT_CARD">$1<ex>Visa - 5679</ex></ph> to update your card details. Once you confirm, your card details will be shared with this site.
     </message>
+    <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_CVC_FIELD_TITLE" desc="The name of the field for credit card verification code in the card unmasking dialog. The text field where this is presented can be very narrow, so please prefer to translate this to the most common abbreviated form. [CHAR_LIMIT=4]">
+      CVC
+    </message>
+    <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_UPDATE_CARD_MESSAGE_LINK" desc="Text explaining the user they can update their credit card expiration date if they received a new card after the old one expired. The text also contains a link that when tapped displays the form to update the expiration date.">
+      New card? <ph name="BEGIN_LINK">BEGIN_LINK</ph>Enter Card Details<ph name="END_LINK">END_LINK</ph>
+    </message>
+    <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_EXPIRATION_DATE_FIELD_TITLE" desc="The name of the field for the expiration date of the credit card in the card unmasking dialog.">
+      Expiration Date
+    </message>
+    <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_ERROR_ALERT_TITLE" desc="Text to be displayed as the title of the error alert in the card unmasking dialog.">
+      Something Went Wrong
+    </message>
   </if>
   <if expr="is_ios">
     <if expr="_google_chrome">
@@ -399,22 +426,25 @@
   <message name="IDS_AUTOFILL_CARD_UNMASK_CONFIRMATION_MESSAGE" desc="Message displayed after tapping a Virtual Card, and the response from the bank indicates that no further verification is required.">
     Your card is confirmed
   </message>
+  <message name="IDS_AUTOFILL_FIDO_AUTHENTICATION_PROMPT_TITLE" desc="Title for FIDO authentication progress dialog">
+      Verifying...
+  </message>
 
   <!-- WebAuthn fingerprint opt-in dialog -->
   <!-- Desktop only -->
   <if expr="not is_ios and not is_android">
     <if expr="is_macosx">
       <message name="IDS_AUTOFILL_WEBAUTHN_OPT_IN_DIALOG_TITLE" desc="Headline asking the user if they want to use their device's platform authenticator to confirm their cards in the future instead of CVC.">
-        Use Touch ID instead of CVC?
+        Use device unlock instead of CVC?
       </message>
       <message name="IDS_AUTOFILL_WEBAUTHN_OPT_IN_DIALOG_TITLE_ERROR" desc="Headline explaining to users there were errors in the attempt to opt in using platform's authenticator.">
-        Couldn't use Touch ID
+        Couldn't use device unlock
       </message>
       <message name="IDS_AUTOFILL_WEBAUTHN_OPT_IN_DIALOG_INSTRUCTION" desc="Subheading that appears below the headline explaining to the user that they won't have to enter their card's security code if they decide to use their device's platform authenticator in the future.">
-        Confirm your cards faster by using Touch ID from now on
+        Confirm your cards faster by using device unlock from now on
       </message>
       <message name="IDS_AUTOFILL_WEBAUTHN_OPT_IN_DIALOG_OK_BUTTON_LABEL" desc="Button that allows the user to use their device's platform authenticator to confirm card use in the future.">
-        Use Touch ID
+        Use device unlock
       </message>
     </if>
     <if expr="is_win">
@@ -485,9 +515,6 @@
     <message name="IDS_AUTOFILL_VIRTUAL_CARD_ENTRY_PREFIX" desc="Notifies users that the type of card they are enrolling in is a virtual card.">
       Virtual card
     </message>
-    <message name="IDS_AUTOFILL_VIRTUAL_CARD_ENTRY_PREFIX_TWO" desc="Notifies the user that their virtual card card is linked with another card on their account.">
-      Linked with
-    </message>
     <message name="IDS_AUTOFILL_VIRTUAL_CARD_SELECTION_DIALOG_CONTENT_TITLE" desc="The title shown in the Autofill virtual card selection dialog. This dialog offers available virtual credit cards for users to choose to fill the form with. [ICU Syntax]">
       {NUM_CARDS, plural,
       =1 {Use a virtual number for this card}
@@ -545,7 +572,7 @@
       Make it more secure with a virtual card?
   </message>
   <message name="IDS_AUTOFILL_VIRTUAL_CARD_ENROLLMENT_DIALOG_CONTENT_LABEL" desc="Text explaining the benefit of enrolling a credit card as a virtual card. Also contains a link to learn more about virtual cards from IDS_AUTOFILL_VIRTUAL_CARD_ENROLLMENT_LEARN_MORE_LINK_LABEL.">
-    A virtual card disguises your actual card to help protect you from potential fraud. <ph name="IDS_AUTOFILL_VIRTUAL_CARD_ENROLLMENT_LEARN_MORE_LINK_LABEL">$1<ex>Learn about virtual cards</ex></ph>
+    A virtual card hides your actual card to help protect you from potential fraud. <ph name="IDS_AUTOFILL_VIRTUAL_CARD_ENROLLMENT_LEARN_MORE_LINK_LABEL">$1<ex>Learn about virtual cards</ex></ph>
   </message>
   <message name="IDS_AUTOFILL_VIRTUAL_CARD_ENROLLMENT_DECLINE_BUTTON_LABEL_SKIP" desc="Text displayed in the decline button in the virtual card enroll bubble. It is displayed only if the bubble/infobar will still be shown again at a later date after this one is declined.">
     Skip
@@ -589,6 +616,12 @@
     </message>
     <message name="IDS_AUTOFILL_VIRTUAL_CARD_NUMBER_SNACKBAR_ACTION_TEXT" desc="Text to be displayed as the snackbar action shown after a virtual card number id autofilled.">
       View card
+    </message>
+    <message name="IDS_AUTOFILL_VIRTUAL_CARD_ENROLLMENT_ELIGIBLE_TEXT" desc="Text to be displayed in the Settings page as label for cards that are not enrolled into virtual card number, but are eligible." formatter_data="android_java">
+      Virtual card available
+    </message>
+    <message name="IDS_AUTOFILL_VIRTUAL_CARD_ENROLLED_TEXT" desc="Text to be displayed in the Settings page as label for cards that are enrolled into virtual card number." formatter_data="android_java">
+      Virtual card turned on
     </message>
   </if>
   <!-- virtual cards related strings - end -->
@@ -647,31 +680,48 @@
   <message name="IDS_AUTOFILL_OFFERS_REMINDER_POSITIVE_BUTTON_LABEL" desc="Label for the positive button for the bubble/infobar shown on the merchant website when an offer is available to use.">
     Got it
   </message>
+  <message name="IDS_AUTOFILL_PROMO_CODE_SUGGESTIONS_FOOTER_TEXT" desc="Label for the footer text of the autofill suggestions popup when a user clicks on a promo code field. It redirects the user to the offer webview page for more details on the promo code offers suggested. An example of details the user can see is the terms and conditions of the promo code offers that are shown in the autofill suggestions popup.">
+    See promo code details
+  </message>
   <if expr="not is_ios and not is_android">
-    <message name="IDS_AUTOFILL_OFFERS_REMINDER_DESCRIPTION_TEXT" desc="Secondary explanatory text for the Desktop bubble shown on the merchant website when an offer is available to use.">
-      Pay with <ph name="CARD_DETAIL">$1<ex>Visa - 1234</ex></ph> at checkout
-    </message>
     <message name="IDS_AUTOFILL_OFFERS_REMINDER_ICON_TOOLTIP_TEXT" desc="The tooltip text for the offer icon in the location bar.">
       Offer available
     </message>
   </if>
+  <if expr="not is_ios">
+    <message name="IDS_AUTOFILL_OFFERS_REMINDER_DESCRIPTION_TEXT" desc="Secondary explanatory text for the Desktop bubble and Android message shown on the merchant website when an offer is available to use.">
+      Pay with <ph name="CARD_DETAIL">$1<ex>Visa - 1234</ex></ph> at checkout
+    </message>
+  </if>
   <if expr="is_android">
-    <message name="IDS_AUTOFILL_OFFERS_REMINDER_DESCRIPTION_TEXT" desc="Secondary explanatory text for the Clank infobar shown on the merchant website when an offer is available to use." formatter_data="android_java">
+    <message name="IDS_AUTOFILL_OFFERS_REMINDER_INFOBAR_DESCRIPTION_TEXT" desc="Secondary explanatory text for the infobar shown on the merchant website when an offer is available to use." formatter_data="android_java">
       Pay with <ph name="CARD_DETAIL">%1$s<ex>Visa - 1234</ex></ph> at checkout.
     </message>
     <message name="IDS_AUTOFILL_OFFERS_REMINDER_DEEP_LINK_TEXT" desc="Text to be linked to take the user to the offer in the Google Pay app." formatter_data="android_java">
       See details
+    </message>
+    <message name="IDS_AUTOFILL_OFFERS_MESSAGE_TITLE" desc="Title of the message shown on the merchant website when a GPay-activated card linked offer is available to use.">
+      Google Pay offer available
+    </message>
+    <message name="IDS_AUTOFILL_OFFERS_MESSAGE_PRIMARY_BUTTON_TEXT" desc="Text for the primary button of the message shown on the merchant website when a GPay-activated card linked offer is available to use.">
+      Details
     </message>
   </if>
   <if expr="toolkit_views">
     <message name="IDS_AUTOFILL_PROMO_CODE_OFFERS_REMINDER_TITLE" desc="Title of the bubble shown on the merchant website when a merchant promo code offer is available to use.">
       Use this code at checkout
     </message>
+    <message name="IDS_AUTOFILL_GPAY_PROMO_CODE_OFFERS_REMINDER_TITLE" desc="Title of the bubble shown on the merchant website when a GPay merchant promo code offer is available to use, and the user can click on the promo code field to autofill it.">
+      Reminder: Saved promo code available
+    </message>
     <message name="IDS_AUTOFILL_PROMO_CODE_OFFER_BUTTON_TOOLTIP_NORMAL" desc="The tooltip message for a button containing a copyable promo code in the merchant promo code offer notification bubble on Desktop. This message is shown when the button is hovered over and if the button has not been clicked.">
       Click to copy
     </message>
     <message name="IDS_AUTOFILL_PROMO_CODE_OFFER_BUTTON_TOOLTIP_CLICKED" desc="The tooltip message for a button containing a copyable promo code in the merchant promo code offer notification bubble on Desktop. This message is shown when the button is hovered over and if the button has been clicked.">
       Copied to clipboard
+    </message>
+    <message name="IDS_AUTOFILL_GPAY_PROMO_CODE_OFFERS_REMINDER_VALUE_PROP_TEXT" desc="The first line of the GPay promo code notification bubble, consisting of the value prop text and a see details link">
+      <ph name="VALUE_PROP">$1<ex>5% off on shoes. Up to $50.</ex></ph> <ph name="DETAILS">$2<ex>See Details</ex></ph>
     </message>
   </if>
 

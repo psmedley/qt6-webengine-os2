@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -97,9 +97,9 @@ void WidgetInputHandlerImpl::ImeSetComposition(
     int32_t end,
     WidgetInputHandlerImpl::ImeSetCompositionCallback callback) {
   RunOnMainThread(base::BindOnce(&ImeSetCompositionOnMainThread, widget_,
-                                 base::ThreadTaskRunnerHandle::Get(),
-                                 text.IsolatedCopy(), ime_text_spans, range,
-                                 start, end, std::move(callback)));
+                                 base::ThreadTaskRunnerHandle::Get(), text,
+                                 ime_text_spans, range, start, end,
+                                 std::move(callback)));
 }
 
 static void ImeCommitTextOnMainThread(
@@ -120,10 +120,10 @@ void WidgetInputHandlerImpl::ImeCommitText(
     const gfx::Range& range,
     int32_t relative_cursor_position,
     ImeCommitTextCallback callback) {
-  RunOnMainThread(base::BindOnce(
-      &ImeCommitTextOnMainThread, widget_, base::ThreadTaskRunnerHandle::Get(),
-      text.IsolatedCopy(), ime_text_spans, range, relative_cursor_position,
-      std::move(callback)));
+  RunOnMainThread(
+      base::BindOnce(&ImeCommitTextOnMainThread, widget_,
+                     base::ThreadTaskRunnerHandle::Get(), text, ime_text_spans,
+                     range, relative_cursor_position, std::move(callback)));
 }
 
 void WidgetInputHandlerImpl::ImeFinishComposingText(bool keep_selection) {
@@ -197,6 +197,14 @@ void WidgetInputHandlerImpl::GetFrameWidgetInputHandler(
       std::move(frame_receiver));
 }
 
+void WidgetInputHandlerImpl::UpdateBrowserControlsState(
+    cc::BrowserControlsState constraints,
+    cc::BrowserControlsState current,
+    bool animate) {
+  input_handler_manager_->UpdateBrowserControlsState(constraints, current,
+                                                     animate);
+}
+
 void WidgetInputHandlerImpl::RunOnMainThread(base::OnceClosure closure) {
   if (ThreadedCompositingEnabled()) {
     input_event_queue_->QueueClosure(base::BindOnce(
@@ -216,17 +224,7 @@ void WidgetInputHandlerImpl::Release() {
   if (input_processed_ack_)
     std::move(input_processed_ack_).Run();
 
-  if (!ThreadedCompositingEnabled()) {
-    delete this;
-    return;
-  }
-
-  // Close the binding on the compositor thread first before telling the main
-  // thread to delete this object.
-  receiver_.reset();
-  input_event_queue_->QueueClosure(base::BindOnce(
-      [](const WidgetInputHandlerImpl* handler) { delete handler; },
-      base::Unretained(this)));
+  delete this;
 }
 
 }  // namespace blink

@@ -63,90 +63,86 @@ static const int32_t csa_table[8][4] = {
 #if CONFIG_MP1_DECODER
 const FFCodec ff_mp1_decoder = {
     .p.name         = "mp1",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("MP1 (MPEG audio layer 1)"),
+    CODEC_LONG_NAME("MP1 (MPEG audio layer 1)"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_MP1,
     .priv_data_size = sizeof(MPADecodeContext),
     .init           = decode_init,
-    .decode         = decode_frame,
+    FF_CODEC_DECODE_CB(decode_frame),
     .p.capabilities = AV_CODEC_CAP_CHANNEL_CONF |
                       AV_CODEC_CAP_DR1,
     .flush          = flush,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16P,
                                                       AV_SAMPLE_FMT_S16,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };
 #endif
 #if CONFIG_MP2_DECODER
 const FFCodec ff_mp2_decoder = {
     .p.name         = "mp2",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("MP2 (MPEG audio layer 2)"),
+    CODEC_LONG_NAME("MP2 (MPEG audio layer 2)"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_MP2,
     .priv_data_size = sizeof(MPADecodeContext),
     .init           = decode_init,
-    .decode         = decode_frame,
+    FF_CODEC_DECODE_CB(decode_frame),
     .p.capabilities = AV_CODEC_CAP_CHANNEL_CONF |
                       AV_CODEC_CAP_DR1,
     .flush          = flush,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16P,
                                                       AV_SAMPLE_FMT_S16,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };
 #endif
 #if CONFIG_MP3_DECODER
 const FFCodec ff_mp3_decoder = {
     .p.name         = "mp3",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("MP3 (MPEG audio layer 3)"),
+    CODEC_LONG_NAME("MP3 (MPEG audio layer 3)"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_MP3,
     .priv_data_size = sizeof(MPADecodeContext),
     .init           = decode_init,
-    .decode         = decode_frame,
+    FF_CODEC_DECODE_CB(decode_frame),
     .p.capabilities = AV_CODEC_CAP_CHANNEL_CONF |
                       AV_CODEC_CAP_DR1,
     .flush          = flush,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16P,
                                                       AV_SAMPLE_FMT_S16,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };
 #endif
 #if CONFIG_MP3ADU_DECODER
 const FFCodec ff_mp3adu_decoder = {
     .p.name         = "mp3adu",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("ADU (Application Data Unit) MP3 (MPEG audio layer 3)"),
+    CODEC_LONG_NAME("ADU (Application Data Unit) MP3 (MPEG audio layer 3)"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_MP3ADU,
     .priv_data_size = sizeof(MPADecodeContext),
     .init           = decode_init,
-    .decode         = decode_frame_adu,
+    FF_CODEC_DECODE_CB(decode_frame_adu),
     .p.capabilities = AV_CODEC_CAP_CHANNEL_CONF |
                       AV_CODEC_CAP_DR1,
     .flush          = flush,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16P,
                                                       AV_SAMPLE_FMT_S16,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };
 #endif
 #if CONFIG_MP3ON4_DECODER
 const FFCodec ff_mp3on4_decoder = {
     .p.name         = "mp3on4",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("MP3onMP4"),
+    CODEC_LONG_NAME("MP3onMP4"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_MP3ON4,
     .priv_data_size = sizeof(MP3On4DecodeContext),
     .init           = decode_init_mp3on4,
     .close          = decode_close_mp3on4,
-    .decode         = decode_frame_mp3on4,
+    FF_CODEC_DECODE_CB(decode_frame_mp3on4),
     .p.capabilities = AV_CODEC_CAP_CHANNEL_CONF |
                       AV_CODEC_CAP_DR1,
     .flush          = flush_mp3on4,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16P,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };
 #endif

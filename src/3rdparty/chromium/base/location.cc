@@ -1,27 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/location.h"
 
-#include "build/build_config.h"
-
-// location.h is a widely included header and its size can significantly impact
-// build time. Try not to raise this limit unless absolutely necessary. See
-// https://chromium.googlesource.com/chromium/src/+/HEAD/docs/wmax_tokens.md
-#ifndef NACL_TC_REV
-#pragma clang max_tokens_here 240000
-#endif
-
-#if defined(COMPILER_MSVC)
-#include <intrin.h>
-#endif
-
 #include "base/compiler_specific.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/base_tracing.h"
-#include "build/build_config.h"
+
+#if defined(COMPILER_MSVC)
+#include <intrin.h>
+#endif
 
 namespace base {
 
@@ -41,7 +31,11 @@ constexpr size_t StrLen(const char* str) {
 constexpr size_t StrippedFilePathPrefixLength() {
   constexpr char path[] = __FILE__;
   // Only keep the file path starting from the src directory.
+#if defined(__clang__) && defined(_MSC_VER)
+  constexpr char stripped[] = "base\\location.cc";
+#else
   constexpr char stripped[] = "base/location.cc";
+#endif
   constexpr size_t path_len = StrLen(path);
   constexpr size_t stripped_len = StrLen(stripped);
   static_assert(path_len >= stripped_len,
@@ -69,8 +63,13 @@ constexpr bool StrEndsWith(const char* name,
   return true;
 }
 
+#if defined(__clang__) && defined(_MSC_VER)
+static_assert(StrEndsWith(__FILE__, kStrippedPrefixLength, "base\\location.cc"),
+              "The file name does not match the expected prefix format.");
+#else
 static_assert(StrEndsWith(__FILE__, kStrippedPrefixLength, "base/location.cc"),
               "The file name does not match the expected prefix format.");
+#endif
 
 }  // namespace
 

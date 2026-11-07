@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -147,16 +147,27 @@ bool PlatformSensor::UpdateSharedBuffer(const SensorReading& reading,
     last_raw_reading_ = reading;
   }
 
-  ReadingBuffer* buffer = reading_buffer_;
-  auto& seqlock = buffer->seqlock.value();
-
   // Round the reading to guard user privacy. See https://crbug.com/1018180.
   SensorReading rounded_reading = reading;
   RoundSensorReading(&rounded_reading, type_);
 
-  seqlock.WriteBegin();
-  buffer->reading = rounded_reading;
-  seqlock.WriteEnd();
+  {
+    base::AutoLock auto_lock(lock_);
+    // Report new values only if rounded value is different compared to
+    // previous value.
+    if (GetReportingMode() == mojom::ReportingMode::ON_CHANGE &&
+        do_significance_check && last_rounded_reading_.has_value() &&
+        base::ranges::equal(rounded_reading.raw.values,
+                            last_rounded_reading_->raw.values)) {
+      return false;
+    }
+    // Save rounded value for next comparison.
+    last_rounded_reading_ = rounded_reading;
+  }
+  reading_buffer_->seqlock.value().WriteBegin();
+  device::OneWriterSeqLock::AtomicWriterMemcpy(
+      &reading_buffer_->reading, &rounded_reading, sizeof(SensorReading));
+  reading_buffer_->seqlock.value().WriteEnd();
   return true;
 }
 

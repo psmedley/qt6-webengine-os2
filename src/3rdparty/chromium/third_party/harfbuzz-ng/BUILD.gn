@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -30,7 +30,7 @@ if (use_system_harfbuzz) {
   }
 
   config("harfbuzz_warnings") {
-    if (is_win) {
+    if (is_win && !is_mingw) {
       # Result of 32-bit shift implicitly converted to 64 bits.
       cflags = [ "/wd4334" ]
     }
@@ -43,6 +43,7 @@ if (use_system_harfbuzz) {
       "src/src/hb-blob.h",
       "src/src/hb-buffer.h",
       "src/src/hb-common.h",
+      "src/src/hb-cplusplus.hh",
       "src/src/hb-deprecated.h",
       "src/src/hb-face.h",
       "src/src/hb-font.h",
@@ -65,6 +66,14 @@ if (use_system_harfbuzz) {
     ]
 
     sources = [
+      "src/src/graph/classdef-graph.hh",
+      "src/src/graph/coverage-graph.hh",
+      "src/src/graph/gsubgpos-context.cc",
+      "src/src/graph/gsubgpos-context.hh",
+      "src/src/graph/gsubgpos-graph.hh",
+      "src/src/graph/markbasepos-graph.hh",
+      "src/src/graph/pairpos-graph.hh",
+      "src/src/graph/split-helpers.hh",
       "src/src/hb-aat-layout-ankr-table.hh",
       "src/src/hb-aat-layout-bsln-table.hh",
       "src/src/hb-aat-layout-common.hh",
@@ -104,6 +113,7 @@ if (use_system_harfbuzz) {
       "src/src/hb-cff2-interp-cs.hh",
       "src/src/hb-common.cc",
       "src/src/hb-config.hh",
+      "src/src/hb-cplusplus.hh",
       "src/src/hb-debug.hh",
       "src/src/hb-dispatch.hh",
       "src/src/hb-draw.cc",
@@ -187,39 +197,39 @@ if (use_system_harfbuzz) {
       "src/src/hb-ot-post-macroman.hh",
       "src/src/hb-ot-post-table-v2subset.hh",
       "src/src/hb-ot-post-table.hh",
-      "src/src/hb-ot-shape-complex-arabic-fallback.hh",
-      "src/src/hb-ot-shape-complex-arabic-joining-list.hh",
-      "src/src/hb-ot-shape-complex-arabic-table.hh",
-      "src/src/hb-ot-shape-complex-arabic.cc",
-      "src/src/hb-ot-shape-complex-arabic.hh",
-      "src/src/hb-ot-shape-complex-default.cc",
-      "src/src/hb-ot-shape-complex-hangul.cc",
-      "src/src/hb-ot-shape-complex-hebrew.cc",
-      "src/src/hb-ot-shape-complex-indic-machine.hh",
-      "src/src/hb-ot-shape-complex-indic-table.cc",
-      "src/src/hb-ot-shape-complex-indic.cc",
-      "src/src/hb-ot-shape-complex-indic.hh",
-      "src/src/hb-ot-shape-complex-khmer-machine.hh",
-      "src/src/hb-ot-shape-complex-khmer.cc",
-      "src/src/hb-ot-shape-complex-khmer.hh",
-      "src/src/hb-ot-shape-complex-myanmar-machine.hh",
-      "src/src/hb-ot-shape-complex-myanmar.cc",
-      "src/src/hb-ot-shape-complex-myanmar.hh",
-      "src/src/hb-ot-shape-complex-syllabic.cc",
-      "src/src/hb-ot-shape-complex-syllabic.hh",
-      "src/src/hb-ot-shape-complex-thai.cc",
-      "src/src/hb-ot-shape-complex-use-machine.hh",
-      "src/src/hb-ot-shape-complex-use-table.hh",
-      "src/src/hb-ot-shape-complex-use.cc",
-      "src/src/hb-ot-shape-complex-vowel-constraints.cc",
-      "src/src/hb-ot-shape-complex-vowel-constraints.hh",
-      "src/src/hb-ot-shape-complex.hh",
       "src/src/hb-ot-shape-fallback.cc",
       "src/src/hb-ot-shape-fallback.hh",
       "src/src/hb-ot-shape-normalize.cc",
       "src/src/hb-ot-shape-normalize.hh",
       "src/src/hb-ot-shape.cc",
       "src/src/hb-ot-shape.hh",
+      "src/src/hb-ot-shaper-arabic-fallback.hh",
+      "src/src/hb-ot-shaper-arabic-joining-list.hh",
+      "src/src/hb-ot-shaper-arabic-pua.hh",
+      "src/src/hb-ot-shaper-arabic-table.hh",
+      "src/src/hb-ot-shaper-arabic-win1256.hh",
+      "src/src/hb-ot-shaper-arabic.cc",
+      "src/src/hb-ot-shaper-arabic.hh",
+      "src/src/hb-ot-shaper-default.cc",
+      "src/src/hb-ot-shaper-hangul.cc",
+      "src/src/hb-ot-shaper-hebrew.cc",
+      "src/src/hb-ot-shaper-indic-machine.hh",
+      "src/src/hb-ot-shaper-indic-table.cc",
+      "src/src/hb-ot-shaper-indic.cc",
+      "src/src/hb-ot-shaper-indic.hh",
+      "src/src/hb-ot-shaper-khmer-machine.hh",
+      "src/src/hb-ot-shaper-khmer.cc",
+      "src/src/hb-ot-shaper-myanmar-machine.hh",
+      "src/src/hb-ot-shaper-myanmar.cc",
+      "src/src/hb-ot-shaper-syllabic.cc",
+      "src/src/hb-ot-shaper-syllabic.hh",
+      "src/src/hb-ot-shaper-thai.cc",
+      "src/src/hb-ot-shaper-use-machine.hh",
+      "src/src/hb-ot-shaper-use-table.hh",
+      "src/src/hb-ot-shaper-use.cc",
+      "src/src/hb-ot-shaper-vowel-constraints.cc",
+      "src/src/hb-ot-shaper-vowel-constraints.hh",
+      "src/src/hb-ot-shaper.hh",
       "src/src/hb-ot-stat-table.hh",
       "src/src/hb-ot-tag-table.hh",
       "src/src/hb-ot-tag.cc",
@@ -287,7 +297,6 @@ if (use_system_harfbuzz) {
       "src/src/hb-gobject.h",
       "src/src/hb-graphite2.cc",
       "src/src/hb-graphite2.h",
-      "src/src/hb-ot-shape-complex-arabic-win1256.hh",
       "src/src/hb-style.cc",
       "src/src/hb-style.h",
       "src/src/hb-uniscribe.cc",
@@ -323,9 +332,6 @@ if (use_system_harfbuzz) {
       # TODO(https://crbug.com/949962): Remove once this is fixed upstream.
       "U_DISABLE_VERSION_SUFFIX=0",
 
-      # No experimental font format extensions yet.
-      "HB_NO_BORING_EXPANSION",
-
       # Buffer verification not used in production build.
       "HB_NO_BUFFER_VERIFY",
 
@@ -348,9 +354,7 @@ if (use_system_harfbuzz) {
       defines += [ "HAVE_PTHREAD" ]
     }
 
-    # TODO(https://crbug.com/1316699): Re-enable CFF subsetting on Android when
-    # the cause for this issue has been identified.
-    if (enable_paint_preview && !is_android) {
+    if (enable_paint_preview) {
       # Paint Previews make use of CFF subsetting. However, enabling this is
       # expensive for binary size so only compile it when Paint Previews are
       # compiled.
@@ -410,15 +414,9 @@ if (use_system_harfbuzz) {
   }
 }
 
-source_set("hb_scoped_util") {
-  sources = [ "utils/hb_scoped.h" ]
-  deps = [ "//third_party:freetype_harfbuzz" ]
-}
-
 fuzzer_test("hb_shape_fuzzer") {
   sources = [ "fuzz/hb_shape_fuzzer.cc" ]
   deps = [
-    ":hb_scoped_util",
     "//base",
     "//third_party:freetype_harfbuzz",
   ]
@@ -428,7 +426,6 @@ fuzzer_test("hb_shape_fuzzer") {
 fuzzer_test("hb_subset_fuzzer") {
   sources = [ "fuzz/hb_subset_fuzzer.cc" ]
   deps = [
-    ":hb_scoped_util",
     "//base",
     "//third_party:freetype_harfbuzz",
   ]

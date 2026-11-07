@@ -27,7 +27,7 @@
 #include "get_bits.h"
 #include "bswapdsp.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 
 #define MAX_HUFF_CODES 16
 
@@ -278,9 +278,8 @@ static void mp_decode_frame_helper(MotionPixelsContext *mp, GetBitContext *gb)
             mp_decode_line(mp, gb, y);
 }
 
-static int mp_decode_frame(AVCodecContext *avctx,
-                                 void *data, int *got_frame,
-                                 AVPacket *avpkt)
+static int mp_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
+                           int *got_frame, AVPacket *avpkt)
 {
     const uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
@@ -340,7 +339,7 @@ static int mp_decode_frame(AVCodecContext *avctx,
     ff_free_vlc(&mp->vlc);
 
 end:
-    if ((ret = av_frame_ref(data, mp->frame)) < 0)
+    if ((ret = av_frame_ref(rframe, mp->frame)) < 0)
         return ret;
     *got_frame       = 1;
     return buf_size;
@@ -348,13 +347,13 @@ end:
 
 const FFCodec ff_motionpixels_decoder = {
     .p.name         = "motionpixels",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Motion Pixels video"),
+    CODEC_LONG_NAME("Motion Pixels video"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_MOTIONPIXELS,
     .priv_data_size = sizeof(MotionPixelsContext),
     .init           = mp_decode_init,
     .close          = mp_decode_end,
-    .decode         = mp_decode_frame,
+    FF_CODEC_DECODE_CB(mp_decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP | FF_CODEC_CAP_INIT_THREADSAFE,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

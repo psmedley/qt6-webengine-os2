@@ -14,6 +14,7 @@
 #include "src/core/SkScalerCache.h"
 #include "src/core/SkScalerContext.h"
 #include "src/core/SkUtils.h"
+#include "src/text/GlyphRun.h"
 #include <climits>
 
 // disable warning : local variable used without having been initialized
@@ -39,8 +40,8 @@ void SkDraw::paintMasks(SkDrawableGlyphBuffer* accepted, const SkPaint& paint) c
 
     // The size used for a typical blitter.
     SkSTArenaAlloc<3308> alloc;
-    SkBlitter* blitter =
-            SkBlitter::Choose(fDst, *fMatrixProvider, paint, &alloc, false, fRC->clipShader());
+    SkBlitter* blitter = SkBlitter::Choose(fDst, *fMatrixProvider, paint, &alloc, false,
+                                           fRC->clipShader(), SkSurfacePropsCopyOrDefault(fProps));
 
     SkAAClipBlitterWrapper wrapper{*fRC, blitter};
     blitter = wrapper.getBlitter();
@@ -106,8 +107,8 @@ void SkDraw::paintMasks(SkDrawableGlyphBuffer* accepted, const SkPaint& paint) c
 }
 
 void SkDraw::drawGlyphRunList(SkCanvas* canvas,
-                              SkGlyphRunListPainter* glyphPainter,
-                              const SkGlyphRunList& glyphRunList,
+                              SkGlyphRunListPainterCPU* glyphPainter,
+                              const sktext::GlyphRunList& glyphRunList,
                               const SkPaint& paint) const {
 
     SkDEBUGCODE(this->validate();)

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,11 +33,6 @@ class MEDIA_EXPORT MediaCodecUtil {
 
   // Returns true if MediaCodec supports CBCS Encryption.
   static bool PlatformSupportsCbcsEncryption(int sdk);
-
-#if BUILDFLAG(ENABLE_PLATFORM_DOLBY_VISION)
-  // Indicates if Dolby Vision decoder is available on this device.
-  static bool IsDolbyVisionDecoderAvailable();
-#endif
 
   // Indicates if the vp8 decoder or encoder is available on this device.
   static bool IsVp8DecoderAvailable();
@@ -85,10 +80,9 @@ class MEDIA_EXPORT MediaCodecUtil {
 
   // Indicates if the h264 encoder is available on this device.
   //
-  // WARNING: If |use_codec_list| is true, this can't be used from the renderer
-  // process since it attempts to access MediaCodecList (which requires
-  // permissions).
-  static bool IsH264EncoderAvailable(bool use_codec_list = true);
+  // This can't be used from the renderer process since it attempts to
+  // access MediaCodecList (which requires permissions).
+  static bool IsH264EncoderAvailable();
 
   // Returns a vector of supported codecs profiles and levels.
   //

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -168,6 +168,41 @@ TEST_P(NGInlineCursorTest, GetLayoutBlockFlowWithScopedCursor) {
   ASSERT_TRUE(line.Current().IsLineBox()) << line;
   NGInlineCursor cursor = line.CursorForDescendants();
   EXPECT_EQ(line.GetLayoutBlockFlow(), cursor.GetLayoutBlockFlow());
+}
+
+TEST_P(NGInlineCursorTest, Parent) {
+  NGInlineCursor cursor = SetupCursor(R"HTML(
+    <style>
+    span { background: yellow; } /* Ensure not culled. */
+    </style>
+    <body>
+      <div id="root">
+        text1
+        <span id="span1">
+          span1
+          <span></span>
+          <span id="span2">
+            span2
+            <span style="display: inline-block"></span>
+            <span id="span3">
+              span3
+            </span>
+          </span>
+        </span>
+      </div>
+    <body>
+)HTML");
+  cursor.MoveTo(*GetLayoutObjectByElementId("span3"));
+  ASSERT_TRUE(cursor);
+  Vector<AtomicString> ids;
+  for (;;) {
+    cursor.MoveToParent();
+    if (!cursor)
+      break;
+    const auto* element = To<Element>(cursor.Current()->GetNode());
+    ids.push_back(element->GetIdAttribute());
+  }
+  EXPECT_THAT(ids, testing::ElementsAre("span2", "span1", "root"));
 }
 
 TEST_P(NGInlineCursorTest, ContainingLine) {
@@ -1184,6 +1219,30 @@ TEST_P(NGInlineCursorTest, CursorForDescendants) {
   EXPECT_EQ(ToDebugString(cursor), "#span2");
   EXPECT_THAT(ToDebugStringList(cursor.CursorForDescendants()),
               ElementsAre("text3"));
+}
+
+TEST_P(NGInlineCursorTest, MoveToVisualFirstOrLast) {
+  SetBodyInnerHTML(R"HTML(
+    <div id=root dir="rtl">
+      here is
+      <span id="span1">some <bdo dir="rtl">MIXED</bdo></span>
+      <bdo dir="rtl">TEXT</bdo>
+    </div>
+  )HTML");
+
+  //          _here_is_some_MIXED_TEXT_
+  // visual:  _TXET_DEXIM_here_is_some_
+  // in span:       ______        ____
+
+  NGInlineCursor cursor1;
+  cursor1.MoveToIncludingCulledInline(*GetLayoutObjectByElementId("span1"));
+  cursor1.MoveToVisualFirstForSameLayoutObject();
+  EXPECT_EQ("NGPhysicalTextFragment 'MIXED'", cursor1.Current()->ToString());
+
+  NGInlineCursor cursor2;
+  cursor2.MoveToIncludingCulledInline(*GetLayoutObjectByElementId("span1"));
+  cursor2.MoveToVisualLastForSameLayoutObject();
+  EXPECT_EQ("NGPhysicalTextFragment 'some'", cursor2.Current()->ToString());
 }
 
 class NGInlineCursorBlockFragmentationTest

@@ -65,7 +65,7 @@
 
 #if !UCONFIG_NO_SERVICE
 static icu::ICULocaleService* gService = NULL;
-static icu::UInitOnce gServiceInitOnce = U_INITONCE_INITIALIZER;
+static icu::UInitOnce gServiceInitOnce {};
 
 // INTERNAL - for cleanup
 U_CDECL_BEGIN
@@ -210,15 +210,18 @@ SharedCalendar::~SharedCalendar() {
 template<> U_I18N_API
 const SharedCalendar *LocaleCacheKey<SharedCalendar>::createObject(
         const void * /*unusedCreationContext*/, UErrorCode &status) const {
+    if (U_FAILURE(status)) {
+       return nullptr;
+    }
     Calendar *calendar = Calendar::makeInstance(fLoc, status);
     if (U_FAILURE(status)) {
-        return NULL;
+        return nullptr;
     }
     SharedCalendar *shared = new SharedCalendar(calendar);
-    if (shared == NULL) {
+    if (shared == nullptr) {
         delete calendar;
         status = U_MEMORY_ALLOCATION_ERROR;
-        return NULL;
+        return nullptr;
     }
     shared->addRef();
     return shared;
@@ -440,6 +443,9 @@ protected:
     }
 
     virtual UObject* create(const ICUServiceKey& key, const ICUService* /*service*/, UErrorCode& status) const override {
+        if (U_FAILURE(status)) {
+           return nullptr;
+        }
 #ifdef U_DEBUG_CALSVC
         if(dynamic_cast<const LocaleKey*>(&key) == NULL) {
             fprintf(stderr, "::create - not a LocaleKey!\n");
@@ -486,13 +492,16 @@ public:
     virtual ~DefaultCalendarFactory();
 protected:
     virtual UObject* create(const ICUServiceKey& key, const ICUService* /*service*/, UErrorCode& status) const override {
+        if (U_FAILURE(status)) {
+           return nullptr;
+        }
 
         LocaleKey &lkey = (LocaleKey&)key;
         Locale loc;
         lkey.currentLocale(loc);
 
         UnicodeString *ret = new UnicodeString();
-        if (ret == NULL) {
+        if (ret == nullptr) {
             status = U_MEMORY_ALLOCATION_ERROR;
         } else {
             ret->append((UChar)0x40); // '@' is a variant character
@@ -531,6 +540,9 @@ public:
     }
 
     virtual UObject* handleDefault(const ICUServiceKey& key, UnicodeString* /*actualID*/, UErrorCode& status) const override {
+        if (U_FAILURE(status)) {
+           return nullptr;
+        }
         LocaleKey& lkey = (LocaleKey&)key;
         //int32_t kind = lkey.kind();
 
@@ -577,6 +589,9 @@ initCalendarService(UErrorCode &status)
 #ifdef U_DEBUG_CALSVC
         fprintf(stderr, "Spinning up Calendar Service\n");
 #endif
+    if (U_FAILURE(status)) {
+       return;
+    }
     ucln_i18n_registerCleanup(UCLN_I18N_CALENDAR, calendar_cleanup);
     gService = new CalendarService();
     if (gService == NULL) {
@@ -639,8 +654,8 @@ static const int32_t kCalendarLimits[UCAL_FIELD_COUNT][4] = {
     {           0,            0,            59,            59  }, // MINUTE
     {           0,            0,            59,            59  }, // SECOND
     {           0,            0,           999,           999  }, // MILLISECOND
-    {-12*kOneHour, -12*kOneHour,   12*kOneHour,   15*kOneHour  }, // ZONE_OFFSET
-    {           0,            0,    1*kOneHour,    1*kOneHour  }, // DST_OFFSET
+    {-16*kOneHour, -16*kOneHour,   12*kOneHour,   30*kOneHour  }, // ZONE_OFFSET
+    { -1*kOneHour,  -1*kOneHour,    2*kOneHour,    2*kOneHour  }, // DST_OFFSET
     {/*N/A*/-1,       /*N/A*/-1,     /*N/A*/-1,       /*N/A*/-1}, // YEAR_WOY
     {           1,            1,             7,             7  }, // DOW_LOCAL
     {/*N/A*/-1,       /*N/A*/-1,     /*N/A*/-1,       /*N/A*/-1}, // EXTENDED_YEAR
@@ -1435,6 +1450,9 @@ int32_t Calendar::newestStamp(UCalendarDateFields first, UCalendarDateFields las
 void
 Calendar::complete(UErrorCode& status)
 {
+    if (U_FAILURE(status)) {
+       return;
+    }
     if (!fIsTimeSet) {
         updateTime(status);
         /* Test for buffer overflows */
@@ -1486,6 +1504,9 @@ Calendar::complete(UErrorCode& status)
 * @stable ICU 2.0
 */
 void Calendar::pinField(UCalendarDateFields field, UErrorCode& status) {
+    if (U_FAILURE(status)) {
+       return;
+    }
     int32_t max = getActualMaximum(field, status);
     int32_t min = getActualMinimum(field, status);
 
@@ -1499,13 +1520,16 @@ void Calendar::pinField(UCalendarDateFields field, UErrorCode& status) {
 
 void Calendar::computeFields(UErrorCode &ec)
 {
-  if (U_FAILURE(ec)) {
+    if (U_FAILURE(ec)) {
         return;
     }
     // Compute local wall millis
     double localMillis = internalGetTime();
     int32_t rawOffset, dstOffset;
     getTimeZone().getOffset(localMillis, FALSE, rawOffset, dstOffset, ec);
+    if (U_FAILURE(ec)) {
+        return;
+    }
     localMillis += (rawOffset + dstOffset);
 
     // Mark fields as set.  Do this before calling handleComputeFields().
@@ -1537,7 +1561,8 @@ void Calendar::computeFields(UErrorCode &ec)
     // JULIAN_DAY field and also removes some inelegant code. - Liu
     // 11/6/00
 
-    int32_t days =  (int32_t)ClockMath::floorDivide(localMillis, (double)kOneDay);
+    int32_t millisInDay;
+    int32_t days = ClockMath::floorDivide(localMillis, kOneDay, &millisInDay);
 
     internalSet(UCAL_JULIAN_DAY,days + kEpochStartAsJulianDay);
 
@@ -1561,19 +1586,50 @@ void Calendar::computeFields(UErrorCode &ec)
     // Compute time-related fields.  These are independent of the date and
     // of the subclass algorithm.  They depend only on the local zone
     // wall milliseconds in day.
-    int32_t millisInDay =  (int32_t) (localMillis - (days * kOneDay));
+    if (U_FAILURE(ec)) {
+        return;
+    }
+
     fFields[UCAL_MILLISECONDS_IN_DAY] = millisInDay;
+    U_ASSERT(getMinimum(UCAL_MILLISECONDS_IN_DAY) <=
+             fFields[UCAL_MILLISECONDS_IN_DAY]);
+    U_ASSERT(fFields[UCAL_MILLISECONDS_IN_DAY] <=
+             getMaximum(UCAL_MILLISECONDS_IN_DAY));
+
     fFields[UCAL_MILLISECOND] = millisInDay % 1000;
+    U_ASSERT(getMinimum(UCAL_MILLISECOND) <= fFields[UCAL_MILLISECOND]);
+    U_ASSERT(fFields[UCAL_MILLISECOND] <= getMaximum(UCAL_MILLISECOND));
+
     millisInDay /= 1000;
     fFields[UCAL_SECOND] = millisInDay % 60;
+    U_ASSERT(getMinimum(UCAL_SECOND) <= fFields[UCAL_SECOND]);
+    U_ASSERT(fFields[UCAL_SECOND] <= getMaximum(UCAL_SECOND));
+
     millisInDay /= 60;
     fFields[UCAL_MINUTE] = millisInDay % 60;
+    U_ASSERT(getMinimum(UCAL_MINUTE) <= fFields[UCAL_MINUTE]);
+    U_ASSERT(fFields[UCAL_MINUTE] <= getMaximum(UCAL_MINUTE));
+
     millisInDay /= 60;
     fFields[UCAL_HOUR_OF_DAY] = millisInDay;
+    U_ASSERT(getMinimum(UCAL_HOUR_OF_DAY) <= fFields[UCAL_HOUR_OF_DAY]);
+    U_ASSERT(fFields[UCAL_HOUR_OF_DAY] <= getMaximum(UCAL_HOUR_OF_DAY));
+
     fFields[UCAL_AM_PM] = millisInDay / 12; // Assume AM == 0
+    U_ASSERT(getMinimum(UCAL_AM_PM) <= fFields[UCAL_AM_PM]);
+    U_ASSERT(fFields[UCAL_AM_PM] <= getMaximum(UCAL_AM_PM));
+
     fFields[UCAL_HOUR] = millisInDay % 12;
+    U_ASSERT(getMinimum(UCAL_HOUR) <= fFields[UCAL_HOUR]);
+    U_ASSERT(fFields[UCAL_HOUR] <= getMaximum(UCAL_HOUR));
+
     fFields[UCAL_ZONE_OFFSET] = rawOffset;
+    U_ASSERT(getMinimum(UCAL_ZONE_OFFSET) <= fFields[UCAL_ZONE_OFFSET]);
+    U_ASSERT(fFields[UCAL_ZONE_OFFSET] <= getMaximum(UCAL_ZONE_OFFSET));
+
     fFields[UCAL_DST_OFFSET] = dstOffset;
+    U_ASSERT(getMinimum(UCAL_DST_OFFSET) <= fFields[UCAL_DST_OFFSET]);
+    U_ASSERT(fFields[UCAL_DST_OFFSET] <= getMaximum(UCAL_DST_OFFSET));
 }
 
 uint8_t Calendar::julianDayToDayOfWeek(double julian)
@@ -1595,6 +1651,9 @@ uint8_t Calendar::julianDayToDayOfWeek(double julian)
 void Calendar::computeGregorianAndDOWFields(int32_t julianDay, UErrorCode &ec)
 {
     computeGregorianFields(julianDay, ec);
+    if (U_FAILURE(ec)) {
+        return;
+    }
 
     // Compute day of week: JD 0 = Monday
     int32_t dow = julianDayToDayOfWeek(julianDay);
@@ -1616,7 +1675,10 @@ void Calendar::computeGregorianAndDOWFields(int32_t julianDay, UErrorCode &ec)
 * subclasses that are Gregorian derivatives.  Subclasses may call this
 * method to perform a Gregorian calendar millis->fields computation.
 */
-void Calendar::computeGregorianFields(int32_t julianDay, UErrorCode & /* ec */) {
+void Calendar::computeGregorianFields(int32_t julianDay, UErrorCode& ec) {
+    if (U_FAILURE(ec)) {
+        return;
+    }
     int32_t gregorianDayOfWeekUnused;
     Grego::dayToFields(julianDay - kEpochStartAsJulianDay, fGregorianYear, fGregorianMonth, fGregorianDayOfMonth, gregorianDayOfWeekUnused, fGregorianDayOfYear);
 }
@@ -1699,11 +1761,20 @@ void Calendar::computeWeekFields(UErrorCode &ec) {
     }
     fFields[UCAL_WEEK_OF_YEAR] = woy;
     fFields[UCAL_YEAR_WOY] = yearOfWeekOfYear;
+    // min/max of years are not constrains for caller, so not assert here.
     // WEEK_OF_YEAR end
 
     int32_t dayOfMonth = fFields[UCAL_DAY_OF_MONTH];
     fFields[UCAL_WEEK_OF_MONTH] = weekNumber(dayOfMonth, dayOfWeek);
+    U_ASSERT(getMinimum(UCAL_WEEK_OF_MONTH) <= fFields[UCAL_WEEK_OF_MONTH]);
+    U_ASSERT(fFields[UCAL_WEEK_OF_MONTH] <= getMaximum(UCAL_WEEK_OF_MONTH));
+
     fFields[UCAL_DAY_OF_WEEK_IN_MONTH] = (dayOfMonth-1) / 7 + 1;
+    U_ASSERT(getMinimum(UCAL_DAY_OF_WEEK_IN_MONTH) <=
+             fFields[UCAL_DAY_OF_WEEK_IN_MONTH]);
+    U_ASSERT(fFields[UCAL_DAY_OF_WEEK_IN_MONTH] <=
+             getMaximum(UCAL_DAY_OF_WEEK_IN_MONTH));
+
 #if defined (U_DEBUG_CAL)
     if(fFields[UCAL_DAY_OF_WEEK_IN_MONTH]==0) fprintf(stderr, "%s:%d: DOWIM %d on %g\n",
         __FILE__, __LINE__,fFields[UCAL_DAY_OF_WEEK_IN_MONTH], fTime);
@@ -1732,8 +1803,11 @@ int32_t Calendar::weekNumber(int32_t desiredDay, int32_t dayOfPeriod, int32_t da
     return weekNo;
 }
 
-void Calendar::handleComputeFields(int32_t /* julianDay */, UErrorCode &/* status */)
+void Calendar::handleComputeFields(int32_t /* julianDay */, UErrorCode& status)
 {
+    if (U_FAILURE(status)) {
+        return;
+    }
     internalSet(UCAL_MONTH, getGregorianMonth());
     internalSet(UCAL_DAY_OF_MONTH, getGregorianDayOfMonth());
     internalSet(UCAL_DAY_OF_YEAR, getGregorianDayOfYear());
@@ -2103,6 +2177,9 @@ void Calendar::add(EDateFields field, int32_t amount, UErrorCode& status)
 // -------------------------------------
 void Calendar::add(UCalendarDateFields field, int32_t amount, UErrorCode& status)
 {
+    if (U_FAILURE(status)) {
+       return;
+    }
     if (amount == 0) {
         return;   // Do nothing!
     }
@@ -2745,6 +2822,9 @@ int32_t Calendar::getLimit(UCalendarDateFields field, ELimitType limitType) cons
 int32_t
 Calendar::getActualMinimum(UCalendarDateFields field, UErrorCode& status) const
 {
+    if (U_FAILURE(status)) {
+       return 0;
+    }
     int32_t fieldValue = getGreatestMinimum(field);
     int32_t endValue = getMinimum(field);
 
@@ -2799,6 +2879,9 @@ Calendar::getActualMinimum(UCalendarDateFields field, UErrorCode& status) const
 * @see #validateField(int)
 */
 void Calendar::validateFields(UErrorCode &status) {
+    if (U_FAILURE(status)) {
+       return;
+    }
     for (int32_t field = 0; U_SUCCESS(status) && (field < UCAL_FIELD_COUNT); field++) {
         if (fStamp[field] >= kMinimumUserStamp) {
             validateField((UCalendarDateFields)field, status);
@@ -2814,6 +2897,9 @@ void Calendar::validateFields(UErrorCode &status) {
 * @see #validateField(int, int, int)
 */
 void Calendar::validateField(UCalendarDateFields field, UErrorCode &status) {
+    if (U_FAILURE(status)) {
+       return;
+    }
     int32_t y;
     switch (field) {
     case UCAL_DAY_OF_MONTH:
@@ -2850,6 +2936,9 @@ void Calendar::validateField(UCalendarDateFields field, UErrorCode &status) {
 */
 void Calendar::validateField(UCalendarDateFields field, int32_t min, int32_t max, UErrorCode& status)
 {
+    if (U_FAILURE(status)) {
+       return;
+    }
     int32_t value = fFields[field];
     if (value < min || value > max) {
 #if defined (U_DEBUG_CAL)
@@ -2972,6 +3061,9 @@ const UFieldResolutionTable Calendar::kYearPrecedence[] =
 
 
 void Calendar::computeTime(UErrorCode& status) {
+    if (U_FAILURE(status)) {
+       return;
+    }
     if (!isLenient()) {
         validateFields(status);
         if (U_FAILURE(status)) {
@@ -3086,6 +3178,9 @@ void Calendar::computeTime(UErrorCode& status) {
  * Find the previous zone transition near the given time.
  */
 UBool Calendar::getImmediatePreviousZoneTransition(UDate base, UDate *transitionTime, UErrorCode& status) const {
+    if (U_FAILURE(status)) {
+       return FALSE;
+    }
     BasicTimeZone *btz = getBasicTimeZone();
     if (btz) {
         TimeZoneTransition trans;
@@ -3159,6 +3254,9 @@ double Calendar::computeMillisInDay() {
 * @stable ICU 2.0
 */
 int32_t Calendar::computeZoneOffset(double millis, double millisInDay, UErrorCode &ec) {
+    if (U_FAILURE(ec)) {
+       return 0;
+    }
     int32_t rawOffset, dstOffset;
     UDate wall = millis + millisInDay;
     BasicTimeZone* btz = getBasicTimeZone();
@@ -3588,6 +3686,9 @@ int32_t Calendar::handleGetYearLength(int32_t eyear) const  {
 int32_t
 Calendar::getActualMaximum(UCalendarDateFields field, UErrorCode& status) const
 {
+    if (U_FAILURE(status)) {
+       return 0;
+    }
     int32_t result;
     switch (field) {
     case UCAL_DATE:
@@ -3662,6 +3763,9 @@ Calendar::getActualMaximum(UCalendarDateFields field, UErrorCode& status) const
 */
 void Calendar::prepareGetActual(UCalendarDateFields field, UBool isMinimum, UErrorCode &status)
 {
+    if (U_FAILURE(status)) {
+       return;
+    }
     set(UCAL_MILLISECONDS_IN_DAY, 0);
 
     switch (field) {
@@ -3717,6 +3821,9 @@ int32_t Calendar::getActualHelper(UCalendarDateFields field, int32_t startValue,
 #if defined (U_DEBUG_CAL)
     fprintf(stderr, "getActualHelper(%d,%d .. %d, %s)\n", field, startValue, endValue, u_errorName(status));
 #endif
+    if (U_FAILURE(status)) {
+       return 0;
+    }
     if (startValue == endValue) {
         // if we know that the maximum value is always the same, just return it
         return startValue;

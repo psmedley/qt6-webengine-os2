@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -150,7 +150,7 @@ void StoreUpdateData::CopyPredictionModelIntoUpdateData(
     expiry_duration =
         base::Seconds(prediction_model.model_info().valid_duration().seconds());
   } else {
-    expiry_duration = features::StoredFetchedHintsFreshnessDuration();
+    expiry_duration = features::StoredModelsValidDuration();
   }
   expiry_time_ = base::Time::Now() + expiry_duration;
   entry_proto.set_expiry_time_secs(

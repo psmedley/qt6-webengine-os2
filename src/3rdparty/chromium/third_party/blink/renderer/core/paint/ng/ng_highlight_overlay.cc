@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/markers/custom_highlight_marker.h"
 #include "third_party/blink/renderer/core/highlight/highlight_registry.h"
+#include "third_party/blink/renderer/core/layout/layout_text.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_offset_mapping.h"
 #include "third_party/blink/renderer/platform/fonts/ng_text_fragment_paint_info.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -31,6 +32,10 @@ unsigned GetTextContentOffset(const Text& text, unsigned offset) {
       offset_mapping->GetTextContentOffset(position);
   DCHECK(ng_offset.has_value());
   return ng_offset.value();
+}
+
+unsigned ClampOffset(unsigned offset, const NGTextFragmentPaintInfo& fragment) {
+  return std::min(std::max(offset, fragment.from), fragment.to);
 }
 
 }  // namespace
@@ -168,9 +173,9 @@ String HighlightPart::ToString() const {
   result.Append(",");
   result.AppendNumber(to);
   result.Append(")");
-  for (const HighlightLayer& layer : decorations) {
+  for (const HighlightLayer& current_layer : decorations) {
     result.Append("+");
-    result.Append(layer.ToString());
+    result.Append(current_layer.ToString());
   }
   return result.ToString();
 }
@@ -186,7 +191,6 @@ bool HighlightPart::operator!=(const HighlightPart& other) const {
 
 Vector<HighlightLayer> NGHighlightOverlay::ComputeLayers(
     const HighlightRegistry* registry,
-    const NGTextFragmentPaintInfo& originating,
     const LayoutSelectionStatus* selection,
     const DocumentMarkerVector& custom,
     const DocumentMarkerVector& grammar,
@@ -198,17 +202,17 @@ Vector<HighlightLayer> NGHighlightOverlay::ComputeLayers(
   result.emplace_back(HighlightLayerType::kOriginating);
 
   for (const auto& marker : custom) {
-    auto* custom = To<CustomHighlightMarker>(marker.Get());
+    auto* custom_marker = To<CustomHighlightMarker>(marker.Get());
     HighlightLayer layer{HighlightLayerType::kCustom,
-                         custom->GetHighlightName()};
+                         custom_marker->GetHighlightName()};
     if (!result.Contains(layer))
       result.push_back(layer);
   }
-  if (!grammar.IsEmpty())
+  if (!grammar.empty())
     result.emplace_back(HighlightLayerType::kGrammar);
-  if (!spelling.IsEmpty())
+  if (!spelling.empty())
     result.emplace_back(HighlightLayerType::kSpelling);
-  if (!target.IsEmpty())
+  if (!target.empty())
     result.emplace_back(HighlightLayerType::kTargetText);
   if (selection)
     result.emplace_back(HighlightLayerType::kSelection);
@@ -224,6 +228,7 @@ Vector<HighlightLayer> NGHighlightOverlay::ComputeLayers(
 Vector<HighlightEdge> NGHighlightOverlay::ComputeEdges(
     const Node* node,
     const HighlightRegistry* registry,
+    bool is_generated_text_fragment,
     const NGTextFragmentPaintInfo& originating,
     const LayoutSelectionStatus* selection,
     const DocumentMarkerVector& custom,
@@ -233,85 +238,7 @@ Vector<HighlightEdge> NGHighlightOverlay::ComputeEdges(
   DCHECK(RuntimeEnabledFeatures::HighlightOverlayPaintingEnabled());
 
   Vector<HighlightEdge> result{};
-  DCHECK_LT(originating.from, originating.to);
-  result.emplace_back(originating.from,
-                      HighlightLayer{HighlightLayerType::kOriginating},
-                      HighlightEdgeType::kStart);
-  result.emplace_back(originating.to,
-                      HighlightLayer{HighlightLayerType::kOriginating},
-                      HighlightEdgeType::kEnd);
 
-  // |node| might not be a Text node (e.g. <br>), or it might be nullptr (e.g.
-  // ::first-letter). In both cases, we should still try to paint kOriginating
-  // and kSelection if necessary, but we can’t paint marker-based highlights,
-  // because GetTextContentOffset requires a Text node. Markers are defined and
-  // stored in terms of Text nodes anyway, so this check should never fail.
-  const auto* text_node = DynamicTo<Text>(node);
-  if (!text_node) {
-    DCHECK(custom.IsEmpty() && grammar.IsEmpty() && spelling.IsEmpty() &&
-           target.IsEmpty())
-        << "markers can not be painted without a valid Text node";
-  }
-
-  for (const auto& marker : custom) {
-    auto* custom = To<CustomHighlightMarker>(marker.Get());
-    unsigned content_start =
-        GetTextContentOffset(*text_node, marker->StartOffset());
-    unsigned content_end =
-        GetTextContentOffset(*text_node, marker->EndOffset());
-    if (content_start >= content_end)
-      continue;
-    result.emplace_back(
-        content_start,
-        HighlightLayer{HighlightLayerType::kCustom, custom->GetHighlightName()},
-        HighlightEdgeType::kStart);
-    result.emplace_back(
-        content_end,
-        HighlightLayer{HighlightLayerType::kCustom, custom->GetHighlightName()},
-        HighlightEdgeType::kEnd);
-  }
-  for (const auto& marker : grammar) {
-    unsigned content_start =
-        GetTextContentOffset(*text_node, marker->StartOffset());
-    unsigned content_end =
-        GetTextContentOffset(*text_node, marker->EndOffset());
-    if (content_start >= content_end)
-      continue;
-    result.emplace_back(content_start,
-                        HighlightLayer{HighlightLayerType::kGrammar},
-                        HighlightEdgeType::kStart);
-    result.emplace_back(content_end,
-                        HighlightLayer{HighlightLayerType::kGrammar},
-                        HighlightEdgeType::kEnd);
-  }
-  for (const auto& marker : spelling) {
-    unsigned content_start =
-        GetTextContentOffset(*text_node, marker->StartOffset());
-    unsigned content_end =
-        GetTextContentOffset(*text_node, marker->EndOffset());
-    if (content_start >= content_end)
-      continue;
-    result.emplace_back(content_start,
-                        HighlightLayer{HighlightLayerType::kSpelling},
-                        HighlightEdgeType::kStart);
-    result.emplace_back(content_end,
-                        HighlightLayer{HighlightLayerType::kSpelling},
-                        HighlightEdgeType::kEnd);
-  }
-  for (const auto& marker : target) {
-    unsigned content_start =
-        GetTextContentOffset(*text_node, marker->StartOffset());
-    unsigned content_end =
-        GetTextContentOffset(*text_node, marker->EndOffset());
-    if (content_start >= content_end)
-      continue;
-    result.emplace_back(content_start,
-                        HighlightLayer{HighlightLayerType::kTargetText},
-                        HighlightEdgeType::kStart);
-    result.emplace_back(content_end,
-                        HighlightLayer{HighlightLayerType::kTargetText},
-                        HighlightEdgeType::kEnd);
-  }
   if (selection) {
     DCHECK_LT(selection->start, selection->end);
     result.emplace_back(selection->start,
@@ -320,6 +247,110 @@ Vector<HighlightEdge> NGHighlightOverlay::ComputeEdges(
     result.emplace_back(selection->end,
                         HighlightLayer{HighlightLayerType::kSelection},
                         HighlightEdgeType::kEnd);
+  }
+
+  // |node| might not be a Text node (e.g. <br>), or it might be nullptr (e.g.
+  // ::first-letter). In both cases, we should still try to paint kOriginating
+  // and kSelection if necessary, but we can’t paint marker-based highlights,
+  // because GetTextContentOffset requires a Text node. Markers are defined and
+  // stored in terms of Text nodes anyway, so this check should never fail.
+  const auto* text_node = DynamicTo<Text>(node);
+  if (!text_node) {
+    DCHECK(custom.empty() && grammar.empty() && spelling.empty() &&
+           target.empty())
+        << "markers can not be painted without a valid Text node";
+  } else if (is_generated_text_fragment) {
+    // Custom highlights and marker-based highlights are defined in terms of
+    // DOM ranges in a Text node. Generated text either has no Text node or does
+    // not derive its content from the Text node (e.g. ellipsis, soft hyphens).
+    // TODO(crbug.com/17528) handle ::first-letter
+    DCHECK(custom.empty() && grammar.empty() && spelling.empty() &&
+           target.empty())
+        << "no marker can ever apply to fragment items with generated text";
+  } else {
+    // We can save time by skipping marker-based highlights that are outside the
+    // originating fragment (e.g. on a different line), but we can only compare
+    // offsets that are in the same offset space (DOM or canonical text), and
+    // converting each marker to canonical text offsets is the most expensive
+    // step of this function. We can avoid that by converting the originating
+    // fragment back to DOM offsets for comparison.
+    const NGOffsetMapping* mapping =
+        NGOffsetMapping::GetFor(text_node->GetLayoutObject());
+    unsigned last_from =
+        mapping->GetLastPosition(originating.from).OffsetInContainerNode();
+    unsigned first_to =
+        mapping->GetFirstPosition(originating.to).OffsetInContainerNode();
+
+    for (const auto& marker : custom) {
+      if (marker->EndOffset() <= last_from || marker->StartOffset() >= first_to)
+        continue;
+      auto* custom_marker = To<CustomHighlightMarker>(marker.Get());
+      unsigned content_start =
+          GetTextContentOffset(*text_node, marker->StartOffset());
+      unsigned content_end =
+          GetTextContentOffset(*text_node, marker->EndOffset());
+      if (content_start >= content_end)
+        continue;
+      result.emplace_back(content_start,
+                          HighlightLayer{HighlightLayerType::kCustom,
+                                         custom_marker->GetHighlightName()},
+                          HighlightEdgeType::kStart);
+      result.emplace_back(content_end,
+                          HighlightLayer{HighlightLayerType::kCustom,
+                                         custom_marker->GetHighlightName()},
+                          HighlightEdgeType::kEnd);
+    }
+
+    for (const auto& marker : grammar) {
+      if (marker->EndOffset() <= last_from || marker->StartOffset() >= first_to)
+        continue;
+      unsigned content_start =
+          GetTextContentOffset(*text_node, marker->StartOffset());
+      unsigned content_end =
+          GetTextContentOffset(*text_node, marker->EndOffset());
+      if (content_start >= content_end)
+        continue;
+      result.emplace_back(content_start,
+                          HighlightLayer{HighlightLayerType::kGrammar},
+                          HighlightEdgeType::kStart);
+      result.emplace_back(content_end,
+                          HighlightLayer{HighlightLayerType::kGrammar},
+                          HighlightEdgeType::kEnd);
+    }
+
+    for (const auto& marker : spelling) {
+      if (marker->EndOffset() <= last_from || marker->StartOffset() >= first_to)
+        continue;
+      unsigned content_start =
+          GetTextContentOffset(*text_node, marker->StartOffset());
+      unsigned content_end =
+          GetTextContentOffset(*text_node, marker->EndOffset());
+      if (content_start >= content_end)
+        continue;
+      result.emplace_back(content_start,
+                          HighlightLayer{HighlightLayerType::kSpelling},
+                          HighlightEdgeType::kStart);
+      result.emplace_back(content_end,
+                          HighlightLayer{HighlightLayerType::kSpelling},
+                          HighlightEdgeType::kEnd);
+    }
+
+    for (const auto& marker : target) {
+      if (marker->EndOffset() <= last_from || marker->StartOffset() >= first_to)
+        continue;
+      unsigned content_start =
+          GetTextContentOffset(*text_node, marker->StartOffset());
+      unsigned content_end =
+          GetTextContentOffset(*text_node, marker->EndOffset());
+      if (content_start >= content_end)
+        continue;
+      result.emplace_back(content_start,
+                          HighlightLayer{HighlightLayerType::kTargetText},
+                          HighlightEdgeType::kStart);
+      result.emplace_back(content_end,
+                          HighlightLayer{HighlightLayerType::kTargetText},
+                          HighlightEdgeType::kEnd);
+    }
   }
 
   std::sort(result.begin(), result.end(),
@@ -331,24 +362,42 @@ Vector<HighlightEdge> NGHighlightOverlay::ComputeEdges(
 }
 
 Vector<HighlightPart> NGHighlightOverlay::ComputeParts(
+    const NGTextFragmentPaintInfo& originating,
     const Vector<HighlightLayer>& layers,
     const Vector<HighlightEdge>& edges) {
   DCHECK(RuntimeEnabledFeatures::HighlightOverlayPaintingEnabled());
+  const HighlightLayer originating_layer{HighlightLayerType::kOriginating};
   Vector<HighlightPart> result{};
   Vector<bool> active(layers.size());
   absl::optional<unsigned> prev_offset{};
+  if (edges.empty()) {
+    result.push_back(HighlightPart{originating_layer,
+                                   originating.from,
+                                   originating.to,
+                                   {originating_layer}});
+    return result;
+  }
+  if (originating.from < edges.front().offset) {
+    result.push_back(
+        HighlightPart{originating_layer,
+                      originating.from,
+                      ClampOffset(edges.front().offset, originating),
+                      {originating_layer}});
+  }
   for (const HighlightEdge& edge : edges) {
     // If there is actually some text between the previous and current edges...
     if (prev_offset.has_value() && *prev_offset < edge.offset) {
-      // ...and there is at least one active layer over that range...
-      wtf_size_t topmost_active_index = active.ReverseFind(true);
-      if (topmost_active_index != kNotFound) {
-        // ...then enqueue this part of the text to be painted in that layer.
-        HighlightPart part{layers[topmost_active_index], *prev_offset,
-                           edge.offset};
+      // ...and the range overlaps with the fragment being painted...
+      unsigned from = ClampOffset(*prev_offset, originating);
+      unsigned to = ClampOffset(edge.offset, originating);
+      if (from < to) {
+        // ...then find the topmost layer and enqueue a new part to be painted.
+        HighlightPart part{originating_layer, from, to, {originating_layer}};
         for (wtf_size_t i = 0; i < layers.size(); i++) {
-          if (active[i])
+          if (active[i]) {
+            part.layer = layers[i];
             part.decorations.push_back(layers[i]);
+          }
         }
         result.push_back(part);
       }
@@ -356,13 +405,19 @@ Vector<HighlightPart> NGHighlightOverlay::ComputeParts(
     wtf_size_t edge_layer_index = layers.Find(edge.layer);
     DCHECK_NE(edge_layer_index, kNotFound)
         << "edge layer should be one of the given layers";
-    // TODO(crbug.com/1147859) this will crash if there are overlapping ranges
-    // for a given highlight layer (see logic in old ComputeMarkersToPaint)
+    // This algorithm malfunctions if the edges represent overlapping ranges.
     DCHECK(active[edge_layer_index] ? edge.type == HighlightEdgeType::kEnd
                                     : edge.type == HighlightEdgeType::kStart)
         << "edge should be kStart iff the layer is active or else kEnd";
     active[edge_layer_index] = edge.type == HighlightEdgeType::kStart;
     prev_offset.emplace(edge.offset);
+  }
+  if (edges.back().offset < originating.to) {
+    result.push_back(
+        HighlightPart{originating_layer,
+                      ClampOffset(edges.back().offset, originating),
+                      originating.to,
+                      {originating_layer}});
   }
   return result;
 }

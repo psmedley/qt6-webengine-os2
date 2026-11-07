@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@
 #include "components/history/core/browser/browsing_history_service.h"
 #include "components/history/core/test/fake_web_history_service.h"
 #include "components/sync/base/model_type.h"
-#include "components/sync/driver/test_sync_service.h"
+#include "components/sync/test/test_sync_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_web_ui.h"
 #include "net/http/http_status_code.h"
@@ -143,11 +143,11 @@ class BrowsingHistoryHandlerTest : public ChromeRenderViewHostTestHarness {
 
   void InitializeWebUI(BrowsingHistoryHandlerWithWebUIForTesting& handler) {
     // Send historyLoaded so that JS will be allowed.
-    base::Value init_args(base::Value::Type::LIST);
+    base::Value::List init_args;
     init_args.Append("query-history-callback-id");
     init_args.Append("");
     init_args.Append(150);
-    handler.HandleQueryHistory(&base::Value::AsListValue(init_args));
+    handler.HandleQueryHistory(init_args);
   }
 
   syncer::TestSyncService* sync_service() { return sync_service_; }
@@ -251,17 +251,17 @@ TEST_F(BrowsingHistoryHandlerTest, ObservingWebHistoryDeletions) {
     EXPECT_EQ(10U, web_ui()->call_data().size());
 
     // Simulate a delete request.
-    base::Value args(base::Value::Type::LIST);
+    base::Value::List args;
     args.Append("remove-visits-callback-id");
-    base::Value to_remove(base::Value::Type::LIST);
-    base::Value visit(base::Value::Type::DICTIONARY);
-    visit.SetStringKey("url", "https://www.google.com");
-    base::Value timestamps(base::Value::Type::LIST);
+    base::Value::List to_remove;
+    base::Value::Dict visit;
+    visit.Set("url", "https://www.google.com");
+    base::Value::List timestamps;
     timestamps.Append(12345678.0);
-    visit.SetKey("timestamps", std::move(timestamps));
+    visit.Set("timestamps", std::move(timestamps));
     to_remove.Append(std::move(visit));
     args.Append(std::move(to_remove));
-    handler.HandleRemoveVisits(&base::Value::AsListValue(args));
+    handler.HandleRemoveVisits(args);
 
     EXPECT_EQ(11U, web_ui()->call_data().size());
     const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
@@ -301,11 +301,11 @@ TEST_F(BrowsingHistoryHandlerTest, HostPrefixParameter) {
       QueryHistory(query,
                    ::testing::Field(&history::QueryOptions::host_only, true)));
 
-  base::Value init_args(base::Value::Type::LIST);
+  base::Value::List init_args;
   init_args.Append("query-history-callback-id");
   init_args.Append("host:www.chromium.org");
   init_args.Append(150);
-  handler.HandleQueryHistory(&base::Value::AsListValue(init_args));
+  handler.HandleQueryHistory(init_args);
 }
 
 TEST_F(BrowsingHistoryHandlerTest, WithoutHostPrefixParameter) {
@@ -318,11 +318,11 @@ TEST_F(BrowsingHistoryHandlerTest, WithoutHostPrefixParameter) {
       QueryHistory(query,
                    ::testing::Field(&history::QueryOptions::host_only, false)));
 
-  base::Value init_args(base::Value::Type::LIST);
+  base::Value::List init_args;
   init_args.Append("query-history-callback-id");
   init_args.Append("www.chromium.org");
   init_args.Append(150);
-  handler.HandleQueryHistory(&base::Value::AsListValue(init_args));
+  handler.HandleQueryHistory(init_args);
 }
 
 TEST_F(BrowsingHistoryHandlerTest, MisplacedHostPrefixParameter) {
@@ -335,11 +335,11 @@ TEST_F(BrowsingHistoryHandlerTest, MisplacedHostPrefixParameter) {
         QueryHistory(
             query, ::testing::Field(&history::QueryOptions::host_only, false)));
 
-    base::Value init_args(base::Value::Type::LIST);
+    base::Value::List init_args;
     init_args.Append("query-history-callback-id");
     init_args.Append("whost:ww.chromium.org");
     init_args.Append(150);
-    handler.HandleQueryHistory(&base::Value::AsListValue(init_args));
+    handler.HandleQueryHistory(init_args);
   }
 
   {
@@ -349,11 +349,11 @@ TEST_F(BrowsingHistoryHandlerTest, MisplacedHostPrefixParameter) {
         QueryHistory(
             query, ::testing::Field(&history::QueryOptions::host_only, false)));
 
-    base::Value init_args(base::Value::Type::LIST);
+    base::Value::List init_args;
     init_args.Append("query-history-callback-id");
     init_args.Append("www.chromium.orghost:");
     init_args.Append(150);
-    handler.HandleQueryHistory(&base::Value::AsListValue(init_args));
+    handler.HandleQueryHistory(init_args);
   }
 }
 
@@ -386,7 +386,7 @@ TEST_F(BrowsingHistoryHandlerTest, MdTruncatesTitles) {
   const base::Value* list = arg3->FindListKey("value");
   ASSERT_TRUE(list->is_list());
 
-  const base::Value& first_entry = list->GetListDeprecated()[0];
+  const base::Value& first_entry = list->GetList()[0];
   ASSERT_TRUE(first_entry.is_dict());
 
   const std::string* title = first_entry.FindStringKey("title");

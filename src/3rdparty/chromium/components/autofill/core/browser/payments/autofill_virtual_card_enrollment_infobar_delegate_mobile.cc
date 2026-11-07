@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,7 +48,7 @@ AutofillVirtualCardEnrollmentInfoBarDelegateMobile::GetLearnMoreLinkText()
   return virtual_card_enroll_bubble_controller_->GetLearnMoreLinkText();
 }
 
-raw_ptr<const gfx::ImageSkia>
+const gfx::ImageSkia*
 AutofillVirtualCardEnrollmentInfoBarDelegateMobile::GetIssuerIcon() const {
   return virtual_card_enroll_bubble_controller_
       ->GetVirtualCardEnrollmentFields()

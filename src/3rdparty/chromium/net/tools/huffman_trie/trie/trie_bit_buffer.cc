@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,7 @@
 #include "base/check.h"
 #include "net/tools/huffman_trie/bit_writer.h"
 
-namespace net {
-
-namespace huffman_trie {
+namespace net::huffman_trie {
 
 TrieBitBuffer::TrieBitBuffer() = default;
 
@@ -146,6 +144,4 @@ void TrieBitBuffer::Flush() {
   }
 }
 
-}  // namespace huffman_trie
-
-}  // namespace net
+}  // namespace net::huffman_trie

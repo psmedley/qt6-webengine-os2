@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,14 +53,13 @@ class PLATFORM_EXPORT WebGraphicsContext3DVideoFramePool {
       base::OnceCallback<void(scoped_refptr<media::VideoFrame>)>;
 
   // On success, this function will issue return true and will call the
-  // specified FrameCallback with the resulting VideoFrame when the frame
-  // is ready. On failure this will issue `callback` with a nullptr VideoFrame
-  // and then return false. The resulting VideoFrame will always be NV12.
-  // Note: In some paths `src_color_space` is ignored in favor of the
-  // SharedImage color space associated with `src_mailbox_holder`.
-  // Note: If the YUV to RGB matrix of `dst_color_space` is not Rec601, then
-  // this function will use the matrix for Rec709 (it supports no other
-  // values). See https://crbug.com/skia/12545.
+  // specified FrameCallback with the resulting VideoFrame when the frame is
+  // ready. On failure this will return false. The resulting VideoFrame will
+  // always be NV12. Note: In some paths `src_color_space` is ignored in favor
+  // of the SharedImage color space associated with `src_mailbox_holder`. Note:
+  // If the YUV to RGB matrix of `dst_color_space` is not Rec601, then this
+  // function will use the matrix for Rec709 (it supports no other values). See
+  // https://crbug.com/skia/12545.
   bool CopyRGBATextureToVideoFrame(viz::ResourceFormat src_format,
                                    const gfx::Size& src_size,
                                    const gfx::ColorSpace& src_color_space,
@@ -76,6 +75,10 @@ class PLATFORM_EXPORT WebGraphicsContext3DVideoFramePool {
   bool ConvertVideoFrame(scoped_refptr<media::VideoFrame> src_video_frame,
                          const gfx::ColorSpace& dst_color_space,
                          FrameReadyCallback callback);
+
+  // This is a helper function to get whether GpuMemoryBuffer readback from
+  // texture is enabled.
+  static bool IsGpuMemoryBufferReadbackFromTextureEnabled();
 
  private:
   base::WeakPtr<blink::WebGraphicsContext3DProviderWrapper>

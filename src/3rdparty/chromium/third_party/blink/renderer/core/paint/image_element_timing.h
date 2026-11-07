@@ -1,16 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_IMAGE_ELEMENT_TIMING_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_IMAGE_ELEMENT_TIMING_H_
 
-#include <utility>
-
 #include "base/time/time.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/paint/media_record_id.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
@@ -120,14 +119,15 @@ class CORE_EXPORT ImageElementTiming final
 
     base::TimeTicks load_time_;
     bool is_painted_ = false;
+
+    DISALLOW_NEW();
   };
-  typedef std::pair<const LayoutObject*, const ImageResourceContent*> RecordId;
   // Hashmap of pairs of elements, LayoutObjects (for the elements) and
   // ImageResourceContent (for the src) which correspond to either images or
   // background images whose paint has been observed. For background images,
   // only the |is_painted_| bit is used, as the timestamp needs to be tracked by
   // |background_image_timestamps_|.
-  WTF::HashMap<RecordId, ImageInfo> images_notified_;
+  WTF::HashMap<MediaRecordIdHash, ImageInfo> images_notified_;
 
   // Hashmap of background images which contain information about the load time
   // of the background image.

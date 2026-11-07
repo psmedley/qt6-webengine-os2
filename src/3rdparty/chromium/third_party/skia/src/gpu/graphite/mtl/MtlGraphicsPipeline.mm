@@ -7,202 +7,16 @@
 
 #include "src/gpu/graphite/mtl/MtlGraphicsPipeline.h"
 
-#include "include/core/SkSpan.h"
-#include "include/gpu/ShaderErrorHandler.h"
 #include "include/gpu/graphite/TextureInfo.h"
-#include "include/private/SkSLString.h"
-#include "src/core/SkPipelineData.h"
-#include "src/core/SkShaderCodeDictionary.h"
-#include "src/gpu/graphite/GraphicsPipelineDesc.h"
+#include "src/gpu/graphite/Attribute.h"
 #include "src/gpu/graphite/Log.h"
-#include "src/gpu/graphite/Renderer.h"
-#include "src/gpu/graphite/mtl/MtlGpu.h"
 #include "src/gpu/graphite/mtl/MtlResourceProvider.h"
+#include "src/gpu/graphite/mtl/MtlSharedContext.h"
 #include "src/gpu/graphite/mtl/MtlUtils.h"
-
-#include "src/gpu/tessellate/WangsFormula.h"
 
 namespace skgpu::graphite {
 
 namespace {
-
-std::string get_uniform_header(int bufferID, const char* name) {
-    std::string result;
-
-    SkSL::String::appendf(&result, "layout (binding=%d) uniform %sUniforms {\n", bufferID, name);
-
-    return result;
-}
-
-std::string get_uniforms(SkSpan<const SkUniform> uniforms, int* offset, int manglingSuffix) {
-    std::string result;
-
-    for (auto u : uniforms) {
-        int count = u.count() ? u.count() : 1;
-        // TODO: this is sufficient for the sprint but should be changed to use SkSL's
-        // machinery
-        SkSL::String::appendf(&result, "    layout(offset=%d) ", *offset);
-        switch (u.type()) {
-            case SkSLType::kFloat4:
-                result.append("float4");
-                *offset += 16 * count;
-                break;
-            case SkSLType::kFloat2:
-                result.append("float2");
-                *offset += 8 * count;
-                break;
-            case SkSLType::kFloat:
-                result.append("float");
-                *offset += 4 * count;
-                break;
-            case SkSLType::kFloat4x4:
-                result.append("float4x4");
-                *offset += 64 * count;
-                break;
-            case SkSLType::kHalf4:
-                result.append("half4");
-                *offset += 8 * count;
-                break;
-            case SkSLType::kInt:
-                result.append("int");
-                *offset += 4 * count;
-                break;
-            default:
-                SkASSERT(0);
-        }
-
-        result.append(" ");
-        result.append(u.name());
-        if (manglingSuffix >= 0) {
-            result.append("_");
-            result.append(std::to_string(manglingSuffix));
-        }
-        if (u.count()) {
-            result.append("[");
-            result.append(std::to_string(u.count()));
-            result.append("]");
-        }
-        result.append(";\n");
-    }
-
-    return result;
-}
-
-std::string emit_SKSL_uniforms(int bufferID, const char* name, SkSpan<const SkUniform> uniforms) {
-    int offset = 0;
-
-    std::string result = get_uniform_header(bufferID, name);
-    result += get_uniforms(uniforms, &offset, -1);
-    result.append("};\n\n");
-
-    return result;
-}
-
-std::string emit_SkSL_attributes(SkSpan<const Attribute> vertexAttrs,
-                                 SkSpan<const Attribute> instanceAttrs) {
-    std::string result;
-
-    int attr = 0;
-    auto add_attrs = [&](SkSpan<const Attribute> attrs) {
-        for (auto a : attrs) {
-            // TODO: this is sufficient for the sprint but should be changed to use SkSL's
-            // machinery
-            SkSL::String::appendf(&result, "    layout(location=%d) in ", attr++);
-            switch (a.gpuType()) {
-                case SkSLType::kFloat4:
-                    result.append("float4");
-                    break;
-                case SkSLType::kFloat2:
-                    result.append("float2");
-                    break;
-                case SkSLType::kFloat3:
-                    result.append("float3");
-                    break;
-                case SkSLType::kFloat:
-                    result.append("float");
-                    break;
-                case SkSLType::kHalf4:
-                    result.append("half4");
-                    break;
-                default:
-                    SkASSERT(0);
-            }
-
-            SkSL::String::appendf(&result, " %s;\n", a.name());
-        }
-    };
-
-    if (!vertexAttrs.empty()) {
-        result.append("// vertex attrs\n");
-        add_attrs(vertexAttrs);
-    }
-    if (!instanceAttrs.empty()) {
-        result.append("// instance attrs\n");
-        add_attrs(instanceAttrs);
-    }
-
-    return result;
-}
-
-std::string get_sksl_vs(const GraphicsPipelineDesc& desc) {
-    const RenderStep* step = desc.renderStep();
-    // TODO: To more completely support end-to-end rendering, this will need to be updated so that
-    // the RenderStep shader snippet can produce a device coord, a local coord, and depth.
-    // If the paint combination doesn't need the local coord it can be ignored, otherwise we need
-    // a varying for it. The fragment function's output will need to be updated to have a color and
-    // the depth, or when there's no combination, just the depth. Lastly, we also should add the
-    // static/intrinsic uniform binding point so that we can handle normalizing the device position
-    // produced by the RenderStep automatically.
-
-    // Fixed program header
-    std::string sksl =
-        "layout (binding=0) uniform intrinsicUniforms {\n"
-        "    layout(offset=0) float4 rtAdjust;\n"
-        "};\n"
-        "\n";
-
-    if (step->numVertexAttributes() > 0 || step->numInstanceAttributes() > 0) {
-        sksl += emit_SkSL_attributes(step->vertexAttributes(), step->instanceAttributes());
-    }
-
-    // Uniforms needed by RenderStep
-    if (step->numUniforms() > 0) {
-        sksl += emit_SKSL_uniforms(1, "Step", step->uniforms());
-    }
-
-    // TODO: This is only needed for tessellation path renderers and should be handled using a
-    // helper function injector that the SkSL built-in code snippets can use.
-    sksl += wangs_formula::as_sksl().c_str();
-
-    // Vertex shader function declaration
-    sksl += "void main() {\n";
-    // Vertex shader body
-    sksl += step->vertexSkSL();
-    sksl += "sk_Position = float4(devPosition.xy * rtAdjust.xy + rtAdjust.zw, devPosition.zw);\n"
-            "}\n";
-
-    return sksl;
-}
-
-std::string get_sksl_fs(SkShaderCodeDictionary* dict,
-                        const GraphicsPipelineDesc& desc,
-                        SkPipelineDataGatherer::BlendInfo* blendInfo) {
-    if (!desc.paintParamsID().isValid()) {
-        // TODO: we should return the error shader code here
-        return {};
-    }
-
-    SkShaderInfo shaderInfo;
-
-    dict->getShaderInfo(desc.paintParamsID(), &shaderInfo);
-
-    *blendInfo = shaderInfo.blendInfo();
-#if SK_SUPPORT_GPU
-    return shaderInfo.toSkSL();
-#else
-    return {};
-#endif
-}
 
 inline MTLVertexFormat attribute_type_to_mtlformat(VertexAttribType type) {
     switch (type) {
@@ -282,13 +96,13 @@ inline MTLVertexFormat attribute_type_to_mtlformat(VertexAttribType type) {
     SK_ABORT("Unknown vertex attribute type");
 }
 
-MTLVertexDescriptor* create_vertex_descriptor(const RenderStep* step) {
+MTLVertexDescriptor* create_vertex_descriptor(SkSpan<const Attribute> vertexAttrs,
+                                              SkSpan<const Attribute> instanceAttrs) {
     auto vertexDescriptor = [[MTLVertexDescriptor alloc] init];
     int attributeIndex = 0;
 
-    int vertexAttributeCount = step->numVertexAttributes();
     size_t vertexAttributeOffset = 0;
-    for (const auto& attribute : step->vertexAttributes()) {
+    for (const auto& attribute : vertexAttrs) {
         MTLVertexAttributeDescriptor* mtlAttribute = vertexDescriptor.attributes[attributeIndex];
         MTLVertexFormat format = attribute_type_to_mtlformat(attribute.cpuType());
         SkASSERT(MTLVertexFormatInvalid != format);
@@ -299,9 +113,8 @@ MTLVertexDescriptor* create_vertex_descriptor(const RenderStep* step) {
         vertexAttributeOffset += attribute.sizeAlign4();
         attributeIndex++;
     }
-    SkASSERT(vertexAttributeOffset == step->vertexStride());
 
-    if (vertexAttributeCount) {
+    if (vertexAttributeOffset) {
         MTLVertexBufferLayoutDescriptor* vertexBufferLayout =
                 vertexDescriptor.layouts[MtlGraphicsPipeline::kVertexBufferIndex];
         vertexBufferLayout.stepFunction = MTLVertexStepFunctionPerVertex;
@@ -309,9 +122,8 @@ MTLVertexDescriptor* create_vertex_descriptor(const RenderStep* step) {
         vertexBufferLayout.stride = vertexAttributeOffset;
     }
 
-    int instanceAttributeCount = step->numInstanceAttributes();
     size_t instanceAttributeOffset = 0;
-    for (const auto& attribute : step->instanceAttributes()) {
+    for (const auto& attribute : instanceAttrs) {
         MTLVertexAttributeDescriptor* mtlAttribute = vertexDescriptor.attributes[attributeIndex];
         MTLVertexFormat format = attribute_type_to_mtlformat(attribute.cpuType());
         SkASSERT(MTLVertexFormatInvalid != format);
@@ -322,9 +134,8 @@ MTLVertexDescriptor* create_vertex_descriptor(const RenderStep* step) {
         instanceAttributeOffset += attribute.sizeAlign4();
         attributeIndex++;
     }
-    SkASSERT(instanceAttributeOffset == step->instanceStride());
 
-    if (instanceAttributeCount) {
+    if (instanceAttributeOffset) {
         MTLVertexBufferLayoutDescriptor* instanceBufferLayout =
                 vertexDescriptor.layouts[MtlGraphicsPipeline::kInstanceBufferIndex];
         instanceBufferLayout.stepFunction = MTLVertexStepFunctionPerInstance;
@@ -399,7 +210,7 @@ static MTLBlendOperation blend_equation_to_mtl_blend_op(skgpu::BlendEquation equ
             MTLBlendOperationSubtract,         // skgpu::BlendEquation::kSubtract
             MTLBlendOperationReverseSubtract,  // skgpu::BlendEquation::kReverseSubtract
     };
-    static_assert(SK_ARRAY_COUNT(gTable) == (int)skgpu::BlendEquation::kFirstAdvanced);
+    static_assert(std::size(gTable) == (int)skgpu::BlendEquation::kFirstAdvanced);
     static_assert(0 == (int)skgpu::BlendEquation::kAdd);
     static_assert(1 == (int)skgpu::BlendEquation::kSubtract);
     static_assert(2 == (int)skgpu::BlendEquation::kReverseSubtract);
@@ -410,7 +221,7 @@ static MTLBlendOperation blend_equation_to_mtl_blend_op(skgpu::BlendEquation equ
 
 static MTLRenderPipelineColorAttachmentDescriptor* create_color_attachment(
         MTLPixelFormat format,
-        const SkPipelineDataGatherer::BlendInfo& blendInfo) {
+        const BlendInfo& blendInfo) {
 
     skgpu::BlendEquation equation = blendInfo.fEquation;
     skgpu::BlendCoeff srcCoeff = blendInfo.fSrcBlend;
@@ -441,124 +252,46 @@ static MTLRenderPipelineColorAttachmentDescriptor* create_color_attachment(
 
 } // anonymous namespace
 
-std::string GetMtlUniforms(int bufferID,
-                           const char* name,
-                           const std::vector<SkPaintParamsKey::BlockReader>& readers) {
-    size_t numUniforms = 0;
-    for (auto r : readers) {
-        numUniforms += r.entry()->fUniforms.size();
+sk_sp<MtlGraphicsPipeline> MtlGraphicsPipeline::Make(const MtlSharedContext* sharedContext,
+                                                     std::string label,
+                                                     MSLFunction vertexMain,
+                                                     SkSpan<const Attribute> vertexAttrs,
+                                                     SkSpan<const Attribute> instanceAttrs,
+                                                     MSLFunction fragmentMain,
+                                                     sk_cfp<id<MTLDepthStencilState>> dss,
+                                                     uint32_t stencilRefValue,
+                                                     const BlendInfo& blendInfo,
+                                                     const RenderPassDesc& renderPassDesc) {
+    id<MTLLibrary> vsLibrary = std::get<0>(vertexMain);
+    id<MTLLibrary> fsLibrary = std::get<0>(fragmentMain);
+    if (!vsLibrary || !fsLibrary) {
+        return nullptr;
     }
 
-    if (!numUniforms) {
-        return {};
-    }
-
-    int offset = 0;
-
-    std::string result = get_uniform_header(bufferID, name);
-    for (int i = 0; i < (int) readers.size(); ++i) {
-        result += get_uniforms(readers[i].entry()->fUniforms, &offset, i);
-    }
-    result.append("};\n\n");
-
-    return result;
-}
-
-std::string GetMtlTexturesAndSamplers(const std::vector<SkPaintParamsKey::BlockReader>& readers,
-                                      int* binding) {
-
-    std::string result;
-    for (int i = 0; i < (int) readers.size(); ++i) {
-        auto texturesAndSamplers = readers[i].entry()->fTexturesAndSamplers;
-
-        for (int j = 0; j < (int) texturesAndSamplers.size(); ++j) {
-            const SkTextureAndSampler& t = texturesAndSamplers[j];
-            SkSL::String::appendf(&result,
-                                  "layout(binding=%d) uniform sampler2D %s_%d_%d;\n",
-                                  *binding, t.name(), i, j);
-            (*binding)++;
-        }
-    }
-
-    return result;
-}
-
-
-enum ShaderType {
-    kVertex_ShaderType = 0,
-    kFragment_ShaderType = 1,
-
-    kLast_ShaderType = kFragment_ShaderType
-};
-static const int kShaderTypeCount = kLast_ShaderType + 1;
-
-sk_sp<MtlGraphicsPipeline> MtlGraphicsPipeline::Make(
-        MtlResourceProvider* resourceProvider, const MtlGpu* gpu,
-        const GraphicsPipelineDesc& pipelineDesc,
-        const RenderPassDesc& renderPassDesc) {
     sk_cfp<MTLRenderPipelineDescriptor*> psoDescriptor([[MTLRenderPipelineDescriptor alloc] init]);
 
-    std::string msl[kShaderTypeCount];
-    SkSL::Program::Inputs inputs[kShaderTypeCount];
-    SkSL::Program::Settings settings;
+    NSString* labelName =  [NSString stringWithUTF8String: label.c_str()];
+    NSString* vsFuncName = [NSString stringWithUTF8String: std::get<1>(vertexMain).c_str()];
+    NSString* fsFuncName = [NSString stringWithUTF8String: std::get<1>(fragmentMain).c_str()];
 
-    settings.fForceNoRTFlip = true;
-
-    ShaderErrorHandler* errorHandler = DefaultShaderErrorHandler();
-    if (!SkSLToMSL(gpu,
-                   get_sksl_vs(pipelineDesc),
-                   SkSL::ProgramKind::kVertex,
-                   settings,
-                   &msl[kVertex_ShaderType],
-                   &inputs[kVertex_ShaderType],
-                   errorHandler)) {
-        return nullptr;
-    }
-
-    SkPipelineDataGatherer::BlendInfo blendInfo;
-    auto dict = resourceProvider->shaderCodeDictionary();
-    if (!SkSLToMSL(gpu,
-                   get_sksl_fs(dict, pipelineDesc, &blendInfo),
-                   SkSL::ProgramKind::kFragment,
-                   settings,
-                   &msl[kFragment_ShaderType],
-                   &inputs[kFragment_ShaderType],
-                   errorHandler)) {
-        return nullptr;
-    }
-
-    sk_cfp<id<MTLLibrary>> shaderLibraries[kShaderTypeCount];
-
-    shaderLibraries[kVertex_ShaderType] = MtlCompileShaderLibrary(gpu,
-                                                                  msl[kVertex_ShaderType],
-                                                                  errorHandler);
-    shaderLibraries[kFragment_ShaderType] = MtlCompileShaderLibrary(gpu,
-                                                                    msl[kFragment_ShaderType],
-                                                                    errorHandler);
-    if (!shaderLibraries[kVertex_ShaderType] || !shaderLibraries[kFragment_ShaderType]) {
-        return nullptr;
-    }
-
-    (*psoDescriptor).label = @(pipelineDesc.renderStep()->name());
-
-    (*psoDescriptor).vertexFunction =
-            [shaderLibraries[kVertex_ShaderType].get() newFunctionWithName: @"vertexMain"];
-    (*psoDescriptor).fragmentFunction =
-            [shaderLibraries[kFragment_ShaderType].get() newFunctionWithName: @"fragmentMain"];
+    (*psoDescriptor).label = labelName;
+    (*psoDescriptor).vertexFunction = [vsLibrary newFunctionWithName: vsFuncName];
+    (*psoDescriptor).fragmentFunction = [fsLibrary newFunctionWithName: fsFuncName];
 
     // TODO: I *think* this gets cleaned up by the pipelineDescriptor?
-    (*psoDescriptor).vertexDescriptor = create_vertex_descriptor(pipelineDesc.renderStep());
+    (*psoDescriptor).vertexDescriptor = create_vertex_descriptor(vertexAttrs, instanceAttrs);
 
-    MtlTextureInfo mtlTexInfo;
-    renderPassDesc.fColorAttachment.fTextureInfo.getMtlTextureInfo(&mtlTexInfo);
-
-    auto mtlColorAttachment = create_color_attachment((MTLPixelFormat)mtlTexInfo.fFormat,
+    const MtlTextureSpec& mtlColorSpec =
+            renderPassDesc.fColorAttachment.fTextureInfo.mtlTextureSpec();
+    auto mtlColorAttachment = create_color_attachment((MTLPixelFormat)mtlColorSpec.fFormat,
                                                       blendInfo);
-
     (*psoDescriptor).colorAttachments[0] = mtlColorAttachment;
 
-    renderPassDesc.fDepthStencilAttachment.fTextureInfo.getMtlTextureInfo(&mtlTexInfo);
-    MTLPixelFormat depthStencilFormat = (MTLPixelFormat)mtlTexInfo.fFormat;
+    (*psoDescriptor).sampleCount = renderPassDesc.fColorAttachment.fTextureInfo.numSamples();
+
+    const MtlTextureSpec& mtlDSSpec =
+            renderPassDesc.fDepthStencilAttachment.fTextureInfo.mtlTextureSpec();
+    MTLPixelFormat depthStencilFormat = (MTLPixelFormat)mtlDSSpec.fFormat;
     if (MtlFormatIsStencil(depthStencilFormat)) {
         (*psoDescriptor).stencilAttachmentPixelFormat = depthStencilFormat;
     } else {
@@ -572,25 +305,17 @@ sk_sp<MtlGraphicsPipeline> MtlGraphicsPipeline::Make(
 
     NSError* error;
     sk_cfp<id<MTLRenderPipelineState>> pso(
-            [gpu->device() newRenderPipelineStateWithDescriptor:psoDescriptor.get()
-                                                          error:&error]);
+            [sharedContext->device() newRenderPipelineStateWithDescriptor:psoDescriptor.get()
+                                                                    error:&error]);
     if (!pso) {
-        SKGPU_LOG_E("Pipeline creation failure:\n%s", error.debugDescription.UTF8String);
+        SKGPU_LOG_E("Render pipeline creation failure:\n%s", error.debugDescription.UTF8String);
         return nullptr;
     }
 
-    const DepthStencilSettings& depthStencilSettings =
-            pipelineDesc.renderStep()->depthStencilSettings();
-    sk_cfp<id<MTLDepthStencilState>> dss =
-            resourceProvider->findOrCreateCompatibleDepthStencilState(depthStencilSettings);
-
-    return sk_sp<MtlGraphicsPipeline>(
-            new MtlGraphicsPipeline(gpu,
-                                    std::move(pso),
-                                    std::move(dss),
-                                    depthStencilSettings.fStencilReferenceValue,
-                                    pipelineDesc.renderStep()->vertexStride(),
-                                    pipelineDesc.renderStep()->instanceStride()));
+    return sk_sp<MtlGraphicsPipeline>(new MtlGraphicsPipeline(sharedContext,
+                                                              std::move(pso),
+                                                              std::move(dss),
+                                                              stencilRefValue));
 }
 
 void MtlGraphicsPipeline::freeGpuData() {

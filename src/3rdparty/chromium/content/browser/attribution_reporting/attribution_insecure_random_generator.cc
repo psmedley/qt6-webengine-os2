@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,7 @@ double ToDouble(uint64_t state0) {
   // Exponent for double values for [1.0 .. 2.0)
   static const uint64_t kExponentBits = uint64_t{0x3FF0000000000000};
   uint64_t random = (state0 >> 12) | kExponentBits;
-  return bit_cast<double>(random) - 1;
+  return base::bit_cast<double>(random) - 1;
 }
 
 }  // namespace

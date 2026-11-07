@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -76,7 +76,7 @@ void BurnCPU() {
   [[maybe_unused]] volatile double number = 1;
   while (base::TimeTicks::Now() < (begin + busy_time)) {
     for (int i = 0; i < 10000; ++i)
-      number *= base::RandDouble();
+      number = number * base::RandDouble();
   }
 }
 

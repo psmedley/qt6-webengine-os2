@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "base/component_export.h"
 #include "base/containers/flat_map.h"
 #include "base/memory/free_deleter.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_piece.h"
@@ -127,7 +128,7 @@ class COMPONENT_EXPORT(EVENTS_OZONE_LAYOUT) XkbKeyboardLayoutEngine
  private:
   struct XkbKeymapEntry {
     std::string layout_name;
-    xkb_keymap* keymap;
+    raw_ptr<xkb_keymap> keymap;
   };
   std::vector<XkbKeymapEntry> xkb_keymaps_;
 

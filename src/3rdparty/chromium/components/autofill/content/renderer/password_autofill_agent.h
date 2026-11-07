@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -130,7 +130,7 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
   mojom::PasswordManagerDriver& GetPasswordManagerDriver();
 
   // mojom::PasswordAutofillAgent:
-  void FillPasswordForm(const PasswordFormFillData& form_data) override;
+  void SetPasswordFillData(const PasswordFormFillData& form_data) override;
   void InformNoSavedCredentials(
       bool should_show_popup_without_passwords) override;
   void FillIntoFocusedField(bool is_password,
@@ -192,6 +192,7 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
   // no check request were sent from this frame load.
   void MaybeCheckSafeBrowsingReputation(const blink::WebInputElement& element);
 
+#if BUILDFLAG(IS_ANDROID)
   // Returns whether the soft keyboard should be suppressed.
   bool ShouldSuppressKeyboard();
 
@@ -199,6 +200,7 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
   // whether the agent was able to do so.
   bool TryToShowTouchToFill(
       const blink::WebFormControlElement& control_element);
+#endif
 
   // Shows an Autofill popup with username suggestions for |element|. If
   // |show_all| is |true|, will show all possible suggestions for that element,
@@ -572,7 +574,8 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
 
   bool prefilled_username_metrics_logged_ = false;
 
-  // Keeps autofilled values for the form elements.
+  // Keeps autofilled values for the form elements until a user gesture
+  // is observed. At that point, the map is cleared.
   std::map<FieldRendererId, blink::WebString> autofilled_elements_cache_;
   std::set<FieldRendererId> all_autofilled_elements_;
   // Keeps forms structure (amount of elements, element types etc).
@@ -598,9 +601,15 @@ class PasswordAutofillAgent : public content::RenderFrameObserver,
   // Contains renderer id of the form of the last updated input element.
   FormRendererId last_updated_form_renderer_id_;
 
+  // Contains render id of the field where a form submission should be
+  // triggered.
+  FieldRendererId field_renderer_id_to_submit_;
+
+#if BUILDFLAG(IS_ANDROID)
   // Current state of Touch To Fill. This is reset during
   // CleanupOnDocumentShutdown.
   TouchToFillState touch_to_fill_state_ = TouchToFillState::kShouldShow;
+#endif
 };
 
 }  // namespace autofill

@@ -13,8 +13,8 @@
 #include "src/gpu/ganesh/GrRecordingContextPriv.h"
 #include "src/gpu/ganesh/GrResourceProvider.h"
 #include "src/gpu/ganesh/glsl/GrGLSLVertexGeoBuilder.h"
-#include "src/gpu/ganesh/ops/PathTessellator.h"
-#include "src/gpu/ganesh/tessellate/shaders/GrPathTessellationShader.h"
+#include "src/gpu/ganesh/tessellate/GrPathTessellationShader.h"
+#include "src/gpu/ganesh/tessellate/PathTessellator.h"
 
 namespace skgpu::v1 {
 
@@ -26,11 +26,13 @@ class HullShader : public GrPathTessellationShader {
 public:
     HullShader(const SkMatrix& viewMatrix, SkPMColor4f color, const GrShaderCaps& shaderCaps)
             : GrPathTessellationShader(kTessellate_HullShader_ClassID,
-                                       GrPrimitiveType::kTriangleStrip, 0, viewMatrix, color,
-                                       skgpu::PatchAttribs::kNone) {
+                                       GrPrimitiveType::kTriangleStrip,
+                                       viewMatrix,
+                                       color,
+                                       PatchAttribs::kNone) {
         fInstanceAttribs.emplace_back("p01", kFloat4_GrVertexAttribType, SkSLType::kFloat4);
         fInstanceAttribs.emplace_back("p23", kFloat4_GrVertexAttribType, SkSLType::kFloat4);
-        if (!shaderCaps.infinitySupport()) {
+        if (!shaderCaps.fInfinitySupport) {
             // A conic curve is written out with p3=[w,Infinity], but GPUs that don't support
             // infinity can't detect this. On these platforms we also write out an extra float with
             // each patch that explicitly tells the shader what type of curve it is.
@@ -40,14 +42,12 @@ public:
                                                        fInstanceAttribs.count());
         SkASSERT(fInstanceAttribs.count() <= kMaxInstanceAttribCount);
 
-        if (!shaderCaps.vertexIDSupport()) {
+        if (!shaderCaps.fVertexIDSupport) {
             constexpr static Attribute kVertexIdxAttrib("vertexidx", kFloat_GrVertexAttribType,
                                                         SkSLType::kFloat);
             this->setVertexAttributesWithImplicitOffsets(&kVertexIdxAttrib, 1);
         }
     }
-
-    int maxTessellationSegments(const GrShaderCaps&) const override { SkUNREACHABLE; }
 
 private:
     const char* name() const final { return "tessellate_HullShader"; }
@@ -66,98 +66,102 @@ std::unique_ptr<GrGeometryProcessor::ProgramImpl> HullShader::makeProgramImpl(
                             GrGLSLVertexBuilder* v,
                             GrGLSLVaryingHandler*,
                             GrGPArgs* gpArgs) override {
-            if (shaderCaps.infinitySupport()) {
-                v->insertFunction(R"(
-                bool is_conic_curve() { return isinf(p23.w); }
-                bool is_non_triangular_conic_curve() {
+            if (shaderCaps.fInfinitySupport) {
+                v->insertFunction(
+                "bool is_conic_curve() { return isinf(p23.w); }"
+                "bool is_non_triangular_conic_curve() {"
                     // We consider a conic non-triangular as long as its weight isn't infinity.
                     // NOTE: "isinf == false" works on Mac Radeon GLSL; "!isinf" can get the wrong
                     // answer.
-                    return isinf(p23.z) == false;
-                })");
+                    "return isinf(p23.z) == false;"
+                "}"
+                );
             } else {
-                v->insertFunction(SkStringPrintf(R"(
-                bool is_conic_curve() { return curveType != %g; })", kCubicCurveType).c_str());
-                v->insertFunction(SkStringPrintf(R"(
-                bool is_non_triangular_conic_curve() {
-                    return curveType == %g;
-                })", kConicCurveType).c_str());
+                v->insertFunction(SkStringPrintf(
+                "bool is_conic_curve() { return curveType != %g; }",
+                        tess::kCubicCurveType).c_str());
+                v->insertFunction(SkStringPrintf(
+                "bool is_non_triangular_conic_curve() {"
+                    "return curveType == %g;"
+                "}", tess::kConicCurveType).c_str());
             }
-            v->codeAppend(R"(
-            float2 p0=p01.xy, p1=p01.zw, p2=p23.xy, p3=p23.zw;
-            if (is_conic_curve()) {
+            v->codeAppend(
+            "float2 p0=p01.xy, p1=p01.zw, p2=p23.xy, p3=p23.zw;"
+            "if (is_conic_curve()) {"
                 // Conics are 3 points, with the weight in p3.
-                float w = p3.x;
-                p3 = p2;  // Duplicate the endpoint for shared code that also runs on cubics.
-                if (is_non_triangular_conic_curve()) {
+                "float w = p3.x;"
+                "p3 = p2;"  // Duplicate the endpoint for shared code that also runs on cubics.
+                "if (is_non_triangular_conic_curve()) {"
                     // Convert the points to a trapeziodal hull that circumcscribes the conic.
-                    float2 p1w = p1 * w;
-                    float T = .51;  // Bias outward a bit to ensure we cover the outermost samples.
-                    float2 c1 = mix(p0, p1w, T);
-                    float2 c2 = mix(p2, p1w, T);
-                    float iw = 1 / mix(1, w, T);
-                    p2 = c2 * iw;
-                    p1 = c1 * iw;
-                }
-            }
+                    "float2 p1w = p1 * w;"
+                    "float T = .51;"  // Bias outward a bit to ensure we cover the outermost samples.
+                    "float2 c1 = mix(p0, p1w, T);"
+                    "float2 c2 = mix(p2, p1w, T);"
+                    "float iw = 1 / mix(1, w, T);"
+                    "p2 = c2 * iw;"
+                    "p1 = c1 * iw;"
+                "}"
+            "}"
 
             // Translate the points to v0..3 where v0=0.
-            float2 v1 = p1 - p0;
-            float2 v2 = p2 - p0;
-            float2 v3 = p3 - p0;
+            "float2 v1 = p1 - p0;"
+            "float2 v2 = p2 - p0;"
+            "float2 v3 = p3 - p0;"
 
             // Reorder the points so v2 bisects v1 and v3.
-            if (sign(cross_length_2d(v2, v1)) == sign(cross_length_2d(v2, v3))) {
-                float2 tmp = p2;
-                if (sign(cross_length_2d(v1, v2)) != sign(cross_length_2d(v1, v3))) {
-                    p2 = p1;  // swap(p2, p1)
-                    p1 = tmp;
-                } else {
-                    p2 = p3;  // swap(p2, p3)
-                    p3 = tmp;
-                }
-            })");
+            "if (sign(cross_length_2d(v2, v1)) == sign(cross_length_2d(v2, v3))) {"
+                "float2 tmp = p2;"
+                "if (sign(cross_length_2d(v1, v2)) != sign(cross_length_2d(v1, v3))) {"
+                    "p2 = p1;"  // swap(p2, p1)
+                    "p1 = tmp;"
+                "} else {"
+                    "p2 = p3;"  // swap(p2, p3)
+                    "p3 = tmp;"
+                "}"
+            "}"
+            );
 
-            if (shaderCaps.vertexIDSupport()) {
+            if (shaderCaps.fVertexIDSupport) {
                 // If we don't have sk_VertexID support then "vertexidx" already came in as a
                 // vertex attrib.
-                v->codeAppend(R"(
+                v->codeAppend(
                 // sk_VertexID comes in fan order. Convert to strip order.
-                int vertexidx = sk_VertexID;
-                vertexidx ^= vertexidx >> 1;)");
+                "int vertexidx = sk_VertexID;"
+                "vertexidx ^= vertexidx >> 1;");
             }
 
-            v->codeAppend(R"(
+            v->codeAppend(
             // Find the "turn direction" of each corner and net turn direction.
-            float vertexdir = 0;
-            float netdir = 0;
-            float2 prev, next;
-            float dir;
-            float2 localcoord;
-            float2 nextcoord;)");
+            "float vertexdir = 0;"
+            "float netdir = 0;"
+            "float2 prev, next;"
+            "float dir;"
+            "float2 localcoord;"
+            "float2 nextcoord;"
+            );
 
             for (int i = 0; i < 4; ++i) {
-                v->codeAppendf(R"(
-                prev = p%i - p%i;)", i, (i + 3) % 4);
-                v->codeAppendf(R"(
-                next = p%i - p%i;)", (i + 1) % 4, i);
-                v->codeAppendf(R"(
-                dir = sign(cross_length_2d(prev, next));
-                if (vertexidx == %i) {
-                    vertexdir = dir;
-                    localcoord = p%i;
-                    nextcoord = p%i;
-                }
-                netdir += dir;)", i, i, (i + 1) % 4);
+                v->codeAppendf(
+                "prev = p%i - p%i;", i, (i + 3) % 4);
+                v->codeAppendf(
+                "next = p%i - p%i;", (i + 1) % 4, i);
+                v->codeAppendf(
+                "dir = sign(cross_length_2d(prev, next));"
+                "if (vertexidx == %i) {"
+                    "vertexdir = dir;"
+                    "localcoord = p%i;"
+                    "nextcoord = p%i;"
+                "}"
+                "netdir += dir;", i, i, (i + 1) % 4);
             }
 
-            v->codeAppend(R"(
+            v->codeAppend(
             // Remove the non-convex vertex, if any.
-            if (vertexdir != sign(netdir)) {
-                localcoord = nextcoord;
-            }
+            "if (vertexdir != sign(netdir)) {"
+                "localcoord = nextcoord;"
+            "}"
 
-            float2 vertexpos = AFFINE_MATRIX * localcoord + TRANSLATE;)");
+            "float2 vertexpos = AFFINE_MATRIX * localcoord + TRANSLATE;");
             gpArgs->fLocalCoordVar.set(SkSLType::kFloat2, "localcoord");
             gpArgs->fPositionVar.set(SkSLType::kFloat2, "vertexpos");
         }
@@ -252,14 +256,12 @@ void PathInnerTriangulateOp::prePreparePrograms(const GrTessellationShader::Prog
     // Pass 1: Tessellate the outer curves into the stencil buffer.
     if (!isLinear) {
         fTessellator = PathCurveTessellator::Make(args.fArena,
-                                                  args.fCaps->shaderCaps()->infinitySupport());
-        auto* tessShader = GrPathTessellationShader::Make(args.fArena,
+                                                  args.fCaps->shaderCaps()->fInfinitySupport);
+        auto* tessShader = GrPathTessellationShader::Make(*args.fCaps->shaderCaps(),
+                                                          args.fArena,
                                                           fViewMatrix,
                                                           SK_PMColor4fTRANSPARENT,
-                                                          fPath.countVerbs(),
-                                                          *pipelineForStencils,
-                                                          fTessellator->patchAttribs(),
-                                                          *args.fCaps);
+                                                          fTessellator->patchAttribs());
         const GrUserStencilSettings* stencilPathSettings =
                 GrPathTessellationShader::StencilPathSettings(GrFillRuleForSkPath(fPath));
         fStencilCurvesProgram = GrTessellationShader::MakeProgram(args,
@@ -420,18 +422,14 @@ void PathInnerTriangulateOp::onPrepare(GrOpFlushState* flushState) {
 
     if (fTessellator) {
         auto tessShader = &fStencilCurvesProgram->geomProc().cast<GrPathTessellationShader>();
-        int maxSegments = tessShader->maxTessellationSegments(*caps.shaderCaps());
-
         fTessellator->prepareWithTriangles(flushState,
-                                           maxSegments,
                                            tessShader->viewMatrix(),
                                            &fFanBreadcrumbs,
                                            {SkMatrix::I(), fPath, SK_PMColor4fTRANSPARENT},
-                                           fPath.countVerbs(),
-                                           tessShader->willUseTessellationShaders());
+                                           fPath.countVerbs());
     }
 
-    if (!caps.shaderCaps()->vertexIDSupport()) {
+    if (!caps.shaderCaps()->fVertexIDSupport) {
         constexpr static float kStripOrderIDs[4] = {0, 1, 3, 2};
 
         SKGPU_DEFINE_STATIC_UNIQUE_KEY(gHullVertexBufferKey);
@@ -452,11 +450,7 @@ void PathInnerTriangulateOp::onExecute(GrOpFlushState* flushState, const SkRect&
     if (fStencilCurvesProgram) {
         SkASSERT(fTessellator);
         flushState->bindPipelineAndScissorClip(*fStencilCurvesProgram, this->bounds());
-        fTessellator->draw(flushState,
-                           fStencilCurvesProgram->geomProc().willUseTessellationShaders());
-        if (flushState->caps().requiresManualFBBarrierAfterTessellatedStencilDraw()) {
-            flushState->gpu()->insertManualFramebufferBarrier();  // http://skbug.com/9739
-        }
+        fTessellator->draw(flushState);
     }
 
     // Allocation of the fan vertex buffer may have failed but we already pushed back fan programs.

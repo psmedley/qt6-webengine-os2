@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/containers/queue.h"
 #include "base/containers/span.h"
 #include "base/files/file_util.h"
+#include "base/memory/raw_ptr.h"
 #include "media/base/test_data_util.h"
 #include "media/gpu/h265_decoder.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -117,7 +118,9 @@ class MockH265Accelerator : public H265Decoder::H265Accelerator {
   MOCK_METHOD2(SetStream,
                Status(base::span<const uint8_t> stream,
                       const DecryptConfig* decrypt_config));
-
+  bool IsChromaSamplingSupported(VideoChromaSampling format) override {
+    return format == VideoChromaSampling::k420;
+  }
   void Reset() override {}
 };
 
@@ -141,7 +144,7 @@ class H265DecoderTest : public ::testing::Test {
 
  protected:
   std::unique_ptr<H265Decoder> decoder_;
-  MockH265Accelerator* accelerator_;
+  raw_ptr<MockH265Accelerator> accelerator_;
 
  private:
   base::queue<std::string> input_frame_files_;
@@ -517,6 +520,13 @@ TEST_F(H265DecoderTest, SetStreamRetry) {
     EXPECT_CALL(*accelerator_, SubmitDecode(HasPoc(0))).Times(1);
     EXPECT_CALL(*accelerator_, OutputPicture(HasPoc(0))).Times(1);
   }
+  EXPECT_EQ(AcceleratedVideoDecoder::kRanOutOfStreamData, Decode(false));
+  EXPECT_TRUE(decoder_->Flush());
+}
+
+TEST_F(H265DecoderTest, DecodeMultiFrameInput) {
+  SetInputFrameFiles({"bear.hevc"});
+  EXPECT_EQ(AcceleratedVideoDecoder::kConfigChange, Decode());
   EXPECT_EQ(AcceleratedVideoDecoder::kRanOutOfStreamData, Decode());
   EXPECT_TRUE(decoder_->Flush());
 }

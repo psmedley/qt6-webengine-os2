@@ -11,13 +11,12 @@
 
 #include <list>
 #include <mutex>
-#include <thread>
 
 #include "libANGLE/Caps.h"
 #include "libANGLE/Error.h"
 #include "libANGLE/Version.h"
 #include "libANGLE/renderer/gl/renderergl_utils.h"
-#include "platform/FeaturesGL.h"
+#include "platform/FeaturesGL_autogen.h"
 
 namespace angle
 {
@@ -62,7 +61,7 @@ class WorkerContext : angle::NonCopyable
     virtual void unmakeCurrent() = 0;
 };
 
-class ANGLE_NO_DISCARD ScopedWorkerContextGL
+class [[nodiscard]] ScopedWorkerContextGL
 {
   public:
     ScopedWorkerContextGL(RendererGL *renderer, std::string *infoLog);
@@ -112,6 +111,7 @@ class RendererGL : angle::NonCopyable
     const gl::TextureCapsMap &getNativeTextureCaps() const;
     const gl::Extensions &getNativeExtensions() const;
     const gl::Limitations &getNativeLimitations() const;
+    ShPixelLocalStorageType getNativePixelLocalStorageType() const;
     void initializeFrontendFeatures(angle::FrontendFeatures *features) const;
 
     angle::Result dispatchCompute(const gl::Context *context,
@@ -122,6 +122,8 @@ class RendererGL : angle::NonCopyable
 
     angle::Result memoryBarrier(GLbitfield barriers);
     angle::Result memoryBarrierByRegion(GLbitfield barriers);
+
+    void framebufferFetchBarrier();
 
     bool bindWorkerContext(std::string *infoLog);
     void unbindWorkerContext();
@@ -169,7 +171,7 @@ class RendererGL : angle::NonCopyable
     bool mWorkDoneSinceLastFlush = false;
 
     // The thread-to-context mapping for the currently active worker threads.
-    angle::HashMap<std::thread::id, std::unique_ptr<WorkerContext>> mCurrentWorkerContexts;
+    angle::HashMap<uint64_t, std::unique_ptr<WorkerContext>> mCurrentWorkerContexts;
     // The worker contexts available to use.
     std::list<std::unique_ptr<WorkerContext>> mWorkerContextPool;
     // Protect the concurrent accesses to worker contexts.

@@ -5,8 +5,22 @@
  * found in the LICENSE file.
  */
 
-#include "src/core/SkTSort.h"
 #include "src/pathops/SkPathOpsTSect.h"
+
+#include "include/private/SkMacros.h"
+#include "include/private/SkTArray.h"
+#include "src/core/SkTSort.h"
+#include "src/pathops/SkIntersections.h"
+#include "src/pathops/SkPathOpsConic.h"
+#include "src/pathops/SkPathOpsCubic.h"
+#include "src/pathops/SkPathOpsLine.h"
+#include "src/pathops/SkPathOpsQuad.h"
+
+#include <cfloat>
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <utility>
 
 #define COINCIDENT_SPAN_COUNT 9
 
@@ -1084,7 +1098,7 @@ int SkTSect::linesIntersect(SkTSpan* span,
     if (thisRayI.used() > 1) {
         int ptMatches = 0;
         for (int tIndex = 0; tIndex < thisRayI.used(); ++tIndex) {
-            for (int lIndex = 0; lIndex < (int) SK_ARRAY_COUNT(thisLine.fPts); ++lIndex) {
+            for (int lIndex = 0; lIndex < (int) std::size(thisLine.fPts); ++lIndex) {
                 ptMatches += thisRayI.pt(tIndex).approximatelyEqual(thisLine.fPts[lIndex]);
             }
         }
@@ -1095,7 +1109,7 @@ int SkTSect::linesIntersect(SkTSpan* span,
     if (oppRayI.used() > 1) {
         int ptMatches = 0;
         for (int oIndex = 0; oIndex < oppRayI.used(); ++oIndex) {
-            for (int lIndex = 0; lIndex < (int) SK_ARRAY_COUNT(oppLine.fPts); ++lIndex) {
+            for (int lIndex = 0; lIndex < (int) std::size(oppLine.fPts); ++lIndex) {
                 ptMatches += oppRayI.pt(oIndex).approximatelyEqual(oppLine.fPts[lIndex]);
             }
         }

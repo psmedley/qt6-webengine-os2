@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -208,7 +208,7 @@ class ResourceMultiBufferDataProviderTest : public testing::Test {
 
   base::test::SingleThreadTaskEnvironment task_environment_;
   GURL gurl_;
-  int64_t first_position_;
+  int32_t first_position_;
 
   NiceMock<MockResourceFetchContext> fetch_context_;
   UrlIndex url_index_{&fetch_context_, 0,

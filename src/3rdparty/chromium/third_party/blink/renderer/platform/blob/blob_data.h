@@ -45,6 +45,7 @@
 #include "base/thread_annotations.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/struct_ptr.h"
+#include "mojo/public/cpp/system/data_pipe.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/blob/data_element.mojom-blink-forward.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -119,9 +120,6 @@ class PLATFORM_EXPORT BlobData {
   static std::unique_ptr<BlobData> CreateForFileWithUnknownSize(
       const String& path,
       const absl::optional<base::Time>& expected_modification_time);
-  static std::unique_ptr<BlobData> CreateForFileSystemURLWithUnknownSize(
-      const KURL& file_system_url,
-      const absl::optional<base::Time>& expected_modification_time);
 
   const String& ContentType() const { return content_type_; }
   void SetContentType(const String&);
@@ -143,11 +141,6 @@ class PLATFORM_EXPORT BlobData {
   void AppendBlob(scoped_refptr<BlobDataHandle>,
                   int64_t offset,
                   int64_t length);
-  void AppendFileSystemURL(
-      const KURL&,
-      int64_t offset,
-      int64_t length,
-      const absl::optional<base::Time>& expected_modification_time);
   void AppendText(const String&, bool normalize_line_endings_to_native);
 
   // The value of the size property for a Blob who has this data.
@@ -208,8 +201,8 @@ class PLATFORM_EXPORT BlobDataHandle
       uint64_t size,
       mojo::PendingRemote<mojom::blink::Blob>);
 
-  String Uuid() const { return uuid_.IsolatedCopy(); }
-  String GetType() const { return type_.IsolatedCopy(); }
+  String Uuid() const { return uuid_; }
+  String GetType() const { return type_; }
   uint64_t size() const { return size_; }
 
   bool IsSingleUnknownSizeFile() const { return is_single_unknown_size_file_; }

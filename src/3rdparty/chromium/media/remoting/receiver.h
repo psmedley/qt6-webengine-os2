@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -73,6 +73,7 @@ class Receiver final
 
   // RendererClient implementation.
   void OnError(PipelineStatus status) override;
+  void OnFallback(PipelineStatus status) override;
   void OnEnded() override;
   void OnStatisticsUpdate(const PipelineStatistics& stats) override;
   void OnBufferingStateChange(BufferingState state,

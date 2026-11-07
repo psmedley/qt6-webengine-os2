@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -79,6 +79,7 @@ class MockInputApi(object):
     self.change = MockChange([])
     self.presubmit_local_path = os.path.dirname(__file__)
     self.is_windows = sys.platform == 'win32'
+    self.no_diffs = False
 
   def CreateMockFileInPath(self, f_list):
     self.os_path.exists = lambda x: x in f_list
@@ -141,7 +142,7 @@ class MockInputApi(object):
 class MockOutputApi(object):
   """Mock class for the OutputApi class.
 
-  An instance of this class can be passed to presubmit unittests for outputing
+  An instance of this class can be passed to presubmit unittests for outputting
   various types of results.
   """
 
@@ -256,6 +257,7 @@ class MockChange(object):
 
   def __init__(self, changed_files):
     self._changed_files = changed_files
+    self.author_email = None
     self.footers = defaultdict(list)
 
   def LocalPaths(self):

@@ -83,15 +83,15 @@ FontCustomPlatformData::FontCustomPlatformData(sk_sp<SkTypeface> typeface,
 
 FontCustomPlatformData::~FontCustomPlatformData() = default;
 
-// TODO(crbug.com/1205794): Optical sizing should use specified size, instead of
-// zoomed size.
 FontPlatformData FontCustomPlatformData::GetFontPlatformData(
     float size,
+    float adjusted_specified_size,
     bool bold,
     bool italic,
     const FontSelectionRequest& selection_request,
     const FontSelectionCapabilities& selection_capabilities,
     const OpticalSizing& optical_sizing,
+    TextRenderingMode text_rendering,
     FontOrientation orientation,
     const FontVariationSettings* variation_settings,
     const FontPalette* palette) {
@@ -175,7 +175,7 @@ FontPlatformData FontCustomPlatformData::GetFontPlatformData(
 
     bool explicit_opsz_configured = false;
     if (variation_settings && variation_settings->size() < UINT16_MAX) {
-      variation.ReserveCapacity(variation_settings->size() + variation.size());
+      variation.reserve(variation_settings->size() + variation.size());
       for (const auto& setting : *variation_settings) {
         if (setting.Tag() == kOpszTag)
           explicit_opsz_configured = true;
@@ -188,7 +188,7 @@ FontPlatformData FontCustomPlatformData::GetFontPlatformData(
     if (!explicit_opsz_configured) {
       if (optical_sizing == kAutoOpticalSizing) {
         SkFontArguments::VariationPosition::Coordinate opsz_coordinate = {
-            kOpszTag, SkFloatToScalar(size)};
+            kOpszTag, SkFloatToScalar(adjusted_specified_size)};
         variation.push_back(opsz_coordinate);
       } else if (optical_sizing == kNoneOpticalSizing) {
         // Explicitly set default value to avoid automatic application of
@@ -290,7 +290,7 @@ FontPlatformData FontCustomPlatformData::GetFontPlatformData(
   return FontPlatformData(std::move(return_typeface), std::string(), size,
                           synthetic_bold && !base_typeface_->isBold(),
                           synthetic_italic && !base_typeface_->isItalic(),
-                          orientation);
+                          text_rendering, orientation);
 }
 
 Vector<VariationAxis> FontCustomPlatformData::GetVariationAxes() const {
@@ -326,19 +326,6 @@ scoped_refptr<FontCustomPlatformData> FontCustomPlatformData::Create(
   }
   return base::AdoptRef(
       new FontCustomPlatformData(std::move(typeface), decoder.DecodedSize()));
-}
-
-bool FontCustomPlatformData::SupportsFormat(const String& format) {
-  // Support relevant format specifiers from
-  // https://drafts.csswg.org/css-fonts-4/#src-desc
-  return EqualIgnoringASCIICase(format, "woff") ||
-         EqualIgnoringASCIICase(format, "truetype") ||
-         EqualIgnoringASCIICase(format, "opentype") ||
-         EqualIgnoringASCIICase(format, "woff2") ||
-         EqualIgnoringASCIICase(format, "woff-variations") ||
-         EqualIgnoringASCIICase(format, "truetype-variations") ||
-         EqualIgnoringASCIICase(format, "opentype-variations") ||
-         EqualIgnoringASCIICase(format, "woff2-variations");
 }
 
 bool FontCustomPlatformData::MayBeIconFont() const {

@@ -50,6 +50,7 @@ private Q_SLOTS:
     void roles();
     void objectName();
     void crossTreeParent();
+    void tableCellInterface();
 };
 
 // This will be called before the first test function is executed.
@@ -475,7 +476,7 @@ void tst_Accessibility::roles_data()
     QTest::newRow("ax::mojom::Role::kNote") << QString("<div role='note'>a</div>") << 0 << QAccessible::Note;
     //QTest::newRow("ax::mojom::Role::kPane"); // No mapping to ARIA role
     QTest::newRow("ax::mojom::Role::kParagraph") << QString("<p>a</p>") << 0 << QAccessible::Paragraph;
-    QTest::newRow("ax::mojom::Role::kPopUpButton") << QString("<select><option>a</option></select>") << 1 << QAccessible::ComboBox;
+    QTest::newRow("ax::mojom::Role::kPopUpButton") << QString("<select><option>a</option></select>") << 1 << QAccessible::PopupMenu;
     QTest::newRow("ax::mojom::Role::kPre") << QString("<pre>a</pre>") << 0 << QAccessible::Section;
     //QTest::newRow("ax::mojom::Role::kPresentational") << QString("<div role='presentation'>a</div>") << 0 << QAccessible::NoRole; // FIXME: Aria role 'presentation' should work
     QTest::newRow("ax::mojom::Role::kProgressIndicator") << QString("<div role='progressbar' aria-valuenow='77' aria-valuemin='22' aria-valuemax='99'></div>") << 0 << QAccessible::ProgressBar;
@@ -603,6 +604,58 @@ void tst_Accessibility::crossTreeParent()
     QCOMPARE(p->parent()->parent()->parent()->parent(), document);
     QCOMPARE(p->parent()->parent()->parent()->parent()->parent(), view);
     QCOMPARE(p->object()->objectName(), QStringLiteral("my_id"));
+}
+
+void tst_Accessibility::tableCellInterface()
+{
+    QWebEngineView webView;
+    webView.resize(400, 400);
+    webView.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&webView));
+
+    QSignalSpy spyFinished(&webView, &QWebEngineView::loadFinished);
+    webView.setHtml(QLatin1String(
+            "<html><body>"
+            "  <ul>"
+            "    <li><a href='#link1' id='link1'>Link in ListItem</a></li>"
+            "  </ul>"
+            ""
+            "  <div role='rowgroup'>"
+            "    <div role='row'>"
+            "      <span role='cell'><a href='#link2' id='link2'>Link in Cell</a></span>"
+            "    </div>"
+            "  </div>"
+            "</body></html>"));
+    QTRY_COMPARE(spyFinished.size(), 1);
+
+    QAccessibleInterface *view = QAccessible::queryAccessibleInterface(&webView);
+    QAccessibleInterface *document = view->child(0);
+    QTRY_COMPARE(document->childCount(), 2);
+
+    // ListItem without Table parent.
+    {
+        QAccessibleInterface *list = document->child(0);
+        QAccessibleInterface *listItem = list->child(0);
+        QVERIFY(!listItem->tableCellInterface());
+
+        // Should not crash.
+        QPoint linkCenter = elementCenter(webView.page(), QLatin1String("link1"));
+        QTest::mouseClick(webView.focusProxy(), Qt::LeftButton, {}, linkCenter);
+        QTRY_COMPARE(webView.url().fragment(), QLatin1String("link1"));
+    }
+
+    // Cell without Table parent.
+    {
+        QAccessibleInterface *rowgroup = document->child(1);
+        QAccessibleInterface *row = rowgroup->child(0);
+        QAccessibleInterface *cell = row->child(0);
+        QVERIFY(!cell->tableCellInterface());
+
+        // Should not crash.
+        QPoint linkCenter = elementCenter(webView.page(), QLatin1String("link2"));
+        QTest::mouseClick(webView.focusProxy(), Qt::LeftButton, {}, linkCenter);
+        QTRY_COMPARE(webView.url().fragment(), QLatin1String("link2"));
+    }
 }
 
 static QByteArrayList params = QByteArrayList()

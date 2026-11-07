@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,12 +90,14 @@ void SendMotionEvent(wl::TestDataDevice* data_device,
 
 }  // namespace
 
-class MockDragHandlerDelegate : public WmDragHandler::Delegate {
+class MockDragFinishedCallback {
  public:
-  MOCK_METHOD1(OnDragLocationChanged, void(const gfx::Point& location));
-  MOCK_METHOD1(OnDragOperationChanged, void(DragOperation operation));
   MOCK_METHOD1(OnDragFinished, void(DragOperation operation));
-  MOCK_METHOD0(GetDragWidget, absl::optional<gfx::AcceleratedWidget>());
+
+  ui::WmDragHandler::DragFinishedCallback callback() {
+    return base::BindOnce(&MockDragFinishedCallback::OnDragFinished,
+                          base::Unretained(this));
+  }
 };
 
 class MockDropHandler : public WmDropHandler {
@@ -162,7 +164,7 @@ class WaylandDataDragControllerTest : public WaylandDragDropTest {
     server_.output()->SetRect({20, 30, 800, 600});
     WaylandDragDropTest::SetUp();
 
-    drag_handler_delegate_ = std::make_unique<MockDragHandlerDelegate>();
+    drag_finished_callback_ = std::make_unique<MockDragFinishedCallback>();
     drop_handler_ = std::make_unique<MockDropHandler>();
     SetWmDropHandler(window_.get(), drop_handler_.get());
   }
@@ -177,8 +179,8 @@ class WaylandDataDragControllerTest : public WaylandDragDropTest {
 
   MockDropHandler* drop_handler() { return drop_handler_.get(); }
 
-  MockDragHandlerDelegate* drag_handler() {
-    return drag_handler_delegate_.get();
+  MockDragFinishedCallback* drag_finished_callback() {
+    return drag_finished_callback_.get();
   }
 
   wl::MockSurface* GetMockSurface(uint32_t id) {
@@ -200,7 +202,8 @@ class WaylandDataDragControllerTest : public WaylandDragDropTest {
     os_exchange_data.SetString(sample_text_for_dnd());
     origin_window->StartDrag(
         os_exchange_data, operations, DragEventSource::kMouse, /*cursor=*/{},
-        /*can_grab_pointer=*/true, drag_handler_delegate_.get());
+        /*can_grab_pointer=*/true, drag_finished_callback_->callback(),
+        /*loation delegate=*/nullptr);
     Sync();
   }
 
@@ -209,7 +212,7 @@ class WaylandDataDragControllerTest : public WaylandDragDropTest {
       const gfx::Size& size,
       MockPlatformWindowDelegate* delegate,
       gfx::AcceleratedWidget context) {
-    DCHECK(delegate);
+    CHECK(delegate);
     PlatformWindowInitProperties properties{gfx::Rect(size)};
     properties.type = type;
     properties.parent_widget = context;
@@ -234,13 +237,20 @@ class WaylandDataDragControllerTest : public WaylandDragDropTest {
           // If DnD was cancelled, or data was dropped where it was not
           // accepted, the operation result must be None (0).
           // Regression test for https://crbug.com/1136751.
-          EXPECT_CALL(*self->drag_handler(),
+          EXPECT_CALL(*self->drag_finished_callback(),
                       OnDragFinished(DragOperation::kNone))
               .Times(1);
 
           self->Sync();
         },
         base::Unretained(this)));
+  }
+
+  void ScheduleDataDeviceAction(uint32_t action) {
+    ScheduleTestTask(base::BindLambdaForTesting([this, action]() {
+      SendDndAction(action);
+      Sync();
+    }));
   }
 
   void FocusAndPressLeftPointerButton(WaylandWindow* window,
@@ -254,11 +264,10 @@ class WaylandDataDragControllerTest : public WaylandDragDropTest {
 
  protected:
   std::unique_ptr<MockDropHandler> drop_handler_;
-  std::unique_ptr<MockDragHandlerDelegate> drag_handler_delegate_;
+  std::unique_ptr<MockDragFinishedCallback> drag_finished_callback_;
 };
 
 TEST_P(WaylandDataDragControllerTest, StartDrag) {
-  const bool restored_focus = window_->has_pointer_focus();
   FocusAndPressLeftPointerButton(window_.get(), &delegate_);
 
   auto test = [](WaylandDataDragControllerTest* self) {
@@ -287,12 +296,9 @@ TEST_P(WaylandDataDragControllerTest, StartDrag) {
 
   // Ensure drag delegate it properly reset when the drag loop quits.
   EXPECT_FALSE(data_device()->drag_delegate_);
-
-  window_->SetPointerFocus(restored_focus);
 }
 
 TEST_P(WaylandDataDragControllerTest, StartDragWithWrongMimeType) {
-  bool restored_focus = window_->has_pointer_focus();
   FocusAndPressLeftPointerButton(window_.get(), &delegate_);
 
   // The client starts dragging offering data with |kMimeTypeHTML|
@@ -316,7 +322,6 @@ TEST_P(WaylandDataDragControllerTest, StartDragWithWrongMimeType) {
   data_device_manager_->data_source()->ReadData(kMimeTypeText,
                                                 std::move(callback));
   run_loop.Run();
-  window_->SetPointerFocus(restored_focus);
 }
 
 // Ensures data drag controller properly offers dragged data with custom
@@ -325,7 +330,6 @@ TEST_P(WaylandDataDragControllerTest, StartDragWithWrongMimeType) {
 //  - https://crbug.com/1207607
 //  - https://crbug.com/1247063
 TEST_P(WaylandDataDragControllerTest, StartDragWithCustomFormats) {
-  bool restored_focus = window_->has_pointer_focus();
   FocusAndPressLeftPointerButton(window_.get(), &delegate_);
   OSExchangeData data(OSExchangeDataProviderFactory::CreateProvider());
   ClipboardFormatType kCustomFormats[] = {
@@ -348,12 +352,9 @@ TEST_P(WaylandDataDragControllerTest, StartDragWithCustomFormats) {
     EXPECT_TRUE(base::Contains(mime_types, format.GetName()))
         << "Format '" << format.GetName() << "' should be offered.";
   }
-
-  window_->SetPointerFocus(restored_focus);
 }
 
 TEST_P(WaylandDataDragControllerTest, StartDragWithText) {
-  bool restored_focus = window_->has_pointer_focus();
   FocusAndPressLeftPointerButton(window_.get(), &delegate_);
 
   // The client starts dragging offering text mime type.
@@ -378,11 +379,9 @@ TEST_P(WaylandDataDragControllerTest, StartDragWithText) {
   data_device_manager_->data_source()->ReadData(kMimeTypeMozillaURL,
                                                 std::move(callback));
   run_loop.Run();
-  window_->SetPointerFocus(restored_focus);
 }
 
 TEST_P(WaylandDataDragControllerTest, StartDragWithFileContents) {
-  bool restored_focus = window_->has_pointer_focus();
   FocusAndPressLeftPointerButton(window_.get(), &delegate_);
 
   // The client starts dragging offering text mime type.
@@ -410,7 +409,6 @@ TEST_P(WaylandDataDragControllerTest, StartDragWithFileContents) {
   EXPECT_EQ(1u, data_device_manager_->data_source()->mime_types().size());
   EXPECT_EQ("application/octet-stream;name=\"t\\\\est\\\".jpg\"",
             data_device_manager_->data_source()->mime_types().front());
-  window_->SetPointerFocus(restored_focus);
 }
 
 MATCHER_P(PointFNear, n, "") {
@@ -432,7 +430,7 @@ TEST_P(WaylandDataDragControllerTest, ReceiveDrag) {
 
   // Consume the move event from pointer enter.
   EXPECT_CALL(*drop_handler_,
-              MockDragMotion(PointFNear(gfx::PointF(20, 20)), _, _));
+              MockDragMotion(PointFNear(gfx::PointF(10, 10)), _, _));
 
   gfx::Point entered_point(10, 10);
   // The server sends an enter event.
@@ -443,9 +441,9 @@ TEST_P(WaylandDataDragControllerTest, ReceiveDrag) {
   Sync();
   ASSERT_EQ(drag_controller(), data_device()->drag_delegate_);
 
-  // In 2x window scale, we expect received coordinates to be multiplied.
+  // In 2x window scale, we expect received coordinates still be in DIP.
   EXPECT_CALL(*drop_handler_,
-              MockDragMotion(PointFNear(gfx::PointF(60, 60)), _, _));
+              MockDragMotion(PointFNear(gfx::PointF(30, 30)), _, _));
 
   // The server sends an motion event in DP.
   gfx::Point motion_point(30, 30);
@@ -491,25 +489,33 @@ TEST_P(WaylandDataDragControllerTest, ReceiveDragPixelSurface) {
       data_device_manager_->data_device()->CreateAndSendDataOffer();
   data_offer->OnOffer(kMimeTypeText,
                       ToClipboardData(std::string(kSampleTextForDragAndDrop)));
+  gfx::Point entered_point{800, 600};
+  {
+    gfx::PointF expected_position(entered_point);
+    expected_position.Scale(1.0f / kTripleScale);
 
-  EXPECT_CALL(*drop_handler_,
-              MockDragMotion(PointFNear(gfx::PointF(800, 600)), _, _));
+    EXPECT_CALL(*drop_handler_,
+                MockDragMotion(PointFNear(expected_position), _, _));
 
-  // The server sends an enter event at the bottom right corner of the window.
-  gfx::Point entered_point(800, 600);
-  data_device_manager_->data_device()->OnEnter(
-      1002, surface_->resource(), wl_fixed_from_int(entered_point.x()),
-      wl_fixed_from_int(entered_point.y()), data_offer);
-
+    // The server sends an enter event at the bottom right corner of the window.
+    data_device_manager_->data_device()->OnEnter(
+        1002, surface_->resource(), wl_fixed_from_int(entered_point.x()),
+        wl_fixed_from_int(entered_point.y()), data_offer);
+  }
   Sync();
 
-  EXPECT_CALL(*drop_handler_,
-              MockDragMotion(PointFNear(gfx::PointF(400, 300)), _, _))
-      .Times(::testing::AtLeast(1));
+  gfx::Point center_point{400, 300};
+  {
+    gfx::PointF expected_position(center_point);
+    expected_position.Scale(1.0f / kTripleScale);
 
-  // The server sends a motion event through the center of the output.
-  gfx::Point center(400, 300);
-  SendMotionEvent(data_device_manager_->data_device(), center);
+    EXPECT_CALL(*drop_handler_,
+                MockDragMotion(PointFNear(expected_position), _, _))
+        .Times(::testing::AtLeast(1));
+
+    // The server sends a motion event through the center of the output.
+    SendMotionEvent(data_device_manager_->data_device(), center_point);
+  }
   Sync();
 
   EXPECT_CALL(*drop_handler_,
@@ -675,16 +681,14 @@ TEST_P(WaylandDataDragControllerTest, ValidateDroppedXMozUrl) {
 // Verifies the correct delegate functions are called when a drag session is
 // started and cancelled within the same surface.
 TEST_P(WaylandDataDragControllerTest, StartAndCancel) {
-  const bool restored_focus = window_->has_pointer_focus();
   FocusAndPressLeftPointerButton(window_.get(), &delegate_);
 
+  ScheduleDataDeviceAction(WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE);
   // Schedule a wl_data_source::cancelled event to be sent asynchronously
   // once the drag session gets started.
   ScheduleDragCancel();
 
   RunMouseDragWithSampleData(window_.get(), DragDropTypes::DRAG_COPY);
-
-  window_->SetPointerFocus(restored_focus);
 }
 
 TEST_P(WaylandDataDragControllerTest, ForeignDragHandleAskAction) {
@@ -725,7 +729,6 @@ TEST_P(WaylandDataDragControllerTest, ForeignDragHandleAskAction) {
 // Regression test for https://crbug.com/1143707.
 TEST_P(WaylandDataDragControllerTest, DestroyEnteredSurface) {
   auto* window_1 = window_.get();
-  const bool restored_focus = window_1->has_pointer_focus();
   FocusAndPressLeftPointerButton(window_1, &delegate_);
 
   ASSERT_EQ(PlatformWindowType::kWindow, window_1->type());
@@ -760,16 +763,14 @@ TEST_P(WaylandDataDragControllerTest, DestroyEnteredSurface) {
   ScheduleTestTask(base::BindOnce(test, base::Unretained(this)));
 
   RunMouseDragWithSampleData(window_.get(), DragDropTypes::DRAG_COPY);
-
-  window_1->SetPointerFocus(restored_focus);
 }
 
 // Verifies that early origin surface destruction is properly handled.
 // Regression test for https://crbug.com/1143707.
 TEST_P(WaylandDataDragControllerTest, DestroyOriginSurface) {
   auto* window_1 = window_.get();
-  const bool restored_focus = window_1->has_pointer_focus();
-  window_1->SetPointerFocus(false);
+  SetPointerFocusedWindow(nullptr);
+
   ASSERT_EQ(PlatformWindowType::kWindow, window_1->type());
 
   auto test = [](WaylandDataDragControllerTest* self,
@@ -802,7 +803,7 @@ TEST_P(WaylandDataDragControllerTest, DestroyOriginSurface) {
   os_exchange_data.SetString(sample_text_for_dnd());
   window_2->StartDrag(os_exchange_data, DragDropTypes::DRAG_COPY,
                       DragEventSource::kMouse, {}, true,
-                      drag_handler_delegate_.get());
+                      drag_finished_callback_->callback(), nullptr);
   Sync();
 
   // Send wl_data_source::cancelled event. The drag controller is then
@@ -810,14 +811,11 @@ TEST_P(WaylandDataDragControllerTest, DestroyOriginSurface) {
   SendDndLeave();
   SendDndCancelled();
   Sync();
-
-  window_1->SetPointerFocus(restored_focus);
 }
 
 // Ensures drag/drop events are properly propagated to non-toplevel windows.
 TEST_P(WaylandDataDragControllerTest, DragToNonToplevelWindows) {
   auto* origin_window = window_.get();
-  const bool restored_focus = origin_window->has_pointer_focus();
   FocusAndPressLeftPointerButton(origin_window, &delegate_);
 
   auto test = [](WaylandDataDragControllerTest* self,
@@ -868,15 +866,12 @@ TEST_P(WaylandDataDragControllerTest, DragToNonToplevelWindows) {
 
   // Request to start the drag session, which spins a nested run loop.
   RunMouseDragWithSampleData(origin_window, DragDropTypes::DRAG_COPY);
-
-  origin_window->SetPointerFocus(restored_focus);
 }
 
 // Ensures that requests to create a |PlatformWindowType::kPopup| during drag
 // sessions return xdg_popup-backed windows.
 TEST_P(WaylandDataDragControllerTest, PopupRequestCreatesPopupWindow) {
   auto* origin_window = window_.get();
-  const bool restored_focus = origin_window->has_pointer_focus();
   FocusAndPressLeftPointerButton(origin_window, &delegate_);
 
   std::unique_ptr<WaylandWindow> popup_window;
@@ -899,18 +894,16 @@ TEST_P(WaylandDataDragControllerTest, PopupRequestCreatesPopupWindow) {
 
   Sync();
   ASSERT_TRUE(popup_window.get());
-  auto* surface = GetMockSurface(popup_window->root_surface()->GetSurfaceId());
+  auto* surface =
+      GetMockSurface(popup_window->root_surface()->get_surface_id());
   ASSERT_TRUE(surface);
   EXPECT_NE(nullptr, surface->xdg_surface()->xdg_popup());
-
-  origin_window->SetPointerFocus(restored_focus);
 }
 
 // Ensures that requests to create a |PlatformWindowType::kMenu| during drag
 // sessions return xdg_popup-backed windows.
 TEST_P(WaylandDataDragControllerTest, MenuRequestCreatesPopupWindow) {
   auto* origin_window = window_.get();
-  const bool restored_focus = origin_window->has_pointer_focus();
   FocusAndPressLeftPointerButton(origin_window, &delegate_);
 
   auto test = [](WaylandDataDragControllerTest* self,
@@ -922,7 +915,7 @@ TEST_P(WaylandDataDragControllerTest, MenuRequestCreatesPopupWindow) {
     self->Sync();
 
     auto* surface =
-        self->GetMockSurface(menu_window->root_surface()->GetSurfaceId());
+        self->GetMockSurface(menu_window->root_surface()->get_surface_id());
     ASSERT_TRUE(surface);
     EXPECT_EQ(nullptr, surface->sub_surface());
   };
@@ -936,8 +929,6 @@ TEST_P(WaylandDataDragControllerTest, MenuRequestCreatesPopupWindow) {
 
   // Request to start the drag session, which spins a nested run loop.
   RunMouseDragWithSampleData(origin_window, DragDropTypes::DRAG_COPY);
-
-  origin_window->SetPointerFocus(restored_focus);
 }
 
 // Regression test for https://crbug.com/1209269.
@@ -951,7 +942,6 @@ TEST_P(WaylandDataDragControllerTest, MenuRequestCreatesPopupWindow) {
 // gracefully reset state and quit drag loop as if the drag session was
 // cancelled as usual.
 TEST_P(WaylandDataDragControllerTest, AsyncNoopStartDrag) {
-  const bool restored_focus = window_->has_pointer_focus();
   OSExchangeData os_exchange_data;
   os_exchange_data.SetString(sample_text_for_dnd());
 
@@ -963,10 +953,10 @@ TEST_P(WaylandDataDragControllerTest, AsyncNoopStartDrag) {
   EXPECT_CALL(*this, MockStartDrag(_, _, _)).Times(0);
 
   // Attempt to start drag session and ensure it fails.
-  bool result_1 = window_->StartDrag(os_exchange_data, DragDropTypes::DRAG_COPY,
-                                     DragEventSource::kMouse, /*cursor=*/{},
-                                     /*can_grab_pointer=*/true,
-                                     drag_handler_delegate_.get());
+  bool result_1 = window_->StartDrag(
+      os_exchange_data, DragDropTypes::DRAG_COPY, DragEventSource::kMouse,
+      /*cursor=*/{},
+      /*can_grab_pointer=*/true, drag_finished_callback_->callback(), nullptr);
   EXPECT_FALSE(result_1);
   Mock::VerifyAndClearExpectations(drop_handler_.get());
   Mock::VerifyAndClearExpectations(this);
@@ -983,31 +973,27 @@ TEST_P(WaylandDataDragControllerTest, AsyncNoopStartDrag) {
     SendPointerButton(window_.get(), &delegate_, BTN_LEFT, /*pressed=*/false);
 
     EXPECT_CALL(*drop_handler_, OnDragLeave).Times(1);
-    EXPECT_CALL(*drag_handler_delegate_,
+    EXPECT_CALL(*drag_finished_callback_,
                 OnDragFinished(Eq(DragOperation::kNone)))
         .Times(1);
     Sync();
   }));
   EXPECT_CALL(*this, MockStartDrag(_, _, _)).Times(1);
-  bool result_2 = window_->StartDrag(os_exchange_data, DragDropTypes::DRAG_COPY,
-                                     DragEventSource::kMouse, /*cursor=*/{},
-                                     /*can_grab_pointer=*/true,
-                                     drag_handler_delegate_.get());
+  bool result_2 = window_->StartDrag(
+      os_exchange_data, DragDropTypes::DRAG_COPY, DragEventSource::kMouse,
+      /*cursor=*/{},
+      /*can_grab_pointer=*/true, drag_finished_callback_->callback(), nullptr);
   // TODO(crbug.com/1022722): Double-check if this should return false instead.
   EXPECT_TRUE(result_2);
   Mock::VerifyAndClearExpectations(drop_handler_.get());
-  Mock::VerifyAndClearExpectations(drag_handler_delegate_.get());
+  Mock::VerifyAndClearExpectations(drag_finished_callback_.get());
   Mock::VerifyAndClearExpectations(this);
   EXPECT_FALSE(drag_controller()->origin_window_);
   EXPECT_FALSE(drag_controller()->nested_dispatcher_);
-
-  window_->SetPointerFocus(restored_focus);
 }
 
 // Regression test for https://crbug.com/1175083.
 TEST_P(WaylandDataDragControllerTest, StartDragWithCorrectSerial) {
-  const bool restored_focus = window_->has_pointer_focus();
-
   FocusAndPressLeftPointerButton(window_.get(), &delegate_);
   uint32_t mouse_press_serial = current_serial_;
 
@@ -1036,15 +1022,11 @@ TEST_P(WaylandDataDragControllerTest, StartDragWithCorrectSerial) {
   RunMouseDragWithSampleData(window_.get(), DragDropTypes::DRAG_COPY);
   Mock::VerifyAndClearExpectations(drop_handler_.get());
   Mock::VerifyAndClearExpectations(this);
-
-  window_->SetPointerFocus(restored_focus);
 }
 
 // Check drag session is correctly started when there are both mouse button and
 // a touch point pressed.
 TEST_P(WaylandDataDragControllerTest, StartDragWithCorrectSerialForDragSource) {
-  const bool pointer_focus = window_->has_pointer_focus();
-  const bool touch_focus = window_->has_touch_focus();
   OSExchangeData os_exchange_data;
   os_exchange_data.SetString(sample_text_for_dnd());
 
@@ -1062,7 +1044,8 @@ TEST_P(WaylandDataDragControllerTest, StartDragWithCorrectSerialForDragSource) {
   EXPECT_CALL(*this, MockStartDrag(_, _, _)).Times(0);
   bool drag_started = window_->StartDrag(
       os_exchange_data, DragDropTypes::DRAG_COPY, DragEventSource::kTouch,
-      /*cursor=*/{}, /*can_grab_pointer=*/true, drag_handler_delegate_.get());
+      /*cursor=*/{}, /*can_grab_pointer=*/true,
+      drag_finished_callback_->callback(), nullptr);
   EXPECT_FALSE(drag_started);
   Mock::VerifyAndClearExpectations(drop_handler_.get());
   Mock::VerifyAndClearExpectations(this);
@@ -1081,14 +1064,11 @@ TEST_P(WaylandDataDragControllerTest, StartDragWithCorrectSerialForDragSource) {
   EXPECT_CALL(*this, MockStartDrag(_, _, Eq(mouse_press_serial))).Times(1);
   bool success = window_->StartDrag(
       os_exchange_data, DragDropTypes::DRAG_COPY, DragEventSource::kMouse,
-      /*cursor=*/{}, /*can_grab_pointer=*/true, drag_handler_delegate_.get());
+      /*cursor=*/{}, /*can_grab_pointer=*/true,
+      drag_finished_callback_->callback(), nullptr);
   EXPECT_TRUE(success);
   Mock::VerifyAndClearExpectations(drop_handler_.get());
   Mock::VerifyAndClearExpectations(this);
-
-  // Restore window's focus state.
-  window_->SetPointerFocus(pointer_focus);
-  window_->set_touch_focus(touch_focus);
 }
 
 INSTANTIATE_TEST_SUITE_P(XdgVersionStableTest,

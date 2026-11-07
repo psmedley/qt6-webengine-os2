@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -281,7 +281,8 @@ class DeleteOnActivationChangeObserver : public ActivationChangeObserver,
 
  private:
   raw_ptr<aura::Window> root_;
-  raw_ptr<aura::Window> window_;
+  // TODO(crbug.com/1298696): Breaks wm_unittests.
+  raw_ptr<aura::Window, DegradeToNoOpWhenMTE> window_;
   const bool delete_on_activating_;
   const bool delete_window_losing_active_;
   bool did_delete_;
@@ -322,7 +323,8 @@ class DeleteOnLoseFocusChangeObserver
 
  private:
   raw_ptr<aura::Window> root_;
-  raw_ptr<aura::Window> window_;
+  // TODO(crbug.com/1298696): Breaks wm_unittests.
+  raw_ptr<aura::Window, DegradeToNoOpWhenMTE> window_;
   bool did_delete_;
 };
 
@@ -370,7 +372,8 @@ class ScopedTargetFocusNotificationObserver : public FocusNotificationObserver {
   }
 
  private:
-  raw_ptr<aura::Window> target_;
+  // TODO(crbug.com/1298696): Breaks wm_unittests.
+  raw_ptr<aura::Window, DegradeToNoOpWhenMTE> target_;
   aura::WindowTracker tracker_;
 };
 

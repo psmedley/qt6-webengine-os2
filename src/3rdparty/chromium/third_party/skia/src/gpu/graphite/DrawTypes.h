@@ -10,6 +10,11 @@
 
 #include "include/gpu/graphite/GraphiteTypes.h"
 
+#include "include/core/SkSamplingOptions.h"
+#include "include/core/SkTileMode.h"
+
+#include <array>
+
 namespace skgpu::graphite {
 
 class Buffer;
@@ -24,29 +29,6 @@ enum class CType : unsigned {
 
     kLast = kSkMatrix
 };
-
-/**
- * This enum is used to specify the load operation to be used when a RenderPass begins execution
- */
-enum class LoadOp : uint8_t {
-    kLoad,
-    kClear,
-    kDiscard,
-
-    kLast = kDiscard
-};
-inline static constexpr int kLoadOpCount = (int)(LoadOp::kLast) + 1;
-
-/**
- * This enum is used to specify the store operation to be used when a RenderPass ends execution.
- */
-enum class StoreOp : uint8_t {
-    kStore,
-    kDiscard,
-
-    kLast = kDiscard
-};
-inline static constexpr int kStoreOpCount = (int)(StoreOp::kLast) + 1;
 
 /**
  * Geometric primitives used for drawing.
@@ -92,7 +74,7 @@ enum class VertexAttribType : uint8_t {
     kInt,
     kUInt,
 
-    kUShort_norm,
+    kUShort_norm,  // unsigned short, e.g. depth, 0 -> 0.0f, 65535 -> 1.0f.
 
     kUShort4_norm, // vector of 4 unsigned shorts. 0 -> 0.0f, 65535 -> 1.0f.
 
@@ -158,6 +140,7 @@ static constexpr inline size_t VertexAttribTypeSize(VertexAttribType type) {
         case VertexAttribType::kUShort4_norm:
             return 4 * sizeof(uint16_t);
     }
+    SkUNREACHABLE;
 }
 
 /*
@@ -176,6 +159,47 @@ struct BindBufferInfo {
     bool operator!=(const BindBufferInfo& o) const {
         return !(*this == o);
     }
+};
+
+/**
+ * Struct used to describe how a Texture/TextureProxy/TextureProxyView is sampled.
+ */
+struct SamplerDesc {
+    SkSamplingOptions fSamplingOptions;
+    SkTileMode fTileModes[2];
+
+    bool operator==(const SamplerDesc& o) const {
+        return fSamplingOptions == o.fSamplingOptions &&
+               fTileModes[0] == o.fTileModes[0] &&
+               fTileModes[1] == o.fTileModes[1];
+    }
+    bool operator!=(const SamplerDesc& o) const {
+        return !(*this == o);
+    }
+
+    uint32_t asKey() const {
+        static_assert(kSkTileModeCount <= 4 && kSkFilterModeCount <= 2);
+        // Cubic sampling is handled in a shader, with the actual texture sampled by with NN,
+        // but that is what a cubic SkSamplingOptions is set to if you ignore 'cubic', which let's
+        // us simplify how we construct SamplerDec's from the options passed to high-level draws.
+        SkASSERT(!fSamplingOptions.useCubic || (fSamplingOptions.filter == SkFilterMode::kNearest &&
+                                                fSamplingOptions.mipmap == SkMipmapMode::kNone));
+        // TODO: Add support for anisotropic filtering
+        return (static_cast<int>(fTileModes[0])           << 0) |
+               (static_cast<int>(fTileModes[1])           << 2) |
+               (static_cast<int>(fSamplingOptions.filter) << 4) |
+               (static_cast<int>(fSamplingOptions.mipmap) << 5);
+    }
+};
+
+enum class UniformSlot {
+    // TODO: Want this?
+    // Meant for uniforms that change rarely to never over the course of a render pass
+    // kStatic,
+    // Meant for uniforms that are defined and used by the RenderStep portion of the pipeline shader
+    kRenderStep,
+    // Meant for uniforms that are defined and used by the paint parameters (ie SkPaint subset)
+    kPaint,
 };
 
 /*

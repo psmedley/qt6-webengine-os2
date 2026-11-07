@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@ class SkBitmap;
 
 namespace content {
 
-class PermissionControllerImpl;
+class PermissionController;
 class RenderFrameHostImpl;
 class StoragePartitionImpl;
 
@@ -172,7 +172,7 @@ class CONTENT_EXPORT BackgroundFetchDelegateProxy
 
   BackgroundFetchDelegate* GetDelegate();
 
-  PermissionControllerImpl* GetPermissionController();
+  PermissionController* GetPermissionController();
 
   // Map from unique job ids to the controller.
   std::map<std::string, base::WeakPtr<Controller>> controller_map_;

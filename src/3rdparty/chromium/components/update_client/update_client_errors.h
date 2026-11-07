@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,6 +68,9 @@ enum class UnpackerError {
   kDeltaPatchProcessFailure = 15,
   kDeltaMissingExistingFile = 16,
   // kFingerprintWriteFailed = 17,    // Deprecated. Don't use.
+  kPuffinMissingPreviousCrx = 18,
+  kFailedToAddToCache = 19,
+  kFailedToCreateCacheDir = 20,
 };
 
 // These errors are returned with the |kInstall| error category and
@@ -96,6 +99,7 @@ enum class ServiceError {
   NONE = 0,
   SERVICE_WAIT_FAILED = 1,
   UPDATE_DISABLED = 2,
+  CANCELLED = 3,
 };
 
 // These errors are related to serialization, deserialization, and parsing of

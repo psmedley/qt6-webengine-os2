@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,129 +7,17 @@
 #include <vector>
 
 #include "base/base64.h"
+#include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/test/values_test_util.h"
 #include "components/autofill_assistant/browser/service.pb.h"
+#include "components/autofill_assistant/browser/switches.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
-namespace autofill_assistant {
-namespace js_flow_util {
+namespace autofill_assistant::js_flow_util {
 namespace {
 
 using ::base::test::IsJson;
-
-TEST(JsFlowUtilTest, SimpleValues) {
-  std::string ignored_error_message;
-  EXPECT_TRUE(ContainsOnlyAllowedValues(base::Value(), ignored_error_message));
-  EXPECT_TRUE(ContainsOnlyAllowedValues(base::Value(3), ignored_error_message));
-  EXPECT_TRUE(
-      ContainsOnlyAllowedValues(base::Value(2.0), ignored_error_message));
-  EXPECT_TRUE(
-      ContainsOnlyAllowedValues(base::Value(true), ignored_error_message));
-  EXPECT_FALSE(ContainsOnlyAllowedValues(base::Value(std::string()),
-                                         ignored_error_message));
-  EXPECT_FALSE(
-      ContainsOnlyAllowedValues(base::Value("test"), ignored_error_message));
-  EXPECT_FALSE(ContainsOnlyAllowedValues(
-      base::Value(std::vector<uint8_t>{'b', 'i', 'n', 'a', 'r', 'y'}),
-      ignored_error_message));
-}
-
-// Creates a complex value that contains only primitive data types.
-base::Value CreateTestValue() {
-  return *base::JSONReader::Read(
-      R"(
-      {
-        "keyA":null,
-        "keyB":3,
-        "keyC": 2.0,
-        "keyD": true,
-        "keyE": {
-          "nestedA": null,
-          "nestedB": 4,
-          "nestedC": 3.0,
-          "nestedD": false,
-          "nestedE": [false, false, true]
-        },
-        "keyF": [1,2,3,4,5],
-        "keyG": [{"key":true}, {"key":false}]
-      }
-  )");
-}
-
-TEST(JsFlowUtilTest, ComplexAllowedValue) {
-  std::string ignored_error_message;
-  EXPECT_TRUE(
-      ContainsOnlyAllowedValues(CreateTestValue(), ignored_error_message));
-}
-
-TEST(JsFlowUtilTest, DictContainingStringNotAllowed) {
-  std::string ignored_error_message;
-  base::Value key_a_is_string = CreateTestValue();
-  key_a_is_string.GetIfDict()->Set("keyA", "not allowed");
-  EXPECT_FALSE(
-      ContainsOnlyAllowedValues(key_a_is_string, ignored_error_message));
-}
-
-TEST(JsFlowUtilTest, DictContainingBinaryNotAllowed) {
-  std::string ignored_error_message;
-  base::Value key_a_is_binary = CreateTestValue();
-  key_a_is_binary.GetIfDict()->Set("keyA",
-                                   std::vector<uint8_t>{'t', 'e', 's', 't'});
-  EXPECT_FALSE(
-      ContainsOnlyAllowedValues(key_a_is_binary, ignored_error_message));
-}
-
-TEST(JsFlowUtilTest, NestedDictContainingStringNotAllowed) {
-  std::string ignored_error_message;
-  base::Value nested_key_is_string = CreateTestValue();
-  nested_key_is_string.GetIfDict()->SetByDottedPath("keyE.nestedA",
-                                                    "not allowed");
-  EXPECT_FALSE(
-      ContainsOnlyAllowedValues(nested_key_is_string, ignored_error_message));
-}
-
-TEST(JsFlowUtilTest, NestedDictContainingBinaryNotAllowed) {
-  std::string ignored_error_message;
-  base::Value nested_key_is_binary = CreateTestValue();
-  nested_key_is_binary.GetIfDict()->SetByDottedPath(
-      "keyE.nestedA", std::vector<uint8_t>{'t', 'e', 's', 't'});
-  EXPECT_FALSE(
-      ContainsOnlyAllowedValues(nested_key_is_binary, ignored_error_message));
-}
-
-TEST(JsFlowUtilTest, NestedListContainingStringsNotAllowed) {
-  std::string ignored_error_message;
-  base::Value nested_list_contains_strings = CreateTestValue();
-  base::Value::List list_containing_strings;
-  list_containing_strings.Append("not allowed");
-  nested_list_contains_strings.GetIfDict()->SetByDottedPath(
-      "keyE.nestedE", std::move(list_containing_strings));
-  EXPECT_FALSE(ContainsOnlyAllowedValues(nested_list_contains_strings,
-                                         ignored_error_message));
-}
-
-TEST(JsFlowUtilTest, NestedListContainingBinaryNotAllowed) {
-  std::string ignored_error_message;
-  base::Value nested_list_contains_binary = CreateTestValue();
-  base::Value::List list_containing_binary;
-  list_containing_binary.Append(std::vector<uint8_t>{'t', 'e', 's', 't'});
-  nested_list_contains_binary.GetIfDict()->SetByDottedPath(
-      "keyE.nestedE", std::move(list_containing_binary));
-  EXPECT_FALSE(ContainsOnlyAllowedValues(nested_list_contains_binary,
-                                         ignored_error_message));
-}
-
-TEST(JsFlowUtilTest, NestedListContainingDictWithStringsNotAllowed) {
-  std::string ignored_error_message;
-  base::Value list_contains_dict_with_strings = CreateTestValue();
-  base::Value::List* key_g_list =
-      list_contains_dict_with_strings.GetIfDict()->FindList("keyG");
-  ASSERT_TRUE(key_g_list != nullptr);
-  key_g_list->front().GetIfDict()->Set("key", "not allowed");
-  EXPECT_FALSE(ContainsOnlyAllowedValues(list_contains_dict_with_strings,
-                                         ignored_error_message));
-}
 
 TEST(JsFlowUtilTest, ExtractFlowReturnValue) {
   // Note: this is tested much more extensively in the JsFlowExecutorImpl.
@@ -143,9 +31,9 @@ TEST(JsFlowUtilTest, ExtractFlowReturnValue) {
           .Build();
 
   std::unique_ptr<base::Value> out_flow_value;
-  ClientStatus status = ExtractFlowReturnValue(
-      devtools_status, devtools_result.get(), out_flow_value,
-      /* js_line_offset= */ 0, /* num_stack_entries_to_drop= */ 0);
+  ClientStatus status =
+      ExtractFlowReturnValue(devtools_status, devtools_result.get(),
+                             out_flow_value, /* js_line_offsets= */ {});
   EXPECT_TRUE(status.ok());
   EXPECT_EQ(*out_flow_value, base::Value(12345));
 }
@@ -250,6 +138,23 @@ TEST(JsFlowUtilTest, NativeActionResultToResultValueHasSerializedActionResult) {
           "actionSpecificResult": ")" + wait_for_dom_result_base64 + "\"}")));
 }
 
+TEST(JsFlowUtilTest, NativeActionResultToResultValueHasAutofillErrorInfo) {
+  ProcessedActionProto processed_action;
+  AutofillErrorInfoProto* autofill_error_info =
+      processed_action.mutable_status_details()->mutable_autofill_error_info();
+  autofill_error_info->set_client_memory_address_key_names("key_names");
+
+  std::string autofill_error_info_base64;
+  base::Base64Encode(autofill_error_info->SerializeAsString(),
+                     &autofill_error_info_base64);
+
+  EXPECT_THAT(
+      NativeActionResultToResultValue(processed_action), Pointee(IsJson(R"(
+        {
+          "navigationStarted": false,
+          "autofillErrorInfo": ")" + autofill_error_info_base64 + "\"}")));
+}
+
 TEST(JsFlowUtilTest, NativeActionResultToResultValueHasEmptyActionResult) {
   ProcessedActionProto processed_action;
 
@@ -259,6 +164,42 @@ TEST(JsFlowUtilTest, NativeActionResultToResultValueHasEmptyActionResult) {
   )")));
 }
 
+TEST(JsFlowUtilTest, ExceptionLocationToDevtoolsUrlMapping) {
+  const std::string url =
+      GetDevtoolsSourceUrl(UnexpectedErrorInfoProto::JS_FLOW);
+  EXPECT_THAT(GetExceptionLocation(url), UnexpectedErrorInfoProto::JS_FLOW);
+}
+
+TEST(JsFlowUtilTest, UnknownUrl) {
+  EXPECT_THAT(GetExceptionLocation("SOME_STRING"),
+              UnexpectedErrorInfoProto::UNKNOWN);
+}
+
+TEST(JsFlowUtilTest, GetDevtoolsSourceUrlCommentToAppend) {
+  EXPECT_THAT(GetDevtoolsSourceUrlCommentToAppend(
+                  UnexpectedErrorInfoProto::JS_FLOW_LIBRARY),
+              "\n//# sourceURL=JS_FLOW_LIBRARY");
+}
+
+TEST(JsFlowUtilTest, ExpectsDebugModeSetToTrue) {
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  command_line->AppendSwitch(switches::kAutofillAssistantDebugMode);
+  command_line->AppendSwitchASCII(switches::kAutofillAssistantDebugMode,
+                                  "true");
+  EXPECT_EQ(IsDebugMode(), true);
+}
+
+TEST(JsFlowUtilTest, ExpectsDebugModeSetToFalse) {
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  command_line->AppendSwitch(switches::kAutofillAssistantDebugMode);
+  command_line->AppendSwitchASCII(switches::kAutofillAssistantDebugMode,
+                                  "false");
+  EXPECT_EQ(IsDebugMode(), false);
+}
+
+TEST(JsFlowUtilTest, ExpectsDebugModeDefaultIsFalse) {
+  EXPECT_EQ(IsDebugMode(), false);
+}
+
 }  // namespace
-}  // namespace js_flow_util
-}  // namespace autofill_assistant
+}  // namespace autofill_assistant::js_flow_util

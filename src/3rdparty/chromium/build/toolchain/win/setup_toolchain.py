@@ -1,4 +1,4 @@
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 #
@@ -58,6 +58,15 @@ def _ExtractImportantEnvironment(output_of_set):
           # path. Add the path to this python here so that if it's not in the
           # path when ninja is run later, python will still be found.
           setting = os.path.dirname(sys.executable) + os.pathsep + setting
+        if envvar in ['include', 'lib']:
+          # Make sure that the include and lib paths point to directories that
+          # exist. This ensures a (relatively) clear error message if the
+          # required SDK is not installed.
+          for part in setting.split(';'):
+            if not os.path.exists(part) and len(part) != 0:
+              raise Exception(
+                  'Path "%s" from environment variable "%s" does not exist. '
+                  'Make sure the necessary SDK is installed.' % (part, envvar))
         env[var.upper()] = setting
         break
   if sys.platform in ('win32', 'cygwin'):
@@ -292,7 +301,7 @@ def main():
 
       if (environment_block_name != ''):
         env_block = _FormatAsEnvironmentBlock(env)
-        with open(environment_block_name, 'w') as f:
+        with open(environment_block_name, 'w', encoding='utf8') as f:
           f.write(env_block)
 
   print('vc_bin_dir = ' + gn_helpers.ToGNString(vc_bin_dir))

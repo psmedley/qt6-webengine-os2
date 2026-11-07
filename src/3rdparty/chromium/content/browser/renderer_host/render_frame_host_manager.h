@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "content/browser/renderer_host/browsing_context_state.h"
+#include "content/browser/renderer_host/navigation_discard_reason.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/should_swap_browsing_instance.h"
 #include "content/browser/renderer_host/stored_page.h"
@@ -47,7 +48,6 @@ class NavigationControllerImpl;
 class NavigationEntry;
 class NavigationRequest;
 class NavigatorTest;
-class RenderFrameHostImpl;
 class RenderFrameHostManagerTest;
 class RenderFrameProxyHost;
 class RenderViewHost;
@@ -191,6 +191,7 @@ class CONTENT_EXPORT RenderFrameHostManager {
                  int32_t frame_routing_id,
                  mojo::PendingAssociatedRemote<mojom::Frame> frame_remote,
                  const blink::LocalFrameToken& frame_token,
+                 const blink::DocumentToken& document_token,
                  blink::FramePolicy frame_policy,
                  std::string frame_name,
                  std::string frame_unique_name);
@@ -365,16 +366,17 @@ class CONTENT_EXPORT RenderFrameHostManager {
                                                  std::string* reason = nullptr);
 
   // Clean up any state for any ongoing navigation.
-  void CleanUpNavigation();
+  void CleanUpNavigation(NavigationDiscardReason reason);
 
   // Determines whether any active navigations are associated with
   // |speculative_render_frame_host_| and if not, discards it.
-  void MaybeCleanUpNavigation();
+  void MaybeCleanUpNavigation(NavigationDiscardReason reason);
 
   // Clears the speculative RFH when a navigation is cancelled (for example, by
   // being replaced by a new navigation), returning ownership of the
   // `RenderFrameHost` to the caller for disposal.
-  std::unique_ptr<RenderFrameHostImpl> UnsetSpeculativeRenderFrameHost();
+  std::unique_ptr<RenderFrameHostImpl> UnsetSpeculativeRenderFrameHost(
+      NavigationDiscardReason reason);
 
   // Used for FrameTreeNode teardown. This releases any pending views from the
   // speculative RFH (if any) to its respective RenderProcessHost before
@@ -432,7 +434,7 @@ class CONTENT_EXPORT RenderFrameHostManager {
 
   // Tells the |render_frame_host|'s renderer that its RenderFrame is being
   // swapped for a frame in another process, and that it should create a
-  // RenderFrameProxy to replace it using the |proxy| RenderFrameProxyHost.
+  // `blink::RemoteFrame` to replace it using the |proxy| RenderFrameProxyHost.
   void SwapOuterDelegateFrame(RenderFrameHostImpl* render_frame_host,
                               RenderFrameProxyHost* proxy);
 
@@ -440,10 +442,10 @@ class CONTENT_EXPORT RenderFrameHostManager {
   // an inner FrameTree.
   void SetRWHViewForInnerFrameTree(RenderWidgetHostViewChildFrame* child_rwhv);
 
-  // Executes a PageBroadcast Mojo method to every RenderView in the FrameTree.
-  // This should only be called in the top-level RenderFrameHostManager.
-  // The |callback| is called synchronously and the |instance_to_skip| won't
-  // be referenced after this method returns.
+  // Executes a PageBroadcast Mojo method to every `blink::WebView` in the
+  // FrameTree. This should only be called in the top-level
+  // RenderFrameHostManager. The `callback` is called synchronously and the
+  // `instance_to_skip` won't be referenced after this method returns.
   void ExecutePageBroadcastMethod(PageBroadcastMethodCallback callback,
                                   SiteInstance* instance_to_skip = nullptr);
 
@@ -462,9 +464,12 @@ class CONTENT_EXPORT RenderFrameHostManager {
     return render_frame_host_->browsing_context_state()->proxy_hosts();
   }
 
-  // Cancels and destroys the pending or speculative RenderFrameHost if they
-  // match the provided |render_frame_host|.
-  void CancelPendingIfNecessary(RenderFrameHostImpl* render_frame_host);
+  // Called when the render process is gone for `render_frame_host`. If
+  // `render_frame_host` is the speculative frame host, cancels the navigation
+  // and cleans up the RenderFrameHost because there is no longer a render
+  // process for the navigation to commit into.
+  void CleanupIfSpeculativeForRenderProcessGone(
+      RenderFrameHostImpl* render_frame_host);
 
   // Updates the user activation state in all proxies of this frame.  For
   // more details, see the comment on FrameTreeNode::user_activation_state_.
@@ -476,9 +481,9 @@ class CONTENT_EXPORT RenderFrameHostManager {
       blink::mojom::UserActivationNotificationType notification_type);
 
   // Sets up the necessary state for a new RenderViewHost.  If |proxy| is not
-  // null, it creates a RenderFrameProxy in the target renderer process which is
-  // used to route IPC messages.  Returns early if the RenderViewHost has
-  // already been initialized for another RenderFrameHost.
+  // null, it creates a `blink::RemoteFrame` in the target renderer process
+  // which is used to route IPC messages.  Returns early if the RenderViewHost
+  // has already been initialized for another RenderFrameHost.
   bool InitRenderView(SiteInstanceGroup* site_instance_group,
                       RenderViewHostImpl* render_view_host,
                       RenderFrameProxyHost* proxy);
@@ -782,6 +787,7 @@ class CONTENT_EXPORT RenderFrameHostManager {
       int32_t frame_routing_id,
       mojo::PendingAssociatedRemote<mojom::Frame> frame_remote,
       const blink::LocalFrameToken& frame_token,
+      const blink::DocumentToken& document_token,
       bool renderer_initiated_creation,
       scoped_refptr<BrowsingContextState> browsing_context_state);
 
@@ -798,14 +804,16 @@ class CONTENT_EXPORT RenderFrameHostManager {
   // above.
   bool InitRenderFrame(RenderFrameHostImpl* render_frame_host);
 
-  // Find the routing ID of the frame or proxy that this frame will replace or
-  // |MSG_ROUTING_NONE| if there is none. When initializing a new RenderFrame
-  // for |render_frame_host|, it may be replacing a RenderFrameProxy or another
-  // RenderFrame in the renderer or recovering from a crash. |existing_proxy| is
-  // the proxy for |this| in the destination renderer, nullptr if there is no
-  // proxy. |render_frame_host| is used only for sanity checking.
-  int GetReplacementRoutingId(RenderFrameProxyHost* existing_proxy,
-                              RenderFrameHostImpl* render_frame_host) const;
+  // Find the `blink::FrameToken` of the frame or proxy that this frame will
+  // replace or absl::nullopt if there is none. When initializing a new
+  // RenderFrame for `render_frame_host`, it may be replacing a RenderFrameProxy
+  // or another RenderFrame in the renderer or recovering from a crash.
+  // `existing_proxy` is the proxy for `this` in the destination renderer,
+  // nullptr if there is no proxy. `render_frame_host` is used only for sanity
+  // checking.
+  absl::optional<blink::FrameToken> GetReplacementFrameToken(
+      RenderFrameProxyHost* existing_proxy,
+      RenderFrameHostImpl* render_frame_host) const;
 
   // Helper to reinitialize the RenderFrame, RenderView, and the opener chain
   // for the provided |render_frame_host|.  Used when the |render_frame_host|
@@ -873,7 +881,7 @@ class CONTENT_EXPORT RenderFrameHostManager {
 
   void PrepareForCollectingPage(
       RenderFrameHostImpl* main_render_frame_host,
-      std::set<RenderViewHostImpl*>* render_view_hosts,
+      StoredPage::RenderViewHostImplSafeRefSet* render_view_hosts,
       BrowsingContextState::RenderFrameProxyHostMap* proxy_hosts);
 
   // Collects all of the page-related state currently owned by

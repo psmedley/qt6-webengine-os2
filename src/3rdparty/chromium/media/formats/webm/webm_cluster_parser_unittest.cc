@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -176,8 +176,8 @@ bool VerifyBuffers(const StreamParser::BufferQueueMap& buffer_queue_map,
                    const BlockInfo* block_info,
                    int block_count) {
   int buffer_count = 0;
-  for (const auto& it : buffer_queue_map)
-    buffer_count += it.second.size();
+  for (const auto& [track_id, buffer_queue] : buffer_queue_map)
+    buffer_count += buffer_queue.size();
   if (block_count != buffer_count) {
     DVLOG(1) << __func__ << " : block_count (" << block_count
              << ") mismatches buffer_count (" << buffer_count << ")";

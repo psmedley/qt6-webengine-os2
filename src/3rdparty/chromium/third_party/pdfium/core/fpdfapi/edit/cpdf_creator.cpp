@@ -6,7 +6,10 @@
 
 #include "core/fpdfapi/edit/cpdf_creator.h"
 
+#include <stdint.h>
+
 #include <algorithm>
+#include <utility>
 
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_crypto_handler.h"
@@ -20,8 +23,8 @@
 #include "core/fpdfapi/parser/cpdf_string.h"
 #include "core/fpdfapi/parser/cpdf_syntax_parser.h"
 #include "core/fpdfapi/parser/fpdf_parser_utility.h"
+#include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/fx_extension.h"
-#include "core/fxcrt/fx_memory_wrappers.h"
 #include "core/fxcrt/fx_random.h"
 #include "core/fxcrt/fx_safe_types.h"
 #include "core/fxcrt/span_util.h"
@@ -35,8 +38,7 @@ const size_t kArchiveBufferSize = 32768;
 
 class CFX_FileBufferArchive final : public IFX_ArchiveStream {
  public:
-  explicit CFX_FileBufferArchive(
-      const RetainPtr<IFX_RetainableWriteStream>& file);
+  explicit CFX_FileBufferArchive(RetainPtr<IFX_RetainableWriteStream> file);
   ~CFX_FileBufferArchive() override;
 
   bool WriteBlock(const void* pBuf, size_t size) override;
@@ -46,15 +48,17 @@ class CFX_FileBufferArchive final : public IFX_ArchiveStream {
   bool Flush();
 
   FX_FILESIZE offset_ = 0;
-  size_t current_length_ = 0;
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> buffer_;
-  RetainPtr<IFX_RetainableWriteStream> backing_file_;
+  DataVector<uint8_t> buffer_;
+  pdfium::span<uint8_t> available_;
+  RetainPtr<IFX_RetainableWriteStream> const backing_file_;
 };
 
 CFX_FileBufferArchive::CFX_FileBufferArchive(
-    const RetainPtr<IFX_RetainableWriteStream>& file)
-    : buffer_(kArchiveBufferSize), backing_file_(file) {
-  DCHECK(file);
+    RetainPtr<IFX_RetainableWriteStream> file)
+    : buffer_(kArchiveBufferSize),
+      available_(buffer_),
+      backing_file_(std::move(file)) {
+  DCHECK(backing_file_);
 }
 
 CFX_FileBufferArchive::~CFX_FileBufferArchive() {
@@ -62,32 +66,27 @@ CFX_FileBufferArchive::~CFX_FileBufferArchive() {
 }
 
 bool CFX_FileBufferArchive::Flush() {
-  size_t nRemaining = current_length_;
-  current_length_ = 0;
-  if (!backing_file_)
-    return false;
-  if (!nRemaining)
+  size_t nUsed = buffer_.size() - available_.size();
+  available_ = pdfium::make_span(buffer_);
+  if (!nUsed)
     return true;
-  return backing_file_->WriteBlock(buffer_.data(), nRemaining);
+  return backing_file_->WriteBlock(buffer_.data(), nUsed);
 }
 
 bool CFX_FileBufferArchive::WriteBlock(const void* pBuf, size_t size) {
+  if (size == 0)
+    return true;
+
   DCHECK(pBuf);
-  DCHECK(size > 0);
-
-  const uint8_t* buffer = reinterpret_cast<const uint8_t*>(pBuf);
-  size_t temp_size = size;
-  while (temp_size) {
-    size_t buf_size = std::min(kArchiveBufferSize - current_length_, temp_size);
-    fxcrt::spancpy(pdfium::make_span(buffer_).subspan(current_length_),
-                   pdfium::make_span(buffer, buf_size));
-
-    current_length_ += buf_size;
-    if (current_length_ == kArchiveBufferSize && !Flush())
+  auto* pSrc = reinterpret_cast<const uint8_t*>(pBuf);
+  pdfium::span<const uint8_t> src_span(pSrc, size);
+  while (!src_span.empty()) {
+    size_t copy_size = std::min(available_.size(), src_span.size());
+    fxcrt::spancpy(available_, src_span.first(copy_size));
+    src_span = src_span.subspan(copy_size);
+    available_ = available_.subspan(copy_size);
+    if (available_.empty() && !Flush())
       return false;
-
-    temp_size -= buf_size;
-    buffer += buf_size;
   }
 
   FX_SAFE_FILESIZE safe_offset = offset_;
@@ -123,13 +122,13 @@ bool OutputIndex(IFX_ArchiveStream* archive, FX_FILESIZE offset) {
 }  // namespace
 
 CPDF_Creator::CPDF_Creator(CPDF_Document* pDoc,
-                           const RetainPtr<IFX_RetainableWriteStream>& archive)
+                           RetainPtr<IFX_RetainableWriteStream> archive)
     : m_pDocument(pDoc),
       m_pParser(pDoc->GetParser()),
       m_pEncryptDict(m_pParser ? m_pParser->GetEncryptDict() : nullptr),
       m_pSecurityHandler(m_pParser ? m_pParser->GetSecurityHandler() : nullptr),
       m_dwLastObjNum(m_pDocument->GetLastObjNum()),
-      m_Archive(std::make_unique<CFX_FileBufferArchive>(archive)) {}
+      m_Archive(std::make_unique<CFX_FileBufferArchive>(std::move(archive))) {}
 
 CPDF_Creator::~CPDF_Creator() = default;
 
@@ -154,12 +153,12 @@ bool CPDF_Creator::WriteOldIndirectObject(uint32_t objnum) {
   m_ObjectOffsets[objnum] = m_Archive->CurrentOffset();
 
   bool bExistInMap = !!m_pDocument->GetIndirectObject(objnum);
-  CPDF_Object* pObj = m_pDocument->GetOrParseIndirectObject(objnum);
+  RetainPtr<CPDF_Object> pObj = m_pDocument->GetOrParseIndirectObject(objnum);
   if (!pObj) {
     m_ObjectOffsets.erase(objnum);
     return true;
   }
-  if (!WriteIndirectObj(pObj->GetObjNum(), pObj))
+  if (!WriteIndirectObj(pObj->GetObjNum(), pObj.Get()))
     return false;
   if (!bExistInMap)
     m_pDocument->DeleteIndirectObject(objnum);
@@ -181,12 +180,12 @@ bool CPDF_Creator::WriteOldObjs() {
 bool CPDF_Creator::WriteNewObjs() {
   for (size_t i = m_CurObjNum; i < m_NewObjNumArray.size(); ++i) {
     uint32_t objnum = m_NewObjNumArray[i];
-    CPDF_Object* pObj = m_pDocument->GetIndirectObject(objnum);
+    RetainPtr<const CPDF_Object> pObj = m_pDocument->GetIndirectObject(objnum);
     if (!pObj)
       continue;
 
     m_ObjectOffsets[objnum] = m_Archive->CurrentOffset();
-    if (!WriteIndirectObj(pObj->GetObjNum(), pObj))
+    if (!WriteIndirectObj(pObj->GetObjNum(), pObj.Get()))
       return false;
   }
   return true;
@@ -216,7 +215,7 @@ CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage1() {
       m_IsIncremental = false;
 
     const CPDF_Dictionary* pDict = m_pDocument->GetRoot();
-    m_pMetadata.Reset(pDict ? pDict->GetDirectObjectFor("Metadata") : nullptr);
+    m_pMetadata = pDict ? pDict->GetDirectObjectFor("Metadata") : nullptr;
     m_iStage = Stage::kWriteHeader10;
   }
   if (m_iStage == Stage::kWriteHeader10) {
@@ -243,7 +242,7 @@ CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage1() {
   if (m_iStage == Stage::kWriteIncremental15) {
     if (m_IsOriginal && m_SavedOffset > 0) {
       static constexpr FX_FILESIZE kBufferSize = 4096;
-      std::vector<uint8_t, FxAllocAllocator<uint8_t>> buffer(kBufferSize);
+      DataVector<uint8_t> buffer(kBufferSize);
       FX_FILESIZE src_size = m_SavedOffset;
       m_pParser->GetSyntax()->SetPos(0);
       while (src_size) {
@@ -427,8 +426,7 @@ CPDF_Creator::Stage CPDF_Creator::WriteDoc_Stage4() {
   }
 
   if (m_pParser) {
-    RetainPtr<CPDF_Dictionary> p = m_pParser->GetCombinedTrailer();
-    CPDF_DictionaryLocker locker(p.Get());
+    CPDF_DictionaryLocker locker(m_pParser->GetCombinedTrailer());
     for (const auto& it : locker) {
       const ByteString& key = it.first;
       CPDF_Object* pValue = it.second.Get();
@@ -565,8 +563,10 @@ void CPDF_Creator::InitID() {
   DCHECK(!m_pIDArray);
 
   m_pIDArray = pdfium::MakeRetain<CPDF_Array>();
-  const CPDF_Array* pOldIDArray = m_pParser ? m_pParser->GetIDArray() : nullptr;
-  const CPDF_Object* pID1 = pOldIDArray ? pOldIDArray->GetObjectAt(0) : nullptr;
+  RetainPtr<const CPDF_Array> pOldIDArray =
+      m_pParser ? m_pParser->GetIDArray() : nullptr;
+  RetainPtr<const CPDF_Object> pID1 =
+      pOldIDArray ? pOldIDArray->GetObjectAt(0) : nullptr;
   if (pID1) {
     m_pIDArray->Append(pID1->Clone());
   } else {
@@ -576,7 +576,7 @@ void CPDF_Creator::InitID() {
   }
 
   if (pOldIDArray) {
-    const CPDF_Object* pID2 = pOldIDArray->GetObjectAt(1);
+    RetainPtr<const CPDF_Object> pID2 = pOldIDArray->GetObjectAt(1);
     if (m_IsIncremental && m_pEncryptDict && pID2) {
       m_pIDArray->Append(pID2->Clone());
       return;
@@ -592,7 +592,7 @@ void CPDF_Creator::InitID() {
     DCHECK(m_pParser);
     int revision = m_pEncryptDict->GetIntegerFor("R");
     if ((revision == 2 || revision == 3) &&
-        m_pEncryptDict->GetStringFor("Filter") == "Standard") {
+        m_pEncryptDict->GetByteStringFor("Filter") == "Standard") {
       m_pNewEncryptDict = ToDictionary(m_pEncryptDict->Clone());
       m_pEncryptDict = m_pNewEncryptDict;
       m_pSecurityHandler = pdfium::MakeRetain<CPDF_SecurityHandler>();

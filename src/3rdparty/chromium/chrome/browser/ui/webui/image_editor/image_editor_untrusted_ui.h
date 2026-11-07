@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,12 +14,12 @@
 #include "chrome/browser/ui/webui/image_editor/image_editor.mojom.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/webui_config.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "ui/webui/untrusted_web_ui_controller.h"
-#include "ui/webui/webui_config.h"
 
 namespace image_editor {
 
-class ImageEditorUntrustedUIConfig : public ui::WebUIConfig {
+class ImageEditorUntrustedUIConfig : public content::WebUIConfig {
  public:
   ImageEditorUntrustedUIConfig();
   ~ImageEditorUntrustedUIConfig() override;

@@ -62,8 +62,9 @@ LayoutSVGRoot::LayoutSVGRoot(SVGElement* node)
   auto* svg = To<SVGSVGElement>(node);
   DCHECK(svg);
 
-  SetIntrinsicSize(LayoutSize(svg->IntrinsicWidth().value_or(kDefaultWidth),
-                              svg->IntrinsicHeight().value_or(kDefaultHeight)));
+  SetIntrinsicSize(
+      LayoutSize(LayoutUnit(svg->IntrinsicWidth().value_or(kDefaultWidth)),
+                 LayoutUnit(svg->IntrinsicHeight().value_or(kDefaultHeight))));
 }
 
 LayoutSVGRoot::~LayoutSVGRoot() = default;
@@ -188,7 +189,7 @@ LayoutUnit LayoutSVGRoot::ComputeReplacedLogicalHeight(
 
 double LayoutSVGRoot::LogicalSizeScaleFactorForPercentageLengths() const {
   NOT_DESTROYED();
-  if (!IsDocumentElement() || !GetDocument().IsInMainFrame())
+  if (!IsDocumentElement() || !GetDocument().IsInOutermostMainFrame())
     return 1;
   if (GetDocument().GetLayoutView()->ShouldUsePrintingLayout())
     return 1;
@@ -203,7 +204,7 @@ double LayoutSVGRoot::LogicalSizeScaleFactorForPercentageLengths() const {
 void LayoutSVGRoot::UpdateLayout() {
   NOT_DESTROYED();
   DCHECK(NeedsLayout());
-  DeferredShapingDisallowScope disallow_deferred(*GetFrameView());
+  DeferredShapingDisallowScope disallow_deferred(*View());
 
   LayoutSize old_size = Size();
   UpdateLogicalWidth();
@@ -278,22 +279,11 @@ void LayoutSVGRoot::UpdateLayout() {
   ClearNeedsLayout();
 }
 
-bool LayoutSVGRoot::ShouldApplyViewportClip() const {
-  NOT_DESTROYED();
-  // the outermost svg is clipped if auto, and svg document roots are always
-  // clipped. When the svg is stand-alone (isDocumentElement() == true) the
-  // viewport clipping should always be applied, noting that the window
-  // scrollbars should be hidden if overflow=hidden.
-  return StyleRef().OverflowX() == EOverflow::kHidden ||
-         StyleRef().OverflowX() == EOverflow::kAuto ||
-         StyleRef().OverflowX() == EOverflow::kScroll || IsDocumentElement();
-}
-
 void LayoutSVGRoot::RecalcVisualOverflow() {
   NOT_DESTROYED();
   LayoutReplaced::RecalcVisualOverflow();
   UpdateCachedBoundaries();
-  if (!ShouldApplyViewportClip())
+  if (!ClipsToContentBox())
     AddContentsVisualOverflow(ComputeContentsVisualOverflow());
 }
 
@@ -321,7 +311,7 @@ void LayoutSVGRoot::PaintReplaced(const PaintInfo& paint_info,
 
 void LayoutSVGRoot::WillBeDestroyed() {
   NOT_DESTROYED();
-  SVGResources::ClearClipPathFilterMask(To<SVGSVGElement>(*GetNode()), Style());
+  SVGResources::ClearEffects(*this);
   LayoutReplaced::WillBeDestroyed();
 }
 
@@ -374,8 +364,7 @@ void LayoutSVGRoot::StyleDidChange(StyleDifference diff,
   if (old_style && StyleChangeAffectsIntrinsicSize(*old_style))
     IntrinsicSizingInfoChanged();
 
-  SVGResources::UpdateClipPathFilterMask(To<SVGSVGElement>(*GetNode()),
-                                         old_style, StyleRef());
+  SVGResources::UpdateEffects(*this, diff, old_style);
 
   if (diff.TransformChanged()) {
     for (auto& svg_text : text_set_) {
@@ -511,7 +500,7 @@ SVGTransformChange LayoutSVGRoot::BuildLocalToBorderBoxTransform() {
       scale, 0, 0, scale, border_and_padding.Width() + translate.x(),
       border_and_padding.Height() + translate.y());
   view_to_border_box_transform.Scale(svg->currentScale());
-  local_to_border_box_transform_.PreMultiply(view_to_border_box_transform);
+  local_to_border_box_transform_.PostConcat(view_to_border_box_transform);
   return change_detector.ComputeChange(local_to_border_box_transform_);
 }
 
@@ -542,7 +531,7 @@ void LayoutSVGRoot::UpdateCachedBoundaries() {
 bool LayoutSVGRoot::NodeAtPoint(HitTestResult& result,
                                 const HitTestLocation& hit_test_location,
                                 const PhysicalOffset& accumulated_offset,
-                                HitTestAction hit_test_action) {
+                                HitTestPhase phase) {
   NOT_DESTROYED();
   HitTestLocation local_border_box_location(hit_test_location,
                                             -accumulated_offset);
@@ -554,20 +543,19 @@ bool LayoutSVGRoot::NodeAtPoint(HitTestResult& result,
   bool skip_children = (result.GetHitTestRequest().GetStopNode() == this);
   if (!skip_children &&
       (local_border_box_location.Intersects(PhysicalContentBoxRect()) ||
-       (!ShouldApplyViewportClip() &&
+       (!ClipsToContentBox() &&
         local_border_box_location.Intersects(PhysicalVisualOverflowRect())))) {
     TransformedHitTestLocation local_location(local_border_box_location,
                                               LocalToBorderBoxTransform());
     if (local_location) {
-      if (content_.HitTest(result, *local_location, hit_test_action))
+      if (content_.HitTest(result, *local_location, phase))
         return true;
     }
   }
 
   // If we didn't early exit above, we've just hit the container <svg> element.
   // Unlike SVG 1.1, 2nd Edition allows container elements to be hit.
-  if ((hit_test_action == kHitTestBlockBackground ||
-       hit_test_action == kHitTestChildBlockBackground) &&
+  if (phase == HitTestPhase::kSelfBlockBackground &&
       VisibleToHitTestRequest(result.GetHitTestRequest())) {
     // Only return true here, if the last hit testing phase 'BlockBackground'
     // (or 'ChildBlockBackground' - depending on context) is executed.
@@ -610,6 +598,32 @@ PaintLayerType LayoutSVGRoot::LayerTypeRequired() const {
     layer_type_required = kForcedPaintLayer;
   }
   return layer_type_required;
+}
+
+OverflowClipAxes LayoutSVGRoot::ComputeOverflowClipAxes() const {
+  NOT_DESTROYED();
+
+  // svg document roots are always clipped. When the svg is stand-alone
+  // (isDocumentElement() == true) the viewport clipping should always be
+  // applied, noting that the window scrollbars should be hidden if
+  // overflow=hidden.
+  if (IsDocumentElement())
+    return kOverflowClipBothAxis;
+
+  // Use the default code-path which computes overflow based on `overflow`,
+  // `overflow-clip-margin` and paint containment if all these properties are
+  // respected on svg elements similar to other replaced elements.
+  if (RespectsCSSOverflow())
+    return LayoutReplaced::ComputeOverflowClipAxes();
+
+  // the outermost svg is clipped if auto.
+  if (StyleRef().OverflowX() == EOverflow::kHidden ||
+      StyleRef().OverflowX() == EOverflow::kAuto ||
+      StyleRef().OverflowX() == EOverflow::kScroll ||
+      StyleRef().OverflowX() == EOverflow::kClip)
+    return kOverflowClipBothAxis;
+
+  return LayoutReplaced::ComputeOverflowClipAxes();
 }
 
 }  // namespace blink

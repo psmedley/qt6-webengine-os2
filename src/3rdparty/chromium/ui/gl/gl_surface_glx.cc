@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/no_destructor.h"
 #include "base/synchronization/atomic_flag.h"
@@ -31,6 +32,7 @@
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_display.h"
+#include "ui/gl/gl_display_manager.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface_presentation_helper.h"
 #include "ui/gl/glx_util.h"
@@ -328,7 +330,7 @@ class SGIVideoSyncProviderThreadShim {
 
  private:
   gfx::AcceleratedWidget parent_window_;
-  SGIVideoSyncThread* vsync_thread_;
+  raw_ptr<SGIVideoSyncThread> vsync_thread_;
   x11::Window window_ = x11::Window::None;
   GLXWindow glx_window_;
 
@@ -408,8 +410,8 @@ class SGIVideoSyncVSyncProvider
   // Raw pointers to sync primitives owned by the shim_.
   // These will only be referenced before we post a task to destroy
   // the shim_, so they are safe to access.
-  base::AtomicFlag* cancel_vsync_flag_;
-  base::Lock* vsync_lock_;
+  raw_ptr<base::AtomicFlag> cancel_vsync_flag_;
+  raw_ptr<base::Lock> vsync_lock_;
 };
 
 SGIVideoSyncThread* SGIVideoSyncThread::g_video_sync_thread = nullptr;
@@ -419,7 +421,10 @@ x11::Connection* SGIVideoSyncThread::g_connection = nullptr;
 
 bool GLSurfaceGLX::initialized_ = false;
 
-GLSurfaceGLX::GLSurfaceGLX() = default;
+GLSurfaceGLX::GLSurfaceGLX() {
+  display_ =
+      GLDisplayManagerX11::GetInstance()->GetDisplay(GpuPreference::kDefault);
+}
 
 bool GLSurfaceGLX::InitializeOneOff() {
   if (initialized_)
@@ -595,7 +600,7 @@ bool GLSurfaceGLX::IsOMLSyncControlSupported() {
 }
 
 GLDisplay* GLSurfaceGLX::GetGLDisplay() {
-  return &display_;
+  return display_;
 }
 
 GLSurfaceGLX::~GLSurfaceGLX() = default;
@@ -720,7 +725,8 @@ bool NativeViewGLSurfaceGLX::IsOffscreen() {
 }
 
 gfx::SwapResult NativeViewGLSurfaceGLX::SwapBuffers(
-    PresentationCallback callback) {
+    PresentationCallback callback,
+    FrameData data) {
   TRACE_EVENT2("gpu", "NativeViewGLSurfaceGLX:RealSwapBuffers", "width",
                GetSize().width(), "height", GetSize().height());
   GLSurfacePresentationHelper::ScopedSwapBuffers scoped_swap_buffers(
@@ -772,7 +778,8 @@ gfx::SwapResult NativeViewGLSurfaceGLX::PostSubBuffer(
     int y,
     int width,
     int height,
-    PresentationCallback callback) {
+    PresentationCallback callback,
+    FrameData data) {
   DCHECK(g_driver_glx.ext.b_GLX_MESA_copy_sub_buffer);
 
   GLSurfacePresentationHelper::ScopedSwapBuffers scoped_swap_buffers(
@@ -889,7 +896,8 @@ bool UnmappedNativeViewGLSurfaceGLX::IsOffscreen() {
 }
 
 gfx::SwapResult UnmappedNativeViewGLSurfaceGLX::SwapBuffers(
-    PresentationCallback callback) {
+    PresentationCallback callback,
+    FrameData data) {
   NOTREACHED() << "Attempted to call SwapBuffers on an unmapped window.";
   return gfx::SwapResult::SWAP_FAILED;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,16 +36,14 @@ HttpProxyClientSocket::HttpProxyClientSocket(
     const std::string& user_agent,
     const HostPortPair& endpoint,
     const ProxyServer& proxy_server,
-    HttpAuthController* http_auth_controller,
+    scoped_refptr<HttpAuthController> http_auth_controller,
     ProxyDelegate* proxy_delegate,
     const NetworkTrafficAnnotationTag& traffic_annotation)
     : io_callback_(base::BindRepeating(&HttpProxyClientSocket::OnIOComplete,
                                        base::Unretained(this))),
-      next_state_(STATE_NONE),
       socket_(std::move(socket)),
-      is_reused_(false),
       endpoint_(endpoint),
-      auth_(http_auth_controller),
+      auth_(std::move(http_auth_controller)),
       proxy_server_(proxy_server),
       proxy_delegate_(proxy_delegate),
       traffic_annotation_(traffic_annotation),
@@ -149,11 +147,6 @@ bool HttpProxyClientSocket::GetSSLInfo(SSLInfo* ssl_info) {
   // Do not delegate to `socket_`. While `socket_` may connect to the proxy with
   // TLS, this object represents the tunneled TCP connection to the origin.
   return false;
-}
-
-void HttpProxyClientSocket::GetConnectionAttempts(
-    ConnectionAttempts* out) const {
-  out->clear();
 }
 
 int64_t HttpProxyClientSocket::GetTotalReceivedBytes() const {

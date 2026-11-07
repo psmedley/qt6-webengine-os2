@@ -747,6 +747,17 @@ void FrameCaptureShared::ReplayCall(gl::Context *context,
                     params.getParam("indices", ParamType::TvoidConstPointer, 3)),
                 params.getParam("instancecount", ParamType::TGLsizei, 4).value.GLsizeiVal);
             break;
+        case angle::EntryPoint::GLDrawElementsInstancedBaseInstance:
+            context->drawElementsInstancedBaseInstance(
+                params.getParam("modePacked", ParamType::TPrimitiveMode, 0).value.PrimitiveModeVal,
+                params.getParam("count", ParamType::TGLsizei, 1).value.GLsizeiVal,
+                params.getParam("typePacked", ParamType::TDrawElementsType, 2)
+                    .value.DrawElementsTypeVal,
+                replayContext->getAsConstPointer<const void *>(
+                    params.getParam("indices", ParamType::TvoidConstPointer, 3)),
+                params.getParam("instancecount", ParamType::TGLsizei, 4).value.GLsizeiVal,
+                params.getParam("baseinstance", ParamType::TGLuint, 5).value.GLuintVal);
+            break;
         case angle::EntryPoint::GLDrawElementsInstancedBaseVertex:
             context->drawElementsInstancedBaseVertex(
                 params.getParam("modePacked", ParamType::TPrimitiveMode, 0).value.PrimitiveModeVal,
@@ -1225,7 +1236,7 @@ void FrameCaptureShared::ReplayCall(gl::Context *context,
                 params.getParam("target", ParamType::TGLenum, 0).value.GLenumVal,
                 params.getParam("internalformat", ParamType::TGLenum, 1).value.GLenumVal,
                 params.getParam("pname", ParamType::TGLenum, 2).value.GLenumVal,
-                params.getParam("bufSize", ParamType::TGLsizei, 3).value.GLsizeiVal,
+                params.getParam("count", ParamType::TGLsizei, 3).value.GLsizeiVal,
                 replayContext->getReadBufferPointer<GLint *>(
                     params.getParam("params", ParamType::TGLintPointer, 4)));
             break;
@@ -1383,7 +1394,7 @@ void FrameCaptureShared::ReplayCall(gl::Context *context,
                 params.getParam("propCount", ParamType::TGLsizei, 3).value.GLsizeiVal,
                 replayContext->getAsConstPointer<const GLenum *>(
                     params.getParam("props", ParamType::TGLenumConstPointer, 4)),
-                params.getParam("bufSize", ParamType::TGLsizei, 5).value.GLsizeiVal,
+                params.getParam("count", ParamType::TGLsizei, 5).value.GLsizeiVal,
                 replayContext->getReadBufferPointer<GLsizei *>(
                     params.getParam("length", ParamType::TGLsizeiPointer, 6)),
                 replayContext->getReadBufferPointer<GLint *>(
@@ -1512,7 +1523,7 @@ void FrameCaptureShared::ReplayCall(gl::Context *context,
         case angle::EntryPoint::GLGetSynciv:
             context->getSynciv(params.getParam("sync", ParamType::TGLsync, 0).value.GLsyncVal,
                                params.getParam("pname", ParamType::TGLenum, 1).value.GLenumVal,
-                               params.getParam("bufSize", ParamType::TGLsizei, 2).value.GLsizeiVal,
+                               params.getParam("count", ParamType::TGLsizei, 2).value.GLsizeiVal,
                                replayContext->getReadBufferPointer<GLsizei *>(
                                    params.getParam("length", ParamType::TGLsizeiPointer, 3)),
                                replayContext->getReadBufferPointer<GLint *>(
@@ -1895,6 +1906,10 @@ void FrameCaptureShared::ReplayCall(gl::Context *context,
         case angle::EntryPoint::GLLogicOp:
             context->logicOp(params.getParam("opcodePacked", ParamType::TLogicalOperation, 0)
                                  .value.LogicalOperationVal);
+            break;
+        case angle::EntryPoint::GLLogicOpANGLE:
+            context->logicOpANGLE(params.getParam("opcodePacked", ParamType::TLogicalOperation, 0)
+                                      .value.LogicalOperationVal);
             break;
         case angle::EntryPoint::GLMapBuffer:
             context->mapBuffer(params.getParam("targetPacked", ParamType::TBufferBinding, 0)
@@ -2668,7 +2683,7 @@ void FrameCaptureShared::ReplayCall(gl::Context *context,
                 params.getParam("count", ParamType::TGLsizei, 0).value.GLsizeiVal,
                 replayContext->getAsConstPointer<const ShaderProgramID *>(
                     params.getParam("shadersPacked", ParamType::TShaderProgramIDConstPointer, 1)),
-                params.getParam("binaryformat", ParamType::TGLenum, 2).value.GLenumVal,
+                params.getParam("binaryFormat", ParamType::TGLenum, 2).value.GLenumVal,
                 replayContext->getAsConstPointer<const void *>(
                     params.getParam("binary", ParamType::TvoidConstPointer, 3)),
                 params.getParam("length", ParamType::TGLsizei, 4).value.GLsizeiVal);
@@ -2682,6 +2697,10 @@ void FrameCaptureShared::ReplayCall(gl::Context *context,
                     params.getParam("string", ParamType::TGLcharConstPointerPointer, 2)),
                 replayContext->getAsConstPointer<const GLint *>(
                     params.getParam("length", ParamType::TGLintConstPointer, 3)));
+            break;
+        case angle::EntryPoint::GLShadingRateQCOM:
+            context->shadingRateQCOM(
+                params.getParam("rate", ParamType::TGLenum, 0).value.GLenumVal);
             break;
         case angle::EntryPoint::GLStencilFunc:
             context->stencilFunc(params.getParam("func", ParamType::TGLenum, 0).value.GLenumVal,

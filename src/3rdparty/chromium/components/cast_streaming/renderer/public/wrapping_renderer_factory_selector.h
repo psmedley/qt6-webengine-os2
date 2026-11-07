@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,9 @@
 
 #include "media/base/renderer_factory_selector.h"
 
-namespace content {
-class RenderFrame;
-}
-
 namespace cast_streaming {
 
+class ResourceProvider;
 class PlaybackCommandForwardingRendererFactory;
 
 // This class provides an implementation of RendererFactorySelector to be used
@@ -25,11 +22,10 @@ class PlaybackCommandForwardingRendererFactory;
 // GetCurrentRendererType() always returns kCastStreaming.
 class WrappingRendererFactorySelector : public media::RendererFactorySelector {
  public:
-  explicit WrappingRendererFactorySelector(content::RenderFrame* render_frame);
+  explicit WrappingRendererFactorySelector(ResourceProvider* resource_provider);
   ~WrappingRendererFactorySelector() override;
 
   // media::RendererFactorySelector overrides.
-  media::RendererType GetCurrentRendererType() override;
   media::RendererFactory* GetCurrentFactory() override;
 
  private:

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -121,11 +121,11 @@ void IterateRightAnglePath(const SkPath& path, const Action& contour_action) {
        verb = iter.next(points)) {
     switch (verb) {
       case SkPath::kMove_Verb:
-        DCHECK(lines.IsEmpty());
+        DCHECK(lines.empty());
         break;
       case SkPath::kLine_Verb: {
         Line new_line{points[0], points[1]};
-        if (lines.IsEmpty() || !MergeLineIfPossible(lines.back(), new_line)) {
+        if (lines.empty() || !MergeLineIfPossible(lines.back(), new_line)) {
           lines.push_back(new_line);
           DCHECK(lines.size() == 1 ||
                  lines.back().start == lines[lines.size() - 2].end);
@@ -330,6 +330,8 @@ void ExtendLineAtEndpoint(SkPoint& point, const SkPoint& other, int offset) {
 // [1] An "edge" means a segment of the path, including a horizontal or vertical
 // line and approximate halves of its adjacent arcs if any.
 class RoundedEdgePathIterator {
+  STACK_ALLOCATED();
+
  public:
   RoundedEdgePathIterator(const SkPath& rounded_center_path, int center_inset)
       : iter_(rounded_center_path, /*forceClose*/ true),
@@ -417,6 +419,8 @@ class RoundedEdgePathIterator {
 };
 
 class ComplexOutlinePainter {
+  STACK_ALLOCATED();
+
  public:
   ComplexOutlinePainter(GraphicsContext& context,
                         const Vector<gfx::Rect>& rects,
@@ -457,7 +461,7 @@ class ComplexOutlinePainter {
                            outline_style_ != EBorderStyle::kDouble;
     if (use_alpha_layer) {
       context_.BeginLayer(color_.Alpha() / 255.0);
-      color_.SetRGB(color_.Red(), color_.Green(), color_.Blue());
+      color_ = Color::FromRGB(color_.Red(), color_.Green(), color_.Blue());
     }
 
     SkPath outer_path = right_angle_outer_path_;
@@ -548,7 +552,7 @@ class ComplexOutlinePainter {
         PaintAutoDarkMode(style_, DarkModeFilter::ElementRole::kBackground));
     if (is_rounded_) {
       context_.StrokePath(center_path, auto_dark_mode,
-                          Path(center_path).length() + width_, width_);
+                          Path(center_path).length(), width_);
     } else {
       // Draw edges one by one instead of the whole path to let the corners
       // have starting/ending dots/dashes.
@@ -768,8 +772,8 @@ FloatRoundedRect::Radii GetFocusRingCornerRadii(
     if (part) {
       float corner_radius =
           ui::NativeTheme::GetInstanceForWeb()->GetBorderRadiusForPart(
-              part.value(), style.Width().GetFloatValue(),
-              style.Height().GetFloatValue());
+              part.value(), reference_border_rect.size.width,
+              reference_border_rect.size.height);
       corner_radius =
           ui::NativeTheme::GetInstanceForWeb()->AdjustBorderRadiusByZoom(
               part.value(), corner_radius, style.EffectiveZoom());
@@ -787,7 +791,7 @@ void PaintSingleFocusRing(GraphicsContext& context,
                           const FloatRoundedRect::Radii& corner_radii,
                           const Color& color,
                           const AutoDarkMode& auto_dark_mode) {
-  DCHECK(!rects.IsEmpty());
+  DCHECK(!rects.empty());
   SkPath path;
   if (!ComputeRightAnglePath(path, rects, offset, 0))
     return;
@@ -853,7 +857,7 @@ void OutlinePainter::PaintOutlineRects(
     const ComputedStyle& style,
     const Document& document) {
   DCHECK(style.HasOutline());
-  DCHECK(!outline_rects.IsEmpty());
+  DCHECK(!outline_rects.empty());
 
   if (DrawingRecorder::UseCachedDrawingIfPossible(paint_info.context, client,
                                                   paint_info.phase))
@@ -872,7 +876,7 @@ void OutlinePainter::PaintOutlineRects(
         united_outline_rect->UnionEvenIfEmpty(pixel_snapped_rect);
     }
   }
-  if (pixel_snapped_outline_rects.IsEmpty())
+  if (pixel_snapped_outline_rects.empty())
     return;
 
   gfx::Rect visual_rect = *united_outline_rect;

@@ -1,10 +1,9 @@
 {
-    "project": "chromium-m102",
-    "project_title": "Chromium M102",
-    "ref": "refs/branch-heads/5005",
-    "chrome_project": "chrome-m102",
+    "project": "chromium-m108",
+    "project_title": "Chromium M108",
+    "ref": "refs/branch-heads/5359",
+    "chrome_project": "chrome-m108",
     "branch_types": [
-        "cros-lts",
-        "desktop-extended-stable"
+        "standard"
     ]
 }

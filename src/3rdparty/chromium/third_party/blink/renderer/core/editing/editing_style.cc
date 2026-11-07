@@ -101,7 +101,7 @@ enum EditingPropertiesType {
 static const Vector<const CSSProperty*>& AllEditingProperties(
     const ExecutionContext* execution_context) {
   DEFINE_STATIC_LOCAL(Vector<const CSSProperty*>, properties, ());
-  if (properties.IsEmpty()) {
+  if (properties.empty()) {
     CSSProperty::FilterWebExposedCSSPropertiesIntoVector(
         execution_context, kStaticEditingProperties,
         std::size(kStaticEditingProperties), properties);
@@ -118,7 +118,7 @@ static const Vector<const CSSProperty*>& AllEditingProperties(
 static const Vector<const CSSProperty*>& InheritableEditingProperties(
     const ExecutionContext* execution_context) {
   DEFINE_STATIC_LOCAL(Vector<const CSSProperty*>, properties, ());
-  if (properties.IsEmpty()) {
+  if (properties.empty()) {
     CSSProperty::FilterWebExposedCSSPropertiesIntoVector(
         execution_context, kStaticEditingProperties,
         std::size(kStaticEditingProperties), properties);
@@ -435,7 +435,7 @@ static Color CssValueToColor(const CSSValue* value) {
   if (color_value)
     return color_value->Value();
 
-  Color color = 0;
+  Color color = Color::kTransparent;
   // FIXME: Why ignore the return value?
   CSSParser::ParseColor(color, value->CssText());
   return color;
@@ -761,12 +761,12 @@ static const CSSPropertyID kStaticBlockProperties[] = {
     CSSPropertyID::kPageBreakAfter, CSSPropertyID::kPageBreakBefore,
     CSSPropertyID::kPageBreakInside, CSSPropertyID::kTextAlign,
     CSSPropertyID::kTextAlignLast, CSSPropertyID::kTextIndent,
-    CSSPropertyID::kTextJustify, CSSPropertyID::kWidows};
+    CSSPropertyID::kWidows};
 
 static const Vector<const CSSProperty*>& BlockPropertiesVector(
     const ExecutionContext* execution_context) {
   DEFINE_STATIC_LOCAL(Vector<const CSSProperty*>, properties, ());
-  if (properties.IsEmpty()) {
+  if (properties.empty()) {
     CSSProperty::FilterWebExposedCSSPropertiesIntoVector(
         execution_context, kStaticBlockProperties,
         std::size(kStaticBlockProperties), properties);
@@ -938,7 +938,7 @@ EditingTriState EditingStyle::TriStateOfStyle(
   EditingTriState state = EditingTriState::kFalse;
   bool node_is_start = true;
   for (Node& node : NodeTraversal::StartsAt(*selection.Start().AnchorNode())) {
-    if (node.GetLayoutObject() && HasEditableStyle(node)) {
+    if (node.GetLayoutObject() && IsEditable(node)) {
       auto* node_style =
           MakeGarbageCollected<CSSComputedStyleDeclaration>(&node);
       if (node_style) {
@@ -986,7 +986,7 @@ bool EditingStyle::ConflictsWithInlineStyleOfElement(
     EditingStyle* extracted_style,
     Vector<CSSPropertyID>* conflicting_properties) const {
   DCHECK(element);
-  DCHECK(!conflicting_properties || conflicting_properties->IsEmpty());
+  DCHECK(!conflicting_properties || conflicting_properties->empty());
 
   const CSSPropertyValueSet* inline_style = element->InlineStyle();
   if (!mutable_style_ || !inline_style)
@@ -1050,7 +1050,7 @@ bool EditingStyle::ConflictsWithInlineStyleOfElement(
     }
   }
 
-  return conflicting_properties && !conflicting_properties->IsEmpty();
+  return conflicting_properties && !conflicting_properties->empty();
 }
 
 static const HeapVector<Member<HTMLElementEquivalent>>&
@@ -1579,8 +1579,7 @@ void EditingStyle::RemoveStyleFromRulesAndContext(Element* element,
   // 1. Remove style from matched rules because style remain without repeating
   // it in inline style declaration
   MutableCSSPropertyValueSet* style_from_matched_rules =
-      StyleFromMatchedRulesForElement(element,
-                                      StyleResolver::kAllButEmptyCSSRules);
+      StyleFromMatchedRulesForElement(element, StyleResolver::kAllCSSRules);
   if (style_from_matched_rules && !style_from_matched_rules->IsEmpty()) {
     mutable_style_ =
         GetPropertiesNotIn(mutable_style_.Get(), element,
@@ -1821,7 +1820,9 @@ void StyleChange::ExtractTextStyles(Document* document,
   }
 
   if (style->GetPropertyCSSValue(CSSPropertyID::kColor)) {
-    apply_font_color_ = GetFontColor(style).Serialized();
+    // The <font> tag cannot handle rgb colors, so we need to serialize as hex
+    // here in order to continue supporting it.
+    apply_font_color_ = GetFontColor(style).SerializeAsCanvasColor();
     style->RemoveProperty(CSSPropertyID::kColor);
   }
 

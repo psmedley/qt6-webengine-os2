@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,6 @@
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
-#include "content/public/renderer/render_view.h"
 #include "net/base/net_errors.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/resource_request.h"
@@ -123,9 +122,11 @@ NetErrorHelper::NetErrorHelper(RenderFrame* render_frame)
   // subframes don't need any of the NetErrorHelperCore's extra logic.
   core_ = std::make_unique<NetErrorHelperCore>(this);
 
-  render_frame->GetAssociatedInterfaceRegistry()->AddInterface(
-      base::BindRepeating(&NetErrorHelper::OnNetworkDiagnosticsClientRequest,
-                          base::Unretained(this)));
+  render_frame->GetAssociatedInterfaceRegistry()
+      ->AddInterface<chrome::mojom::NetworkDiagnosticsClient>(
+          base::BindRepeating(
+              &NetErrorHelper::OnNetworkDiagnosticsClientRequest,
+              base::Unretained(this)));
 }
 
 NetErrorHelper::~NetErrorHelper() = default;
@@ -254,13 +255,7 @@ LocalizedError::PageState NetErrorHelper::GenerateLocalizedErrorPage(
   // If the user is viewing an offline web app then a default page is shown
   // rather than the dino.
   if (alternative_error_page_info) {
-#if BUILDFLAG(IS_ANDROID)
-    DCHECK(
-        base::FeatureList::IsEnabled(features::kAndroidPWAsDefaultOfflinePage));
-#else
-    DCHECK(
-        base::FeatureList::IsEnabled(features::kDesktopPWAsDefaultOfflinePage));
-#endif  // BUILDFLAG(IS_ANDROID)
+    DCHECK(base::FeatureList::IsEnabled(features::kPWAsDefaultOfflinePage));
     base::UmaHistogramSparse("Net.ErrorPageCounts.WebAppAlternativeErrorPage",
                              -error.reason());
     resource_id = alternative_error_page_info->resource_id;
@@ -285,8 +280,7 @@ LocalizedError::PageState NetErrorHelper::GenerateLocalizedErrorPage(
                                   extracted_string.size());
   DCHECK(!template_html.empty()) << "unable to load template.";
   // "t" is the id of the template's root node.
-  *error_html =
-      webui::GetTemplatesHtml(template_html, &page_state.strings, "t");
+  *error_html = webui::GetTemplatesHtml(template_html, page_state.strings, "t");
   return page_state;
 }
 

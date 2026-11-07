@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,7 +52,10 @@ enum class ConnectionFailureReason {
   kUnknownConnectionError = 5,
   kUnsupportedDevice = 6,
   kNotConnectable = 7,
-  kMaxValue = kNotConnectable
+  kAuthCanceled = 8,
+  kAuthRejected = 9,
+  kInprogress = 10,
+  kMaxValue = kInprogress
 };
 
 // This enum is tied directly to a UMA enum defined in
@@ -64,7 +67,7 @@ enum class BluetoothUiSurface {
   kSettingsPairingDialog = 2,
   kBluetoothQuickSettings = 3,
   kStandalonePairingDialog = 4,
-  kPairedNotification = 5,
+  // [Deprecated] kPairedNotification = 5,
   kConnectionToast = 6,
   kDisconnectedToast = 7,
   kOobeHidDetection = 8,

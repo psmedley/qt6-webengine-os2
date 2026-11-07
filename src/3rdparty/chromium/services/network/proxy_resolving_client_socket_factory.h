@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@
 namespace net {
 struct CommonConnectJobParams;
 class HttpNetworkSession;
-class NetworkIsolationKey;
+class NetworkAnonymizationKey;
 class URLRequestContext;
 }  // namespace net
 
@@ -44,10 +44,10 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ProxyResolvingClientSocketFactory {
   // established to. The full URL will be only used for proxy resolution. Caller
   // doesn't need to explicitly sanitize the url, any sensitive data (like
   // embedded usernames and passwords), and local data (i.e. reference fragment)
-  // will be sanitized by net::ProxyService::ResolveProxyHelper() before the url
-  // is disclosed to the proxy.
+  // will be sanitized by net::ProxyResolutionService before the url is
+  // disclosed to the PAC script.
   //
-  // |network_isolation_key| indicates the network shard to use for storing
+  // |network_anonymization_key| indicates the network shard to use for storing
   // shared network state (DNS cache entries, shared H2/QUIC proxy connections,
   // etc).  Proxy connections will only be shared with other
   // ProxyResolvingClientSockets, not with standards HTTP/HTTPS requests.
@@ -57,7 +57,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) ProxyResolvingClientSocketFactory {
   // establishing a TLS connection.
   std::unique_ptr<ProxyResolvingClientSocket> CreateSocket(
       const GURL& url,
-      const net::NetworkIsolationKey& network_isolation_key,
+      const net::NetworkAnonymizationKey& network_anonymization_key,
       bool use_tls);
 
  private:

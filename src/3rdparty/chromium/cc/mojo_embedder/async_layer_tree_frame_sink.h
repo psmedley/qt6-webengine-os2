@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,6 +32,9 @@
 #include "services/viz/public/mojom/compositing/compositor_frame_sink.mojom.h"
 
 namespace cc {
+
+class RasterContextProviderWrapper;
+
 namespace mojo_embedder {
 
 // A mojo-based implementation of LayerTreeFrameSink. The typically-used
@@ -73,10 +76,10 @@ class CC_MOJO_EMBEDDER_EXPORT AsyncLayerTreeFrameSink
     base::PlatformThreadId io_thread_id = base::kInvalidThreadId;
   };
 
-  AsyncLayerTreeFrameSink(
-      scoped_refptr<viz::ContextProvider> context_provider,
-      scoped_refptr<viz::RasterContextProvider> worker_context_provider,
-      InitParams* params);
+  AsyncLayerTreeFrameSink(scoped_refptr<viz::ContextProvider> context_provider,
+                          scoped_refptr<RasterContextProviderWrapper>
+                              worker_context_provider_wrapper,
+                          InitParams* params);
   AsyncLayerTreeFrameSink(const AsyncLayerTreeFrameSink&) = delete;
   ~AsyncLayerTreeFrameSink() override;
 
@@ -131,13 +134,14 @@ class CC_MOJO_EMBEDDER_EXPORT AsyncLayerTreeFrameSink
   // Message pipes that will be bound when BindToClient() is called.
   UnboundMessagePipes pipes_;
 
-  // One of |compositor_frame_sink_| or |compositor_frame_sink_associated_| will
-  // be bound after calling BindToClient(). |compositor_frame_sink_ptr_| will
-  // point to message pipe we want to use.
-  raw_ptr<viz::mojom::CompositorFrameSink> compositor_frame_sink_ptr_ = nullptr;
   mojo::Remote<viz::mojom::CompositorFrameSink> compositor_frame_sink_;
   mojo::AssociatedRemote<viz::mojom::CompositorFrameSink>
       compositor_frame_sink_associated_;
+  // One of |compositor_frame_sink_| or |compositor_frame_sink_associated_| will
+  // be bound after calling BindToClient(). |compositor_frame_sink_ptr_| will
+  // point to message pipe we want to use. It must be declared last and cleared
+  // first.
+  raw_ptr<viz::mojom::CompositorFrameSink> compositor_frame_sink_ptr_ = nullptr;
   mojo::Receiver<viz::mojom::CompositorFrameSinkClient> client_receiver_{this};
 
   THREAD_CHECKER(thread_checker_);

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,6 @@ const std::string GetDecodeStatusString(const DecoderStatus& status) {
     STRINGIFY(DecoderStatus::Codes::kMalformedBitstream);
     STRINGIFY(DecoderStatus::Codes::kFailedToGetDecoderBuffer);
     STRINGIFY(DecoderStatus::Codes::kDecoderStreamInErrorState);
-    STRINGIFY(DecoderStatus::Codes::kDecoderStreamReinitFailed);
     STRINGIFY(DecoderStatus::Codes::kDecoderStreamDemuxerError);
     STRINGIFY(DecoderStatus::Codes::kUnsupportedProfile);
     STRINGIFY(DecoderStatus::Codes::kUnsupportedCodec);
@@ -40,6 +39,8 @@ const std::string GetDecodeStatusString(const DecoderStatus& status) {
     STRINGIFY(DecoderStatus::Codes::kFailedToCreateDecoder);
     STRINGIFY(DecoderStatus::Codes::kKeyFrameRequired);
     STRINGIFY(DecoderStatus::Codes::kMissingTimestamp);
+    STRINGIFY(DecoderStatus::Codes::kTooManyDecoders);
+    STRINGIFY(DecoderStatus::Codes::kMediaFoundationNotAvailable);
   }
 #undef STRINGIFY
 }

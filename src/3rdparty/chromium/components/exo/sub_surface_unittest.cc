@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -116,12 +116,18 @@ TEST_F(SubSurfaceTest, PlaceBelow) {
 }
 
 TEST_F(SubSurfaceTest, ParentDamageOnReorder) {
+  gfx::Size buffer_size(800, 600);
+  auto buffer = std::make_unique<Buffer>(
+      exo_test_helper()->CreateGpuMemoryBuffer(buffer_size));
   auto surface_tree_host = std::make_unique<SurfaceTreeHost>("SubSurfaceTest");
   LayerTreeFrameSinkHolder* frame_sink_holder =
       surface_tree_host->layer_tree_frame_sink_holder();
 
   auto parent = std::make_unique<Surface>();
-  parent->SetViewport({800.f, 600.f});
+  parent->Attach(buffer.get());
+  // Set the overlay priority hint to low to prevent a texture draw quad from
+  // being used.
+  parent->SetOverlayPriorityHint(OverlayPriority::LOW);
   auto surface1 = std::make_unique<Surface>();
   auto surface2 = std::make_unique<Surface>();
   auto non_sibling_surface = std::make_unique<Surface>();

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -558,8 +558,6 @@ void SiteEngagementService::RecordMetrics(
       GetMedianEngagementFromSortedDetails(details));
   SiteEngagementMetrics::RecordEngagementScores(details);
 
-  SiteEngagementMetrics::RecordOriginsWithMaxDailyEngagement(
-      OriginsWithMaxDailyEngagement());
   SiteEngagementMetrics::RecordOriginsWithMaxEngagement(
       origins_with_max_engagement);
 }
@@ -686,24 +684,6 @@ SiteEngagementScore SiteEngagementService::CreateEngagementScore(
   return CreateEngagementScoreImpl(
       clock_, origin,
       permissions::PermissionsClient::Get()->GetSettingsMap(browser_context_));
-}
-
-int SiteEngagementService::OriginsWithMaxDailyEngagement() const {
-  int total_origins = 0;
-
-  // We cannot call GetScoreMap as we need the score objects, not raw scores.
-  for (const auto& site : GetContentSettingsFromBrowserContext(
-           browser_context_, ContentSettingsType::SITE_ENGAGEMENT)) {
-    GURL origin(site.primary_pattern.ToString());
-
-    if (!origin.is_valid())
-      continue;
-
-    if (CreateEngagementScore(origin).MaxPointsPerDayAdded())
-      ++total_origins;
-  }
-
-  return total_origins;
 }
 
 }  // namespace site_engagement

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,24 +14,20 @@ DefaultModelManager::SegmentInfoWrapper::~SegmentInfoWrapper() = default;
 
 DefaultModelManager::DefaultModelManager(
     ModelProviderFactory* model_provider_factory,
-    const std::vector<OptimizationTarget>& segment_ids)
+    const base::flat_set<SegmentId>& segment_ids)
     : model_provider_factory_(model_provider_factory) {
-  for (OptimizationTarget segment_id : segment_ids) {
-    if (!model_provider_factory)
-      continue;
+  for (SegmentId segment_id : segment_ids) {
     std::unique_ptr<ModelProvider> provider =
         model_provider_factory->CreateDefaultProvider(segment_id);
     if (!provider)
       continue;
-    default_model_providers_.emplace(
-        std::make_pair(segment_id, std::move(provider)));
+    default_model_providers_.emplace(segment_id, std::move(provider));
   }
 }
 
 DefaultModelManager::~DefaultModelManager() = default;
 
-ModelProvider* DefaultModelManager::GetDefaultProvider(
-    OptimizationTarget segment_id) {
+ModelProvider* DefaultModelManager::GetDefaultProvider(SegmentId segment_id) {
   auto it = default_model_providers_.find(segment_id);
   if (it != default_model_providers_.end())
     return it->second.get();
@@ -39,21 +35,20 @@ ModelProvider* DefaultModelManager::GetDefaultProvider(
 }
 
 void DefaultModelManager::GetAllSegmentInfoFromDefaultModel(
-    const std::vector<OptimizationTarget>& segment_ids,
+    const base::flat_set<SegmentId>& segment_ids,
     MultipleSegmentInfoCallback callback) {
   auto result = std::make_unique<SegmentInfoList>();
-  std::deque<OptimizationTarget> remaining_segment_ids(segment_ids.begin(),
-                                                       segment_ids.end());
+  std::deque<SegmentId> remaining_segment_ids(segment_ids.begin(),
+                                              segment_ids.end());
   GetNextSegmentInfoFromDefaultModel(
       std::move(result), std::move(remaining_segment_ids), std::move(callback));
 }
 
 void DefaultModelManager::GetNextSegmentInfoFromDefaultModel(
     std::unique_ptr<SegmentInfoList> result,
-    std::deque<OptimizationTarget> remaining_segment_ids,
+    std::deque<SegmentId> remaining_segment_ids,
     MultipleSegmentInfoCallback callback) {
-  OptimizationTarget segment_id =
-      OptimizationTarget::OPTIMIZATION_TARGET_UNKNOWN;
+  SegmentId segment_id = SegmentId::OPTIMIZATION_TARGET_UNKNOWN;
   ModelProvider* default_provider = nullptr;
 
   // Find the next available default provider.
@@ -80,9 +75,9 @@ void DefaultModelManager::GetNextSegmentInfoFromDefaultModel(
 
 void DefaultModelManager::OnFetchDefaultModel(
     std::unique_ptr<SegmentInfoList> result,
-    std::deque<OptimizationTarget> remaining_segment_ids,
+    std::deque<SegmentId> remaining_segment_ids,
     MultipleSegmentInfoCallback callback,
-    OptimizationTarget segment_id,
+    SegmentId segment_id,
     proto::SegmentationModelMetadata metadata,
     int64_t model_version) {
   auto info = std::make_unique<SegmentInfoWrapper>();
@@ -97,7 +92,7 @@ void DefaultModelManager::OnFetchDefaultModel(
 }
 
 void DefaultModelManager::GetAllSegmentInfoFromBothModels(
-    const std::vector<OptimizationTarget>& segment_ids,
+    const base::flat_set<SegmentId>& segment_ids,
     SegmentInfoDatabase* segment_database,
     MultipleSegmentInfoCallback callback) {
   segment_database->GetSegmentInfoForSegments(
@@ -108,7 +103,7 @@ void DefaultModelManager::GetAllSegmentInfoFromBothModels(
 }
 
 void DefaultModelManager::OnGetAllSegmentInfoFromDatabase(
-    const std::vector<OptimizationTarget>& segment_ids,
+    const base::flat_set<SegmentId>& segment_ids,
     MultipleSegmentInfoCallback callback,
     std::unique_ptr<SegmentInfoDatabase::SegmentInfoList> segment_infos) {
   GetAllSegmentInfoFromDefaultModel(
@@ -139,7 +134,7 @@ void DefaultModelManager::OnGetAllSegmentInfoFromDefaultModel(
 }
 
 void DefaultModelManager::SetDefaultProvidersForTesting(
-    std::map<OptimizationTarget, std::unique_ptr<ModelProvider>>&& providers) {
+    std::map<SegmentId, std::unique_ptr<ModelProvider>>&& providers) {
   default_model_providers_ = std::move(providers);
 }
 

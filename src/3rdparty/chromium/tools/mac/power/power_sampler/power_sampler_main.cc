@@ -1,7 +1,8 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <signal.h>
 #include <cstdio>
 #include <iostream>
 #include <memory>
@@ -10,14 +11,14 @@
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/power_monitor/iopm_power_source_sampling_event_source.h"
+#include "base/power_monitor/timer_sampling_event_source.h"
 #include "base/process/process_handle.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/task/single_thread_task_executor.h"
 #include "base/time/time.h"
-#include "components/power_metrics/iopm_power_source_sampling_event_source.h"
-#include "components/power_metrics/timer_sampling_event_source.h"
 #include "tools/mac/power/power_sampler/battery_sampler.h"
 #include "tools/mac/power/power_sampler/csv_exporter.h"
 #include "tools/mac/power/power_sampler/json_exporter.h"
@@ -50,7 +51,8 @@ constexpr char kSwitchSampleInterval[] = "sample-interval";
 constexpr char kSwitchSampleCount[] = "sample-count";
 constexpr char kSwitchTimeout[] = "timeout";
 constexpr char kSwitchJsonOutputFile[] = "json-output-file";
-constexpr char kSwitchSampleOnNotification[] = "sample-on-notification";
+constexpr char kSwitchSampleEveryNthNotification[] =
+    "sample-every-nth-notification";
 constexpr char kSwitchResourceCoalitionPid[] = "resource-coalition-pid";
 constexpr char kSwitchSimulateUserActive[] = "simulate-user-active";
 constexpr char kSwitchNoSamplers[] = "no-samplers";
@@ -62,7 +64,8 @@ in CSV or JSON format.
 Options:
   --samplers=<samplers>           Comma separated list of samplers.
   --sample-interval=<num>         Sample on a <num> second interval.
-  --sample-on-notification        Sample on power manager notifications.
+  --sample-every-nth-notification        Sample on power manager notifications.
+      Respond to every nth notification only.
       Note that interval and event notifications are mutually exclusive.
   --sample-count=<num>            Collect <num> samples before exiting.
   --no-samplers                   Use no samplers.
@@ -116,6 +119,11 @@ bool ConsumeSamplerName(const std::string& sampler_name,
   return false;
 }
 
+std::atomic<bool> should_quit_{false};
+void quit_signal_handler(int signal) {
+  should_quit_ = true;
+}
+
 int main(int argc, char** argv) {
   // Initialize infrastructure from base.
   base::CommandLine::Init(argc, argv);
@@ -145,10 +153,10 @@ int main(int argc, char** argv) {
 
   base::TimeDelta sampling_interval = base::Seconds(60);
   if (command_line.HasSwitch(kSwitchSampleInterval)) {
-    if (command_line.HasSwitch(kSwitchSampleOnNotification)) {
+    if (command_line.HasSwitch(kSwitchSampleEveryNthNotification)) {
       PrintUsage(
           "--sample-interval should not be specified with "
-          "--sample-on-notification.");
+          "--sample-every-nth-notification.");
       return kStatusInvalidParam;
     }
 
@@ -171,7 +179,7 @@ int main(int argc, char** argv) {
 
     std::string sample_count_switch =
         command_line.GetSwitchValueASCII(kSwitchSampleCount);
-    if (!base::StringToInt64(sample_count_switch, &sample_count) &&
+    if (!base::StringToInt64(sample_count_switch, &sample_count) ||
         sample_count < 1) {
       PrintUsage("sample-count must be numeric and larger than 0.");
       return kStatusInvalidParam;
@@ -205,17 +213,29 @@ int main(int argc, char** argv) {
     }
   }
 
-  std::unique_ptr<power_metrics::SamplingEventSource> event_source;
-  if (command_line.HasSwitch(kSwitchSampleOnNotification)) {
-    event_source =
-        std::make_unique<power_metrics::IOPMPowerSourceSamplingEventSource>();
+  std::unique_ptr<base::SamplingEventSource> event_source;
+  if (command_line.HasSwitch(kSwitchSampleEveryNthNotification)) {
+    event_source = std::make_unique<base::IOPMPowerSourceSamplingEventSource>();
   } else {
-    event_source = std::make_unique<power_metrics::TimerSamplingEventSource>(
-        sampling_interval);
+    event_source =
+        std::make_unique<base::TimerSamplingEventSource>(sampling_interval);
   }
 
   base::SingleThreadTaskExecutor executor(base::MessagePumpType::NS_RUNLOOP);
-  power_sampler::SamplingController controller;
+
+  int64_t sample_every = 1;
+  if (command_line.HasSwitch(kSwitchSampleEveryNthNotification)) {
+    std::string sample_every_switch =
+        command_line.GetSwitchValueASCII(kSwitchSampleEveryNthNotification);
+    if (!base::StringToInt64(sample_every_switch, &sample_every) ||
+        sample_every < 1) {
+      PrintUsage(
+          "sample-every-nth-notification must be numeric and larger than 0.");
+      return kStatusInvalidParam;
+    }
+  }
+
+  power_sampler::SamplingController controller(sample_every);
 
   std::unique_ptr<power_sampler::UserActiveSimulator> user_active_simulator;
   if (command_line.HasSwitch(kSwitchSimulateUserActive)) {
@@ -330,6 +350,23 @@ int main(int argc, char** argv) {
                                             timeout);
   }
 
+  // Install signal handler for on-demand quitting.
+  struct sigaction new_action;
+  new_action.sa_handler = quit_signal_handler;
+  sigemptyset(&new_action.sa_mask);
+  new_action.sa_flags = 0;
+  sigaction(SIGTERM, &new_action, NULL);
+  sigaction(SIGINT, &new_action, NULL);
+
+  base::RepeatingTimer quit_timer;
+  quit_timer.Start(FROM_HERE, base::Seconds(1),
+                   BindRepeating(
+                       [](base::OnceClosure quit_closure) {
+                         if (should_quit_.load())
+                           std::move(quit_closure).Run();
+                       },
+                       run_loop.QuitClosure()));
+
   if (!event_source->Start(BindRepeating(
           [](power_sampler::SamplingController* controller,
              base::OnceClosure quit_closure) {
@@ -344,6 +381,8 @@ int main(int argc, char** argv) {
   controller.StartSession();
 
   run_loop.Run();
+
+  quit_timer.Stop();
 
   controller.EndSession();
 

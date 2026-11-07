@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -177,12 +177,6 @@ IN_PROC_BROWSER_TEST_F(InterstitialUITest, CaptivePortalInterstitial) {
 IN_PROC_BROWSER_TEST_F(InterstitialUITest, CaptivePortalInterstitialWifi) {
   TestInterstitial(GURL("chrome://interstitials/captiveportal?is_wifi=1"),
                    "Connect to Wi-Fi");
-}
-
-IN_PROC_BROWSER_TEST_F(InterstitialUITest, OriginPolicyErrorInterstitial) {
-  TestInterstitial(GURL("chrome://interstitials/origin_policy"),
-                   "Origin Policy Error",
-                   u"has requested that an origin policy");
 }
 
 IN_PROC_BROWSER_TEST_F(InterstitialUITest, BlockedInterceptionInterstitial) {

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@
 #include "net/cookies/cookie_inclusion_status.h"
 #include "net/cookies/cookie_partition_key_collection.h"
 #include "net/cookies/cookie_store.h"
-#include "net/cookies/first_party_set_metadata.h"
+#include "net/first_party_sets/first_party_set_metadata.h"
 #include "services/network/public/mojom/cookie_access_observer.mojom.h"
 #include "services/network/public/mojom/restricted_cookie_manager.mojom.h"
 #include "url/gurl.h"
@@ -79,7 +79,6 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) RestrictedCookieManager
       const url::Origin& origin,
       const net::IsolationInfo& isolation_info,
       mojo::PendingRemote<mojom::CookieAccessObserver> cookie_observer,
-      bool first_party_sets_enabled,
       net::FirstPartySetMetadata first_party_set_metadata);
 
   RestrictedCookieManager(const RestrictedCookieManager&) = delete;
@@ -145,6 +144,20 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) RestrictedCookieManager
       const net::CookieStore* cookie_store,
       const net::IsolationInfo& isolation_info,
       base::OnceCallback<void(net::FirstPartySetMetadata)> callback);
+
+  // This is a temporary method for the partitioned cookies (aka CHIPS) origin
+  // trial.
+  //
+  // This method allows RCM to convert any sites' partitioned cookies to
+  // unpartitioned. It should only exist for the duration of the CHIPS OT and
+  // should be deleted shortly after, since it gives untrusted processes the
+  // ability to convert any site's partitioned cookies to unpartitioned.
+  //
+  // Since CHIPS is still an experimental API, giving RCM this privilege should
+  // not be a major risk. However, before CHIPS goes live this method should be
+  // deleted.
+  // TODO(https://crbug.com/1296161): Delete this function.
+  void ConvertPartitionedCookiesToUnpartitioned(const GURL& url) override;
 
  private:
   // The state associated with a CookieChangeListener.
@@ -249,7 +262,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) RestrictedCookieManager
   // update filtering.
   CookieAccessesByURLAndSite recent_cookie_accesses_;
 
-  const bool first_party_sets_enabled_;
+  bool same_party_attribute_enabled_;
 
   base::WeakPtrFactory<RestrictedCookieManager> weak_ptr_factory_{this};
 };

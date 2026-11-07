@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,18 +60,21 @@ const net::NetworkTrafficAnnotationTag
             "page load performance and features such as Translate."
           trigger:
             "When there are new models to download based on response from "
-            "Optimization Guide Service that is triggered daily."
+            "Optimization Guide Service that is triggered at the start of each "
+            "session."
           data: "The URL provided by the Optimization Guide Service to fetch "
             "an updated model. No user information is sent."
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
           cookies_allowed: NO
-          setting:
-            "This request cannot be disabled in settings. However it will "
-            "never be made if the "
-            "'OptimizationGuideModelDownloading' feature is disabled."
-          policy_exception_justification: "Not yet implemented."
+          setting: "This feature cannot be disabled."
+          chrome_policy {
+            ComponentUpdatesEnabled {
+              policy_options {mode: MANDATORY}
+              ComponentUpdatesEnabled: false
+            }
+          }
         })");
 
 const base::FilePath::CharType kModelInfoFileName[] =
@@ -102,6 +105,11 @@ PredictionModelDownloadManager::PredictionModelDownloadManager(
       background_task_runner_(background_task_runner) {}
 
 PredictionModelDownloadManager::~PredictionModelDownloadManager() = default;
+
+// static
+base::FilePath::StringType PredictionModelDownloadManager::ModelInfoFileName() {
+  return kModelInfoFileName;
+}
 
 void PredictionModelDownloadManager::StartDownload(
     const GURL& download_url,
@@ -219,8 +227,8 @@ void PredictionModelDownloadManager::OnDownloadSucceeded(
 
   background_task_runner_->PostTaskAndReplyWithResult(
       FROM_HERE,
-      base::BindOnce(&PredictionModelDownloadManager::ProcessDownload,
-                     base::Unretained(this), file_path),
+      base::BindOnce(&PredictionModelDownloadManager::VerifyDownload, file_path,
+                     /*delete_file_on_error=*/true),
       base::BindOnce(&PredictionModelDownloadManager::StartUnzipping,
                      ui_weak_ptr_factory_.GetWeakPtr(), optimization_target));
 }
@@ -237,11 +245,11 @@ void PredictionModelDownloadManager::OnDownloadFailed(
     NotifyModelDownloadFailed(*optimization_target);
 }
 
+// static
+// Note: This function runs on a background sequence!
 absl::optional<std::pair<base::FilePath, base::FilePath>>
-PredictionModelDownloadManager::ProcessDownload(
-    const base::FilePath& file_path) {
-  DCHECK(background_task_runner_->RunsTasksInCurrentSequence());
-
+PredictionModelDownloadManager::VerifyDownload(const base::FilePath& file_path,
+                                               bool delete_file_on_error) {
   if (!switches::ShouldSkipModelDownloadVerificationForTesting()) {
     // Verify that the |file_path| contains a valid CRX file.
     std::string public_key;
@@ -253,9 +261,11 @@ PredictionModelDownloadManager::ProcessDownload(
     if (verifier_result != crx_file::VerifierResult::OK_FULL) {
       RecordPredictionModelDownloadStatus(
           PredictionModelDownloadStatus::kFailedCrxVerification);
-      base::ThreadPool::PostTask(
-          FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
-          base::BindOnce(base::GetDeleteFileCallback(), file_path));
+      if (delete_file_on_error) {
+        base::ThreadPool::PostTask(
+            FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
+            base::GetDeleteFileCallback(file_path));
+      }
       return absl::nullopt;
     }
 
@@ -270,22 +280,26 @@ PredictionModelDownloadManager::ProcessDownload(
     if (publisher_key_hash != public_key_hash) {
       RecordPredictionModelDownloadStatus(
           PredictionModelDownloadStatus::kFailedCrxInvalidPublisher);
-      base::ThreadPool::PostTask(
-          FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
-          base::BindOnce(base::GetDeleteFileCallback(), file_path));
+      if (delete_file_on_error) {
+        base::ThreadPool::PostTask(
+            FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
+            base::GetDeleteFileCallback(file_path));
+      }
       return absl::nullopt;
     }
   }
 
-  // Unzip download.
+  // Create a temp directory to unzip the model package.
   base::FilePath temp_dir_path;
   if (!base::CreateNewTempDirectory(base::FilePath::StringType(),
                                     &temp_dir_path)) {
     RecordPredictionModelDownloadStatus(
         PredictionModelDownloadStatus::kFailedUnzipDirectoryCreation);
-    base::ThreadPool::PostTask(
-        FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
-        base::BindOnce(base::GetDeleteFileCallback(), file_path));
+    if (delete_file_on_error) {
+      base::ThreadPool::PostTask(
+          FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
+          base::GetDeleteFileCallback(file_path));
+    }
     return absl::nullopt;
   }
 
@@ -326,8 +340,7 @@ void PredictionModelDownloadManager::OnDownloadUnzipped(
 
   // Clean up original download file when this function finishes.
   background_task_runner_->PostTask(
-      FROM_HERE,
-      base::BindOnce(base::GetDeleteFileCallback(), original_file_path));
+      FROM_HERE, base::GetDeleteFileCallback(original_file_path));
 
   if (!success) {
     if (optimization_target) {
@@ -353,8 +366,7 @@ PredictionModelDownloadManager::ProcessUnzippedContents(
     const base::FilePath& unzipped_dir_path) {
   // Clean up temp dir when this function finishes.
   base::SequencedTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(base::GetDeletePathRecursivelyCallback(),
-                                unzipped_dir_path));
+      FROM_HERE, base::GetDeletePathRecursivelyCallback(unzipped_dir_path));
 
   // Unpack and verify model info file.
   base::FilePath model_info_path = unzipped_dir_path.Append(kModelInfoFileName);
@@ -379,7 +391,6 @@ PredictionModelDownloadManager::ProcessUnzippedContents(
   if (model_dir_path.empty()) {
     RecordPredictionModelDownloadStatus(
         PredictionModelDownloadStatus::kOptGuideDirectoryDoesNotExist);
-
     return absl::nullopt;
   }
 

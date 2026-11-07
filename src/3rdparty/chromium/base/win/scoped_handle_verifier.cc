@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "base/trace_event/base_tracing.h"
 #include "base/win/base_win_buildflags.h"
 #include "base/win/current_module.h"
+#include "base/win/scoped_handle.h"
 
 extern "C" {
 __declspec(dllexport) void* GetHandleVerifier();
@@ -40,10 +41,12 @@ using HandleMap =
 using NativeLock = base::internal::LockImpl;
 
 NOINLINE void ReportErrorOnScopedHandleOperation(
-    const base::debug::StackTrace& creation_stack) {
+    const base::debug::StackTrace& creation_stack,
+    HandleOperation operation) {
   auto creation_stack_copy = creation_stack;
   base::debug::Alias(&creation_stack_copy);
-  CHECK(false);
+  base::debug::Alias(&operation);
+  CHECK(false) << operation;
 #if !defined(COMPILER_MSVC)
   __builtin_unreachable();
 #else
@@ -53,12 +56,14 @@ NOINLINE void ReportErrorOnScopedHandleOperation(
 
 NOINLINE void ReportErrorOnScopedHandleOperation(
     const base::debug::StackTrace& creation_stack,
-    const ScopedHandleVerifierInfo& other) {
+    const ScopedHandleVerifierInfo& other,
+    HandleOperation operation) {
   auto other_stack_copy = *other.stack;
   base::debug::Alias(&other_stack_copy);
   auto creation_stack_copy = creation_stack;
   base::debug::Alias(&creation_stack_copy);
-  CHECK(false);
+  base::debug::Alias(&operation);
+  CHECK(false) << operation;
 #if !defined(COMPILER_MSVC)
   __builtin_unreachable();
 #else
@@ -115,7 +120,7 @@ ScopedHandleVerifier* ScopedHandleVerifier::Get() {
 
 bool CloseHandleWrapper(HANDLE handle) {
   if (!::CloseHandle(handle))
-    CHECK(false);  // CloseHandle failed.
+    CHECK(false) << "CloseHandle failed";
   return true;
 }
 
@@ -210,9 +215,10 @@ void ScopedHandleVerifier::Disable() {
   enabled_ = false;
 }
 
-void ScopedHandleVerifier::OnHandleBeingClosed(HANDLE handle) {
+void ScopedHandleVerifier::OnHandleBeingClosed(HANDLE handle,
+                                               HandleOperation operation) {
   if (enabled_)
-    OnHandleBeingClosedImpl(handle);
+    OnHandleBeingClosedImpl(handle, operation);
 }
 
 HMODULE ScopedHandleVerifier::GetModule() const {
@@ -235,7 +241,8 @@ NOINLINE void ScopedHandleVerifier::StartTrackingImpl(HANDLE handle,
                                        thread_id});
   if (!result.second) {
     // Attempt to start tracking already tracked handle.
-    ReportErrorOnScopedHandleOperation(creation_stack_, result.first->second);
+    ReportErrorOnScopedHandleOperation(creation_stack_, result.first->second,
+                                       HandleOperation::kHandleAlreadyTracked);
   }
 }
 
@@ -247,18 +254,22 @@ NOINLINE void ScopedHandleVerifier::StopTrackingImpl(HANDLE handle,
   HandleMap::iterator i = map_.find(handle);
   if (i == map_.end()) {
     // Attempting to close an untracked handle.
-    ReportErrorOnScopedHandleOperation(creation_stack_);
+    ReportErrorOnScopedHandleOperation(creation_stack_,
+                                       HandleOperation::kCloseHandleNotTracked);
   }
 
   if (i->second.owner != owner) {
     // Attempting to close a handle not owned by opener.
-    ReportErrorOnScopedHandleOperation(creation_stack_, i->second);
+    ReportErrorOnScopedHandleOperation(creation_stack_, i->second,
+                                       HandleOperation::kCloseHandleNotOwner);
   }
 
   map_.erase(i);
 }
 
-NOINLINE void ScopedHandleVerifier::OnHandleBeingClosedImpl(HANDLE handle) {
+NOINLINE void ScopedHandleVerifier::OnHandleBeingClosedImpl(
+    HANDLE handle,
+    HandleOperation operation) {
   if (closing_.Get())
     return;
 
@@ -266,7 +277,7 @@ NOINLINE void ScopedHandleVerifier::OnHandleBeingClosedImpl(HANDLE handle) {
   HandleMap::iterator i = map_.find(handle);
   if (i != map_.end()) {
     // CloseHandle called on tracked handle.
-    ReportErrorOnScopedHandleOperation(creation_stack_, i->second);
+    ReportErrorOnScopedHandleOperation(creation_stack_, i->second, operation);
   }
 }
 

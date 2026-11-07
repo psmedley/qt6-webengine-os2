@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,8 +98,8 @@ class EventListenerMapTest : public ExtensionsTest {
     mojom::EventFilteringInfoPtr info = mojom::EventFilteringInfo::New();
     info->url = url;
     return std::make_unique<Event>(
-        events::FOR_TEST, event_name, std::vector<base::Value>(), nullptr,
-        GURL(), EventRouter::USER_GESTURE_UNKNOWN, std::move(info));
+        events::FOR_TEST, event_name, base::Value::List(), nullptr, GURL(),
+        EventRouter::USER_GESTURE_UNKNOWN, std::move(info));
   }
 
   std::unique_ptr<EventListener> CreateLazyListener(
@@ -517,7 +517,8 @@ TEST_P(EventListenerMapWithContextTest, AddLazyListenersFromPreferences) {
   };
   auto filter_list = std::make_unique<ListValue>();
   for (const TestCase& test_case : kTestCases)
-    filter_list->Append(CreateHostSuffixFilter(test_case.filter_host_suffix));
+    filter_list->Append(base::Value::FromUniquePtrValue(
+        CreateHostSuffixFilter(test_case.filter_host_suffix)));
 
   DictionaryValue filtered_listeners;
   filtered_listeners.Set(kEvent1Name, std::move(filter_list));

@@ -44,7 +44,7 @@ class TestHolder final : public CPDF_IndirectObjectHolder {
   ~TestHolder() override = default;
 
   // CPDF_IndirectObjectHolder overrides:
-  CPDF_Object* GetOrParseIndirectObject(uint32_t objnum) override {
+  RetainPtr<CPDF_Object> ParseIndirectObject(uint32_t objnum) override {
     auto it = objects_data_.find(objnum);
     if (it == objects_data_.end())
       return nullptr;
@@ -54,7 +54,7 @@ class TestHolder final : public CPDF_IndirectObjectHolder {
       validator_->SimulateReadError();
       return nullptr;
     }
-    return obj_data.object.Get();
+    return obj_data.object;
   }
 
   RetainPtr<CPDF_ReadValidator> GetValidator() { return validator_; }
@@ -121,7 +121,7 @@ class CPDF_ObjectAvailExcludeTypeKey final : public CPDF_ObjectAvail {
     // In this case CPDF_ObjectAvail should wait availability of this item and
     // call ExcludeObject again.
     return object->IsDictionary() &&
-           object->GetDict()->GetStringFor("Type") == "Exclude me";
+           object->GetDict()->GetByteStringFor("Type") == "Exclude me";
   }
 };
 
@@ -182,8 +182,8 @@ TEST(ObjectAvailTest, DoNotCheckParent) {
   holder.AddObject(2, pdfium::MakeRetain<CPDF_Dictionary>(),
                    TestHolder::ObjectState::Unavailable);
 
-  holder.GetTestObject(2)->GetDict()->SetNewFor<CPDF_Reference>("Parent",
-                                                                &holder, 1);
+  holder.GetTestObject(2)->GetMutableDict()->SetNewFor<CPDF_Reference>(
+      "Parent", &holder, 1);
 
   CPDF_ObjectAvail avail(holder.GetValidator(), &holder, 2);
   EXPECT_EQ(CPDF_DataAvail::kDataNotAvailable, avail.CheckAvail());
@@ -200,7 +200,7 @@ TEST(ObjectAvailTest, Generic) {
     holder.AddObject(i, pdfium::MakeRetain<CPDF_Dictionary>(),
                      TestHolder::ObjectState::Unavailable);
     // Add ref to next dictionary.
-    holder.GetTestObject(i)->GetDict()->SetNewFor<CPDF_Reference>(
+    holder.GetTestObject(i)->GetMutableDict()->SetNewFor<CPDF_Reference>(
         "Child", &holder, i + 1);
   }
   // Add final object
@@ -237,11 +237,12 @@ TEST(ObjectAvailTest, Exclude) {
   TestHolder holder;
   holder.AddObject(1, pdfium::MakeRetain<CPDF_Dictionary>(),
                    TestHolder::ObjectState::Available);
-  holder.GetTestObject(1)->GetDict()->SetNewFor<CPDF_Reference>("ArrayRef",
-                                                                &holder, 2);
+  holder.GetTestObject(1)->GetMutableDict()->SetNewFor<CPDF_Reference>(
+      "ArrayRef", &holder, 2);
   holder.AddObject(2, pdfium::MakeRetain<CPDF_Array>(),
                    TestHolder::ObjectState::Available);
-  holder.GetTestObject(2)->AsArray()->AppendNew<CPDF_Reference>(&holder, 2);
+  holder.GetTestObject(2)->AsMutableArray()->AppendNew<CPDF_Reference>(&holder,
+                                                                       2);
 
   // Add string, which is refered by array item. It is should not be checked.
   holder.AddObject(
@@ -256,21 +257,21 @@ TEST(ObjectAvailTest, ReadErrorOnExclude) {
   TestHolder holder;
   holder.AddObject(1, pdfium::MakeRetain<CPDF_Dictionary>(),
                    TestHolder::ObjectState::Available);
-  holder.GetTestObject(1)->GetDict()->SetNewFor<CPDF_Reference>("DictRef",
-                                                                &holder, 2);
+  holder.GetTestObject(1)->GetMutableDict()->SetNewFor<CPDF_Reference>(
+      "DictRef", &holder, 2);
   holder.AddObject(2, pdfium::MakeRetain<CPDF_Dictionary>(),
                    TestHolder::ObjectState::Available);
 
-  holder.GetTestObject(2)->GetDict()->SetNewFor<CPDF_Reference>("Type", &holder,
-                                                                3);
+  holder.GetTestObject(2)->GetMutableDict()->SetNewFor<CPDF_Reference>(
+      "Type", &holder, 3);
   // The value of "Type" key is not available at start
   holder.AddObject(
       3, pdfium::MakeRetain<CPDF_String>(nullptr, "Exclude me", false),
       TestHolder::ObjectState::Unavailable);
 
-  holder.GetTestObject(2)->GetDict()->SetNewFor<CPDF_Reference>("OtherData",
-                                                                &holder, 4);
-  // Add string, which is refered by dictionary item. It is should not be
+  holder.GetTestObject(2)->GetMutableDict()->SetNewFor<CPDF_Reference>(
+      "OtherData", &holder, 4);
+  // Add string, which is referred by dictionary item. It is should not be
   // checked, because the dictionary with it, should be skipped.
   holder.AddObject(
       4,
@@ -293,7 +294,7 @@ TEST(ObjectAvailTest, IgnoreNotExistsObject) {
   TestHolder holder;
   holder.AddObject(1, pdfium::MakeRetain<CPDF_Dictionary>(),
                    TestHolder::ObjectState::Available);
-  holder.GetTestObject(1)->GetDict()->SetNewFor<CPDF_Reference>(
+  holder.GetTestObject(1)->GetMutableDict()->SetNewFor<CPDF_Reference>(
       "NotExistsObjRef", &holder, 2);
   CPDF_ObjectAvail avail(holder.GetValidator(), &holder, 1);
   // Now object should be available, although the object '2' is not exists. But
@@ -318,21 +319,19 @@ TEST(ObjectAvailTest, SelfReferedInlinedObject) {
   holder.AddObject(1, pdfium::MakeRetain<CPDF_Dictionary>(),
                    TestHolder::ObjectState::Available);
 
-  holder.GetTestObject(1)->GetDict()->SetNewFor<CPDF_Reference>("Data", &holder,
-                                                                2);
-  auto* root =
-      holder.GetTestObject(1)->GetDict()->SetNewFor<CPDF_Dictionary>("Dict");
+  holder.GetTestObject(1)->GetMutableDict()->SetNewFor<CPDF_Reference>(
+      "Data", &holder, 2);
+  auto root =
+      holder.GetTestObject(1)->GetMutableDict()->SetNewFor<CPDF_Dictionary>(
+          "Dict");
 
   root->SetNewFor<CPDF_Reference>("Self", &holder, 1);
-
   holder.AddObject(2, pdfium::MakeRetain<CPDF_String>(nullptr, "Data", false),
                    TestHolder::ObjectState::Unavailable);
 
   CPDF_ObjectAvail avail(holder.GetValidator(), &holder, root);
-
   EXPECT_EQ(CPDF_DataAvail::kDataNotAvailable, avail.CheckAvail());
 
   holder.SetObjectState(2, TestHolder::ObjectState::Available);
-
   EXPECT_EQ(CPDF_DataAvail::kDataAvailable, avail.CheckAvail());
 }

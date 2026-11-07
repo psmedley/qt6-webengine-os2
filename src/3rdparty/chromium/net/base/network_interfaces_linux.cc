@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,13 +20,13 @@
 
 #include "base/files/file_path.h"
 #include "base/files/scoped_file.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "net/base/address_tracker_linux.h"
-#include "net/base/escape.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_interfaces_posix.h"
@@ -128,16 +128,16 @@ bool GetNetworkListImpl(
     GetInterfaceNameFunction get_interface_name) {
   std::map<int, std::string> ifnames;
 
-  for (auto it = address_map.begin(); it != address_map.end(); ++it) {
+  for (const auto& it : address_map) {
     // Ignore addresses whose links are not online.
-    if (online_links.find(it->second.ifa_index) == online_links.end())
+    if (online_links.find(it.second.ifa_index) == online_links.end())
       continue;
 
     sockaddr_storage sock_addr;
     socklen_t sock_len = sizeof(sockaddr_storage);
 
     // Convert to sockaddr for next check.
-    if (!IPEndPoint(it->first, 0)
+    if (!IPEndPoint(it.first, 0)
              .ToSockAddr(reinterpret_cast<sockaddr*>(&sock_addr), &sock_len)) {
       continue;
     }
@@ -148,25 +148,25 @@ bool GetNetworkListImpl(
 
     int ip_attributes = IP_ADDRESS_ATTRIBUTE_NONE;
 
-    if (it->second.ifa_family == AF_INET6) {
+    if (it.second.ifa_family == AF_INET6) {
       // Ignore addresses whose attributes are not actionable by
       // the application layer.
-      if (!TryConvertNativeToNetIPAttributes(it->second.ifa_flags,
+      if (!TryConvertNativeToNetIPAttributes(it.second.ifa_flags,
                                              &ip_attributes))
         continue;
     }
 
     // Find the name of this link.
     std::map<int, std::string>::const_iterator itname =
-        ifnames.find(it->second.ifa_index);
+        ifnames.find(it.second.ifa_index);
     std::string ifname;
     if (itname == ifnames.end()) {
       char buffer[IFNAMSIZ] = {0};
-      ifname.assign(get_interface_name(it->second.ifa_index, buffer));
+      ifname.assign(get_interface_name(it.second.ifa_index, buffer));
       // Ignore addresses whose interface name can't be retrieved.
       if (ifname.empty())
         continue;
-      ifnames[it->second.ifa_index] = ifname;
+      ifnames[it.second.ifa_index] = ifname;
     } else {
       ifname = itname->second;
     }
@@ -180,8 +180,8 @@ bool GetNetworkListImpl(
         GetInterfaceConnectionType(ifname);
 
     networks->push_back(
-        NetworkInterface(ifname, ifname, it->second.ifa_index, type, it->first,
-                         it->second.ifa_prefixlen, ip_attributes));
+        NetworkInterface(ifname, ifname, it.second.ifa_index, type, it.first,
+                         it.second.ifa_prefixlen, ip_attributes));
   }
 
   return true;
@@ -214,7 +214,7 @@ base::ScopedFD GetSocketForIoctl() {
 }  // namespace internal
 
 bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
-  if (networks == NULL)
+  if (networks == nullptr)
     return false;
 
 #if BUILDFLAG(IS_ANDROID)

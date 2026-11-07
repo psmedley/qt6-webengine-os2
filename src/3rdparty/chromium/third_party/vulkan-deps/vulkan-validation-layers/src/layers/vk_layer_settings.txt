@@ -23,7 +23,7 @@ khronos_validation.log_filename = stdout
 # <LayerIdentifier>.report_flags
 # Comma-delineated list of options specifying the types of messages to be
 # reported
-khronos_validation.report_flags = error,warn,perf
+khronos_validation.report_flags = error
 
 # Limit Duplicated Messages
 # =====================
@@ -42,7 +42,7 @@ khronos_validation.duplicate_message_limit = 10
 # <LayerIdentifier>.message_id_filter
 # List of VUIDs and VUID identifers which are to be IGNORED by the validation
 # layer
-khronos_validation.message_id_filter = 
+khronos_validation.message_id_filter =
 
 # Disables
 # =====================
@@ -54,7 +54,7 @@ khronos_validation.disables = VK_VALIDATION_FEATURE_DISABLE_THREAD_SAFETY_EXT
 # =====================
 # <LayerIdentifier>.enables
 # Setting an option here will enable specialized areas of validation
-khronos_validation.enables = 
+khronos_validation.enables =
 
 # Redirect Printf messages to stdout
 # =====================
@@ -80,7 +80,7 @@ khronos_validation.enables =
 # Enable descriptor indexing access checking
 #khronos_validation.gpuav_descriptor_indexing = true
 
-# Check Out of Bounds 
+# Check Out of Bounds
 # =====================
 # <LayerIdentifier>.gpuav_buffer_oob
 # Enable buffer out of bounds checking
@@ -92,11 +92,22 @@ khronos_validation.enables =
 # Enable draw indirect checking
 #khronos_validation.validate_draw_indirect = true
 
+# Check Dispatch Indirect group count values
+# =====================
+# <LayerIdentifier>.validate_dispatch_indirect
+# Enable dispatch indirect checking
+#khronos_validation.validate_dispatch_indirect = true
+
+# Use linear vma allocator for GPU-AV output buffers
+# =====================
+# <LayerIdentifier>.gpuav_vma_linear_output
+# Use VMA linear memory allocations for GPU-AV output buffers
+#khronos_validation.vma_linear_output = true
+
 # Fine Grained Locking
 # =====================
 # <LayerIdentifier>.fine_grained_locking
 # Enable fine grained locking for Core Validation, which should improve
-# performance in multithreaded applications. This is an experimental feature
-# which may cause stability problems or incorrect errors to be reported.
-khronos_validation.fine_grained_locking = false
+# performance in multithreaded applications.
+khronos_validation.fine_grained_locking = true
 

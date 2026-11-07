@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,9 @@
 #include <memory>
 #include <string>
 
+#include "base/bind.h"
+#include "base/callback_forward.h"
+#include "base/callback_list.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -21,6 +24,8 @@
 #include "base/metrics/histogram_flattener.h"
 #include "base/metrics/histogram_snapshot_manager.h"
 #include "base/metrics/user_metrics.h"
+#include "base/observer_list.h"
+#include "base/scoped_observation.h"
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -29,6 +34,7 @@
 #include "components/metrics/metrics_log.h"
 #include "components/metrics/metrics_log_manager.h"
 #include "components/metrics/metrics_log_store.h"
+#include "components/metrics/metrics_logs_event_manager.h"
 #include "components/metrics/metrics_provider.h"
 #include "components/metrics/metrics_reporting_service.h"
 
@@ -104,6 +110,14 @@ class MetricsService : public base::HistogramFlattener {
   // recording is not currently running.
   std::string GetClientId() const;
 
+  // Set an external provided id for the metrics service. This method can be
+  // set by a caller which wants to explicitly control the *next* id used by the
+  // metrics service. Note that setting the external client id will *not* change
+  // the current metrics client id. In order to change the current client id,
+  // callers should call ResetClientId to change the current client id to the
+  // provided id.
+  void SetExternalClientId(const std::string& id);
+
   // Returns the date at which the current metrics client ID was created as
   // an int64_t containing seconds since the epoch.
   int64_t GetMetricsReportingEnabledDate();
@@ -122,14 +136,6 @@ class MetricsService : public base::HistogramFlattener {
   // to be interacting with the application.
   void OnApplicationNotIdle();
 
-  // Invoked when we get a WM_SESSIONEND. This places a value in prefs that is
-  // reset when RecordCompletedSessionEnd is invoked.
-  void RecordStartOfSessionEnd();
-
-  // This should be called when the application is shutting down. It records
-  // that session end was successful.
-  void RecordCompletedSessionEnd();
-
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
   // Called when the application is going into background mode.
   // If |keep_recording_in_background| is true, UMA is still recorded and
@@ -138,15 +144,17 @@ class MetricsService : public base::HistogramFlattener {
 
   // Called when the application is coming out of background mode.
   void OnAppEnterForeground(bool force_open_new_log = false);
-#else
-  // Signals that the session has not yet exited cleanly. Calling this later
-  // requires a call to LogCleanShutdown().
-  void LogNeedForCleanShutdown();
 #endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
+
+  // Signals that the browser is shutting down cleanly. Intended to be called
+  // during shutdown after critical shutdown tasks have completed.
+  void LogCleanShutdown();
 
   bool recording_active() const;
   bool reporting_active() const;
   bool has_unsent_logs() const;
+
+  bool IsMetricsReportingEnabled() const;
 
   // Register the specified |provider| to provide additional metrics into the
   // UMA log. Should be called during MetricsService initialization only.
@@ -219,14 +227,16 @@ class MetricsService : public base::HistogramFlattener {
 
   // Updates the current user metrics consent. No-ops if no user has logged in.
   void UpdateCurrentUserMetricsConsent(bool user_metrics_consent);
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
+#if BUILDFLAG(IS_CHROMEOS)
   // Forces the client ID to be reset and generates a new client ID. This will
   // be called when a user re-consents to metrics collection and the user had
   // consented in the past.
   //
   // This is to preserve the pseudo-anonymous identifier <client_id, user_id>.
   void ResetClientId();
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   variations::SyntheticTrialRegistry* GetSyntheticTrialRegistry();
 
@@ -240,6 +250,20 @@ class MetricsService : public base::HistogramFlattener {
   DelegatingProvider* GetDelegatingProviderForTesting() {
     return &delegating_provider_;
   }
+
+  // Adds/Removes a logs observer. Observers are notified when a log is newly
+  // created and is now known by the metrics service. This may occur when
+  // closing a log, or when loading a log from persistent storage. Observers are
+  // also notified when an event occurs on the log (e.g., log is staged,
+  // uploaded, etc.). See MetricsLogsEventManager::LogEvent for more details.
+  void AddLogsObserver(MetricsLogsEventManager::Observer* observer);
+  void RemoveLogsObserver(MetricsLogsEventManager::Observer* observer);
+
+  // Observers will be notified when the enablement state changes. The callback
+  // should accept one boolean argument, which will signal whether or not the
+  // metrics collection has been enabled.
+  base::CallbackListSubscription AddEnablementObserver(
+      const base::RepeatingCallback<void(bool)>& observer);
 
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
   bool IsInForegroundForTesting() const { return is_in_foreground_; }
@@ -352,13 +376,6 @@ class MetricsService : public base::HistogramFlattener {
   // profiler data, as well as incremental stability-related metrics.
   void PrepareInitialMetricsLog();
 
-  // Reads, increments and then sets the specified long preference that is
-  // stored as a string.
-  void IncrementLongPrefsValue(const char* path);
-
-  // Records that the browser was shut down cleanly.
-  void LogCleanShutdown(bool end_completed);
-
   // Creates a new MetricsLog instance with the given |log_type|.
   std::unique_ptr<MetricsLog> CreateLog(MetricsLog::LogType log_type);
 
@@ -452,6 +469,14 @@ class MetricsService : public base::HistogramFlattener {
 
   // Indicates if loading of independent metrics is currently active.
   bool independent_loader_active_ = false;
+
+  // Logs event manager to keep track of the various logs that the metrics
+  // service interacts with. An unowned pointer of this instance is passed down
+  // to various objects that are owned by this class.
+  MetricsLogsEventManager logs_event_manager_;
+
+  // A set of observers that keeps track of the metrics reporting state.
+  base::RepeatingCallbackList<void(bool)> enablement_observers_;
 
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
   // Indicates whether OnAppEnterForeground() (true) or OnAppEnterBackground

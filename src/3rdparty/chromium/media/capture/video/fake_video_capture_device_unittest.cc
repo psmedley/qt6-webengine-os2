@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -357,6 +357,16 @@ TEST_F(FakeVideoCaptureDeviceTest, GetAndSetCapabilities) {
   EXPECT_GE(state->zoom->current, state->zoom->min);
   EXPECT_GE(state->zoom->max, state->zoom->current);
   EXPECT_TRUE(state->fill_light_mode.empty());
+
+  ASSERT_TRUE(state->supported_background_blur_modes);
+  EXPECT_EQ(2u, state->supported_background_blur_modes->size());
+  EXPECT_EQ(1, std::count(state->supported_background_blur_modes->begin(),
+                          state->supported_background_blur_modes->end(),
+                          mojom::BackgroundBlurMode::OFF));
+  EXPECT_EQ(1, std::count(state->supported_background_blur_modes->begin(),
+                          state->supported_background_blur_modes->end(),
+                          mojom::BackgroundBlurMode::BLUR));
+  EXPECT_EQ(mojom::BackgroundBlurMode::OFF, state->background_blur_mode);
 
   // Set options: zoom to the maximum value.
   const int max_zoom_value = state->zoom->max;

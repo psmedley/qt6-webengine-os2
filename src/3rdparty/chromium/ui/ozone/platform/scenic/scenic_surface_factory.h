@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,13 +53,13 @@ class ScenicSurfaceFactory : public SurfaceFactoryOzone {
       gfx::AcceleratedWidget widget) override;
   scoped_refptr<gfx::NativePixmap> CreateNativePixmap(
       gfx::AcceleratedWidget widget,
-      VkDevice vk_device,
+      gpu::VulkanDeviceQueue* device_queue,
       gfx::Size size,
       gfx::BufferFormat format,
       gfx::BufferUsage usage,
       absl::optional<gfx::Size> framebuffer_size = absl::nullopt) override;
   void CreateNativePixmapAsync(gfx::AcceleratedWidget widget,
-                               VkDevice vk_device,
+                               gpu::VulkanDeviceQueue* device_queue,
                                gfx::Size size,
                                gfx::BufferFormat format,
                                gfx::BufferUsage usage,

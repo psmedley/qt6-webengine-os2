@@ -29,7 +29,7 @@
 #include "bytestream.h"
 #include "codec.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 #include "packet.h"
 #include "png.h"
 #include "pngdsp.h"
@@ -107,9 +107,8 @@ static int decode_idat(LSCRContext *s, z_stream *zstream, int length)
     return 0;
 }
 
-static int decode_frame_lscr(AVCodecContext *avctx,
-                             void *data, int *got_frame,
-                             AVPacket *avpkt)
+static int decode_frame_lscr(AVCodecContext *avctx, AVFrame *rframe,
+                             int *got_frame, AVPacket *avpkt)
 {
     LSCRContext *const s = avctx->priv_data;
     GetByteContext *gb = &s->gb;
@@ -202,7 +201,7 @@ static int decode_frame_lscr(AVCodecContext *avctx,
 
     frame->pict_type = frame->key_frame ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_P;
 
-    if ((ret = av_frame_ref(data, frame)) < 0)
+    if ((ret = av_frame_ref(rframe, frame)) < 0)
         return ret;
 
     *got_frame = 1;
@@ -247,14 +246,14 @@ static void lscr_decode_flush(AVCodecContext *avctx)
 
 const FFCodec ff_lscr_decoder = {
     .p.name         = "lscr",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("LEAD Screen Capture"),
+    CODEC_LONG_NAME("LEAD Screen Capture"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_LSCR,
     .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(LSCRContext),
     .init           = lscr_decode_init,
     .close          = lscr_decode_close,
-    .decode         = decode_frame_lscr,
+    FF_CODEC_DECODE_CB(decode_frame_lscr),
     .flush          = lscr_decode_flush,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,19 +18,10 @@ constexpr char kUsername[] = "username";
 
 }  // namespace
 
-// static
-constexpr StaticOobeScreenId ParentalHandoffScreenView::kScreenId;
-
 ParentalHandoffScreenHandler::ParentalHandoffScreenHandler()
-    : BaseScreenHandler(kScreenId) {
-  set_user_acted_method_path_deprecated(
-      "login.ParentalHandoffScreen.userActed");
-}
+    : BaseScreenHandler(kScreenId) {}
 
-ParentalHandoffScreenHandler::~ParentalHandoffScreenHandler() {
-  if (screen_)
-    screen_->OnViewDestroyed(this);
-}
+ParentalHandoffScreenHandler::~ParentalHandoffScreenHandler() = default;
 
 void ParentalHandoffScreenHandler::DeclareLocalizedValues(
     ::login::LocalizedValuesBuilder* builder) {
@@ -42,23 +33,11 @@ void ParentalHandoffScreenHandler::DeclareLocalizedValues(
                IDS_LOGIN_PARENTAL_HANDOFF_SCREEN_SUBTITLE);
 }
 
-void ParentalHandoffScreenHandler::InitializeDeprecated() {}
-
 void ParentalHandoffScreenHandler::Show(const std::u16string& username) {
   base::Value::Dict data;
   data.Set(kUsername, username);
 
   ShowInWebUI(std::move(data));
-}
-
-void ParentalHandoffScreenHandler::Bind(ParentalHandoffScreen* screen) {
-  screen_ = screen;
-  BaseScreenHandler::SetBaseScreenDeprecated(screen_);
-}
-
-void ParentalHandoffScreenHandler::Unbind() {
-  screen_ = nullptr;
-  BaseScreenHandler::SetBaseScreenDeprecated(nullptr);
 }
 
 }  // namespace chromeos

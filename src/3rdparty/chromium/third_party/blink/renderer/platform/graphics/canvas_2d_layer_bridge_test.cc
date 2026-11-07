@@ -48,6 +48,8 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
+#include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_host.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
@@ -132,7 +134,7 @@ class Canvas2DLayerBridgeTest : public Test {
       std::unique_ptr<FakeCanvasResourceHost> custom_host = nullptr) {
     std::unique_ptr<Canvas2DLayerBridge> bridge =
         std::make_unique<Canvas2DLayerBridge>(size, raster_mode, opacity_mode);
-    bridge->DontUseIdleSchedulingForTesting();
+    bridge->AlwaysMeasureForTesting();
     if (custom_host)
       host_ = std::move(custom_host);
     if (!host_)
@@ -367,7 +369,7 @@ TEST_F(Canvas2DLayerBridgeTest, FallbackToSoftwareOnFailedTextureAlloc) {
     std::unique_ptr<Canvas2DLayerBridge> bridge =
         std::make_unique<Canvas2DLayerBridge>(gfx::Size(300, 150),
                                               RasterMode::kGPU, kNonOpaque);
-    bridge->DontUseIdleSchedulingForTesting();
+    bridge->AlwaysMeasureForTesting();
     EXPECT_TRUE(bridge->IsValid());
     EXPECT_TRUE(bridge->IsAccelerated());  // We don't yet know that
                                            // allocation will fail.
@@ -391,16 +393,13 @@ class MockLogger : public Canvas2DLayerBridge::Logger {
   ~MockLogger() override = default;
 };
 
-#if CANVAS2D_HIBERNATION_ENABLED
-TEST_F(Canvas2DLayerBridgeTest, HibernationLifeCycle)
-#else
-TEST_F(Canvas2DLayerBridgeTest, DISABLED_HibernationLifeCycle)
-#endif
-{
+TEST_F(Canvas2DLayerBridgeTest, HibernationLifeCycle) {
+  if (!Canvas2DLayerBridge::IsHibernationEnabled())
+    GTEST_SKIP();
+
   ScopedTestingPlatformSupport<GpuMemoryBufferTestPlatform> platform;
   std::unique_ptr<Canvas2DLayerBridge> bridge =
       MakeBridge(gfx::Size(300, 300), RasterMode::kGPU, kNonOpaque);
-  bridge->DontUseIdleSchedulingForTesting();
   DrawSomething(bridge.get());
   EXPECT_TRUE(bridge->IsAccelerated());
 
@@ -416,6 +415,9 @@ TEST_F(Canvas2DLayerBridgeTest, DISABLED_HibernationLifeCycle)
   EXPECT_CALL(*mock_logger_ptr, DidStartHibernating()).Times(1);
 
   bridge->SetIsInHiddenPage(true);
+  scheduler::RunIdleTasksForTesting(
+      scheduler::WebThreadScheduler::MainThreadScheduler(),
+      base::BindOnce([]() {}));
   platform->RunUntilIdle();
 
   testing::Mock::VerifyAndClearExpectations(mock_logger_ptr);
@@ -436,16 +438,13 @@ TEST_F(Canvas2DLayerBridgeTest, DISABLED_HibernationLifeCycle)
   EXPECT_TRUE(bridge->IsValid());
 }
 
-#if CANVAS2D_HIBERNATION_ENABLED
-TEST_F(Canvas2DLayerBridgeTest, HibernationReEntry)
-#else
-TEST_F(Canvas2DLayerBridgeTest, DISABLED_HibernationReEntry)
-#endif
-{
+TEST_F(Canvas2DLayerBridgeTest, HibernationReEntry) {
+  if (!Canvas2DLayerBridge::IsHibernationEnabled())
+    GTEST_SKIP();
+
   ScopedTestingPlatformSupport<GpuMemoryBufferTestPlatform> platform;
   std::unique_ptr<Canvas2DLayerBridge> bridge =
       MakeBridge(gfx::Size(300, 300), RasterMode::kGPU, kNonOpaque);
-  bridge->DontUseIdleSchedulingForTesting();
   DrawSomething(bridge.get());
 
   // Register an alternate Logger for tracking hibernation events
@@ -463,6 +462,9 @@ TEST_F(Canvas2DLayerBridgeTest, DISABLED_HibernationReEntry)
   // chance to run.
   bridge->SetIsInHiddenPage(false);
   bridge->SetIsInHiddenPage(true);
+  scheduler::RunIdleTasksForTesting(
+      scheduler::WebThreadScheduler::MainThreadScheduler(),
+      base::BindOnce([]() {}));
   platform->RunUntilIdle();
 
   testing::Mock::VerifyAndClearExpectations(mock_logger_ptr);
@@ -483,16 +485,13 @@ TEST_F(Canvas2DLayerBridgeTest, DISABLED_HibernationReEntry)
   EXPECT_TRUE(bridge->IsValid());
 }
 
-#if CANVAS2D_HIBERNATION_ENABLED
-TEST_F(Canvas2DLayerBridgeTest, TeardownWhileHibernating)
-#else
-TEST_F(Canvas2DLayerBridgeTest, DISABLED_TeardownWhileHibernating)
-#endif
-{
+TEST_F(Canvas2DLayerBridgeTest, TeardownWhileHibernating) {
+  if (!Canvas2DLayerBridge::IsHibernationEnabled())
+    GTEST_SKIP();
+
   ScopedTestingPlatformSupport<GpuMemoryBufferTestPlatform> platform;
   std::unique_ptr<Canvas2DLayerBridge> bridge =
       MakeBridge(gfx::Size(300, 300), RasterMode::kGPU, kNonOpaque);
-  bridge->DontUseIdleSchedulingForTesting();
   DrawSomething(bridge.get());
 
   // Register an alternate Logger for tracking hibernation events
@@ -506,6 +505,9 @@ TEST_F(Canvas2DLayerBridgeTest, DISABLED_TeardownWhileHibernating)
       ReportHibernationEvent(Canvas2DLayerBridge::kHibernationScheduled));
   EXPECT_CALL(*mock_logger_ptr, DidStartHibernating()).Times(1);
   bridge->SetIsInHiddenPage(true);
+  scheduler::RunIdleTasksForTesting(
+      scheduler::WebThreadScheduler::MainThreadScheduler(),
+      base::BindOnce([]() {}));
   platform->RunUntilIdle();
   testing::Mock::VerifyAndClearExpectations(mock_logger_ptr);
   EXPECT_FALSE(bridge->IsAccelerated());
@@ -520,16 +522,13 @@ TEST_F(Canvas2DLayerBridgeTest, DISABLED_TeardownWhileHibernating)
   testing::Mock::VerifyAndClearExpectations(mock_logger_ptr);
 }
 
-#if CANVAS2D_HIBERNATION_ENABLED
-TEST_F(Canvas2DLayerBridgeTest, SnapshotWhileHibernating)
-#else
-TEST_F(Canvas2DLayerBridgeTest, DISABLED_SnapshotWhileHibernating)
-#endif
-{
+TEST_F(Canvas2DLayerBridgeTest, SnapshotWhileHibernating) {
+  if (!Canvas2DLayerBridge::IsHibernationEnabled())
+    GTEST_SKIP();
+
   ScopedTestingPlatformSupport<GpuMemoryBufferTestPlatform> platform;
   std::unique_ptr<Canvas2DLayerBridge> bridge =
       MakeBridge(gfx::Size(300, 300), RasterMode::kGPU, kNonOpaque);
-  bridge->DontUseIdleSchedulingForTesting();
   DrawSomething(bridge.get());
 
   // Register an alternate Logger for tracking hibernation events
@@ -543,6 +542,9 @@ TEST_F(Canvas2DLayerBridgeTest, DISABLED_SnapshotWhileHibernating)
       ReportHibernationEvent(Canvas2DLayerBridge::kHibernationScheduled));
   EXPECT_CALL(*mock_logger_ptr, DidStartHibernating()).Times(1);
   bridge->SetIsInHiddenPage(true);
+  scheduler::RunIdleTasksForTesting(
+      scheduler::WebThreadScheduler::MainThreadScheduler(),
+      base::BindOnce([]() {}));
   platform->RunUntilIdle();
   testing::Mock::VerifyAndClearExpectations(mock_logger_ptr);
   EXPECT_FALSE(bridge->IsAccelerated());
@@ -567,16 +569,13 @@ TEST_F(Canvas2DLayerBridgeTest, DISABLED_SnapshotWhileHibernating)
   bridge->SetIsInHiddenPage(false);
 }
 
-#if CANVAS2D_HIBERNATION_ENABLED
-TEST_F(Canvas2DLayerBridgeTest, TeardownWhileHibernationIsPending)
-#else
-TEST_F(Canvas2DLayerBridgeTest, DISABLED_TeardownWhileHibernationIsPending)
-#endif
-{
+TEST_F(Canvas2DLayerBridgeTest, TeardownWhileHibernationIsPending) {
+  if (!Canvas2DLayerBridge::IsHibernationEnabled())
+    GTEST_SKIP();
+
   ScopedTestingPlatformSupport<GpuMemoryBufferTestPlatform> platform;
   std::unique_ptr<Canvas2DLayerBridge> bridge =
       MakeBridge(gfx::Size(300, 300), RasterMode::kGPU, kNonOpaque);
-  bridge->DontUseIdleSchedulingForTesting();
   DrawSomething(bridge.get());
 
   // Register an alternate Logger for tracking hibernation events
@@ -594,22 +593,21 @@ TEST_F(Canvas2DLayerBridgeTest, DISABLED_TeardownWhileHibernationIsPending)
   // HibernationAbortedDueToDestructionWhileHibernatePending event to be
   // fired, but that signal is lost in the unit test due to no longer having
   // a bridge to hold the mockLogger.
+  scheduler::RunIdleTasksForTesting(
+      scheduler::WebThreadScheduler::MainThreadScheduler(),
+      base::BindOnce([]() {}));
   platform->RunUntilIdle();
   // This test passes by not crashing, which proves that the WeakPtr logic
   // is sound.
 }
 
-#if CANVAS2D_HIBERNATION_ENABLED
-TEST_F(Canvas2DLayerBridgeTest, HibernationAbortedDueToVisibilityChange)
-#else
-TEST_F(Canvas2DLayerBridgeTest,
-       DISABLED_HibernationAbortedDueToVisibilityChange)
-#endif
-{
+TEST_F(Canvas2DLayerBridgeTest, HibernationAbortedDueToVisibilityChange) {
+  if (!Canvas2DLayerBridge::IsHibernationEnabled())
+    GTEST_SKIP();
+
   ScopedTestingPlatformSupport<GpuMemoryBufferTestPlatform> platform;
   std::unique_ptr<Canvas2DLayerBridge> bridge =
       MakeBridge(gfx::Size(300, 300), RasterMode::kGPU, kNonOpaque);
-  bridge->DontUseIdleSchedulingForTesting();
   DrawSomething(bridge.get());
 
   // Register an alternate Logger for tracking hibernation events
@@ -628,6 +626,9 @@ TEST_F(Canvas2DLayerBridgeTest,
       .Times(1);
   bridge->SetIsInHiddenPage(true);
   bridge->SetIsInHiddenPage(false);
+  scheduler::RunIdleTasksForTesting(
+      scheduler::WebThreadScheduler::MainThreadScheduler(),
+      base::BindOnce([]() {}));
   platform->RunUntilIdle();
   testing::Mock::VerifyAndClearExpectations(mock_logger_ptr);
   EXPECT_TRUE(bridge->IsAccelerated());
@@ -635,16 +636,13 @@ TEST_F(Canvas2DLayerBridgeTest,
   EXPECT_TRUE(bridge->IsValid());
 }
 
-#if CANVAS2D_HIBERNATION_ENABLED
-TEST_F(Canvas2DLayerBridgeTest, HibernationAbortedDueToLostContext)
-#else
-TEST_F(Canvas2DLayerBridgeTest, DISABLED_HibernationAbortedDueToLostContext)
-#endif
-{
+TEST_F(Canvas2DLayerBridgeTest, HibernationAbortedDueToLostContext) {
+  if (!Canvas2DLayerBridge::IsHibernationEnabled())
+    GTEST_SKIP();
+
   ScopedTestingPlatformSupport<GpuMemoryBufferTestPlatform> platform;
   std::unique_ptr<Canvas2DLayerBridge> bridge =
       MakeBridge(gfx::Size(300, 300), RasterMode::kGPU, kNonOpaque);
-  bridge->DontUseIdleSchedulingForTesting();
   DrawSomething(bridge.get());
 
   // Register an alternate Logger for tracking hibernation events
@@ -664,21 +662,21 @@ TEST_F(Canvas2DLayerBridgeTest, DISABLED_HibernationAbortedDueToLostContext)
       .Times(1);
 
   bridge->SetIsInHiddenPage(true);
+  scheduler::RunIdleTasksForTesting(
+      scheduler::WebThreadScheduler::MainThreadScheduler(),
+      base::BindOnce([]() {}));
   platform->RunUntilIdle();
   testing::Mock::VerifyAndClearExpectations(mock_logger_ptr);
   EXPECT_FALSE(bridge->IsHibernating());
 }
 
-#if CANVAS2D_HIBERNATION_ENABLED
-TEST_F(Canvas2DLayerBridgeTest, PrepareMailboxWhileHibernating)
-#else
-TEST_F(Canvas2DLayerBridgeTest, DISABLED_PrepareMailboxWhileHibernating)
-#endif
-{
+TEST_F(Canvas2DLayerBridgeTest, PrepareMailboxWhileHibernating) {
+  if (!Canvas2DLayerBridge::IsHibernationEnabled())
+    GTEST_SKIP();
+
   ScopedTestingPlatformSupport<GpuMemoryBufferTestPlatform> platform;
   std::unique_ptr<Canvas2DLayerBridge> bridge =
       MakeBridge(gfx::Size(300, 300), RasterMode::kGPU, kNonOpaque);
-  bridge->DontUseIdleSchedulingForTesting();
   DrawSomething(bridge.get());
 
   // Register an alternate Logger for tracking hibernation events
@@ -692,6 +690,9 @@ TEST_F(Canvas2DLayerBridgeTest, DISABLED_PrepareMailboxWhileHibernating)
       ReportHibernationEvent(Canvas2DLayerBridge::kHibernationScheduled));
   EXPECT_CALL(*mock_logger_ptr, DidStartHibernating()).Times(1);
   bridge->SetIsInHiddenPage(true);
+  scheduler::RunIdleTasksForTesting(
+      scheduler::WebThreadScheduler::MainThreadScheduler(),
+      base::BindOnce([]() {}));
   platform->RunUntilIdle();
   testing::Mock::VerifyAndClearExpectations(mock_logger_ptr);
 
@@ -931,7 +932,7 @@ TEST_F(Canvas2DLayerBridgeTest,
   std::unique_ptr<Canvas2DLayerBridge> bridge =
       MakeBridge(size, RasterMode::kGPU, kNonOpaque);
 
-  bridge->GetPaintCanvas()->clear(SK_ColorRED);
+  bridge->GetPaintCanvas()->clear(SkColors::kRed);
   DrawSomething(bridge.get());
   ASSERT_TRUE(bridge->layer_for_testing());
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,12 +25,19 @@
 namespace net {
 
 class CertVerifyProc;
+class CertNetFetcher;
+class CertVerifyProcFactory;
+class ChromeRootStoreData;
 
 // MultiThreadedCertVerifier is a CertVerifier implementation that runs
 // synchronous CertVerifier implementations on worker threads.
-class NET_EXPORT_PRIVATE MultiThreadedCertVerifier : public CertVerifier {
+class NET_EXPORT_PRIVATE MultiThreadedCertVerifier
+    : public CertVerifierWithUpdatableProc {
  public:
   explicit MultiThreadedCertVerifier(scoped_refptr<CertVerifyProc> verify_proc);
+  explicit MultiThreadedCertVerifier(
+      scoped_refptr<CertVerifyProc> verify_proc,
+      scoped_refptr<CertVerifyProcFactory> verify_proc_factory);
 
   MultiThreadedCertVerifier(const MultiThreadedCertVerifier&) = delete;
   MultiThreadedCertVerifier& operator=(const MultiThreadedCertVerifier&) =
@@ -47,12 +54,16 @@ class NET_EXPORT_PRIVATE MultiThreadedCertVerifier : public CertVerifier {
              std::unique_ptr<Request>* out_req,
              const NetLogWithSource& net_log) override;
   void SetConfig(const CertVerifier::Config& config) override;
+  void UpdateChromeRootStoreData(
+      scoped_refptr<CertNetFetcher> cert_net_fetcher,
+      const ChromeRootStoreData* root_store_data) override;
 
  private:
   class InternalRequest;
 
   Config config_;
   scoped_refptr<CertVerifyProc> verify_proc_;
+  scoped_refptr<CertVerifyProcFactory> verify_proc_factory_;
 
   // Holds a list of CertVerifier::Requests that have not yet completed or been
   // deleted. It is used to ensure that when the MultiThreadedCertVerifier is

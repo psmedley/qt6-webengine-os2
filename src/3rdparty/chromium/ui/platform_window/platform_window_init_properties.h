@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,8 @@
 #include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -110,6 +112,7 @@ struct COMPONENT_EXPORT(PLATFORM_WINDOW) PlatformWindowInitProperties {
   bool visible_on_all_workspaces = false;
   bool remove_standard_frame = false;
   std::string workspace;
+  ZOrderLevel z_order = ZOrderLevel::kNormal;
 
   raw_ptr<WorkspaceExtensionDelegate> workspace_extension_delegate = nullptr;
 
@@ -117,8 +120,8 @@ struct COMPONENT_EXPORT(PLATFORM_WINDOW) PlatformWindowInitProperties {
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   bool prefer_dark_theme = false;
-  gfx::ImageSkia* icon = nullptr;
-  absl::optional<int> background_color;
+  raw_ptr<gfx::ImageSkia> icon = nullptr;
+  absl::optional<SkColor> background_color;
 
   // Specifies the res_name and res_class fields,
   // respectively, of the WM_CLASS window property. Controls window grouping
@@ -127,11 +130,24 @@ struct COMPONENT_EXPORT(PLATFORM_WINDOW) PlatformWindowInitProperties {
   std::string wm_class_name;
   std::string wm_class_class;
 
-  X11ExtensionDelegate* x11_extension_delegate = nullptr;
+  raw_ptr<X11ExtensionDelegate> x11_extension_delegate = nullptr;
 
   // Wayland specific.  Holds the application ID that is used by the window
   // manager to match the desktop entry and group windows.
   std::string wayland_app_id;
+
+  // Specifies the unique session id and the restore window id.
+  int32_t restore_session_id;
+  absl::optional<int32_t> restore_window_id;
+
+  // Specifies the source to get `restore_window_id` from.
+  absl::optional<std::string> restore_window_id_source;
+#endif
+
+#if defined(USE_OZONE)
+  // Specifies whether the current window requests key-events that matches
+  // system shortcuts.
+  bool inhibit_keyboard_shortcuts = false;
 #endif
 
   bool enable_compositing_based_throttling = false;

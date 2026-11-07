@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -309,6 +309,9 @@ RTCVideoDecoderFactory::QueryCodecSupport(const webrtc::SdpVideoFormat& format,
   // See:
   // https://chromium-review.googlesource.com/c/chromium/src/+/3305493
   // For the exact diff.
+  // Please note that `decoder_factory_` may be a null pointer when this
+  // function is called from the MediaCapabilities API, see
+  // https://crbug.com/1349423.
 
   return codec_support;
 }

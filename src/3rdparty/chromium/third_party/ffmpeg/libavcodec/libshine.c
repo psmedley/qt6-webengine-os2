@@ -44,11 +44,6 @@ static av_cold int libshine_encode_init(AVCodecContext *avctx)
 {
     SHINEContext *s = avctx->priv_data;
 
-    if (avctx->ch_layout.nb_channels <= 0 || avctx->ch_layout.nb_channels > 2){
-        av_log(avctx, AV_LOG_ERROR, "only mono or stereo is supported\n");
-        return AVERROR(EINVAL);
-    }
-
     shine_set_config_mpeg_defaults(&s->config.mpeg);
     if (avctx->bit_rate)
         s->config.mpeg.bitr = avctx->bit_rate / 1000;
@@ -133,13 +128,14 @@ static const int libshine_sample_rates[] = {
 
 const FFCodec ff_libshine_encoder = {
     .p.name                = "libshine",
-    .p.long_name           = NULL_IF_CONFIG_SMALL("libshine MP3 (MPEG audio layer 3)"),
+    CODEC_LONG_NAME("libshine MP3 (MPEG audio layer 3)"),
     .p.type                = AVMEDIA_TYPE_AUDIO,
     .p.id                  = AV_CODEC_ID_MP3,
     .p.capabilities        = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
+    .caps_internal         = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
     .priv_data_size        = sizeof(SHINEContext),
     .init                  = libshine_encode_init,
-    .encode2               = libshine_encode_frame,
+    FF_CODEC_ENCODE_CB(libshine_encode_frame),
     .close                 = libshine_encode_close,
     .p.sample_fmts         = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_S16P,
                                                             AV_SAMPLE_FMT_NONE },

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "components/guest_view/renderer/guest_view_container.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
-#include "content/public/renderer/render_view.h"
 #include "ipc/ipc_sync_channel.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_remote_frame.h"
@@ -42,7 +41,7 @@ GuestViewAttachRequest::GuestViewAttachRequest(
     guest_view::GuestViewContainer* container,
     int render_frame_routing_id,
     int guest_instance_id,
-    std::unique_ptr<base::DictionaryValue> params,
+    base::Value::Dict params,
     v8::Local<v8::Function> callback,
     v8::Isolate* isolate)
     : container_(container),
@@ -57,7 +56,7 @@ GuestViewAttachRequest::~GuestViewAttachRequest() = default;
 void GuestViewAttachRequest::PerformRequest() {
   GetGuestViewHost()->AttachToEmbedderFrame(
       render_frame_routing_id_, container_->element_instance_id(),
-      guest_instance_id_, params_->Clone(),
+      guest_instance_id_, params_.Clone(),
       base::BindOnce(&GuestViewAttachRequest::OnAcknowledged,
                      weak_ptr_factory_.GetWeakPtr()));
 }

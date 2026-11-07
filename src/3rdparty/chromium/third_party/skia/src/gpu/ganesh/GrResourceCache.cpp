@@ -28,7 +28,9 @@
 
 DECLARE_SKMESSAGEBUS_MESSAGE(skgpu::UniqueKeyInvalidatedMessage, uint32_t, true);
 
-DECLARE_SKMESSAGEBUS_MESSAGE(GrTextureFreedMessage, GrDirectContext::DirectContextID, true);
+DECLARE_SKMESSAGEBUS_MESSAGE(GrResourceCache::UnrefResourceMessage,
+                             GrDirectContext::DirectContextID,
+                             /*AllowCopyableMessage=*/false);
 
 #define ASSERT_SINGLE_OWNER SKGPU_ASSERT_SINGLE_OWNER(fSingleOwner)
 
@@ -44,48 +46,11 @@ private:
 
 //////////////////////////////////////////////////////////////////////////////
 
-inline GrResourceCache::TextureAwaitingUnref::TextureAwaitingUnref() = default;
-
-inline GrResourceCache::TextureAwaitingUnref::TextureAwaitingUnref(GrTexture* texture)
-        : fTexture(texture), fNumUnrefs(1) {}
-
-inline GrResourceCache::TextureAwaitingUnref::TextureAwaitingUnref(TextureAwaitingUnref&& that) {
-    fTexture = std::exchange(that.fTexture, nullptr);
-    fNumUnrefs = std::exchange(that.fNumUnrefs, 0);
-}
-
-inline GrResourceCache::TextureAwaitingUnref& GrResourceCache::TextureAwaitingUnref::operator=(
-        TextureAwaitingUnref&& that) {
-    fTexture = std::exchange(that.fTexture, nullptr);
-    fNumUnrefs = std::exchange(that.fNumUnrefs, 0);
-    return *this;
-}
-
-inline GrResourceCache::TextureAwaitingUnref::~TextureAwaitingUnref() {
-    if (fTexture) {
-        for (int i = 0; i < fNumUnrefs; ++i) {
-            fTexture->unref();
-        }
-    }
-}
-
-inline void GrResourceCache::TextureAwaitingUnref::TextureAwaitingUnref::addRef() { ++fNumUnrefs; }
-
-inline void GrResourceCache::TextureAwaitingUnref::unref() {
-    SkASSERT(fNumUnrefs > 0);
-    fTexture->unref();
-    --fNumUnrefs;
-}
-
-inline bool GrResourceCache::TextureAwaitingUnref::finished() { return !fNumUnrefs; }
-
-//////////////////////////////////////////////////////////////////////////////
-
 GrResourceCache::GrResourceCache(skgpu::SingleOwner* singleOwner,
                                  GrDirectContext::DirectContextID owningContextID,
                                  uint32_t familyID)
         : fInvalidUniqueKeyInbox(familyID)
-        , fFreedTextureInbox(owningContextID)
+        , fUnrefResourceInbox(owningContextID)
         , fOwningContextID(owningContextID)
         , fContextUniqueID(familyID)
         , fSingleOwner(singleOwner) {
@@ -170,11 +135,7 @@ void GrResourceCache::removeResource(GrGpuResource* resource) {
 void GrResourceCache::abandonAll() {
     AutoValidate av(this);
 
-    // We need to make sure to free any resources that were waiting on a free message but never
-    // received one.
-    fTexturesAwaitingUnref.reset();
-
-    while (fNonpurgeableResources.count()) {
+    while (!fNonpurgeableResources.empty()) {
         GrGpuResource* back = *(fNonpurgeableResources.end() - 1);
         SkASSERT(!back->wasDestroyed());
         back->cacheAccess().abandon();
@@ -196,7 +157,6 @@ void GrResourceCache::abandonAll() {
     SkASSERT(!fBudgetedCount);
     SkASSERT(!fBudgetedBytes);
     SkASSERT(!fPurgeableBytes);
-    SkASSERT(!fTexturesAwaitingUnref.count());
 }
 
 void GrResourceCache::releaseAll() {
@@ -206,10 +166,6 @@ void GrResourceCache::releaseAll() {
 
     this->processFreedGpuResources();
 
-    // We need to make sure to free any resources that were waiting on a free message but never
-    // received one.
-    fTexturesAwaitingUnref.reset();
-
     SkASSERT(fProxyProvider); // better have called setProxyProvider
     SkASSERT(fThreadSafeCache); // better have called setThreadSafeCache too
 
@@ -217,7 +173,7 @@ void GrResourceCache::releaseAll() {
     // they also have a raw pointer back to this class (which is presumably going away)!
     fProxyProvider->removeAllUniqueKeys();
 
-    while (fNonpurgeableResources.count()) {
+    while (!fNonpurgeableResources.empty()) {
         GrGpuResource* back = *(fNonpurgeableResources.end() - 1);
         SkASSERT(!back->wasDestroyed());
         back->cacheAccess().release();
@@ -237,7 +193,6 @@ void GrResourceCache::releaseAll() {
     SkASSERT(!fBudgetedCount);
     SkASSERT(!fBudgetedBytes);
     SkASSERT(!fPurgeableBytes);
-    SkASSERT(!fTexturesAwaitingUnref.count());
 }
 
 void GrResourceCache::refResource(GrGpuResource* resource) {
@@ -585,8 +540,8 @@ void GrResourceCache::purgeUnlockedResources(const GrStdSteadyClock::time_point*
 
         // Delete the scratch resources. This must be done as a separate pass
         // to avoid messing up the sorted order of the queue
-        for (int i = 0; i < scratchResources.count(); i++) {
-            scratchResources.getAt(i)->cacheAccess().release();
+        for (int i = 0; i < scratchResources.size(); i++) {
+            scratchResources[i]->cacheAccess().release();
         }
     }
 
@@ -656,8 +611,8 @@ void GrResourceCache::purgeUnlockedResources(size_t bytesToPurge, bool preferScr
 
         // Delete the scratch resources. This must be done as a separate pass
         // to avoid messing up the sorted order of the queue
-        for (int i = 0; i < scratchResources.count(); i++) {
-            scratchResources.getAt(i)->cacheAccess().release();
+        for (int i = 0; i < scratchResources.size(); i++) {
+            scratchResources[i]->cacheAccess().release();
         }
         stillOverbudget = tmpByteBudget < fBytes;
 
@@ -678,40 +633,14 @@ bool GrResourceCache::requestsFlush() const {
            fNumBudgetedResourcesFlushWillMakePurgeable > 0;
 }
 
-void GrResourceCache::insertDelayedTextureUnref(GrTexture* texture) {
-    texture->ref();
-    uint32_t id = texture->uniqueID().asUInt();
-    if (auto* data = fTexturesAwaitingUnref.find(id)) {
-        data->addRef();
-    } else {
-        fTexturesAwaitingUnref.set(id, {texture});
-    }
-}
-
 void GrResourceCache::processFreedGpuResources() {
-    if (!fTexturesAwaitingUnref.count()) {
-        return;
-    }
-
-    SkTArray<GrTextureFreedMessage> msgs;
-    fFreedTextureInbox.poll(&msgs);
-    for (int i = 0; i < msgs.count(); ++i) {
-        SkASSERT(msgs[i].fIntendedRecipient == fOwningContextID);
-        uint32_t id = msgs[i].fTexture->uniqueID().asUInt();
-        TextureAwaitingUnref* info = fTexturesAwaitingUnref.find(id);
-        // If the GrContext was released or abandoned then fTexturesAwaitingUnref should have been
-        // empty and we would have returned early above. Thus, any texture from a message should be
-        // in the list of fTexturesAwaitingUnref.
-        SkASSERT(info);
-        info->unref();
-        if (info->finished()) {
-            fTexturesAwaitingUnref.remove(id);
-        }
-    }
+    SkTArray<UnrefResourceMessage> msgs;
+    fUnrefResourceInbox.poll(&msgs);
+    // We don't need to do anything other than let the messages delete themselves and call unref.
 }
 
 void GrResourceCache::addToNonpurgeableArray(GrGpuResource* resource) {
-    int index = fNonpurgeableResources.count();
+    int index = fNonpurgeableResources.size();
     *fNonpurgeableResources.append() = resource;
     *resource->cacheAccess().accessCacheIndex() = index;
 }
@@ -724,7 +653,7 @@ void GrResourceCache::removeFromNonpurgeableArray(GrGpuResource* resource) {
     SkASSERT(fNonpurgeableResources[*index] == resource);
     fNonpurgeableResources[*index] = tail;
     *tail->cacheAccess().accessCacheIndex() = *index;
-    fNonpurgeableResources.pop();
+    fNonpurgeableResources.pop_back();
     SkDEBUGCODE(*index = -1);
 }
 
@@ -738,7 +667,7 @@ uint32_t GrResourceCache::getNextTimestamp() {
             // sequential timestamps beginning with 0. This is O(n*lg(n)) but it should be extremely
             // rare.
             SkTDArray<GrGpuResource*> sortedPurgeableResources;
-            sortedPurgeableResources.setReserve(fPurgeableQueue.count());
+            sortedPurgeableResources.reserve(fPurgeableQueue.count());
 
             while (fPurgeableQueue.count()) {
                 *sortedPurgeableResources.append() = fPurgeableQueue.peek();
@@ -752,8 +681,8 @@ uint32_t GrResourceCache::getNextTimestamp() {
             // timestamp and assign new timestamps.
             int currP = 0;
             int currNP = 0;
-            while (currP < sortedPurgeableResources.count() &&
-                   currNP < fNonpurgeableResources.count()) {
+            while (currP < sortedPurgeableResources.size() &&
+                   currNP < fNonpurgeableResources.size()) {
                 uint32_t tsP = sortedPurgeableResources[currP]->cacheAccess().timestamp();
                 uint32_t tsNP = fNonpurgeableResources[currNP]->cacheAccess().timestamp();
                 SkASSERT(tsP != tsNP);
@@ -767,16 +696,16 @@ uint32_t GrResourceCache::getNextTimestamp() {
             }
 
             // The above loop ended when we hit the end of one array. Finish the other one.
-            while (currP < sortedPurgeableResources.count()) {
+            while (currP < sortedPurgeableResources.size()) {
                 sortedPurgeableResources[currP++]->cacheAccess().setTimestamp(fTimestamp++);
             }
-            while (currNP < fNonpurgeableResources.count()) {
+            while (currNP < fNonpurgeableResources.size()) {
                 *fNonpurgeableResources[currNP]->cacheAccess().accessCacheIndex() = currNP;
                 fNonpurgeableResources[currNP++]->cacheAccess().setTimestamp(fTimestamp++);
             }
 
             // Rebuild the queue.
-            for (int i = 0; i < sortedPurgeableResources.count(); ++i) {
+            for (int i = 0; i < sortedPurgeableResources.size(); ++i) {
                 fPurgeableQueue.insert(sortedPurgeableResources[i]);
             }
 
@@ -791,7 +720,7 @@ uint32_t GrResourceCache::getNextTimestamp() {
 }
 
 void GrResourceCache::dumpMemoryStatistics(SkTraceMemoryDump* traceMemoryDump) const {
-    for (int i = 0; i < fNonpurgeableResources.count(); ++i) {
+    for (int i = 0; i < fNonpurgeableResources.size(); ++i) {
         fNonpurgeableResources[i]->dumpMemoryStatistics(traceMemoryDump);
     }
     for (int i = 0; i < fPurgeableQueue.count(); ++i) {
@@ -804,10 +733,10 @@ void GrResourceCache::getStats(Stats* stats) const {
     stats->reset();
 
     stats->fTotal = this->getResourceCount();
-    stats->fNumNonPurgeable = fNonpurgeableResources.count();
+    stats->fNumNonPurgeable = fNonpurgeableResources.size();
     stats->fNumPurgeable = fPurgeableQueue.count();
 
-    for (int i = 0; i < fNonpurgeableResources.count(); ++i) {
+    for (int i = 0; i < fNonpurgeableResources.size(); ++i) {
         stats->update(fNonpurgeableResources[i]);
     }
     for (int i = 0; i < fPurgeableQueue.count(); ++i) {
@@ -923,7 +852,7 @@ void GrResourceCache::validate() const {
     size_t purgeableBytes = 0;
     int numBudgetedResourcesFlushWillMakePurgeable = 0;
 
-    for (int i = 0; i < fNonpurgeableResources.count(); ++i) {
+    for (int i = 0; i < fNonpurgeableResources.size(); ++i) {
         SkASSERT(!fNonpurgeableResources[i]->resourcePriv().isPurgeable() ||
                  fNewlyPurgeableResourceForValidation == fNonpurgeableResources[i]);
         SkASSERT(*fNonpurgeableResources[i]->cacheAccess().accessCacheIndex() == i);
@@ -977,7 +906,7 @@ bool GrResourceCache::isInCache(const GrGpuResource* resource) const {
     if (index < fPurgeableQueue.count() && fPurgeableQueue.at(index) == resource) {
         return true;
     }
-    if (index < fNonpurgeableResources.count() && fNonpurgeableResources[index] == resource) {
+    if (index < fNonpurgeableResources.size() && fNonpurgeableResources[index] == resource) {
         return true;
     }
     SkDEBUGFAIL("Resource index should be -1 or the resource should be in the cache.");

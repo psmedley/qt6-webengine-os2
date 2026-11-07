@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/containers/lru_cache.h"
 #include "base/files/important_file_writer.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/timer/timer.h"
@@ -87,13 +88,15 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) SCTAuditingHandler
   // this will call SCTAuditingReporter::Start() to initiate sending the report.
   // If the report is a hashdance report, |leaf_hash| should be set to the
   // Merkle tree leaf hash of a randomly selected SCT.
-  // Optionally takes in a BackoffEntry for recreating reporter state from
-  // persisted storage.
+  // Optionally takes in a BackoffEntry and a bool for whether the report has
+  // already been counted towards the max-reports limit, for recreating reporter
+  // state from persisted storage.
   void AddReporter(
       net::HashValue reporter_key,
       std::unique_ptr<sct_auditing::SCTClientReport> report,
       absl::optional<SCTAuditingReporter::SCTHashdanceMetadata> sct_metadata,
-      std::unique_ptr<net::BackoffEntry> backoff_entry = nullptr);
+      std::unique_ptr<net::BackoffEntry> backoff_entry = nullptr,
+      bool already_counted = false);
 
   // Loads serialized reports from `serialized` and creates a new
   // SCTAuditingReporter for each (if a reporter for that report does not yet
@@ -106,7 +109,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) SCTAuditingHandler
   void OnReportsLoadedFromDisk(const std::string& serialized);
 
   // Clears the set of pending reporters for this SCTAuditingHandler.
-  void ClearPendingReports();
+  void ClearPendingReports(base::OnceClosure callback);
 
   base::LRUCache<net::HashValue, std::unique_ptr<SCTAuditingReporter>>*
   GetPendingReportersForTesting() {
@@ -135,11 +138,13 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) SCTAuditingHandler
  private:
   void OnReporterStateUpdated();
   void OnReporterFinished(net::HashValue reporter_key);
+
   void ReportHWMMetrics();
+
   mojom::URLLoaderFactory* GetURLLoaderFactory();
 
   // The NetworkContext which owns this SCTAuditingHandler.
-  NetworkContext* owner_network_context_;
+  raw_ptr<NetworkContext> owner_network_context_;
 
   // The pending reporters set is an LRUCache, so that the total number of
   // pending reporters can be capped. The LRUCache means that reporters will be

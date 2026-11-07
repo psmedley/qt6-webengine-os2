@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -170,6 +170,8 @@
 #endif
 
 // DISABLE_CFI_ICALL -- Disable Control Flow Integrity indirect call checks.
+// Security Note: if you just need to allow calling of dlsym functions use
+// DISABLE_CFI_DLSYM.
 #if !defined(DISABLE_CFI_ICALL)
 #if BUILDFLAG(IS_WIN)
 // Windows also needs __declspec(guard(nocf)).
@@ -180,6 +182,21 @@
 #endif
 #if !defined(DISABLE_CFI_ICALL)
 #define DISABLE_CFI_ICALL
+#endif
+
+// DISABLE_CFI_DLSYM -- applies DISABLE_CFI_ICALL on platforms where dlsym
+// functions must be called. Retains CFI checks on platforms where loaded
+// modules participate in CFI (e.g. Windows).
+#if !defined(DISABLE_CFI_DLSYM)
+#if BUILDFLAG(IS_WIN)
+// Windows modules register functions when loaded so can be checked by CFG.
+#define DISABLE_CFI_DLSYM
+#else
+#define DISABLE_CFI_DLSYM DISABLE_CFI_ICALL
+#endif
+#endif
+#if !defined(DISABLE_CFI_DLSYM)
+#define DISABLE_CFI_DLSYM
 #endif
 
 // Macro useful for writing cross-platform function pointers.
@@ -329,12 +346,8 @@ inline constexpr bool AnalyzerAssumeTrue(bool arg) {
 #endif  // defined(__clang_analyzer__)
 
 // Use nomerge attribute to disable optimization of merging multiple same calls.
-#if defined(__clang_major__) && (__clang_major__ >= 13)
-#if HAS_ATTRIBUTE(nomerge)
+#if defined(__clang__) && HAS_ATTRIBUTE(nomerge)
 #define NOMERGE [[clang::nomerge]]
-#else
-#define NOMERGE
-#endif
 #else
 #define NOMERGE
 #endif
@@ -391,6 +404,19 @@ inline constexpr bool AnalyzerAssumeTrue(bool arg) {
 #else
 #define GSL_OWNER
 #define GSL_POINTER
+#endif
+
+// Adds the "logically_const" tag to a symbol's mangled name. The "Mutable
+// Constants" check [1] detects instances of constants that aren't in .rodata,
+// e.g. due to a missing `const`. Using this tag suppresses the check for this
+// symbol, allowing it to live outside .rodata without a warning.
+//
+// [1]:
+// https://crsrc.org/c/docs/speed/binary_size/android_binary_size_trybot.md#Mutable-Constants
+#if defined(COMPILER_GCC) || defined(__clang__)
+#define LOGICALLY_CONST [[gnu::abi_tag("logically_const")]]
+#else
+#define LOGICALLY_CONST
 #endif
 
 #endif  // BASE_COMPILER_SPECIFIC_H_

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,7 @@
 #include "ui/gl/gl_surface_egl.h"
 #include "ui/ozone/common/egl_util.h"
 #include "ui/ozone/common/gl_ozone_egl.h"
+#include "ui/ozone/common/native_pixmap_egl_binding.h"
 #include "ui/ozone/platform/drm/common/drm_util.h"
 #include "ui/ozone/platform/drm/common/scoped_drm_types.h"
 #include "ui/ozone/platform/drm/gpu/drm_gpu_util.h"
@@ -113,23 +114,45 @@ class GLOzoneEGLGbm : public GLOzoneEGL {
 
   ~GLOzoneEGLGbm() override {}
 
+  bool CanImportNativePixmap() override {
+    return gl::GLSurfaceEGL::GetGLDisplayEGL()
+        ->ext->b_EGL_EXT_image_dma_buf_import;
+  }
+
+  std::unique_ptr<NativePixmapGLBinding> ImportNativePixmap(
+      scoped_refptr<gfx::NativePixmap> pixmap,
+      gfx::BufferFormat plane_format,
+      gfx::BufferPlane plane,
+      gfx::Size plane_size,
+      const gfx::ColorSpace& color_space,
+      GLenum target,
+      GLuint texture_id) override {
+    return NativePixmapEGLBinding::Create(pixmap, plane_format, plane,
+                                          plane_size, color_space, target,
+                                          texture_id);
+  }
+
   scoped_refptr<gl::GLSurface> CreateViewGLSurface(
+      gl::GLDisplay* display,
       gfx::AcceleratedWidget window) override {
     return nullptr;
   }
 
   scoped_refptr<gl::GLSurface> CreateSurfacelessViewGLSurface(
+      gl::GLDisplay* display,
       gfx::AcceleratedWidget window) override {
     return gl::InitializeGLSurface(new GbmSurfaceless(
-        surface_factory_, drm_thread_proxy_->CreateDrmWindowProxy(window),
-        window));
+        surface_factory_, display->GetAs<gl::GLDisplayEGL>(),
+        drm_thread_proxy_->CreateDrmWindowProxy(window), window));
   }
 
   scoped_refptr<gl::GLSurface> CreateOffscreenGLSurface(
+      gl::GLDisplay* display,
       const gfx::Size& size) override {
     DCHECK_EQ(size.width(), 0);
     DCHECK_EQ(size.height(), 0);
-    return gl::InitializeGLSurface(new gl::SurfacelessEGL(size));
+    return gl::InitializeGLSurface(
+        new gl::SurfacelessEGL(display->GetAs<gl::GLDisplayEGL>(), size));
   }
 
  protected:
@@ -140,24 +163,14 @@ class GLOzoneEGLGbm : public GLOzoneEGL {
     // Default to null platform
     native_display_ = gl::EGLDisplayPlatform(EGL_DEFAULT_DISPLAY);
 
-    gl::g_driver_egl.InitializeClientExtensionBindings();
-
-    const char* client_extensions_string =
-        eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
-
-    gfx::ExtensionSet client_extensions =
-        client_extensions_string
-            ? gfx::MakeExtensionSet(client_extensions_string)
-            : gfx::ExtensionSet();
-
-    if (gfx::HasExtension(client_extensions, "EGL_MESA_platform_surfaceless")) {
+    if (gl::g_driver_egl.client_ext.b_EGL_MESA_platform_surfaceless) {
       native_display_ = gl::EGLDisplayPlatform(EGL_DEFAULT_DISPLAY,
                                                EGL_PLATFORM_SURFACELESS_MESA);
     }
 
-    if (!(gfx::HasExtension(client_extensions, "EGL_EXT_device_query") &&
-          gfx::HasExtension(client_extensions, "EGL_EXT_platform_device") &&
-          gfx::HasExtension(client_extensions, "EGL_EXT_device_enumeration"))) {
+    if (!(gl::g_driver_egl.client_ext.b_EGL_EXT_device_query &&
+          gl::g_driver_egl.client_ext.b_EGL_EXT_platform_device &&
+          gl::g_driver_egl.client_ext.b_EGL_EXT_device_enumeration)) {
       LOG(WARNING) << "Platform device extensions not found.";
       return native_display_;
     }
@@ -198,7 +211,7 @@ std::vector<gfx::BufferFormat> EnumerateSupportedBufferFormatsForTexturing() {
 
     // Skip the virtual graphics memory manager device.
     ScopedDrmVersionPtr version(drmGetVersion(dev_path_file.GetPlatformFile()));
-    if (!version || base::LowerCaseEqualsASCII(version->name, "vgem")) {
+    if (!version || base::EqualsCaseInsensitiveASCII(version->name, "vgem")) {
       continue;
     }
 
@@ -329,20 +342,19 @@ scoped_refptr<gfx::NativePixmap> GbmSurfaceFactory::CreateNativePixmapForVulkan(
   DCHECK_EQ(format, display::DisplaySnapshot::PrimaryFormat());
   VkFormat vk_format = VK_FORMAT_B8G8R8A8_SRGB;
 
-  VkDmaBufImageCreateInfo dma_buf_image_create_info = {
-      /* .sType = */ static_cast<VkStructureType>(
-          VK_STRUCTURE_TYPE_DMA_BUF_IMAGE_CREATE_INFO_INTEL),
-      /* .pNext = */ nullptr,
-      /* .fd = */ vk_image_fd.release(),
-      /* .format = */ vk_format,
-      /* .extent = */
+  VkDmaBufImageCreateInfo dma_buf_image_create_info = {};
+      dma_buf_image_create_info.sType =  static_cast<VkStructureType>(
+          VK_STRUCTURE_TYPE_DMA_BUF_IMAGE_CREATE_INFO_INTEL);
+      dma_buf_image_create_info.pNext = nullptr;
+      dma_buf_image_create_info.fd = vk_image_fd.release();
+      dma_buf_image_create_info.format = vk_format,
+      dma_buf_image_create_info.extent =
       {
           /* .width = */ static_cast<uint32_t>(size.width()),
           /* .height = */ static_cast<uint32_t>(size.height()),
           /* .depth = */ 1,
-      },
-      /* .strideInBytes = */ buffer->GetPlaneStride(0),
-  };
+      };
+      dma_buf_image_create_info.strideInBytes =  buffer->GetPlaneStride(0);
 
   VkResult result =
       create_dma_buf_image_intel(vk_device, &dma_buf_image_create_info, nullptr,
@@ -372,7 +384,7 @@ std::unique_ptr<SurfaceOzoneCanvas> GbmSurfaceFactory::CreateCanvasForWidget(
 
 scoped_refptr<gfx::NativePixmap> GbmSurfaceFactory::CreateNativePixmap(
     gfx::AcceleratedWidget widget,
-    VkDevice vk_device,
+    gpu::VulkanDeviceQueue* device_queue,
     gfx::Size size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage,
@@ -392,12 +404,13 @@ scoped_refptr<gfx::NativePixmap> GbmSurfaceFactory::CreateNativePixmap(
                                          std::move(framebuffer));
 }
 
-void GbmSurfaceFactory::CreateNativePixmapAsync(gfx::AcceleratedWidget widget,
-                                                VkDevice vk_device,
-                                                gfx::Size size,
-                                                gfx::BufferFormat format,
-                                                gfx::BufferUsage usage,
-                                                NativePixmapCallback callback) {
+void GbmSurfaceFactory::CreateNativePixmapAsync(
+    gfx::AcceleratedWidget widget,
+    gpu::VulkanDeviceQueue* device_queue,
+    gfx::Size size,
+    gfx::BufferFormat format,
+    gfx::BufferUsage usage,
+    NativePixmapCallback callback) {
   drm_thread_proxy_->CreateBufferAsync(
       widget, size, format, usage, 0 /* flags */,
       base::BindOnce(OnNativePixmapCreated, std::move(callback),

@@ -1,16 +1,16 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import './icons.js';
-import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
-import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
-import 'chrome://resources/cr_elements/cr_icons_css.m.js';
-import 'chrome://resources/cr_elements/hidden_style_css.m.js';
-import 'chrome://resources/cr_elements/icons.m.js';
-import 'chrome://resources/cr_elements/shared_vars_css.m.js';
+import './icons.html.js';
+import 'chrome://resources/cr_elements/cr_button/cr_button.js';
+import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
+import 'chrome://resources/cr_elements/cr_icons.css.js';
+import 'chrome://resources/cr_elements/cr_hidden_style.css.js';
+import 'chrome://resources/cr_elements/icons.html.js';
+import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
 import 'chrome://resources/js/action_link.js';
-import 'chrome://resources/cr_elements/action_link_css.m.js';
+import 'chrome://resources/cr_elements/action_link.css.js';
 import './strings.m.js';
 import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
 import 'chrome://resources/polymer/v3_0/paper-progress/paper-progress.js';
@@ -18,11 +18,11 @@ import 'chrome://resources/polymer/v3_0/paper-styles/color.js';
 
 import {getToastManager} from 'chrome://resources/cr_elements/cr_toast/cr_toast_manager.js';
 import {assert} from 'chrome://resources/js/assert_ts.js';
-import {FocusRowBehavior} from 'chrome://resources/js/cr/ui/focus_row_behavior.m.js';
-import {focusWithoutInk} from 'chrome://resources/js/cr/ui/focus_without_ink.m.js';
+import {FocusRowMixin} from 'chrome://resources/js/focus_row_mixin.js';
+import {focusWithoutInk} from 'chrome://resources/js/focus_without_ink.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {HTMLEscape} from 'chrome://resources/js/util.m.js';
-import {beforeNextRender, mixinBehaviors, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {HTMLEscape} from 'chrome://resources/js/util.js';
+import {beforeNextRender, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {BrowserProxy} from './browser_proxy.js';
 import {DangerType, States} from './constants.js';
@@ -41,9 +41,7 @@ export interface DownloadsItemElement {
   };
 }
 
-const DownloadsItemElementBase =
-    mixinBehaviors([FocusRowBehavior], PolymerElement) as
-    {new (): PolymerElement & FocusRowBehavior};
+const DownloadsItemElementBase = FocusRowMixin(PolymerElement);
 
 export class DownloadsItemElement extends DownloadsItemElementBase {
   static get is() {
@@ -90,26 +88,20 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
         value: true,
       },
 
-      isDownloadItemSafe_: {
-        computed: 'computeIsDownloadItemSafe_(data.state)',
-        type: Boolean,
-        value: false
-      },
-
       isDangerous_: {
         computed: 'computeIsDangerous_(data.state)',
         type: Boolean,
         value: false,
       },
 
-      shouldShowIncognitoWarning_: {
-        computed: 'computeShouldShowIncognitoWarning_(data.state)',
+      isMalware_: {
+        computed: 'computeIsMalware_(isDangerous_, data.dangerType)',
         type: Boolean,
         value: false,
       },
 
-      isMalware_: {
-        computed: 'computeIsMalware_(isDangerous_, data.dangerType)',
+      isReviewable_: {
+        computed: 'computeIsReviewable_(data.isReviewable)',
         type: Boolean,
         value: false,
       },
@@ -163,20 +155,18 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
   private controlledBy_: string;
   private isActive_: boolean;
   private isDangerous_: boolean;
-  private isDownloadItemSafe_: boolean;
-  private shouldShowIncognitoWarning_: boolean;
   private isInProgress_: boolean;
   private pauseOrResumeText_: string;
   private showCancel_: boolean;
   private showProgress_: boolean;
   private useFileIcon_: boolean;
   private restoreFocusAfterCancel_: boolean = false;
-  overrideCustomEquivalent: boolean;
+  override overrideCustomEquivalent: boolean;
 
   constructor() {
     super();
 
-    /** Used by FocusRowBehavior. */
+    /** Used by FocusRowMixin. */
     this.overrideCustomEquivalent = true;
   }
 
@@ -192,8 +182,8 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
     focusWithoutInk(this.$.remove);
   }
 
-  /** Overrides FocusRowBehavior. */
-  getCustomEquivalent(sampleElement: HTMLElement): HTMLElement|null {
+  /** Overrides FocusRowMixin. */
+  override getCustomEquivalent(sampleElement: HTMLElement): HTMLElement|null {
     if (sampleElement.getAttribute('focus-type') === 'cancel') {
       return this.shadowRoot!.querySelector('[focus-type="retry"]');
     }
@@ -282,9 +272,6 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
         }
         break;
 
-      case States.INCOGNITO_WARNING:
-        return loadTimeData.getString('incognitoDownloadsWarningDesc');
-
       case States.MIXED_CONTENT:
         return loadTimeData.getString('mixedContentDownloadDesc');
 
@@ -338,8 +325,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       const dangerType = this.data.dangerType as DangerType;
       if ((loadTimeData.getBoolean('requestsApVerdicts') &&
            dangerType === DangerType.UNCOMMON_CONTENT) ||
-          dangerType === DangerType.SENSITIVE_CONTENT_WARNING ||
-          this.data.state === States.INCOGNITO_WARNING) {
+          dangerType === DangerType.SENSITIVE_CONTENT_WARNING) {
         return 'cr:warning';
       }
 
@@ -370,8 +356,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       const dangerType = this.data.dangerType as DangerType;
       if ((loadTimeData.getBoolean('requestsApVerdicts') &&
            dangerType === DangerType.UNCOMMON_CONTENT) ||
-          dangerType === DangerType.SENSITIVE_CONTENT_WARNING ||
-          this.data.state === States.INCOGNITO_WARNING) {
+          dangerType === DangerType.SENSITIVE_CONTENT_WARNING) {
         return 'yellow';
       }
 
@@ -419,6 +404,10 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
          this.data.dangerType === DangerType.DANGEROUS_URL ||
          this.data.dangerType === DangerType.POTENTIALLY_UNWANTED ||
          this.data.dangerType === DangerType.DANGEROUS_ACCOUNT_COMPROMISE);
+  }
+
+  private computeIsReviewable_(): boolean {
+    return this.data.isReviewable;
   }
 
   private toggleButtonClass_() {
@@ -522,8 +511,6 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       this.useFileIcon_ = false;
     } else if (this.data.state === States.ASYNC_SCANNING) {
       this.useFileIcon_ = false;
-    } else if (this.data.state === States.INCOGNITO_WARNING) {
-      this.useFileIcon_ = false;
     } else {
       this.$.url.href = this.data.url;
       const path = this.data.filePath;
@@ -538,16 +525,6 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
     }
   }
 
-  private computeShouldShowIncognitoWarning_(): boolean {
-    return this.data.state === States.INCOGNITO_WARNING &&
-        this.data.shouldShowIncognitoWarning;
-  }
-
-  private computeIsDownloadItemSafe_(): boolean {
-    return !this.computeIsDangerous_() &&
-        !this.computeShouldShowIncognitoWarning_();
-  }
-
   private onCancelTap_() {
     this.restoreFocusAfterCancel_ = true;
     this.mojoHandler_!.cancel(this.data.id);
@@ -559,6 +536,10 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
 
   private onOpenNowTap_() {
     this.mojoHandler_!.openDuringScanningRequiringGesture(this.data.id);
+  }
+
+  private onReviewDangerousTap_() {
+    this.mojoHandler_!.reviewDangerousRequiringGesture(this.data.id);
   }
 
   private onDragStart_(e: Event) {
@@ -609,10 +590,6 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
 
   private onSaveDangerousTap_() {
     this.mojoHandler_!.saveDangerousRequiringGesture(this.data.id);
-  }
-
-  private onIncognitoWarningAccepted_() {
-    this.mojoHandler_!.acceptIncognitoWarning(this.data.id);
   }
 
   private onShowTap_() {

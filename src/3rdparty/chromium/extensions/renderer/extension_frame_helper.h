@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,9 +54,9 @@ class ExtensionFrameHelper
       int tab_id,
       mojom::ViewType view_type);
   // Same as above, but returns a v8::Array of the v8 global objects for those
-  // frames, and only includes main frames. Note: This only returns contexts
-  // that are accessible by |context|, and |context| must be the current
-  // context.
+  // frames, and only includes outermost main frames. Note: This only returns
+  // contexts that are accessible by |context|, and |context| must be the
+  // current context.
   // Returns an empty v8::Array if no frames are found.
   static v8::Local<v8::Array> GetV8MainFrames(v8::Local<v8::Context> context,
                                               const std::string& extension_id,
@@ -121,7 +121,7 @@ class ExtensionFrameHelper
 
   void UpdateBrowserWindowId(int32_t window_id) override;
 
-  void set_did_create_script_context() { did_create_script_context_ = true; }
+  void NotifyDidCreateScriptContext(int32_t world_id);
   bool did_create_script_context() const { return did_create_script_context_; }
 
   // Called when the document element has been inserted in this frame. This
@@ -167,6 +167,7 @@ class ExtensionFrameHelper
   bool OnMessageReceived(const IPC::Message& message) override;
   void OnDestruct() override;
   void DraggableRegionsChanged() override;
+  void DidClearWindowObject() override;
 
   // IPC handlers.
   void OnExtensionValidateMessagePort(int worker_thread_id, const PortId& id);

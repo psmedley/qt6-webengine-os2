@@ -12,16 +12,13 @@
 #include "src/builtins/accessors.h"
 #include "src/common/message-template.h"
 #include "src/heap/local-factory-inl.h"
-#include "src/init/bootstrapper.h"
 #include "src/logging/runtime-call-stats-scope.h"
-#include "src/objects/module-inl.h"
-#include "src/objects/objects-inl.h"
 #include "src/objects/scope-info.h"
-#include "src/objects/string-set-inl.h"
+#include "src/objects/string-inl.h"
+#include "src/objects/string-set.h"
 #include "src/parsing/parse-info.h"
 #include "src/parsing/parser.h"
 #include "src/parsing/preparse-data.h"
-#include "src/zone/zone-list-inl.h"
 #include "src/zone/zone.h"
 
 namespace v8 {
@@ -255,7 +252,7 @@ Scope::Scope(Zone* zone, ScopeType scope_type,
   must_use_preparsed_scope_data_ = true;
 
   if (scope_type == BLOCK_SCOPE) {
-    // Set is_block_scope_for_object_literal_ based on the existince of the home
+    // Set is_block_scope_for_object_literal_ based on the existence of the home
     // object variable (we don't store it explicitly).
     DCHECK_NOT_NULL(ast_value_factory);
     int home_object_index = scope_info->ContextSlotIndex(
@@ -494,7 +491,6 @@ Scope* Scope::DeserializeScopeChain(IsolateT* isolate, Zone* zone,
     if (cache_scope_found) {
       outer_scope->set_deserialized_scope_uses_external_cache();
     } else {
-      DCHECK(!cache_scope_found);
       cache_scope_found =
           outer_scope->is_declaration_scope() && !outer_scope->is_eval_scope();
     }
@@ -932,6 +928,7 @@ void Scope::Snapshot::Reparent(DeclarationScope* new_parent) {
   // Move eval calls since Snapshot's creation into new_parent.
   if (outer_scope_->calls_eval_) {
     new_parent->RecordEvalCall();
+    outer_scope_->calls_eval_ = false;
     declaration_scope_->sloppy_eval_can_extend_vars_ = false;
   }
 }
@@ -951,9 +948,14 @@ Variable* Scope::LookupInScopeInfo(const AstRawString* name, Scope* cache) {
   DCHECK(!cache->deserialized_scope_uses_external_cache());
   // The case where where the cache can be another scope is when the cache scope
   // is the last scope that doesn't use an external cache.
+  //
+  // The one exception to this is when looking up the home object, which may
+  // skip multiple scopes that don't use an external cache (e.g., several arrow
+  // functions).
   DCHECK_IMPLIES(
       cache != this,
-      cache->outer_scope()->deserialized_scope_uses_external_cache());
+      cache->outer_scope()->deserialized_scope_uses_external_cache() ||
+          cache->GetHomeObjectScope() == this);
   DCHECK_NULL(cache->variables_.Lookup(name));
   DisallowGarbageCollection no_gc;
 
@@ -1508,26 +1510,22 @@ DeclarationScope* Scope::GetConstructorScope() {
 }
 
 Scope* Scope::GetHomeObjectScope() {
-  Scope* scope = this;
-  while (scope != nullptr && !scope->is_home_object_scope()) {
-    if (scope->is_function_scope()) {
-      FunctionKind function_kind = scope->AsDeclarationScope()->function_kind();
-      // "super" in arrow functions binds outside the arrow function. But if we
-      // find a function which doesn't bind "super" (is not a method etc.) and
-      // not an arrow function, we know "super" here doesn't bind anywhere and
-      // we can return nullptr.
-      if (!IsArrowFunction(function_kind) && !BindsSuper(function_kind)) {
-        return nullptr;
-      }
-    }
-    if (scope->private_name_lookup_skips_outer_class()) {
-      DCHECK(scope->outer_scope()->is_class_scope());
-      scope = scope->outer_scope()->outer_scope();
-    } else {
-      scope = scope->outer_scope();
-    }
-  }
-  return scope;
+  Scope* scope = GetReceiverScope();
+  DCHECK(scope->is_function_scope());
+  FunctionKind kind = scope->AsDeclarationScope()->function_kind();
+  // "super" in arrow functions binds outside the arrow function. Arrow
+  // functions are also never receiver scopes since they close over the
+  // receiver.
+  DCHECK(!IsArrowFunction(kind));
+  // If we find a function which doesn't bind "super" (is not a method etc.), we
+  // know "super" here doesn't bind anywhere and we can return nullptr.
+  if (!BindsSuper(kind)) return nullptr;
+  // Functions that bind "super" can only syntactically occur nested inside home
+  // object scopes (i.e. class scopes and object literal scopes), so directly
+  // return the outer scope.
+  Scope* outer_scope = scope->outer_scope();
+  CHECK(outer_scope->is_home_object_scope());
+  return outer_scope;
 }
 
 DeclarationScope* Scope::GetScriptScope() {
@@ -2272,7 +2270,33 @@ Variable* Scope::LookupSloppyEval(VariableProxy* proxy, Scope* scope,
 
 void Scope::ResolveVariable(VariableProxy* proxy) {
   DCHECK(!proxy->is_resolved());
-  Variable* var = Lookup<kParsedScope>(proxy, this, nullptr);
+  Variable* var;
+  if (V8_UNLIKELY(proxy->is_home_object())) {
+    // VariableProxies of the home object cannot be resolved like a normal
+    // variable. Consider the case of a super.property usage in heritage
+    // position:
+    //
+    //   class C extends super.foo { m() { super.bar(); } }
+    //
+    // The super.foo property access is logically nested under C's class scope,
+    // which also has a home object due to its own method m's usage of
+    // super.bar(). However, super.foo must resolve super in C's outer scope.
+    //
+    // Because of the above, start resolving home objects directly at the home
+    // object scope instead of the current scope.
+    Scope* scope = GetDeclarationScope()->GetHomeObjectScope();
+    DCHECK_NOT_NULL(scope);
+    if (scope->scope_info_.is_null()) {
+      var = Lookup<kParsedScope>(proxy, scope, nullptr);
+    } else {
+      Scope* entry_cache = scope->deserialized_scope_uses_external_cache()
+                               ? GetNonEvalDeclarationScope()
+                               : scope;
+      var = Lookup<kDeserializedScope>(proxy, scope, nullptr, entry_cache);
+    }
+  } else {
+    var = Lookup<kParsedScope>(proxy, this, nullptr);
+  }
   DCHECK_NOT_NULL(var);
   ResolveTo(proxy, var);
 }
@@ -2289,7 +2313,7 @@ void UpdateNeedsHoleCheck(Variable* var, VariableProxy* proxy, Scope* scope) {
     // Dynamically introduced variables never need a hole check (since they're
     // VariableMode::kVar bindings, either from var or function declarations),
     // but the variable they shadow might need a hole check, which we want to do
-    // if we decide that no shadowing variable was dynamically introoduced.
+    // if we decide that no shadowing variable was dynamically introduced.
     DCHECK_EQ(kCreatedInitialized, var->initialization_flag());
     return UpdateNeedsHoleCheck(var->local_if_not_shadowed(), proxy, scope);
   }
@@ -2396,7 +2420,7 @@ bool Scope::MustAllocate(Variable* var) {
     var->set_is_used();
     if (inner_scope_calls_eval_ && !var->is_this()) var->SetMaybeAssigned();
   }
-  DCHECK(!var->has_forced_context_allocation() || var->is_used());
+  CHECK(!var->has_forced_context_allocation() || var->is_used());
   // Global variables do not need to be allocated.
   return !var->IsGlobalObjectProperty() && var->is_used();
 }
@@ -2737,48 +2761,6 @@ int Scope::ContextLocalCount() const {
          (is_function_var_in_context ? 1 : 0);
 }
 
-VariableProxy* Scope::NewHomeObjectVariableProxy(AstNodeFactory* factory,
-                                                 const AstRawString* name,
-                                                 int start_pos) {
-  // VariableProxies of the home object cannot be resolved like a normal
-  // variable. Consider the case of a super.property usage in heritage position:
-  //
-  //   class C extends super.foo { m() { super.bar(); } }
-  //
-  // The super.foo property access is logically nested under C's class scope,
-  // which also has a home object due to its own method m's usage of
-  // super.bar(). However, super.foo must resolve super in C's outer scope.
-  //
-  // Because of the above, home object VariableProxies are always made directly
-  // on the Scope that needs the home object instead of the innermost scope.
-  DCHECK(needs_home_object());
-  if (!scope_info_.is_null()) {
-    // This is a lazy compile, so the home object's context slot is already
-    // known.
-    Variable* home_object = variables_.Lookup(name);
-    if (home_object == nullptr) {
-      VariableLookupResult lookup_result;
-      int index = scope_info_->ContextSlotIndex(name->string(), &lookup_result);
-      DCHECK_GE(index, 0);
-      bool was_added;
-      home_object = variables_.Declare(zone(), this, name, lookup_result.mode,
-                                       NORMAL_VARIABLE, lookup_result.init_flag,
-                                       lookup_result.maybe_assigned_flag,
-                                       IsStaticFlag::kNotStatic, &was_added);
-      DCHECK(was_added);
-      home_object->AllocateTo(VariableLocation::CONTEXT, index);
-    }
-    return factory->NewVariableProxy(home_object, start_pos);
-  }
-  // This is not a lazy compile. Add the unresolved home object VariableProxy to
-  // the unresolved list of the home object scope, which is not necessarily the
-  // innermost scope.
-  VariableProxy* proxy =
-      factory->NewVariableProxy(name, NORMAL_VARIABLE, start_pos);
-  AddUnresolved(proxy);
-  return proxy;
-}
-
 bool IsComplementaryAccessorPair(VariableMode a, VariableMode b) {
   switch (a) {
     case VariableMode::kPrivateGetterOnly:
@@ -2793,7 +2775,7 @@ bool IsComplementaryAccessorPair(VariableMode a, VariableMode b) {
 void ClassScope::FinalizeReparsedClassScope(
     Isolate* isolate, MaybeHandle<ScopeInfo> maybe_scope_info,
     AstValueFactory* ast_value_factory, bool needs_allocation_fixup) {
-  // Set this bit so that DelcarationScope::Analyze recognizes
+  // Set this bit so that DeclarationScope::Analyze recognizes
   // the reparsed instance member initializer scope.
 #ifdef DEBUG
   is_reparsed_class_scope_ = true;
@@ -2944,7 +2926,7 @@ Variable* ClassScope::LookupPrivateName(VariableProxy* proxy) {
        scope_iter.Next()) {
     ClassScope* scope = scope_iter.GetScope();
     // Try finding it in the private name map first, if it can't be found,
-    // try the deseralized scope info.
+    // try the deserialized scope info.
     Variable* var = scope->LookupLocalPrivateName(proxy->raw_name());
     if (var == nullptr && !scope->scope_info_.is_null()) {
       var = scope->LookupPrivateNameInScopeInfo(proxy->raw_name());
@@ -3036,7 +3018,7 @@ VariableProxy* ClassScope::ResolvePrivateNamesPartially() {
       }
 
       // The private name may be found later in the outer private name scope, so
-      // push it to the outer sopce.
+      // push it to the outer scope.
       private_name_scope_iter.AddUnresolvedPrivateName(proxy);
     }
 

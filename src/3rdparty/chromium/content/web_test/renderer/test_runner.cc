@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,14 +18,15 @@
 #include "base/containers/cxx20_erase.h"
 #include "base/containers/unique_ptr_adapters.h"
 #include "base/logging.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
+#include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "cc/paint/paint_canvas.h"
 #include "content/public/common/isolated_world_ids.h"
 #include "content/public/renderer/render_frame_observer.h"
-#include "content/public/renderer/render_view_visitor.h"
 #include "content/renderer/render_thread_impl.h"
-#include "content/renderer/render_view_impl.h"
 #include "content/web_test/common/web_test_constants.h"
 #include "content/web_test/common/web_test_string_util.h"
 #include "content/web_test/renderer/app_banner_service.h"
@@ -43,6 +44,7 @@
 #include "mojo/public/mojom/base/text_direction.mojom-forward.h"
 #include "net/base/filename_util.h"
 #include "printing/buildflags/buildflags.h"
+#include "printing/page_range.h"
 #include "services/network/public/mojom/cors.mojom.h"
 #include "third_party/blink/public/common/page/page_zoom.h"
 #include "third_party/blink/public/common/permissions/permission_utils.h"
@@ -63,6 +65,7 @@
 #include "third_party/blink/public/web/web_array_buffer_converter.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_document_loader.h"
+#include "third_party/blink/public/web/web_element_collection.h"
 #include "third_party/blink/public/web/web_frame.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_input_element.h"
@@ -93,6 +96,11 @@
 namespace content {
 
 namespace {
+
+// Default page dimensions for WPT print reftests (5x3 inches at 72 DPI
+// with 0.5 inch margins).
+const int kWPTPrintWidth = 4 * 72;
+const int kWPTPrintHeight = 2 * 72;
 
 // A V8 callback with bound arguments, and the ability to pass additional
 // arguments at time of calling Run().
@@ -170,33 +178,6 @@ void ConvertAndSet(gin::Arguments* args, blink::WebString* set_param) {
   *set_param = web_test_string_util::V8StringToWebString(
       args->isolate(), result.ToLocalChecked());
 }
-
-class SynchronousResizeModeVisitor : public RenderViewVisitor {
- public:
-  SynchronousResizeModeVisitor() = default;
-
-  bool Visit(RenderView* render_view) override {
-    render_view->GetWebView()->UseSynchronousResizeModeForTesting(true);
-    return true;
-  }
-};
-
-class SetAcceptLanguagesVisitor : public RenderViewVisitor {
- public:
-  explicit SetAcceptLanguagesVisitor(const std::string& accept_languages)
-      : accept_languages_(accept_languages) {}
-
-  bool Visit(RenderView* render_view) override {
-    blink::WebView* view = render_view->GetWebView();
-    blink::RendererPreferences prefs = view->GetRendererPreferences();
-    prefs.accept_languages = accept_languages_;
-    view->SetRendererPreferences(prefs);
-    return true;
-  }
-
- private:
-  const std::string& accept_languages_;
-};
 
 }  // namespace
 
@@ -371,6 +352,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetPopupBlockingEnabled(bool block_popups);
   void SetPrinting();
   void SetPrintingForFrame(const std::string& frame_name);
+  void SetPrintingSize(int width, int height);
   void SetScriptsAllowed(bool allowed);
   void SetShouldGeneratePixelResults(bool);
   void SetShouldStayOnPageAfterHandlingBeforeUnload(bool value);
@@ -389,7 +371,6 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SimulateWebNotificationClick(gin::Arguments* args);
   void SimulateWebNotificationClose(const std::string& title, bool by_user);
   void SimulateWebContentIndexDelete(const std::string& id);
-  void UseUnfortunateSynchronousResizeMode();
   void WaitForPolicyDelegate();
   void WaitUntilDone();
   void WaitUntilExternalURLLoad();
@@ -787,6 +768,7 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("setPrinting", &TestRunnerBindings::SetPrinting)
       .SetMethod("setPrintingForFrame",
                  &TestRunnerBindings::SetPrintingForFrame)
+      .SetMethod("setPrintingSize", &TestRunnerBindings::SetPrintingSize)
       .SetMethod("setScriptsAllowed", &TestRunnerBindings::SetScriptsAllowed)
       .SetMethod("setScrollbarPolicy", &TestRunnerBindings::NotImplemented)
       .SetMethod("setShouldGeneratePixelResults",
@@ -833,8 +815,6 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("zoomPageOut", &TestRunnerBindings::ZoomPageOut)
       .SetMethod("setPageZoomFactor", &TestRunnerBindings::SetPageZoomFactor)
       .SetProperty("tooltipText", &TestRunnerBindings::TooltipText)
-      .SetMethod("useUnfortunateSynchronousResizeMode",
-                 &TestRunnerBindings::UseUnfortunateSynchronousResizeMode)
       .SetMethod("waitForPolicyDelegate",
                  &TestRunnerBindings::WaitForPolicyDelegate)
       .SetMethod("waitUntilDone", &TestRunnerBindings::WaitUntilDone)
@@ -1283,12 +1263,6 @@ void TestRunnerBindings::SetTextDirection(const std::string& direction_name) {
   GetWebFrame()->SetTextDirectionForTesting(direction);
 }
 
-void TestRunnerBindings::UseUnfortunateSynchronousResizeMode() {
-  if (invalid_)
-    return;
-  runner_->UseUnfortunateSynchronousResizeMode();
-}
-
 void TestRunnerBindings::EnableAutoResizeMode(int min_width,
                                               int min_height,
                                               int max_width,
@@ -1301,11 +1275,9 @@ void TestRunnerBindings::EnableAutoResizeMode(int min_width,
   if (max_width <= 0 || max_height <= 0)
     return;
 
-  blink::WebView* web_view = GetWebFrame()->View();
-
   gfx::Size min_size(min_width, min_height);
   gfx::Size max_size(max_width, max_height);
-  web_view->EnableAutoResizeForTesting(min_size, max_size);
+  runner_->GetWebTestControlHostRemote()->EnableAutoResize(min_size, max_size);
 }
 
 void TestRunnerBindings::DisableAutoResizeMode(int new_width, int new_height) {
@@ -1317,14 +1289,8 @@ void TestRunnerBindings::DisableAutoResizeMode(int new_width, int new_height) {
   if (new_width <= 0 || new_height <= 0)
     return;
 
-  blink::WebFrameWidget* widget = frame_->GetLocalRootWebFrameWidget();
-
   gfx::Size new_size(new_width, new_height);
-  blink::WebView* web_view = GetWebFrame()->View();
-  web_view->DisableAutoResizeForTesting(new_size);
-
-  gfx::Rect window_rect(widget->WindowRect().origin(), new_size);
-  web_view->SetWindowRectSynchronouslyForTesting(window_rect);
+  runner_->GetWebTestControlHostRemote()->DisableAutoResize(new_size);
 }
 
 void TestRunnerBindings::SetMockScreenOrientation(
@@ -1606,6 +1572,12 @@ void TestRunnerBindings::SetPrintingForFrame(const std::string& frame_name) {
   if (invalid_)
     return;
   runner_->SetPrintingForFrame(frame_name);
+}
+
+void TestRunnerBindings::SetPrintingSize(int width, int height) {
+  if (invalid_)
+    return;
+  runner_->SetPrintingSize(width, height);
 }
 
 void TestRunnerBindings::ClearTrustTokenState(
@@ -1939,7 +1911,10 @@ void TestRunnerBindings::CapturePrintingPixelsThen(
     v8::Local<v8::Function> v8_callback) {
   if (invalid_)
     return;
-  SkBitmap bitmap = PrintFrameToBitmap(GetWebFrame());
+  blink::WebLocalFrame* frame = GetWebFrame();
+  SkBitmap bitmap =
+      PrintFrameToBitmap(frame, runner_->GetPrintingPageSize(frame),
+                         runner_->GetPrintingPageRanges(frame));
 
   v8::Isolate* isolate = blink::MainThreadIsolate();
   v8::HandleScope handle_scope(isolate);
@@ -2194,9 +2169,10 @@ int TestRunnerBindings::WebHistoryItemCount() {
   if (invalid_)
     return 0;
 
-  // Returns the length of the session history of this RenderView. Note that
-  // this only coincides with the actual length of the session history if this
-  // RenderView is the currently active RenderView of a WebContents.
+  // Returns the length of the session history of this `blink::WebView`. Note
+  // that this only coincides with the actual length of the session history if
+  // this `blink::WebView` is the currently active `blink::WebView` of a
+  // WebContents.
   return frame_->GetWebFrame()->View()->HistoryBackListCount() +
          frame_->GetWebFrame()->View()->HistoryForwardListCount() + 1;
 }
@@ -2221,7 +2197,7 @@ void TestRunnerBindings::ForceNextDrawingBufferCreationToFail() {
 
 void TestRunnerBindings::NotImplemented(const gin::Arguments& args) {}
 
-// This class helps track active main windows and when the RenderView is
+// This class helps track active main windows and when the `blink::WebView` is
 // destroyed it will remove it from TestRunner's list.
 class TestRunner::MainWindowTracker : public blink::WebViewObserver {
  public:
@@ -2280,13 +2256,13 @@ void TestRunner::WorkQueue::ProcessWorkItem(mojom::WorkItemPtr work_item) {
 bool TestRunner::WorkQueue::ProcessWorkItemInternal(
     mojom::WorkItemPtr work_item) {
   switch (work_item->which()) {
-    case mojom::WorkItem::Tag::BACK_FORWARD: {
+    case mojom::WorkItem::Tag::kBackForward: {
       mojom::WorkItemBackForwardPtr& item_back_forward =
           work_item->get_back_forward();
       controller_->GoToOffset(item_back_forward->distance);
       return true;  // TODO(danakj): Did it really start a navigation?
     }
-    case mojom::WorkItem::Tag::LOADING_SCRIPT: {
+    case mojom::WorkItem::Tag::kLoadingScript: {
       mojom::WorkItemLoadingScriptPtr& item_loading_script =
           work_item->get_loading_script();
       WebFrameTestProxy* main_frame =
@@ -2296,7 +2272,7 @@ bool TestRunner::WorkQueue::ProcessWorkItemInternal(
           blink::WebString::FromUTF8(item_loading_script->script)));
       return true;  // TODO(danakj): Did it really start a navigation?
     }
-    case mojom::WorkItem::Tag::NON_LOADING_SCRIPT: {
+    case mojom::WorkItem::Tag::kNonLoadingScript: {
       mojom::WorkItemNonLoadingScriptPtr& item_non_loading_script =
           work_item->get_non_loading_script();
       WebFrameTestProxy* main_frame =
@@ -2306,12 +2282,12 @@ bool TestRunner::WorkQueue::ProcessWorkItemInternal(
           blink::WebString::FromUTF8(item_non_loading_script->script)));
       return false;
     }
-    case mojom::WorkItem::Tag::LOAD: {
+    case mojom::WorkItem::Tag::kLoad: {
       mojom::WorkItemLoadPtr& item_load = work_item->get_load();
       controller_->LoadURLForFrame(GURL(item_load->url), item_load->target);
       return true;  // TODO(danakj): Did it really start a navigation?
     }
-    case mojom::WorkItem::Tag::RELOAD:
+    case mojom::WorkItem::Tag::kReload:
       controller_->Reload();
       return true;
   }
@@ -2319,15 +2295,14 @@ bool TestRunner::WorkQueue::ProcessWorkItemInternal(
   return false;
 }
 
-void TestRunner::WorkQueue::ReplicateStates(
-    const base::DictionaryValue& values) {
+void TestRunner::WorkQueue::ReplicateStates(const base::Value::Dict& values) {
   states_.ApplyUntrackedChanges(values);
   if (!has_items())
     controller_->FinishTestIfReady();
 }
 
 void TestRunner::WorkQueue::OnStatesChanged() {
-  if (states_.changed_values().DictEmpty())
+  if (states_.changed_values().empty())
     return;
 
   controller_->GetWebTestControlHostRemote()->WorkQueueStatesChanged(
@@ -2405,7 +2380,6 @@ void TestRunner::ResetWebView(blink::WebView* web_view) {
   web_view->DisableAutoResizeForTesting(gfx::Size());
   web_view->SetScreenOrientationOverrideForTesting(
       fake_screen_orientation_impl_.CurrentOrientationType());
-  web_view->UseSynchronousResizeModeForTesting(false);
 }
 
 void TestRunner::ResetWebFrameWidget(blink::WebFrameWidget* web_frame_widget) {
@@ -2496,6 +2470,95 @@ bool TestRunner::CanDumpPixelsFromRenderer() const {
          web_test_runtime_flags_.is_printing();
 }
 
+gfx::Size TestRunner::GetPrintingPageSize(blink::WebLocalFrame* frame) const {
+  const int printing_width = web_test_runtime_flags_.printing_width();
+  const int printing_height = web_test_runtime_flags_.printing_height();
+
+  if (printing_width > 0 && printing_height > 0) {
+    return gfx::Size(printing_width, printing_height);
+  }
+
+  blink::WebFrameWidget* widget = frame->LocalRoot()->FrameWidget();
+  widget->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
+  return widget->Size();
+}
+
+static std::string GetPageRangesStringFromMetadata(
+    blink::WebLocalFrame* frame) {
+  blink::WebElementCollection meta_iter =
+      frame->GetDocument().GetElementsByHTMLTagName("meta");
+  std::string result = "-";
+
+  if (!meta_iter.IsNull()) {
+    for (blink::WebElement meta = meta_iter.FirstItem(); !meta.IsNull();
+         meta = meta_iter.NextItem()) {
+      if (meta.GetAttribute("name") == "reftest-pages") {
+        blink::WebString pages = meta.GetAttribute("content");
+
+        if (!pages.IsNull()) {
+          result = pages.Ascii();
+        }
+        break;  // We only take the ranges from the first tag.
+      }
+    }
+  }
+
+  return result;
+}
+
+printing::PageRanges TestRunner::GetPrintingPageRanges(
+    blink::WebLocalFrame* frame) const {
+  const std::string page_ranges_string = GetPageRangesStringFromMetadata(frame);
+  const std::vector<base::StringPiece> range_strings =
+      base::SplitStringPiece(page_ranges_string, ",", base::TRIM_WHITESPACE,
+                             base::SPLIT_WANT_NONEMPTY);
+  printing::PageRanges result;
+
+  for (const base::StringPiece& range_string : range_strings) {
+    // The format for each range is "<int> | <int>? - <int>?" where the page
+    // numbers are 1-indexed.
+    const std::vector<base::StringPiece> page_strings = base::SplitStringPiece(
+        range_string, "-", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+    bool invalid = false;
+
+    if (page_strings.size() == 1) {
+      uint32_t page;
+      if (base::StringToUint(range_string, &page)) {
+        result.push_back(printing::PageRange{.from = page - 1, .to = page - 1});
+      } else {
+        invalid = true;
+      }
+    } else if (page_strings.size() > 2) {
+      invalid = true;
+    } else {
+      std::array<uint32_t, 2> page_nums{0, printing::PageRange::kMaxPage};
+
+      for (const int i : {0, 1}) {
+        if (!page_strings[i].empty()) {
+          if (base::StringToUint(page_strings[i], &page_nums[i])) {
+            --page_nums[i];  // Change 1-indexing to 0-indexing.
+          } else {
+            invalid = true;
+            break;
+          }
+        }
+      }
+
+      if (!invalid) {
+        result.push_back(
+            printing::PageRange{.from = page_nums[0], .to = page_nums[1]});
+      }
+    }
+
+    if (invalid) {
+      DLOG(WARNING) << "Invalid page range \"" << range_string << "\".\n";
+    }
+  }
+
+  printing::PageRange::Normalize(result);
+  return result;
+}
+
 SkBitmap TestRunner::DumpPixelsInRenderer(blink::WebLocalFrame* main_frame) {
   DCHECK(!main_frame->Parent());
   DCHECK(CanDumpPixelsFromRenderer());
@@ -2521,7 +2584,8 @@ SkBitmap TestRunner::DumpPixelsInRenderer(blink::WebLocalFrame* main_frame) {
     if (frame_to_print && frame_to_print->IsWebLocalFrame())
       target_frame = frame_to_print->ToWebLocalFrame();
   }
-  return PrintFrameToBitmap(target_frame);
+  return PrintFrameToBitmap(target_frame, GetPrintingPageSize(target_frame),
+                            GetPrintingPageRanges(target_frame));
 #else
   NOTREACHED();
   return SkBitmap();
@@ -2529,7 +2593,7 @@ SkBitmap TestRunner::DumpPixelsInRenderer(blink::WebLocalFrame* main_frame) {
 }
 
 void TestRunner::ReplicateWebTestRuntimeFlagsChanges(
-    const base::DictionaryValue& changed_values) {
+    const base::Value::Dict& changed_values) {
   if (!test_is_running_)
     return;
 
@@ -2830,7 +2894,7 @@ void TestRunner::ProcessWorkItem(mojom::WorkItemPtr work_item) {
   work_queue_.ProcessWorkItem(std::move(work_item));
 }
 
-void TestRunner::ReplicateWorkQueueStates(const base::DictionaryValue& values) {
+void TestRunner::ReplicateWorkQueueStates(const base::Value::Dict& values) {
   if (!test_is_running_)
     return;
   work_queue_.ReplicateStates(values);
@@ -2884,15 +2948,25 @@ void TestRunner::SetMainWindowAndTestConfiguration(
   if (!test_config_.protocol_mode)
     SetShouldDumpAsLayout(true);
 
+  if (test_config_.wpt_print_mode) {
+    SetPrinting();
+    SetPrintingSize(kWPTPrintWidth, kWPTPrintHeight);
+  }
+
   // For http/tests/loading/, which is served via httpd and becomes /loading/.
   if (spec.find("/loading/") != std::string::npos)
     SetShouldDumpFrameLoadCallbacks(true);
 
-  if (spec.find("/external/wpt/") != std::string::npos ||
-      spec.find("/external/csswg-test/") != std::string::npos ||
-      spec.find("://web-platform.test") != std::string::npos ||
-      spec.find("/harness-tests/wpt/") != std::string::npos)
+  if (IsWebPlatformTest(spec)) {
     SetIsWebPlatformTestsMode();
+
+    if (spec.find("/print/") != std::string::npos ||
+        spec.find("-print.html") != std::string::npos) {
+      // This is a WPT print test so set default format for convenience.
+      SetPrinting();
+      SetPrintingSize(kWPTPrintWidth, kWPTPrintHeight);
+    }
+  }
 
   view->GetSettings()->SetV8CacheOptions(
       is_devtools_test ? blink::mojom::V8CacheOptions::kNone
@@ -2981,12 +3055,6 @@ void TestRunner::SetTextSubpixelPositioning(bool value) {
 #endif
 }
 
-void TestRunner::UseUnfortunateSynchronousResizeMode() {
-  // Sets the resize mode on the view of each open window.
-  SynchronousResizeModeVisitor visitor;
-  RenderView::ForEach(&visitor);
-}
-
 void TestRunner::SetMockScreenOrientation(blink::WebView* view,
                                           const std::string& orientation_str) {
   display::mojom::ScreenOrientation orientation;
@@ -3012,23 +3080,8 @@ void TestRunner::DisableMockScreenOrientation(blink::WebView* view) {
   fake_screen_orientation_impl_.SetDisabled(view, true);
 }
 
-std::string TestRunner::GetAcceptLanguages() const {
-  return web_test_runtime_flags_.accept_languages();
-}
-
 void TestRunner::SetAcceptLanguages(const std::string& accept_languages) {
-  if (accept_languages == GetAcceptLanguages())
-    return;
-
-  // TODO(danakj): IPC to WebTestControlHost, and have it change the
-  // WebContentsImpl::GetMutableRendererPrefs(). Then have the browser sync that
-  // to the window's RenderViews, instead of using WebTestRuntimeFlags for this.
-  web_test_runtime_flags_.set_accept_languages(accept_languages);
-  OnWebTestRuntimeFlagsChanged();
-
-  // Sets the accept language on the view of each open window.
-  SetAcceptLanguagesVisitor visitor(accept_languages);
-  RenderView::ForEach(&visitor);
+  GetWebTestControlHostRemote()->SetAcceptLanguages(accept_languages);
 }
 
 void TestRunner::DumpEditingCallbacks() {
@@ -3144,6 +3197,12 @@ void TestRunner::SetPrinting() {
 void TestRunner::SetPrintingForFrame(const std::string& frame_name) {
   web_test_runtime_flags_.set_printing_frame(frame_name);
   web_test_runtime_flags_.set_is_printing(true);
+  OnWebTestRuntimeFlagsChanged();
+}
+
+void TestRunner::SetPrintingSize(int width, int height) {
+  web_test_runtime_flags_.set_printing_width(width);
+  web_test_runtime_flags_.set_printing_height(height);
   OnWebTestRuntimeFlagsChanged();
 }
 
@@ -3295,7 +3354,7 @@ void TestRunner::OnWebTestRuntimeFlagsChanged() {
   // web flag changes in SetTestConfiguration().
   if (!test_is_running_)
     return;
-  if (web_test_runtime_flags_.tracked_dictionary().changed_values().DictEmpty())
+  if (web_test_runtime_flags_.tracked_dictionary().changed_values().empty())
     return;
 
   GetWebTestControlHostRemote()->WebTestRuntimeFlagsChanged(
@@ -3341,6 +3400,7 @@ void TestRunner::FinishTest() {
   // Clean out the lifecycle if needed before capturing the web tree
   // dump and pixels from the compositor.
   auto* web_frame = main_frame->GetWebFrame();
+  web_frame->FrameWidget()->PrepareForFinalLifecyclUpdateForTesting();
   web_frame->FrameWidget()->UpdateAllLifecyclePhases(
       blink::DocumentUpdateReason::kTest);
 
@@ -3364,7 +3424,7 @@ void TestRunner::FinishTest() {
       spec = spec.substr(path_start);
 
     std::string mime_type =
-        web_frame->GetDocumentLoader()->GetResponse().MimeType().Utf8();
+        web_frame->GetDocumentLoader()->GetWebResponse().MimeType().Utf8();
 
     // In a text/plain document, and in a dumpAsText/ subdirectory, we generate
     // text results no matter what the test may previously have requested.

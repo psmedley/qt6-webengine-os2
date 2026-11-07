@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium OS Authors. All rights reserved.
+// Copyright 2015 The ChromiumOS Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,6 +55,9 @@ const char kStartArcTimerMethod[] = "StartArcTimer";
 const char kDeleteArcTimersMethod[] = "DeleteArcTimers";
 const char kHasAmbientColorDeviceMethod[] = "HasAmbientColorDevice";
 const char kChangeWifiRegDomainMethod[] = "ChangeWifiRegDomain";
+const char kChargeNowForAdaptiveChargingMethod[] =
+    "ChargeNowForAdaptiveCharging";
+const char kGetChargeHistoryMethod[] = "GetChargeHistory";
 // TODO(b/166543531): Remove after migrating to BlueZ Battery Provider API.
 const char kRefreshBluetoothBatteryMethod[] = "RefreshBluetoothBattery";
 const char kRefreshAllPeripheralBatteryMethod[] = "RefreshAllPeripheralBattery";
@@ -73,6 +76,7 @@ const char kBatteryStatePollSignal[] = "BatteryStatePoll";
 const char kSuspendImminentSignal[] = "SuspendImminent";
 const char kDarkSuspendImminentSignal[] = "DarkSuspendImminent";
 const char kSuspendDoneSignal[] = "SuspendDone";
+const char kHibernateResumeReadySignal[] = "HibernateResumeReady";
 const char kInputEventSignal[] = "InputEvent";
 const char kIdleActionImminentSignal[] = "IdleActionImminent";
 const char kIdleActionDeferredSignal[] = "IdleActionDeferred";
@@ -119,6 +123,8 @@ enum RequestSuspendFlavor {
   REQUEST_SUSPEND_DEFAULT = 0,
   REQUEST_SUSPEND_TO_RAM = 1,
   REQUEST_SUSPEND_TO_DISK = 2,
+  RESUME_FROM_DISK_PREPARE = 3,
+  RESUME_FROM_DISK_ABORT = 4,
 };
 
 }  // namespace power_manager

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,9 @@ namespace l10n_util {
 
 // Takes normalized locale as |locale|. Returns language part (before '-').
 COMPONENT_EXPORT(UI_BASE) std::string GetLanguage(const std::string& locale);
+
+// Takes normalized locale as |locale|. Returns country part (after '-').
+COMPONENT_EXPORT(UI_BASE) std::string GetCountry(const std::string& locale);
 
 // This method translates a generic locale name to one of the locally defined
 // ones. This method returns true if it succeeds.
@@ -203,6 +206,7 @@ std::u16string GetStringFUTF16(int message_id,
 // ASCII digits in non-UI strings.
 COMPONENT_EXPORT(UI_BASE)
 std::u16string GetStringFUTF16Int(int message_id, int a);
+COMPONENT_EXPORT(UI_BASE)
 std::u16string GetStringFUTF16Int(int message_id, int64_t a);
 
 // Convenience functions to format a string with a single number that requires

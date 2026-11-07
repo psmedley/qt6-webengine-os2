@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "base/mac/scoped_nsobject.h"
+#include "base/memory/raw_ptr.h"
 #include "components/remote_cocoa/app_shim/native_widget_ns_window_host_helper.h"
 #include "components/remote_cocoa/app_shim/ns_view_ids.h"
 #include "components/remote_cocoa/browser/application_host.h"
@@ -67,6 +68,10 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   static NativeWidgetMacNSWindowHost* GetFromNativeWindow(
       gfx::NativeWindow window);
   static NativeWidgetMacNSWindowHost* GetFromNativeView(gfx::NativeView view);
+
+  // Key used to bind the content NSView to the overlay widget in immersive
+  // mode.
+  static const char kImmersiveContentNSView[];
 
   // Unique integer id handles are used to bridge between the
   // NativeWidgetMacNSWindowHost in one process and the NativeWidgetNSWindowHost
@@ -154,11 +159,8 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
 
   // Tell the window to transition to being fullscreen or not-fullscreen.
   // If `fullscreen` is true, then `target_display_id` specifies the display to
-  // which window should move (or an invalid display, to use the default). If
-  // `delay` is given, this sets the target fullscreen state and then posts a
-  // delayed task to request the window transition. See crbug.com/1210548.
+  // which window should move (or an invalid display, to use the default).
   void SetFullscreen(bool fullscreen,
-                     base::TimeDelta delay = {},
                      int64_t target_display_id = display::kInvalidDisplayId);
 
   // The ultimate fullscreen state that is being targeted (irrespective of any
@@ -191,9 +193,7 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
 
   // Geometry of the content area of the window, in DIPs. Note that this is not
   // necessarily the same as the views::View's size.
-  const gfx::Rect& GetContentBoundsInScreen() const {
-    return content_bounds_in_screen_;
-  }
+  gfx::Rect GetContentBoundsInScreen() const;
 
   // The display that the window is currently on (or best guess thereof).
   const display::Display& GetCurrentDisplay() const { return display_; }
@@ -227,6 +227,7 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   bool IsMiniaturized() const { return is_miniaturized_; }
   bool IsWindowKey() const { return is_window_key_; }
   bool IsMouseCaptureActive() const { return is_mouse_capture_active_; }
+  bool IsZoomed() const { return is_zoomed_; }
 
   // Add a NSEvent local event monitor, which will send events to `client`
   // before they are dispatched to their ordinary target. Clients may specify
@@ -249,15 +250,15 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   void RemoveRemoteWindowControlsOverlayView(
       remote_cocoa::mojom::WindowControlsOverlayNSViewType overlay_type);
 
+  // Notify PWA whether can GoBack/GoForward.
+  void CanGoBack(bool can_go_back);
+  void CanGoForward(bool can_go_forward);
+
  private:
   friend class TextInputHost;
 
   void UpdateCompositorProperties();
   void DestroyCompositor();
-
-  // This is used to request a delayed fullscreen window transition after some
-  // other window placement occurs; see SetFullscreen() and crbug.com/1210548.
-  static void SetFullscreenAfterDelay(uint64_t bridged_native_widget_id);
 
   // Sort |attached_native_view_host_views_| by the order in which their
   // NSViews should appear as subviews. This does a recursive pre-order
@@ -320,6 +321,7 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   void OnWindowFullscreenTransitionComplete(
       bool target_fullscreen_state) override;
   void OnWindowMiniaturizedChanged(bool miniaturized) override;
+  void OnWindowZoomedChanged(bool zoomed) override;
   void OnWindowDisplayChanged(const display::Display& display) override;
   void OnWindowWillClose() override;
   void OnWindowHasClosed() override;
@@ -345,12 +347,16 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   void SetRemoteAccessibilityTokens(
       const std::vector<uint8_t>& window_token,
       const std::vector<uint8_t>& view_token) override;
-  bool GetRootViewAccessibilityToken(int64_t* pid,
+  bool GetRootViewAccessibilityToken(base::ProcessId* pid,
                                      std::vector<uint8_t>* token) override;
   bool ValidateUserInterfaceItem(
       int32_t command,
       remote_cocoa::mojom::ValidateUserInterfaceItemResultPtr* out_result)
       override;
+  bool WillExecuteCommand(int32_t command,
+                          WindowOpenDisposition window_open_disposition,
+                          bool is_before_first_responder,
+                          bool* will_execute) override;
   bool ExecuteCommand(int32_t command,
                       WindowOpenDisposition window_open_disposition,
                       bool is_before_first_responder,
@@ -394,6 +400,10 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   void ValidateUserInterfaceItem(
       int32_t command,
       ValidateUserInterfaceItemCallback callback) override;
+  void WillExecuteCommand(int32_t command,
+                          WindowOpenDisposition window_open_disposition,
+                          bool is_before_first_responder,
+                          ExecuteCommandCallback callback) override;
   void ExecuteCommand(int32_t command,
                       WindowOpenDisposition window_open_disposition,
                       bool is_before_first_responder,
@@ -422,7 +432,8 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
 
   // The id that this bridge may be looked up from.
   const uint64_t widget_id_;
-  views::NativeWidgetMac* const native_widget_mac_;  // Weak. Owns |this_|.
+  const raw_ptr<views::NativeWidgetMac>
+      native_widget_mac_;  // Weak. Owns |this_|.
 
   // Structure used to look up this structure's interfaces from its
   // gfx::NativeWindow.
@@ -430,12 +441,12 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
       native_window_mapping_;
 
   // Parent and child widgets.
-  NativeWidgetMacNSWindowHost* parent_ = nullptr;
+  raw_ptr<NativeWidgetMacNSWindowHost> parent_ = nullptr;
   std::vector<NativeWidgetMacNSWindowHost*> children_;
 
   // The factory that was used to create |remote_ns_window_remote_|. This must
   // be the same as |parent_->application_host_|.
-  remote_cocoa::ApplicationHost* application_host_ = nullptr;
+  raw_ptr<remote_cocoa::ApplicationHost> application_host_ = nullptr;
 
   Widget::InitParams::Type widget_type_ = Widget::InitParams::TYPE_WINDOW;
 
@@ -443,7 +454,7 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   const uint64_t root_view_id_;
 
   // Weak. Owned by |native_widget_mac_|.
-  views::View* root_view_ = nullptr;
+  raw_ptr<views::View> root_view_ = nullptr;
 
   std::unique_ptr<DragDropClientMac> drag_drop_client_;
 
@@ -498,6 +509,7 @@ class VIEWS_EXPORT NativeWidgetMacNSWindowHost
   bool is_window_key_ = false;
   bool is_mouse_capture_active_ = false;
   bool is_headless_mode_window_ = false;
+  bool is_zoomed_ = false;
   gfx::Rect window_bounds_before_fullscreen_;
 
   // Weak pointers to event monitors for this widget. The event monitors

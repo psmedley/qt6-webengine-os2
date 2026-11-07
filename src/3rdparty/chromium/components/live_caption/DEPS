@@ -1,7 +1,7 @@
 include_rules = [
   "+ash/constants",
   "+base",
-  "+chromeos/lacros",
+  "+chromeos/startup",
   "+components/keyed_service/core",
   "+components/prefs",
   "+components/pref_registry",
@@ -14,6 +14,7 @@ include_rules = [
   "+ui/accessibility",
   "+ui/base",
   "+ui/color",
+  "+ui/events",
   "+ui/gfx",
   "+ui/native_theme",
   "+ui/strings",

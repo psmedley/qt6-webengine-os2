@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/remote_cocoa/common/select_file_dialog.mojom.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -48,7 +49,8 @@ class SHELL_DIALOGS_EXPORT SelectFileDialogImpl : public ui::SelectFileDialog {
                       int file_type_index,
                       const base::FilePath::StringType& default_extension,
                       gfx::NativeWindow owning_window,
-                      void* params) override;
+                      void* params,
+                      const GURL* caller) override;
 
  private:
   friend class test::SelectFileDialogMacTest;
@@ -66,7 +68,7 @@ class SHELL_DIALOGS_EXPORT SelectFileDialogImpl : public ui::SelectFileDialog {
     gfx::NativeWindow parent_window;
 
     // |params| user data associated with this file dialog.
-    void* params;
+    raw_ptr<void> params;
 
     // Bridge to the Cocoa NSSavePanel.
     mojo::Remote<remote_cocoa::mojom::SelectFileDialog> select_file_dialog;
@@ -98,4 +100,3 @@ class SHELL_DIALOGS_EXPORT SelectFileDialogImpl : public ui::SelectFileDialog {
 }  // namespace ui
 
 #endif  //  UI_SHELL_DIALOGS_SELECT_FILE_DIALOG_MAC_H_
-

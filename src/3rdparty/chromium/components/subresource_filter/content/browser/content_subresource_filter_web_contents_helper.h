@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -167,7 +167,7 @@ class ContentSubresourceFilterWebContentsHelper
   void OnPageActivationComputed(
       content::NavigationHandle* navigation_handle,
       const mojom::ActivationState& activation_state) override;
-  void OnSubframeNavigationEvaluated(
+  void OnChildFrameNavigationEvaluated(
       content::NavigationHandle* navigation_handle,
       LoadPolicy load_policy) override;
 

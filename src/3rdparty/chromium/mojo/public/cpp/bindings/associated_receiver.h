@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,7 +68,7 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) AssociatedReceiverBase {
                 scoped_refptr<base::SequencedTaskRunner> runner,
                 uint32_t interface_version,
                 const char* interface_name,
-                MessageToStableIPCHashCallback ipc_hash_callback,
+                MessageToMethodInfoCallback method_info_callback,
                 MessageToMethodNameCallback method_name_callback);
 
   std::unique_ptr<InterfaceEndpointClient> endpoint_client_;
@@ -186,7 +186,8 @@ class AssociatedReceiver : public internal::AssociatedReceiverBase {
   // current SequencedTaskRunner.
   [[nodiscard]] PendingAssociatedRemote<Interface> BindNewEndpointAndPassRemote(
       scoped_refptr<base::SequencedTaskRunner> task_runner = nullptr) {
-    DCHECK(!is_bound()) << "AssociatedReceiver is already bound";
+    DCHECK(!is_bound()) << "AssociatedReceiver for " << Interface::Name_
+                        << " is already bound";
 
     PendingAssociatedRemote<Interface> remote;
     Bind(remote.InitWithNewEndpointAndPassReceiver(), std::move(task_runner));
@@ -200,14 +201,15 @@ class AssociatedReceiver : public internal::AssociatedReceiverBase {
   // current SequencedTaskRunner.
   void Bind(PendingAssociatedReceiver<Interface> pending_receiver,
             scoped_refptr<base::SequencedTaskRunner> task_runner = nullptr) {
-    DCHECK(!is_bound()) << "AssociatedReceiver is already bound";
+    DCHECK(!is_bound()) << "AssociatedReceiver for " << Interface::Name_
+                        << " is already bound";
 
     if (pending_receiver) {
       BindImpl(pending_receiver.PassHandle(), &stub_,
                base::WrapUnique(new typename Interface::RequestValidator_()),
                internal::SyncMethodTraits<Interface>::GetOrdinals(),
                std::move(task_runner), Interface::Version_, Interface::Name_,
-               Interface::MessageToStableIPCHash_,
+               Interface::MessageToMethodInfo_,
                Interface::MessageToMethodName_);
     } else {
       reset();
@@ -225,7 +227,8 @@ class AssociatedReceiver : public internal::AssociatedReceiverBase {
   // endpoints in tests.
   [[nodiscard]] PendingAssociatedRemote<Interface>
   BindNewEndpointAndPassDedicatedRemote() {
-    DCHECK(!is_bound()) << "AssociatedReceiver is already bound";
+    DCHECK(!is_bound()) << "AssociatedReceiver for " << Interface::Name_
+                        << " is already bound";
 
     PendingAssociatedRemote<Interface> remote = BindNewEndpointAndPassRemote();
     remote.EnableUnassociatedUsage();

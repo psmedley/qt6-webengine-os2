@@ -7,201 +7,186 @@
 
 #include "src/core/SkKeyHelpers.h"
 
+#include "include/core/SkData.h"
+#include "include/effects/SkRuntimeEffect.h"
 #include "src/core/SkDebugUtils.h"
 #include "src/core/SkKeyContext.h"
 #include "src/core/SkPaintParamsKey.h"
 #include "src/core/SkPipelineData.h"
+#include "src/core/SkRuntimeEffectDictionary.h"
+#include "src/core/SkRuntimeEffectPriv.h"
 #include "src/core/SkShaderCodeDictionary.h"
 #include "src/core/SkUniform.h"
-#include "src/shaders/SkShaderBase.h"
+#include "src/shaders/SkImageShader.h"
 
 #ifdef SK_GRAPHITE_ENABLED
 #include "src/gpu/Blend.h"
+#include "src/gpu/graphite/RecorderPriv.h"
+#include "src/gpu/graphite/ResourceProvider.h"
 #include "src/gpu/graphite/Texture.h"
 #include "src/gpu/graphite/TextureProxy.h"
 #include "src/gpu/graphite/UniformManager.h"
+
+constexpr SkPMColor4f kErrorColor = { 1, 0, 0, 1 };
 #endif
 
 #define VALIDATE_UNIFORMS(gatherer, dict, codeSnippetID) \
-    SkDEBUGCODE(UniformExpectationsValidator uev( \
-        gatherer, dict->getUniforms(SkBuiltInCodeSnippetID::codeSnippetID));)
+    SkDEBUGCODE(UniformExpectationsValidator uev(gatherer, dict->getUniforms(codeSnippetID));)
 
-constexpr SkPMColor4f kErrorColor = { 1, 0, 0, 1 };
+//--------------------------------------------------------------------------------------------------
 
-namespace {
-
-// This can be used to catch errors in blocks that have a fixed, known block data size
-void validate_block_header(const SkPaintParamsKeyBuilder* builder,
-                           SkBuiltInCodeSnippetID codeSnippetID,
-                           int blockDataSize) {
-    SkDEBUGCODE(int fullBlockSize = SkPaintParamsKey::kBlockHeaderSizeInBytes + blockDataSize;)
-    SkDEBUGCODE(int headerOffset = builder->sizeInBytes() - fullBlockSize;)
-    SkASSERT(builder->byte(headerOffset) == static_cast<int>(codeSnippetID));
-    SkASSERT(builder->byte(headerOffset+SkPaintParamsKey::kBlockSizeOffsetInBytes) ==
-             fullBlockSize);
-}
-
+void PassthroughShaderBlock::BeginBlock(const SkKeyContext& keyContext,
+                                        SkPaintParamsKeyBuilder* builder,
+                                        SkPipelineDataGatherer* gatherer) {
 #ifdef SK_GRAPHITE_ENABLED
-void add_blendmode_to_key(SkPaintParamsKeyBuilder* builder, SkBlendMode bm) {
-    static_assert(SkTFitsIn<uint8_t>(static_cast<int>(SkBlendMode::kLastMode)));
-    builder->addByte(static_cast<uint8_t>(bm));
-}
-
+    builder->beginBlock(SkBuiltInCodeSnippetID::kPassthroughShader);
 #endif // SK_GRAPHITE_ENABLED
-
-} // anonymous namespace
-
-//--------------------------------------------------------------------------------------------------
-namespace DepthStencilOnlyBlock {
-
-static const int kBlockDataSize = 0;
-
-void AddToKey(const SkKeyContext& /* keyContext */,
-              SkPaintParamsKeyBuilder* builder,
-              SkPipelineDataGatherer* /* gatherer */) {
-    builder->beginBlock(SkBuiltInCodeSnippetID::kDepthStencilOnlyDraw);
-    builder->endBlock();
-
-    validate_block_header(builder,
-                          SkBuiltInCodeSnippetID::kDepthStencilOnlyDraw,
-                          kBlockDataSize);
 }
 
-} // namespace DepthStencilOnlyBlock
+//--------------------------------------------------------------------------------------------------
+
+void PassthroughBlenderBlock::BeginBlock(const SkKeyContext& keyContext,
+                                         SkPaintParamsKeyBuilder* builder,
+                                         SkPipelineDataGatherer* gatherer) {
+#ifdef SK_GRAPHITE_ENABLED
+    builder->beginBlock(SkBuiltInCodeSnippetID::kPassthroughBlender);
+#endif // SK_GRAPHITE_ENABLED
+}
 
 //--------------------------------------------------------------------------------------------------
-namespace SolidColorShaderBlock {
-
-namespace {
 
 #ifdef SK_GRAPHITE_ENABLED
-static const int kBlockDataSize = 0;
+
+namespace {
 
 void add_solid_uniform_data(const SkShaderCodeDictionary* dict,
                             const SkPMColor4f& premulColor,
                             SkPipelineDataGatherer* gatherer) {
-    VALIDATE_UNIFORMS(gatherer, dict, kSolidColorShader)
+    VALIDATE_UNIFORMS(gatherer, dict, SkBuiltInCodeSnippetID::kSolidColorShader)
     gatherer->write(premulColor);
+
+    gatherer->addFlags(dict->getSnippetRequirementFlags(SkBuiltInCodeSnippetID::kSolidColorShader));
 }
-#endif // SK_GRAPHITE_ENABLED
 
 } // anonymous namespace
 
-void AddToKey(const SkKeyContext& keyContext,
-              SkPaintParamsKeyBuilder* builder,
-              SkPipelineDataGatherer* gatherer,
-              const SkPMColor4f& premulColor) {
-
-#ifdef SK_GRAPHITE_ENABLED
-    if (builder->backend() == SkBackend::kGraphite) {
-        auto dict = keyContext.dict();
-
-        builder->beginBlock(SkBuiltInCodeSnippetID::kSolidColorShader);
-        builder->endBlock();
-
-        validate_block_header(builder,
-                              SkBuiltInCodeSnippetID::kSolidColorShader,
-                              kBlockDataSize);
-
-        if (gatherer) {
-            add_solid_uniform_data(dict, premulColor, gatherer);
-        }
-        return;
-    }
 #endif // SK_GRAPHITE_ENABLED
 
-    if (builder->backend() == SkBackend::kSkVM || builder->backend() == SkBackend::kGanesh) {
-        // TODO: add implementation of other backends
+void SolidColorShaderBlock::BeginBlock(const SkKeyContext& keyContext,
+                                       SkPaintParamsKeyBuilder* builder,
+                                       SkPipelineDataGatherer* gatherer,
+                                       const SkPMColor4f& premulColor) {
+#ifdef SK_GRAPHITE_ENABLED
+    if (gatherer) {
+        auto dict = keyContext.dict();
+
+        add_solid_uniform_data(dict, premulColor, gatherer);
     }
 
+    builder->beginBlock(SkBuiltInCodeSnippetID::kSolidColorShader);
+#endif // SK_GRAPHITE_ENABLED
 }
 
-} // namespace SolidColorShaderBlock
-
 //--------------------------------------------------------------------------------------------------
-namespace GradientShaderBlocks {
+
+#ifdef SK_GRAPHITE_ENABLED
 
 namespace {
 
-#ifdef SK_GRAPHITE_ENABLED
-static const int kBlockDataSize = 1;
-
 void add_linear_gradient_uniform_data(const SkShaderCodeDictionary* dict,
-                                      const GradientData& gradData,
+                                      SkBuiltInCodeSnippetID codeSnippetID,
+                                      const GradientShaderBlocks::GradientData& gradData,
                                       SkPipelineDataGatherer* gatherer) {
-    VALIDATE_UNIFORMS(gatherer, dict, kLinearGradientShader)
-    gatherer->write(gradData.fColor4fs, GradientData::kMaxStops);
-    gatherer->write(gradData.fOffsets, GradientData::kMaxStops);
+    VALIDATE_UNIFORMS(gatherer, dict, codeSnippetID)
+    int stops = codeSnippetID == SkBuiltInCodeSnippetID::kLinearGradientShader4 ? 4 : 8;
+
+    gatherer->write(gradData.fColor4fs, stops);
+    gatherer->write(gradData.fOffsets, stops);
     gatherer->write(gradData.fPoints[0]);
     gatherer->write(gradData.fPoints[1]);
-    gatherer->write(gradData.fRadii[0]);        // unused
-    gatherer->write(gradData.fRadii[1]);        // unused
-    gatherer->write(SkPoint::Make(0.0f, 0.0f)); // padding
+    gatherer->write(static_cast<int>(gradData.fTM));
+
+    gatherer->addFlags(dict->getSnippetRequirementFlags(codeSnippetID));
 };
 
 void add_radial_gradient_uniform_data(const SkShaderCodeDictionary* dict,
-                                      const GradientData& gradData,
+                                      SkBuiltInCodeSnippetID codeSnippetID,
+                                      const GradientShaderBlocks::GradientData& gradData,
                                       SkPipelineDataGatherer* gatherer) {
-    VALIDATE_UNIFORMS(gatherer, dict, kRadialGradientShader)
-    gatherer->write(gradData.fColor4fs, GradientData::kMaxStops);
-    gatherer->write(gradData.fOffsets, GradientData::kMaxStops);
+    VALIDATE_UNIFORMS(gatherer, dict, codeSnippetID)
+    int stops = codeSnippetID == SkBuiltInCodeSnippetID::kRadialGradientShader4 ? 4 : 8;
+
+    gatherer->write(gradData.fColor4fs, stops);
+    gatherer->write(gradData.fOffsets, stops);
     gatherer->write(gradData.fPoints[0]);
-    gatherer->write(gradData.fPoints[1]);       // unused
     gatherer->write(gradData.fRadii[0]);
-    gatherer->write(gradData.fRadii[1]);        // unused
-    gatherer->write(SkPoint::Make(0.0f, 0.0f)); // padding
+    gatherer->write(static_cast<int>(gradData.fTM));
+
+    gatherer->addFlags(dict->getSnippetRequirementFlags(codeSnippetID));
 };
 
 void add_sweep_gradient_uniform_data(const SkShaderCodeDictionary* dict,
-                                     const GradientData& gradData,
+                                     SkBuiltInCodeSnippetID codeSnippetID,
+                                     const GradientShaderBlocks::GradientData& gradData,
                                      SkPipelineDataGatherer* gatherer) {
-    VALIDATE_UNIFORMS(gatherer, dict, kSweepGradientShader)
-    gatherer->write(gradData.fColor4fs, GradientData::kMaxStops);
-    gatherer->write(gradData.fOffsets, GradientData::kMaxStops);
+    VALIDATE_UNIFORMS(gatherer, dict, codeSnippetID)
+    int stops = codeSnippetID == SkBuiltInCodeSnippetID::kSweepGradientShader4 ? 4 : 8;
+
+    gatherer->write(gradData.fColor4fs, stops);
+    gatherer->write(gradData.fOffsets, stops);
     gatherer->write(gradData.fPoints[0]);
-    gatherer->write(gradData.fPoints[1]);       // unused
-    gatherer->write(gradData.fRadii[0]);        // unused
-    gatherer->write(gradData.fRadii[1]);        // unused
-    gatherer->write(SkPoint::Make(0.0f, 0.0f)); // padding
+    gatherer->write(gradData.fBias);
+    gatherer->write(gradData.fScale);
+    gatherer->write(static_cast<int>(gradData.fTM));
+
+    gatherer->addFlags(dict->getSnippetRequirementFlags(codeSnippetID));
 };
 
 void add_conical_gradient_uniform_data(const SkShaderCodeDictionary* dict,
-                                       const GradientData& gradData,
+                                       SkBuiltInCodeSnippetID codeSnippetID,
+                                       const GradientShaderBlocks::GradientData& gradData,
                                        SkPipelineDataGatherer* gatherer) {
-    VALIDATE_UNIFORMS(gatherer, dict, kConicalGradientShader)
-    gatherer->write(gradData.fColor4fs, GradientData::kMaxStops);
-    gatherer->write(gradData.fOffsets, GradientData::kMaxStops);
+    VALIDATE_UNIFORMS(gatherer, dict, codeSnippetID)
+    int stops = codeSnippetID == SkBuiltInCodeSnippetID::kConicalGradientShader4 ? 4 : 8;
+
+    gatherer->write(gradData.fColor4fs, stops);
+    gatherer->write(gradData.fOffsets, stops);
     gatherer->write(gradData.fPoints[0]);
     gatherer->write(gradData.fPoints[1]);
     gatherer->write(gradData.fRadii[0]);
     gatherer->write(gradData.fRadii[1]);
-    gatherer->write(SkPoint::Make(0.0f, 0.0f)); // padding
-};
+    gatherer->write(static_cast<int>(gradData.fTM));
 
-#endif // SK_GRAPHITE_ENABLED
+    gatherer->addFlags(dict->getSnippetRequirementFlags(codeSnippetID));
+};
 
 } // anonymous namespace
 
-GradientData::GradientData(SkShader::GradientType type,
-                           SkTileMode tm,
-                           int numStops)
+#endif // SK_GRAPHITE_ENABLED
+
+GradientShaderBlocks::GradientData::GradientData(SkShaderBase::GradientType type, int numStops)
         : fType(type)
         , fPoints{{0.0f, 0.0f}, {0.0f, 0.0f}}
         , fRadii{0.0f, 0.0f}
-        , fTM(tm)
+        , fBias(0.0f)
+        , fScale(0.0f)
+        , fTM(SkTileMode::kClamp)
         , fNumStops(numStops) {
     sk_bzero(fColor4fs, sizeof(fColor4fs));
     sk_bzero(fOffsets, sizeof(fOffsets));
 }
 
-GradientData::GradientData(SkShader::GradientType type,
-                           SkPoint point0, SkPoint point1,
-                           float radius0, float radius1,
-                           SkTileMode tm,
-                           int numStops,
-                           SkColor4f* color4fs,
-                           float* offsets)
+GradientShaderBlocks::GradientData::GradientData(SkShaderBase::GradientType type,
+                                                 SkPoint point0, SkPoint point1,
+                                                 float radius0, float radius1,
+                                                 float bias, float scale,
+                                                 SkTileMode tm,
+                                                 int numStops,
+                                                 SkColor4f* color4fs,
+                                                 float* offsets)
         : fType(type)
+        , fBias(bias)
+        , fScale(scale)
         , fTM(tm)
         , fNumStops(std::min(numStops, kMaxStops)) {
     SkASSERT(fNumStops >= 1);
@@ -227,215 +212,353 @@ GradientData::GradientData(SkShader::GradientType type,
     }
 }
 
-void AddToKey(const SkKeyContext& keyContext,
-              SkPaintParamsKeyBuilder *builder,
-              SkPipelineDataGatherer* gatherer,
-              const GradientData& gradData) {
-
+void GradientShaderBlocks::BeginBlock(const SkKeyContext& keyContext,
+                                      SkPaintParamsKeyBuilder *builder,
+                                      SkPipelineDataGatherer* gatherer,
+                                      const GradientData& gradData) {
 #ifdef SK_GRAPHITE_ENABLED
-    if (builder->backend() == SkBackend::kGraphite) {
-        auto dict = keyContext.dict();
-        SkBuiltInCodeSnippetID codeSnippetID = SkBuiltInCodeSnippetID::kSolidColorShader;
-        switch (gradData.fType) {
-            case SkShader::kLinear_GradientType:
-                codeSnippetID = SkBuiltInCodeSnippetID::kLinearGradientShader;
-                if (gatherer) {
-                    add_linear_gradient_uniform_data(dict, gradData, gatherer);
-                }
-                break;
-            case SkShader::kRadial_GradientType:
-                codeSnippetID = SkBuiltInCodeSnippetID::kRadialGradientShader;
-                if (gatherer) {
-                    add_radial_gradient_uniform_data(dict, gradData, gatherer);
-                }
-                break;
-            case SkShader::kSweep_GradientType:
-                codeSnippetID = SkBuiltInCodeSnippetID::kSweepGradientShader;
-                if (gatherer) {
-                    add_sweep_gradient_uniform_data(dict, gradData, gatherer);
-                }
-                break;
-            case SkShader::GradientType::kConical_GradientType:
-                codeSnippetID = SkBuiltInCodeSnippetID::kConicalGradientShader;
-                if (gatherer) {
-                    add_conical_gradient_uniform_data(dict, gradData, gatherer);
-                }
-                break;
-            case SkShader::GradientType::kColor_GradientType:
-            case SkShader::GradientType::kNone_GradientType:
-            default:
-                SkASSERT(0);
-                break;
-        }
-
-        builder->beginBlock(codeSnippetID);
-
-        SkASSERT(static_cast<int>(gradData.fTM) <= std::numeric_limits<uint8_t>::max());
-        builder->addByte(static_cast<uint8_t>(gradData.fTM));
-
-        builder->endBlock();
-
-        validate_block_header(builder, codeSnippetID, kBlockDataSize);
-        return;
+    auto dict = keyContext.dict();
+    SkBuiltInCodeSnippetID codeSnippetID = SkBuiltInCodeSnippetID::kSolidColorShader;
+    switch (gradData.fType) {
+        case SkShaderBase::GradientType::kLinear:
+            codeSnippetID = gradData.fNumStops <= 4
+                                    ? SkBuiltInCodeSnippetID::kLinearGradientShader4
+                                    : SkBuiltInCodeSnippetID::kLinearGradientShader8;
+            if (gatherer) {
+                add_linear_gradient_uniform_data(dict, codeSnippetID, gradData, gatherer);
+            }
+            break;
+        case SkShaderBase::GradientType::kRadial:
+            codeSnippetID = gradData.fNumStops <= 4
+                                    ? SkBuiltInCodeSnippetID::kRadialGradientShader4
+                                    : SkBuiltInCodeSnippetID::kRadialGradientShader8;
+            if (gatherer) {
+                add_radial_gradient_uniform_data(dict, codeSnippetID, gradData, gatherer);
+            }
+            break;
+        case SkShaderBase::GradientType::kSweep:
+            codeSnippetID = gradData.fNumStops <= 4
+                                    ? SkBuiltInCodeSnippetID::kSweepGradientShader4
+                                    : SkBuiltInCodeSnippetID::kSweepGradientShader8;
+            if (gatherer) {
+                add_sweep_gradient_uniform_data(dict, codeSnippetID, gradData, gatherer);
+            }
+            break;
+        case SkShaderBase::GradientType::kConical:
+            codeSnippetID = gradData.fNumStops <= 4
+                                    ? SkBuiltInCodeSnippetID::kConicalGradientShader4
+                                    : SkBuiltInCodeSnippetID::kConicalGradientShader8;
+            if (gatherer) {
+                add_conical_gradient_uniform_data(dict, codeSnippetID, gradData, gatherer);
+            }
+            break;
+        case SkShaderBase::GradientType::kColor:
+        case SkShaderBase::GradientType::kNone:
+        default:
+            SkASSERT(0);
+            break;
     }
+
+    builder->beginBlock(codeSnippetID);
 #endif // SK_GRAPHITE_ENABLED
-
-    if (builder->backend() == SkBackend::kSkVM || builder->backend() == SkBackend::kGanesh) {
-        // TODO: add implementation of other backends
-        SolidColorShaderBlock::AddToKey(keyContext, builder, gatherer, kErrorColor);
-    }
 }
 
-} // namespace GradientShaderBlocks
-
 //--------------------------------------------------------------------------------------------------
-namespace ImageShaderBlock {
+
+#ifdef SK_GRAPHITE_ENABLED
 
 namespace {
 
-#ifdef SK_GRAPHITE_ENABLED
+void add_localmatrixshader_uniform_data(const SkShaderCodeDictionary* dict,
+                                        const SkM44& localMatrix,
+                                        SkPipelineDataGatherer* gatherer) {
+    VALIDATE_UNIFORMS(gatherer, dict, SkBuiltInCodeSnippetID::kLocalMatrixShader)
 
-void add_image_uniform_data(const SkShaderCodeDictionary* dict,
-                            const ImageData& imgData,
-                            SkPipelineDataGatherer* gatherer) {
-    VALIDATE_UNIFORMS(gatherer, dict, kImageShader)
-    gatherer->write(imgData.fSubset);
+    SkM44 lmInverse;
+    bool wasInverted = localMatrix.invert(&lmInverse);  // TODO: handle failure up stack
+    if (!wasInverted) {
+        lmInverse.setIdentity();
+    }
+
+    gatherer->write(lmInverse);
+
+    gatherer->addFlags(
+            dict->getSnippetRequirementFlags(SkBuiltInCodeSnippetID::kLocalMatrixShader));
 }
-
-#endif // SK_GRAPHITE_ENABLED
 
 } // anonymous namespace
 
-ImageData::ImageData(const SkSamplingOptions& sampling,
-                     SkTileMode tileModeX,
-                     SkTileMode tileModeY,
-                     SkRect subset)
+#endif // SK_GRAPHITE_ENABLED
+
+void LocalMatrixShaderBlock::BeginBlock(const SkKeyContext& keyContext,
+                                        SkPaintParamsKeyBuilder* builder,
+                                        SkPipelineDataGatherer* gatherer,
+                                        const LMShaderData& lmShaderData) {
+
+#ifdef SK_GRAPHITE_ENABLED
+    auto dict = keyContext.dict();
+    // When extracted into SkShaderInfo::SnippetEntries the children will appear after their
+    // parent. Thus, the parent's uniform data must appear in the uniform block before the
+    // uniform data of the children.
+    if (gatherer) {
+        add_localmatrixshader_uniform_data(dict, lmShaderData.fLocalMatrix, gatherer);
+    }
+
+    builder->beginBlock(SkBuiltInCodeSnippetID::kLocalMatrixShader);
+#endif // SK_GRAPHITE_ENABLED
+}
+
+//--------------------------------------------------------------------------------------------------
+
+#ifdef SK_GRAPHITE_ENABLED
+
+namespace {
+
+void add_image_uniform_data(const SkShaderCodeDictionary* dict,
+                            const ImageShaderBlock::ImageData& imgData,
+                            SkPipelineDataGatherer* gatherer) {
+    VALIDATE_UNIFORMS(gatherer, dict, SkBuiltInCodeSnippetID::kImageShader)
+
+    gatherer->write(SkPoint::Make(imgData.fTextureProxy->dimensions().fWidth,
+                                  imgData.fTextureProxy->dimensions().fHeight));
+    gatherer->write(imgData.fSubset);
+    gatherer->write(SkTo<int>(imgData.fTileModes[0]));
+    gatherer->write(SkTo<int>(imgData.fTileModes[1]));
+    gatherer->write(SkTo<int>(imgData.fSampling.filter));
+    gatherer->write(imgData.fSampling.useCubic);
+    if (imgData.fSampling.useCubic) {
+        const SkCubicResampler& cubic = imgData.fSampling.cubic;
+        gatherer->write(SkImageShader::CubicResamplerMatrix(cubic.B, cubic.C));
+    } else {
+        gatherer->write(SkM44());
+    }
+
+    gatherer->addFlags(dict->getSnippetRequirementFlags(SkBuiltInCodeSnippetID::kImageShader));
+}
+
+} // anonymous namespace
+
+#endif // SK_GRAPHITE_ENABLED
+
+ImageShaderBlock::ImageData::ImageData(const SkSamplingOptions& sampling,
+                                       SkTileMode tileModeX,
+                                       SkTileMode tileModeY,
+                                       SkRect subset)
     : fSampling(sampling)
     , fTileModes{tileModeX, tileModeY}
     , fSubset(subset) {
 }
 
-void AddToKey(const SkKeyContext& keyContext,
-              SkPaintParamsKeyBuilder* builder,
-              SkPipelineDataGatherer* gatherer,
-              const ImageData& imgData) {
+void ImageShaderBlock::BeginBlock(const SkKeyContext& keyContext,
+                                  SkPaintParamsKeyBuilder* builder,
+                                  SkPipelineDataGatherer* gatherer,
+                                  const ImageData& imgData) {
 
 #ifdef SK_GRAPHITE_ENABLED
-    if (builder->backend() == SkBackend::kGraphite) {
-        // TODO: allow through lazy proxies
-        if (gatherer && !imgData.fTextureProxy) {
-            // We're dropping the ImageShader here. This could be an instance of trying to draw
-            // a raster-backed image w/ a Graphite-backed canvas.
-            // TODO: At some point the pre-compile path should also be creating a texture
-            // proxy (i.e., we can remove the 'pipelineData' in the above test).
-            SolidColorShaderBlock::AddToKey(keyContext, builder, gatherer, kErrorColor);
-            return;
-        }
-
-        auto dict = keyContext.dict();
-        builder->beginBlock(SkBuiltInCodeSnippetID::kImageShader);
-
-        // TODO: bytes are overkill for just tilemodes. We could add smaller/bit-width
-        // types.
-        static_assert(SkTFitsIn<uint8_t>(SkTileMode::kLastTileMode));
-        builder->addByte(static_cast<uint8_t>(imgData.fTileModes[0]));
-        builder->addByte(static_cast<uint8_t>(imgData.fTileModes[1]));
-
-        builder->endBlock();
-
-        if (gatherer) {
-            gatherer->add(imgData.fSampling,
-                          imgData.fTileModes,
-                          std::move(imgData.fTextureProxy));
-
-            add_image_uniform_data(dict, imgData, gatherer);
-        }
-
+    // TODO: allow through lazy proxies
+    if (gatherer && !imgData.fTextureProxy) {
+        // TODO: At some point the pre-compile path should also be creating a texture
+        // proxy (i.e., we can remove the 'pipelineData' in the above test).
+        SolidColorShaderBlock::BeginBlock(keyContext, builder, gatherer, kErrorColor);
         return;
     }
-#endif // SK_GRAPHITE_ENABLED
 
-    if (builder->backend() == SkBackend::kSkVM || builder->backend() == SkBackend::kGanesh) {
-        // TODO: add implementation for other backends
-        SolidColorShaderBlock::AddToKey(keyContext, builder, gatherer, kErrorColor);
+    auto dict = keyContext.dict();
+    if (gatherer) {
+        gatherer->add(imgData.fSampling,
+                      imgData.fTileModes,
+                      imgData.fTextureProxy);
+
+        add_image_uniform_data(dict, imgData, gatherer);
     }
+
+    builder->beginBlock(SkBuiltInCodeSnippetID::kImageShader);
+#endif // SK_GRAPHITE_ENABLED
 }
 
-} // namespace ImageShaderBlock
+//--------------------------------------------------------------------------------------------------
+
+void PorterDuffBlendShaderBlock::BeginBlock(const SkKeyContext& keyContext,
+                                            SkPaintParamsKeyBuilder* builder,
+                                            SkPipelineDataGatherer* gatherer,
+                                            const PorterDuffBlendShaderData& blendData) {
+#ifdef SK_GRAPHITE_ENABLED
+    auto dict = keyContext.dict();
+    // When extracted into SkShaderInfo::SnippetEntries the children will appear after their
+    // parent. Thus, the parent's uniform data must appear in the uniform block before the
+    // uniform data of the children.
+    if (gatherer) {
+        VALIDATE_UNIFORMS(gatherer, dict, SkBuiltInCodeSnippetID::kPorterDuffBlendShader)
+        gatherer->write(SkSLType::kHalf4, 1, blendData.fPorterDuffConstants.data());
+        gatherer->addFlags(
+                dict->getSnippetRequirementFlags(SkBuiltInCodeSnippetID::kPorterDuffBlendShader));
+    }
+
+    builder->beginBlock(SkBuiltInCodeSnippetID::kPorterDuffBlendShader);
+#endif // SK_GRAPHITE_ENABLED
+}
 
 //--------------------------------------------------------------------------------------------------
-namespace BlendShaderBlock {
+
+void BlendShaderBlock::BeginBlock(const SkKeyContext& keyContext,
+                                  SkPaintParamsKeyBuilder* builder,
+                                  SkPipelineDataGatherer* gatherer,
+                                  const BlendShaderData& blendData) {
+#ifdef SK_GRAPHITE_ENABLED
+    auto dict = keyContext.dict();
+    // When extracted into SkShaderInfo::SnippetEntries the children will appear after their
+    // parent. Thus, the parent's uniform data must appear in the uniform block before the
+    // uniform data of the children.
+    if (gatherer) {
+        VALIDATE_UNIFORMS(gatherer, dict, SkBuiltInCodeSnippetID::kBlendShader)
+        gatherer->write(SkTo<int>(blendData.fBM));
+
+        gatherer->addFlags(dict->getSnippetRequirementFlags(SkBuiltInCodeSnippetID::kBlendShader));
+    }
+
+    builder->beginBlock(SkBuiltInCodeSnippetID::kBlendShader);
+#endif // SK_GRAPHITE_ENABLED
+}
+
+//--------------------------------------------------------------------------------------------------
+
+#ifdef SK_GRAPHITE_ENABLED
 
 namespace {
 
-#ifdef SK_GRAPHITE_ENABLED
+void add_matrix_colorfilter_uniform_data(const SkShaderCodeDictionary* dict,
+                                         const MatrixColorFilterBlock::MatrixColorFilterData& data,
+                                         SkPipelineDataGatherer* gatherer) {
+    VALIDATE_UNIFORMS(gatherer, dict, SkBuiltInCodeSnippetID::kMatrixColorFilter)
+    gatherer->write(data.fMatrix);
+    gatherer->write(data.fTranslate);
+    gatherer->write(static_cast<int>(data.fInHSLA));
 
-void add_blendshader_uniform_data(const SkShaderCodeDictionary* dict,
-                                  SkBlendMode bm,
-                                  SkPipelineDataGatherer* gatherer) {
-    VALIDATE_UNIFORMS(gatherer, dict, kBlendShader)
-    gatherer->write(SkTo<int>(bm));
-    gatherer->write(0); // padding - remove
-    gatherer->write(0); // padding - remove
-    gatherer->write(0); // padding - remove
+    gatherer->addFlags(
+            dict->getSnippetRequirementFlags(SkBuiltInCodeSnippetID::kMatrixColorFilter));
 }
-
-#endif // SK_GRAPHITE_ENABLED
 
 } // anonymous namespace
 
-void AddToKey(const SkKeyContext& keyContext,
-              SkPaintParamsKeyBuilder *builder,
-              SkPipelineDataGatherer* gatherer,
-              const BlendData& blendData) {
-
-#ifdef SK_GRAPHITE_ENABLED
-    if (builder->backend() == SkBackend::kGraphite) {
-        auto dict = keyContext.dict();
-        // When extracted into SkShaderInfo::SnippetEntries the children will appear after their
-        // parent. Thus, the parent's uniform data must appear in the uniform block before the
-        // uniform data of the children.
-        if (gatherer) {
-            add_blendshader_uniform_data(dict, blendData.fBM, gatherer);
-        }
-
-        builder->beginBlock(SkBuiltInCodeSnippetID::kBlendShader);
-
-        // Child blocks always go right after the parent block's header
-        // TODO: add startChild/endChild entry points to SkPaintParamsKeyBuilder. They could be
-        // used to compute and store the number of children w/in a block's header.
-        int start = builder->sizeInBytes();
-        as_SB(blendData.fDst)->addToKey(keyContext, builder, gatherer);
-        int firstShaderSize = builder->sizeInBytes() - start;
-
-        start = builder->sizeInBytes();
-        as_SB(blendData.fSrc)->addToKey(keyContext, builder, gatherer);
-        int secondShaderSize = builder->sizeInBytes() - start;
-
-        builder->endBlock();
-
-        int expectedBlockSize = firstShaderSize + secondShaderSize;
-        validate_block_header(builder,
-                              SkBuiltInCodeSnippetID::kBlendShader,
-                              expectedBlockSize);
-        return;
-    }
 #endif // SK_GRAPHITE_ENABLED
 
-    if (builder->backend() == SkBackend::kSkVM || builder->backend() == SkBackend::kGanesh) {
-        // TODO: add implementation for other backends
-        SolidColorShaderBlock::AddToKey(keyContext, builder, gatherer, kErrorColor);
+void MatrixColorFilterBlock::BeginBlock(const SkKeyContext& keyContext,
+                                        SkPaintParamsKeyBuilder* builder,
+                                        SkPipelineDataGatherer* gatherer,
+                                        const MatrixColorFilterData& matrixCFData) {
+#ifdef SK_GRAPHITE_ENABLED
+    auto dict = keyContext.dict();
+
+    if (gatherer) {
+        add_matrix_colorfilter_uniform_data(dict, matrixCFData, gatherer);
     }
+
+    builder->beginBlock(SkBuiltInCodeSnippetID::kMatrixColorFilter);
+#endif // SK_GRAPHITE_ENABLED
 }
 
-} // namespace BlendShaderBlock
+//--------------------------------------------------------------------------------------------------
+
+#ifdef SK_GRAPHITE_ENABLED
+
+namespace {
+
+void add_blend_colorfilter_uniform_data(const SkShaderCodeDictionary* dict,
+                                        const BlendColorFilterBlock::BlendColorFilterData& data,
+                                        SkPipelineDataGatherer* gatherer) {
+    VALIDATE_UNIFORMS(gatherer, dict, SkBuiltInCodeSnippetID::kBlendColorFilter)
+    gatherer->write(SkTo<int>(data.fBlendMode));
+    gatherer->write(data.fSrcColor);
+
+    gatherer->addFlags(dict->getSnippetRequirementFlags(SkBuiltInCodeSnippetID::kBlendColorFilter));
+}
+
+} // anonymous namespace
+
+#endif // SK_GRAPHITE_ENABLED
+
+void BlendColorFilterBlock::BeginBlock(const SkKeyContext& keyContext,
+                                       SkPaintParamsKeyBuilder* builder,
+                                       SkPipelineDataGatherer* gatherer,
+                                       const BlendColorFilterData& data) {
+#ifdef SK_GRAPHITE_ENABLED
+    auto dict = keyContext.dict();
+
+    if (gatherer) {
+        add_blend_colorfilter_uniform_data(dict, data, gatherer);
+    }
+
+    builder->beginBlock(SkBuiltInCodeSnippetID::kBlendColorFilter);
+#endif // SK_GRAPHITE_ENABLED
+}
+
+//--------------------------------------------------------------------------------------------------
+void ComposeColorFilterBlock::BeginBlock(const SkKeyContext& keyContext,
+                                         SkPaintParamsKeyBuilder* builder,
+                                         SkPipelineDataGatherer* gatherer) {
+#ifdef SK_GRAPHITE_ENABLED
+    builder->beginBlock(SkBuiltInCodeSnippetID::kComposeColorFilter);
+#endif // SK_GRAPHITE_ENABLED
+}
+
+//--------------------------------------------------------------------------------------------------
+void GaussianColorFilterBlock::BeginBlock(const SkKeyContext& keyContext,
+                                          SkPaintParamsKeyBuilder* builder,
+                                          SkPipelineDataGatherer* gatherer) {
+#ifdef SK_GRAPHITE_ENABLED
+    builder->beginBlock(SkBuiltInCodeSnippetID::kGaussianColorFilter);
+#endif // SK_GRAPHITE_ENABLED
+}
+
+//--------------------------------------------------------------------------------------------------
+#ifdef SK_GRAPHITE_ENABLED
+
+namespace {
+
+void add_table_colorfilter_uniform_data(const SkShaderCodeDictionary* dict,
+                                        const TableColorFilterBlock::TableColorFilterData& data,
+                                        SkPipelineDataGatherer* gatherer) {
+    VALIDATE_UNIFORMS(gatherer, dict, SkBuiltInCodeSnippetID::kTableColorFilter)
+
+    gatherer->addFlags(dict->getSnippetRequirementFlags(SkBuiltInCodeSnippetID::kTableColorFilter));
+}
+
+} // anonymous namespace
+
+#endif // SK_GRAPHITE_ENABLED
+
+TableColorFilterBlock::TableColorFilterData::TableColorFilterData() {}
+
+void TableColorFilterBlock::BeginBlock(const SkKeyContext& keyContext,
+                                       SkPaintParamsKeyBuilder* builder,
+                                       SkPipelineDataGatherer* gatherer,
+                                       const TableColorFilterData& data) {
+#ifdef SK_GRAPHITE_ENABLED
+    auto dict = keyContext.dict();
+
+    if (gatherer) {
+        if (!data.fTextureProxy) {
+            // We're dropping the color filter here!
+            PassthroughShaderBlock::BeginBlock(keyContext, builder, gatherer);
+            return;
+        }
+
+        static const SkTileMode kTileModes[2] = { SkTileMode::kClamp, SkTileMode::kClamp };
+        gatherer->add(SkSamplingOptions(), kTileModes, data.fTextureProxy);
+
+        add_table_colorfilter_uniform_data(dict, data, gatherer);
+    }
+
+    builder->beginBlock(SkBuiltInCodeSnippetID::kTableColorFilter);
+#endif // SK_GRAPHITE_ENABLED
+}
 
 //--------------------------------------------------------------------------------------------------
 #ifdef SK_GRAPHITE_ENABLED
 namespace {
 
-constexpr SkPipelineDataGatherer::BlendInfo make_simple_blendInfo(skgpu::BlendCoeff srcCoeff,
-                                                                  skgpu::BlendCoeff dstCoeff) {
+constexpr skgpu::BlendInfo make_simple_blendInfo(skgpu::BlendCoeff srcCoeff,
+                                                 skgpu::BlendCoeff dstCoeff) {
     return { skgpu::BlendEquation::kAdd,
              srcCoeff,
              dstCoeff,
@@ -445,7 +568,7 @@ constexpr SkPipelineDataGatherer::BlendInfo make_simple_blendInfo(skgpu::BlendCo
 
 static constexpr int kNumCoeffModes = (int)SkBlendMode::kLastCoeffMode + 1;
 /*>> No coverage, input color unknown <<*/
-static constexpr SkPipelineDataGatherer::BlendInfo gBlendTable[kNumCoeffModes] = {
+static constexpr skgpu::BlendInfo gBlendTable[kNumCoeffModes] = {
         /* clear */      make_simple_blendInfo(skgpu::BlendCoeff::kZero, skgpu::BlendCoeff::kZero),
         /* src */        make_simple_blendInfo(skgpu::BlendCoeff::kOne,  skgpu::BlendCoeff::kZero),
         /* dst */        make_simple_blendInfo(skgpu::BlendCoeff::kZero, skgpu::BlendCoeff::kOne),
@@ -463,7 +586,7 @@ static constexpr SkPipelineDataGatherer::BlendInfo gBlendTable[kNumCoeffModes] =
         /* screen */     make_simple_blendInfo(skgpu::BlendCoeff::kOne,  skgpu::BlendCoeff::kISC)
 };
 
-const SkPipelineDataGatherer::BlendInfo& get_blend_info(SkBlendMode bm) {
+const skgpu::BlendInfo& get_blend_info(SkBlendMode bm) {
     if (bm <= SkBlendMode::kLastCoeffMode) {
         return gBlendTable[(int) bm];
     }
@@ -471,104 +594,127 @@ const SkPipelineDataGatherer::BlendInfo& get_blend_info(SkBlendMode bm) {
     return gBlendTable[(int) SkBlendMode::kSrc];
 }
 
+void add_shaderbasedblender_uniform_data(const SkShaderCodeDictionary* dict,
+                                         SkBlendMode bm,
+                                         SkPipelineDataGatherer* gatherer) {
+    VALIDATE_UNIFORMS(gatherer, dict, SkBuiltInCodeSnippetID::kShaderBasedBlender)
+    gatherer->write(SkTo<int>(bm));
+
+    gatherer->addFlags(
+            dict->getSnippetRequirementFlags(SkBuiltInCodeSnippetID::kShaderBasedBlender));
+}
+
 } // anonymous namespace
+
 #endif // SK_GRAPHITE_ENABLED
 
-namespace BlendModeBlock {
-
-#ifdef SK_GRAPHITE_ENABLED
-static const int kFixedFunctionBlockDataSize = 1;
-static const int kShaderBasedBlockDataSize = 1;
-#endif
-
-void AddToKey(const SkKeyContext& keyContext,
-              SkPaintParamsKeyBuilder *builder,
-              SkPipelineDataGatherer* gatherer,
-              SkBlendMode bm) {
-
-#ifdef SK_GRAPHITE_ENABLED
-    if (builder->backend() == SkBackend::kGraphite) {
-        if (bm <= SkBlendMode::kLastCoeffMode) {
-            builder->beginBlock(SkBuiltInCodeSnippetID::kFixedFunctionBlender);
-            add_blendmode_to_key(builder, bm);
-            builder->endBlock();
-
-            validate_block_header(builder,
-                                  SkBuiltInCodeSnippetID::kFixedFunctionBlender,
-                                  kFixedFunctionBlockDataSize);
-
-            if (gatherer) {
-                gatherer->setBlendInfo(get_blend_info(bm));
-            }
-        } else {
-            builder->beginBlock(SkBuiltInCodeSnippetID::kShaderBasedBlender);
-            add_blendmode_to_key(builder, bm);
-            builder->endBlock();
-
-            validate_block_header(builder,
-                                  SkBuiltInCodeSnippetID::kShaderBasedBlender,
-                                  kShaderBasedBlockDataSize);
-
-            if (gatherer) {
-                // TODO: set up the correct blend info
-                gatherer->setBlendInfo(SkPipelineDataGatherer::BlendInfo());
-            }
-        }
-        return;
-    }
-#endif// SK_GRAPHITE_ENABLED
-
-    if (builder->backend() == SkBackend::kSkVM || builder->backend() == SkBackend::kGanesh) {
-        // TODO: add implementation for other backends
-        SolidColorShaderBlock::AddToKey(keyContext, builder, gatherer, kErrorColor);
-    }
-}
-
-} // namespace BlendModeBlock
-
-//--------------------------------------------------------------------------------------------------
-#ifdef SK_GRAPHITE_ENABLED
-SkUniquePaintParamsID CreateKey(const SkKeyContext& keyContext,
-                                SkPaintParamsKeyBuilder* builder,
-                                skgpu::graphite::ShaderCombo::ShaderType s,
-                                SkTileMode tm,
+void BlendModeBlock::BeginBlock(const SkKeyContext& keyContext,
+                                SkPaintParamsKeyBuilder *builder,
+                                SkPipelineDataGatherer* gatherer,
                                 SkBlendMode bm) {
-    SkDEBUGCODE(builder->checkReset());
 
-    switch (s) {
-        case skgpu::graphite::ShaderCombo::ShaderType::kNone:
-            DepthStencilOnlyBlock::AddToKey(keyContext, builder, nullptr);
-            break;
-        case skgpu::graphite::ShaderCombo::ShaderType::kSolidColor:
-            SolidColorShaderBlock::AddToKey(keyContext, builder, nullptr, kErrorColor);
-            break;
-        case skgpu::graphite::ShaderCombo::ShaderType::kLinearGradient:
-            GradientShaderBlocks::AddToKey(keyContext, builder, nullptr,
-                                           { SkShader::kLinear_GradientType, tm, 0 });
-            break;
-        case skgpu::graphite::ShaderCombo::ShaderType::kRadialGradient:
-            GradientShaderBlocks::AddToKey(keyContext, builder, nullptr,
-                                           { SkShader::kRadial_GradientType, tm, 0 });
-            break;
-        case skgpu::graphite::ShaderCombo::ShaderType::kSweepGradient:
-            GradientShaderBlocks::AddToKey(keyContext, builder, nullptr,
-                                           { SkShader::kSweep_GradientType, tm, 0 });
-            break;
-        case skgpu::graphite::ShaderCombo::ShaderType::kConicalGradient:
-            GradientShaderBlocks::AddToKey(keyContext, builder, nullptr,
-                                           { SkShader::kConical_GradientType, tm, 0 });
-            break;
-    }
-
-    // TODO: the blendInfo should be filled in by BlendModeBlock::AddToKey
-    SkPipelineDataGatherer::BlendInfo blendInfo = get_blend_info(bm);
-    BlendModeBlock::AddToKey(keyContext, builder, /* pipelineData*/ nullptr, bm);
-    SkPaintParamsKey key = builder->lockAsKey();
-
+#ifdef SK_GRAPHITE_ENABLED
     auto dict = keyContext.dict();
 
-    auto entry = dict->findOrCreate(key, blendInfo);
+    if (bm <= SkBlendMode::kLastCoeffMode) {
+        builder->setBlendInfo(get_blend_info(bm));
 
-    return  entry->uniqueID();
+        builder->beginBlock(SkBuiltInCodeSnippetID::kFixedFunctionBlender);
+        static_assert(SkTFitsIn<uint8_t>(SkBlendMode::kLastMode));
+        builder->addByte(static_cast<uint8_t>(bm));
+    } else {
+        // TODO: set up the correct blend info
+        builder->setBlendInfo({});
+
+        if (gatherer) {
+            add_shaderbasedblender_uniform_data(dict, bm, gatherer);
+        }
+
+        builder->beginBlock(SkBuiltInCodeSnippetID::kShaderBasedBlender);
+    }
+#endif // SK_GRAPHITE_ENABLED
+}
+
+void PrimitiveBlendModeBlock::BeginBlock(const SkKeyContext& keyContext,
+                                         SkPaintParamsKeyBuilder *builder,
+                                         SkPipelineDataGatherer* gatherer,
+                                         SkBlendMode pbm) {
+
+#ifdef SK_GRAPHITE_ENABLED
+    auto dict = keyContext.dict();
+    // Unlike in the usual blendmode case, the primitive blend mode will always be implemented
+    // via shader-based blending.
+    if (gatherer) {
+        add_shaderbasedblender_uniform_data(dict, pbm, gatherer);
+    }
+    builder->beginBlock(SkBuiltInCodeSnippetID::kShaderBasedBlender);
+#endif // SK_GRAPHITE_ENABLED
+}
+
+RuntimeEffectBlock::ShaderData::ShaderData(sk_sp<const SkRuntimeEffect> effect)
+        : fEffect(std::move(effect)) {}
+
+RuntimeEffectBlock::ShaderData::ShaderData(sk_sp<const SkRuntimeEffect> effect,
+                                           sk_sp<const SkData> uniforms)
+        : fEffect(std::move(effect))
+        , fUniforms(std::move(uniforms)) {}
+
+static bool skdata_matches(const SkData* a, const SkData* b) {
+    // Returns true if both SkData objects hold the same contents, or if they are both null.
+    // (SkData::equals supports passing null, and returns false.)
+    return a ? a->equals(b) : (a == b);
+}
+
+bool RuntimeEffectBlock::ShaderData::operator==(const ShaderData& rhs) const {
+    return fEffect == rhs.fEffect && skdata_matches(fUniforms.get(), rhs.fUniforms.get());
+}
+
+#ifdef SK_GRAPHITE_ENABLED
+static void add_effect_to_recorder(skgpu::graphite::Recorder* recorder,
+                                   int codeSnippetID,
+                                   sk_sp<const SkRuntimeEffect> effect) {
+    recorder->priv().runtimeEffectDictionary()->set(codeSnippetID, std::move(effect));
+}
+
+static void gather_runtime_effect_uniforms(SkSpan<const SkRuntimeEffect::Uniform> rtsUniforms,
+                                           SkSpan<const SkUniform> graphiteUniforms,
+                                           const SkData* uniformData,
+                                           SkPipelineDataGatherer* gatherer) {
+    // Collect all the other uniforms from the provided SkData.
+    const uint8_t* uniformBase = uniformData->bytes();
+    for (size_t index = 0; index < rtsUniforms.size(); ++index) {
+        const SkUniform& skUniform = graphiteUniforms[index];
+        // Get a pointer to the offset in our data for this uniform.
+        const uint8_t* uniformPtr = uniformBase + rtsUniforms[index].offset;
+        // Pass the uniform data to the gatherer.
+        gatherer->write(skUniform.type(), skUniform.count(), uniformPtr);
+    }
 }
 #endif
+
+void RuntimeEffectBlock::BeginBlock(const SkKeyContext& keyContext,
+                                    SkPaintParamsKeyBuilder* builder,
+                                    SkPipelineDataGatherer* gatherer,
+                                    const ShaderData& shaderData) {
+#ifdef SK_GRAPHITE_ENABLED
+    SkShaderCodeDictionary* dict = keyContext.dict();
+    int codeSnippetID = dict->findOrCreateRuntimeEffectSnippet(shaderData.fEffect.get());
+
+    add_effect_to_recorder(keyContext.recorder(), codeSnippetID, shaderData.fEffect);
+
+    if (gatherer) {
+        const SkShaderSnippet* entry = dict->getEntry(codeSnippetID);
+        SkASSERT(entry);
+
+        SkDEBUGCODE(UniformExpectationsValidator uev(gatherer, entry->fUniforms);)
+        gatherer->addFlags(entry->fSnippetRequirementFlags);
+
+        gather_runtime_effect_uniforms(shaderData.fEffect->uniforms(),
+                                       entry->fUniforms,
+                                       shaderData.fUniforms.get(),
+                                       gatherer);
+    }
+
+    builder->beginBlock(codeSnippetID);
+#endif  // SK_GRAPHITE_ENABLED
+}

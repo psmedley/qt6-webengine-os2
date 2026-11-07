@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -503,11 +503,11 @@ bool IsMatchDeviceType(const std::string& match_type) {
 // Parse a boolean value keyword (e.g., on/off, true/false).
 int ParseBooleanKeyword(const std::string& value) {
   for (size_t i = 0; i < std::size(kTrue); ++i) {
-    if (base::LowerCaseEqualsASCII(value, kTrue[i]))
+    if (base::EqualsCaseInsensitiveASCII(value, kTrue[i]))
       return 1;
   }
   for (size_t i = 0; i < std::size(kFalse); ++i) {
-    if (base::LowerCaseEqualsASCII(value, kFalse[i]))
+    if (base::EqualsCaseInsensitiveASCII(value, kFalse[i]))
       return -1;
   }
   return 0;

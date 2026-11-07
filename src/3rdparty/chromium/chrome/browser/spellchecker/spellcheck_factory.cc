@@ -1,18 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 
 #include "build/build_config.h"
-#ifndef TOOLKIT_QT
-#include "chrome/browser/profiles/incognito_helpers.h"
-#endif
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 #ifndef TOOLKIT_QT
 #include "chrome/grit/locale_settings.h"
 #endif
-#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/spellcheck/browser/pref_names.h"
@@ -34,9 +30,9 @@ SpellcheckServiceFactory* SpellcheckServiceFactory::GetInstance() {
 }
 
 SpellcheckServiceFactory::SpellcheckServiceFactory()
-    : BrowserContextKeyedServiceFactory(
-        "SpellcheckService",
-        BrowserContextDependencyManager::GetInstance()) {
+    : ProfileKeyedServiceFactory(
+          "SpellcheckService",
+          ProfileSelections::BuildRedirectedInIncognito()) {
   // TODO(erg): Uncomment these as they are initialized.
   // DependsOn(RequestContextFactory::GetInstance());
 }
@@ -74,15 +70,6 @@ void SpellcheckServiceFactory::RegisterProfilePrefs(
 #endif
   user_prefs->RegisterBooleanPref(spellcheck::prefs::kSpellCheckEnable, true,
                                   flags);
-}
-
-content::BrowserContext* SpellcheckServiceFactory::GetBrowserContextToUse(
-    content::BrowserContext* context) const {
-#ifndef TOOLKIT_QT
-  return chrome::GetBrowserContextRedirectedInIncognito(context);
-#else
-  return context;
-#endif
 }
 
 bool SpellcheckServiceFactory::ServiceIsNULLWhileTesting() const {

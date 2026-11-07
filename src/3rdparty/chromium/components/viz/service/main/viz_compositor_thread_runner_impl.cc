@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,12 +26,10 @@
 #include "components/viz/service/frame_sinks/gmb_video_frame_pool_context_provider_impl.h"
 #include "components/viz/service/gl/gpu_service_impl.h"
 #include "components/viz/service/performance_hint/hint_session.h"
+#include "gpu/command_buffer/service/scheduler_sequence.h"
 #include "gpu/config/gpu_finch_features.h"
 #include "gpu/config/gpu_switches.h"
-#include "gpu/ipc/command_buffer_task_executor.h"
-#include "gpu/ipc/scheduler_sequence.h"
 #include "gpu/ipc/service/gpu_memory_buffer_factory.h"
-#include "services/tracing/public/cpp/stack_sampling/tracing_sampler_profiler.h"
 #include "ui/gfx/switches.h"
 
 #if defined(USE_OZONE)
@@ -44,13 +42,10 @@ namespace {
 const char kThreadName[] = "VizCompositorThread";
 
 std::unique_ptr<VizCompositorThreadType> CreateAndStartCompositorThread() {
-  const base::ThreadPriority thread_priority =
-      base::FeatureList::IsEnabled(features::kGpuUseDisplayThreadPriority)
-          ? base::ThreadPriority::DISPLAY
-          : base::ThreadPriority::NORMAL;
+  const base::ThreadType thread_type = base::ThreadType::kCompositing;
 #if BUILDFLAG(IS_ANDROID)
-  auto thread = std::make_unique<base::android::JavaHandlerThread>(
-      kThreadName, thread_priority);
+  auto thread = std::make_unique<base::android::JavaHandlerThread>(kThreadName,
+                                                                   thread_type);
   thread->Start();
   return thread;
 #else  // !BUILDFLAG(IS_ANDROID)
@@ -74,21 +69,16 @@ std::unique_ptr<VizCompositorThreadType> CreateAndStartCompositorThread() {
 #if BUILDFLAG(IS_APPLE)
   // Increase the thread priority to get more reliable values in performance
   // test of macOS.
-  thread_options.priority =
+  thread_options.thread_type =
       (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kUseHighGPUThreadPriorityForPerfTests))
-          ? base::ThreadPriority::REALTIME_AUDIO
-          : thread_priority;
+          ? base::ThreadType::kRealtimeAudio
+          : thread_type;
 #else
-  thread_options.priority = thread_priority;
+  thread_options.thread_type = thread_type;
 #endif  // !BUILDFLAG(IS_APPLE)
 
   CHECK(thread->StartWithOptions(std::move(thread_options)));
-
-  // Setup tracing sampler profiler as early as possible.
-  thread->task_runner()->PostTask(
-      FROM_HERE,
-      base::BindOnce(&tracing::TracingSamplerProfiler::CreateOnChildThread));
 
   return thread;
 #endif  // !BUILDFLAG(IS_ANDROID)
@@ -151,17 +141,7 @@ base::SingleThreadTaskRunner* VizCompositorThreadRunnerImpl::task_runner() {
 }
 
 void VizCompositorThreadRunnerImpl::CreateFrameSinkManager(
-    mojom::FrameSinkManagerParamsPtr params) {
-  task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(&VizCompositorThreadRunnerImpl::
-                                    CreateFrameSinkManagerOnCompositorThread,
-                                base::Unretained(this), std::move(params),
-                                nullptr, nullptr));
-}
-
-void VizCompositorThreadRunnerImpl::CreateFrameSinkManager(
     mojom::FrameSinkManagerParamsPtr params,
-    gpu::CommandBufferTaskExecutor* task_executor,
     GpuServiceImpl* gpu_service) {
   // All of the unretained objects are owned on the GPU thread and destroyed
   // after VizCompositorThread has been shutdown.
@@ -169,18 +149,15 @@ void VizCompositorThreadRunnerImpl::CreateFrameSinkManager(
       FROM_HERE, base::BindOnce(&VizCompositorThreadRunnerImpl::
                                     CreateFrameSinkManagerOnCompositorThread,
                                 base::Unretained(this), std::move(params),
-                                base::Unretained(task_executor),
                                 base::Unretained(gpu_service)));
 }
 
 void VizCompositorThreadRunnerImpl::CreateFrameSinkManagerOnCompositorThread(
     mojom::FrameSinkManagerParamsPtr params,
-    gpu::CommandBufferTaskExecutor* task_executor,
     GpuServiceImpl* gpu_service) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(!frame_sink_manager_);
-  if (features::IsUsingSkiaRenderer())
-    gpu::SchedulerSequence::DefaultDisallowScheduleTaskOnCurrentThread();
+  gpu::SchedulerSequence::DefaultDisallowScheduleTaskOnCurrentThread();
 
   server_shared_bitmap_manager_ = std::make_unique<ServerSharedBitmapManager>();
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
@@ -192,17 +169,14 @@ void VizCompositorThreadRunnerImpl::CreateFrameSinkManagerOnCompositorThread(
   const bool run_all_compositor_stages_before_draw =
       command_line->HasSwitch(switches::kRunAllCompositorStagesBeforeDraw);
 
-  if (task_executor) {
-    DCHECK(gpu_service);
+  if (gpu_service) {
     // Create OutputSurfaceProvider usable for GPU + software compositing.
     gpu_memory_buffer_manager_ =
         std::make_unique<InProcessGpuMemoryBufferManager>(
             gpu_service->gpu_memory_buffer_factory(),
             gpu_service->sync_point_manager());
-    auto* image_factory = gpu_service->gpu_image_factory();
-    output_surface_provider_ = std::make_unique<OutputSurfaceProviderImpl>(
-        gpu_service, task_executor, gpu_service,
-        gpu_memory_buffer_manager_.get(), image_factory, headless);
+    output_surface_provider_ =
+        std::make_unique<OutputSurfaceProviderImpl>(gpu_service, headless);
 
     // Create video frame pool context provider that will enable the frame sink
     // manager to create GMB-backed video frames.
@@ -256,6 +230,7 @@ void VizCompositorThreadRunnerImpl::TearDownOnCompositorThread() {
   frame_sink_manager_.reset();
   hint_session_factory_.reset();
   output_surface_provider_.reset();
+  gmb_video_frame_pool_context_provider_.reset();
   gpu_memory_buffer_manager_.reset();
   server_shared_bitmap_manager_.reset();
 }

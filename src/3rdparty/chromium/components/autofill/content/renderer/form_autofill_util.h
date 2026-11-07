@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -73,6 +73,22 @@ enum ExtractMask {
                                  // kMaxDataLength.
 };
 
+// Autofill supports assigning <label for=x> tags to inputs if x its id/name,
+// or the id/name of a shadow host element containing the input.
+// This enum is used to track how often each case occurs in practise.
+enum class AssignedLabelSource {
+  kId = 0,
+  kName = 1,
+  kShadowHostId = 2,
+  kShadowHostName = 3,
+  kMaxValue = kShadowHostName,
+};
+// This temporary histogram is emitted inline, because browser files like
+// AutofillMetrics cannot be included here.
+// TODO(crbug.com/1339277): Remove.
+inline constexpr char kAssignedLabelSourceHistogram[] =
+    "Autofill.LabelInference.AssignedLabelSource";
+
 // Indicates if an iframe |element| is considered actually visible to the user.
 //
 // This function is not intended to implement a perfect visibility check. It
@@ -85,7 +101,7 @@ enum ExtractMask {
 //
 // Future potential improvements include:
 // * Detect potential visibility of elements with "overflow: visible".
-//   (See Element::scrollWidth().)
+//   (See WebElement::GetScrollSize().)
 // * Detect invisibility of elements with
 //   - "position: absolute; {left,top,right,bottol}: -100px"
 //   - "opacity: 0.0"
@@ -109,18 +125,18 @@ bool IsVisibleIframe(const blink::WebElement& iframe_element);
 // [1] https://html.spec.whatwg.org/multipage/forms.html#the-form-element
 blink::WebFormElement GetClosestAncestorFormElement(blink::WebNode node);
 
-// Returns true if a DOM traversal (pre-order, depth-first) visits |x| before
-// |y|. |common_ancestor| can be any shared ancestor of |x| and |y| (including
-// the WebDocument), with deeper ancestors leading to better performance since
-// the function compares the paths from |x| and |y| to |common_ancestor|.
+// Returns true if a DOM traversal (pre-order, depth-first) visits `x` before
+// `y`.
+// As a performance improvement, `ancestor_hint` can be set to a suspected
+// ancestor of `x` and `y`. Otherwise, `ancestor_hint` can be arbitrary.
 //
 // This function is a simplified/specialised version of Blink's private
 // Node::compareDocumentPosition().
 //
 // Exposed for testing purposes.
-bool IsDomPredecessor(const blink::WebNode& x,
+bool IsDOMPredecessor(const blink::WebNode& x,
                       const blink::WebNode& y,
-                      const blink::WebNode& common_ancestor);
+                      const blink::WebNode& ancestor_hint);
 
 // Gets up to kMaxListSize data list values (with corresponding label) for the
 // given element, each value and label have as far as kMaxDataLength.
@@ -157,6 +173,9 @@ bool IsSelectElement(const blink::WebFormControlElement& element);
 // Returns true if |element| is a textarea element.
 bool IsTextAreaElement(const blink::WebFormControlElement& element);
 
+// Returns true if `element` is a textarea element or a text input element.
+bool IsTextAreaElementOrTextInput(const blink::WebFormControlElement& element);
+
 // Returns true if |element| is a checkbox or a radio button element.
 bool IsCheckableElement(const blink::WebInputElement& element);
 
@@ -168,9 +187,32 @@ bool IsAutofillableInputElement(const blink::WebInputElement& element);
 // {Text, Radiobutton, Checkbox, Select, TextArea}.
 bool IsAutofillableElement(const blink::WebFormControlElement& element);
 
-// True if this node can take focus. If layout is blocked, then the function
-// checks if the element takes up space in the layout, ie. this element or a
-// descendant has a non-empty bounding bounding client rect.
+// True if this node can take focus. If the layout is blocked, then the function
+// checks if the element takes up space in the layout, i.e., this element or a
+// descendant has a non-empty bounding client rect.
+bool IsWebElementFocusable(const blink::WebElement& element);
+
+// A heuristic visibility detection. See crbug.com/1335257 for an overview of
+// relevant aspects.
+//
+// Note that WebElement::BoundsInWidget(), WebElement::GetClientSize(),
+// and WebElement::GetScrollSize() include the padding but do not include the
+// border and margin. BoundsInWidget() additionally scales the
+// dimensions according to the zoom factor.
+//
+// It seems that invisible fields on websites typically have dimensions between
+// 0 and 10 pixels, before the zoom factor. Therefore choosing `kMinPixelSize`
+// is easier without including the zoom factor. For that reason, this function
+// prefers GetClientSize() over BoundsInWidget().
+//
+// This function does not check the position in the viewport because fields in
+// iframes commonly are visible despite the body having height zero. Therefore,
+// `e.GetDocument().Body().BoundsInWidget().Intersects(
+//      e.BoundsInWidget())` yields false negatives.
+//
+// Exposed for testing purposes.
+//
+// TODO(crbug.com/1335257): Can input fields or iframes actually overflow?
 bool IsWebElementVisible(const blink::WebElement& element);
 
 // Returns the form's |name| attribute if non-empty; otherwise the form's |id|
@@ -343,8 +385,8 @@ std::u16string FindChildTextWithIgnoreListForTesting(
     const blink::WebNode& node,
     const std::set<blink::WebNode>& divs_to_skip);
 bool InferLabelForElementForTesting(const blink::WebFormControlElement& element,
-                                    std::u16string* label,
-                                    FormFieldData::LabelSource* label_source);
+                                    std::u16string& label,
+                                    FormFieldData::LabelSource& label_source);
 
 // Returns the form element by unique renderer id. Returns the null element if
 // there is no form with the |form_renderer_id|.

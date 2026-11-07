@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/check_op.h"
 #include "base/memory/ptr_util.h"
 #include "third_party/blink/renderer/core/animation/typed_interpolation_value.h"
 #include "third_party/blink/renderer/platform/geometry/blend.h"

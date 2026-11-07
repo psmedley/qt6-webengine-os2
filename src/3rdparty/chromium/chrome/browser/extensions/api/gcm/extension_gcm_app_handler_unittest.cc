@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,7 +69,7 @@
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/ash/login/users/scoped_test_user_manager.h"
 #include "chrome/browser/ash/settings/scoped_cros_settings_test_helper.h"
-#include "chromeos/dbus/concierge/concierge_client.h"
+#include "chromeos/ash/components/dbus/concierge/concierge_client.h"
 #endif
 
 namespace extensions {
@@ -271,7 +271,7 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
     // This is needed to create extension service under CrOS.
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     test_user_manager_ = std::make_unique<ash::ScopedTestUserManager>();
-    chromeos::ConciergeClient::InitializeFake(/*fake_cicerone_client=*/nullptr);
+    ash::ConciergeClient::InitializeFake(/*fake_cicerone_client=*/nullptr);
 #endif
 
     // Create a new profile.
@@ -311,7 +311,7 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     gcm_app_handler_.reset();
     profile_.reset();
-    chromeos::ConciergeClient::Shutdown();
+    ash::ConciergeClient::Shutdown();
 #endif
   }
 
@@ -354,7 +354,7 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
     path = path.Append(data_dir.BaseName());
     ASSERT_TRUE(base::CopyFile(data_dir, path));
 
-    extensions::CrxInstaller* installer = NULL;
+    extensions::CrxInstaller* installer = nullptr;
     content::WindowedNotificationObserver observer(
         extensions::NOTIFICATION_CRX_INSTALLER_DONE,
         base::BindRepeating(&IsCrxInstallerDone, &installer));
@@ -377,9 +377,7 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
 
   void UninstallExtension(const Extension* extension) {
     extension_service_->UninstallExtension(
-        extension->id(),
-        extensions::UNINSTALL_REASON_FOR_TESTING,
-        NULL);
+        extension->id(), extensions::UNINSTALL_REASON_FOR_TESTING, nullptr);
   }
 
   void Register(const std::string& app_id,

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,8 +41,8 @@ constexpr PrefMap kPrefSessionStorageAccessLevel = {
 std::vector<std::string> GetKeysFromList(const base::Value& list) {
   DCHECK(list.is_list());
   std::vector<std::string> keys;
-  keys.reserve(list.GetListDeprecated().size());
-  for (const auto& value : list.GetListDeprecated()) {
+  keys.reserve(list.GetList().size());
+  for (const auto& value : list.GetList()) {
     auto* as_string = value.GetIfString();
     if (as_string)
       keys.push_back(*as_string);
@@ -190,9 +190,7 @@ ExtensionFunction::ResponseValue SettingsFunction::UseReadResult(
   if (!result.status().ok())
     return Error(result.status().message);
 
-  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
-  dict->Swap(&result.settings());
-  return OneArgument(base::Value::FromUniquePtrValue(std::move(dict)));
+  return OneArgument(base::Value(result.PassSettings()));
 }
 
 ExtensionFunction::ResponseValue SettingsFunction::UseWriteResult(
@@ -265,9 +263,8 @@ ExtensionFunction::ResponseValue StorageStorageAreaGetFunction::RunWithStorage(
       if (!result.status().ok()) {
         return UseReadResult(std::move(result));
       }
-      std::unique_ptr<base::DictionaryValue> with_default_values =
-          base::Value::AsDictionaryValue(input).CreateDeepCopy();
-      with_default_values->MergeDictionary(&result.settings());
+      base::Value::Dict with_default_values = input.GetDict().Clone();
+      with_default_values.Merge(result.PassSettings());
       return UseReadResult(ValueStore::ReadResult(
           std::move(with_default_values), result.PassStatus()));
     }
@@ -394,9 +391,8 @@ ExtensionFunction::ResponseValue StorageStorageAreaSetFunction::RunWithStorage(
                "extension_id", extension_id());
   if (args().empty() || !args()[0].is_dict())
     return BadMessage();
-  const base::DictionaryValue& input =
-      base::Value::AsDictionaryValue(args()[0]);
-  return UseWriteResult(storage->Set(ValueStore::DEFAULTS, input));
+  return UseWriteResult(
+      storage->Set(ValueStore::DEFAULTS, args()[0].GetDict()));
 }
 
 ExtensionFunction::ResponseValue StorageStorageAreaSetFunction::RunInSession() {

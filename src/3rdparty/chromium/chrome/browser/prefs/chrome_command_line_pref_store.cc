@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,9 +53,14 @@ const CommandLinePrefStore::SwitchToPreferenceMapEntry
         {switches::kLang, language::prefs::kApplicationLocale},
         {switches::kAcceptLang, language::prefs::kSelectedLanguages},
 #endif
+        // `switches::kAuthServerAllowlistDeprecated` must be before
+        // `switches::kAuthServerAllowlist` so that the deprecated value is
+        // overridden in `ChromeCommandLinePrefStore::ApplyStringSwitches`.
+        {switches::kAuthServerAllowlistDeprecated, prefs::kAuthServerAllowlist},
         {switches::kAuthServerAllowlist, prefs::kAuthServerAllowlist},
         {switches::kSSLVersionMin, prefs::kSSLVersionMin},
         {switches::kSSLVersionMax, prefs::kSSLVersionMax},
+        {switches::kWebRtcIPHandlingPolicy, prefs::kWebRTCIPHandlingPolicy},
 #if BUILDFLAG(IS_ANDROID)
         {switches::kAuthAndroidNegotiateAccountType,
          prefs::kAuthAndroidNegotiateAccountType},
@@ -148,53 +153,49 @@ void ChromeCommandLinePrefStore::ApplySimpleSwitches() {
 
 void ChromeCommandLinePrefStore::ApplyProxyMode() {
   if (command_line()->HasSwitch(switches::kNoProxyServer)) {
-    SetValue(
-        proxy_config::prefs::kProxy,
-        std::make_unique<base::Value>(ProxyConfigDictionary::CreateDirect()),
-        WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+    SetValue(proxy_config::prefs::kProxy,
+             base::Value(ProxyConfigDictionary::CreateDirect()),
+             WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   } else if (command_line()->HasSwitch(switches::kProxyPacUrl)) {
     std::string pac_script_url =
         command_line()->GetSwitchValueASCII(switches::kProxyPacUrl);
     SetValue(proxy_config::prefs::kProxy,
-             std::make_unique<base::Value>(
+             base::Value(
                  ProxyConfigDictionary::CreatePacScript(pac_script_url, false)),
              WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   } else if (command_line()->HasSwitch(switches::kProxyAutoDetect)) {
     SetValue(proxy_config::prefs::kProxy,
-             std::make_unique<base::Value>(
-                 ProxyConfigDictionary::CreateAutoDetect()),
+             base::Value(ProxyConfigDictionary::CreateAutoDetect()),
              WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   } else if (command_line()->HasSwitch(switches::kProxyServer)) {
     std::string proxy_server =
         command_line()->GetSwitchValueASCII(switches::kProxyServer);
     std::string bypass_list =
         command_line()->GetSwitchValueASCII(switches::kProxyBypassList);
-    SetValue(
-        proxy_config::prefs::kProxy,
-        std::make_unique<base::Value>(ProxyConfigDictionary::CreateFixedServers(
-            proxy_server, bypass_list)),
-        WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+    SetValue(proxy_config::prefs::kProxy,
+             base::Value(ProxyConfigDictionary::CreateFixedServers(
+                 proxy_server, bypass_list)),
+             WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   }
 }
 
 void ChromeCommandLinePrefStore::ApplySSLSwitches() {
   if (command_line()->HasSwitch(switches::kCipherSuiteBlacklist)) {
-    std::unique_ptr<base::ListValue> list_value(new base::ListValue());
+    base::Value::List list_value;
     const std::vector<std::string> str_list = base::SplitString(
         command_line()->GetSwitchValueASCII(switches::kCipherSuiteBlacklist),
         ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     for (const std::string& str : str_list) {
-      list_value->Append(str);
+      list_value.Append(str);
     }
-    SetValue(prefs::kCipherSuiteBlacklist, std::move(list_value),
+    SetValue(prefs::kCipherSuiteBlacklist, base::Value(std::move(list_value)),
              WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   }
 }
 
 void ChromeCommandLinePrefStore::ApplyBackgroundModeSwitches() {
   if (command_line()->HasSwitch(switches::kDisableExtensions)) {
-    SetValue(prefs::kBackgroundModeEnabled,
-             std::make_unique<base::Value>(false),
+    SetValue(prefs::kBackgroundModeEnabled, base::Value(false),
              WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   }
 }
@@ -217,7 +218,6 @@ void ChromeCommandLinePrefStore::ApplyExplicitlyAllowedPortSwitch() {
       continue;
     integer_list.Append(base::Value(port));
   }
-  SetValue(prefs::kExplicitlyAllowedNetworkPorts,
-           base::Value::ToUniquePtrValue(std::move(integer_list)),
+  SetValue(prefs::kExplicitlyAllowedNetworkPorts, std::move(integer_list),
            WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
 }

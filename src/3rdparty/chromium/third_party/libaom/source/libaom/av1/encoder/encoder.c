@@ -1479,51 +1479,6 @@ AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
   snprintf((H) + strlen(H), sizeof(H) - strlen(H), (T), (V))
 #endif  // CONFIG_INTERNAL_STATS
 
-// This function will change the state and free the mutex of corresponding
-// workers and terminate the object. The object can not be re-used unless a call
-// to reset() is made.
-static AOM_INLINE void terminate_worker_data(AV1_PRIMARY *ppi) {
-  PrimaryMultiThreadInfo *const p_mt_info = &ppi->p_mt_info;
-  for (int t = p_mt_info->num_workers - 1; t >= 0; --t) {
-    AVxWorker *const worker = &p_mt_info->workers[t];
-    aom_get_worker_interface()->end(worker);
-  }
-}
-
-// Deallocate allocated thread_data.
-static AOM_INLINE void free_thread_data(AV1_PRIMARY *ppi) {
-  PrimaryMultiThreadInfo *const p_mt_info = &ppi->p_mt_info;
-  for (int t = 1; t < p_mt_info->num_workers; ++t) {
-    EncWorkerData *const thread_data = &p_mt_info->tile_thr_data[t];
-    thread_data->td = thread_data->original_td;
-    aom_free(thread_data->td->tctx);
-    aom_free(thread_data->td->palette_buffer);
-    aom_free(thread_data->td->tmp_conv_dst);
-    release_compound_type_rd_buffers(&thread_data->td->comp_rd_buffer);
-    for (int j = 0; j < 2; ++j) {
-      aom_free(thread_data->td->tmp_pred_bufs[j]);
-    }
-    aom_free(thread_data->td->pixel_gradient_info);
-    aom_free(thread_data->td->src_var_info_of_4x4_sub_blocks);
-    release_obmc_buffers(&thread_data->td->obmc_buffer);
-    aom_free(thread_data->td->vt64x64);
-
-    for (int x = 0; x < 2; x++) {
-      for (int y = 0; y < 2; y++) {
-        aom_free(thread_data->td->hash_value_buffer[x][y]);
-        thread_data->td->hash_value_buffer[x][y] = NULL;
-      }
-    }
-    aom_free(thread_data->td->counts);
-    av1_free_pmc(thread_data->td->firstpass_ctx,
-                 ppi->seq_params.monochrome ? 1 : MAX_MB_PLANE);
-    thread_data->td->firstpass_ctx = NULL;
-    av1_free_shared_coeff_buffer(&thread_data->td->shared_coeff_buf);
-    av1_free_sms_tree(thread_data->td);
-    aom_free(thread_data->td);
-  }
-}
-
 void av1_remove_primary_compressor(AV1_PRIMARY *ppi) {
   if (!ppi) return;
 #if !CONFIG_REALTIME_ONLY
@@ -1551,11 +1506,14 @@ void av1_remove_primary_compressor(AV1_PRIMARY *ppi) {
   av1_tpl_dealloc(&tpl_data->tpl_mt_sync);
 #endif
 
-  terminate_worker_data(ppi);
+  av1_terminate_workers(ppi);
   free_thread_data(ppi);
 
   aom_free(ppi->p_mt_info.tile_thr_data);
+  ppi->p_mt_info.tile_thr_data = NULL;
   aom_free(ppi->p_mt_info.workers);
+  ppi->p_mt_info.workers = NULL;
+  ppi->p_mt_info.num_workers = 0;
 
   aom_free(ppi);
 }

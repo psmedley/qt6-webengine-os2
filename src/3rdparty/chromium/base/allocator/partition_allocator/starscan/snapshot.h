@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,12 +90,5 @@ StarScanSnapshot::UnprotectingView::UnprotectingView(StarScanSnapshot& snapshot)
     : StarScanSnapshot::ViewBase(snapshot.unprotect_worklist_) {}
 
 }  // namespace partition_alloc::internal
-
-// TODO(crbug.com/1288247): Remove this when migration is complete.
-namespace base::internal {
-
-using ::partition_alloc::internal::StarScanSnapshot;
-
-}  // namespace base::internal
 
 #endif  // BASE_ALLOCATOR_PARTITION_ALLOCATOR_STARSCAN_SNAPSHOT_H_

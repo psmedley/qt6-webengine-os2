@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "base/containers/flat_map.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
-#include "components/autofill_assistant/browser/android/dependencies.h"
+#include "components/autofill_assistant/browser/android/dependencies_android.h"
 #include "components/autofill_assistant/browser/autofill_assistant_tts_controller.h"
 #include "components/autofill_assistant/browser/bottom_sheet_state.h"
 #include "components/autofill_assistant/browser/service.pb.h"
@@ -63,7 +63,7 @@ int GetPixelSizeOrDefault(JNIEnv* env,
 base::android::ScopedJavaLocalRef<jobject> CreateJavaDrawable(
     JNIEnv* env,
     const base::android::JavaRef<jobject>& jcontext,
-    const Dependencies& dependencies,
+    const DependenciesAndroid& dependencies,
     const DrawableProto& proto,
     const UserModel* user_model = nullptr);
 
@@ -79,11 +79,14 @@ ValueProto ToNativeValue(JNIEnv* env,
 // Returns an instance of |AssistantInfoPopup| for |proto|.
 // close_display_str is used to provide a Close button when a button is not
 // configured in proto.
+// |jdelegate| needs to be a implementation of |AssistantTextLinkDelegate|
+// and can be |nullptr|.
 base::android::ScopedJavaLocalRef<jobject> CreateJavaInfoPopup(
     JNIEnv* env,
     const InfoPopupProto& proto,
     const base::android::JavaRef<jobject>& jinfo_page_util,
-    const std::string& close_display_str);
+    const std::string& close_display_str,
+    const base::android::JavaRef<jobject>& jdelegate);
 
 // Shows an instance of |AssistantInfoPopup| on the screen.
 void ShowJavaInfoPopup(JNIEnv* env,

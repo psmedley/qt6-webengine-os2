@@ -525,6 +525,18 @@ need to be translated for each locale.-->
       <message name="IDS_APP_ACCNAME_COLOR_CHOOSER_HEX_INPUT" desc="The accessible name for the color chooser hexadecimal input field">
         Hex color value
       </message>
+      <message name="IDS_APP_ACCNAME_HALF" desc="The accessible name for the Half button on Multitask Menu">
+        Half
+      </message>
+      <message name="IDS_APP_ACCNAME_PARTIAL" desc="The accessible name for the Partial button on the Multitask Menu">
+        Partial
+      </message>
+      <message name="IDS_APP_ACCNAME_FULL" desc="The accessible name for the Full button on the Multitask Menu">
+        Full
+      </message>
+      <message name="IDS_APP_ACCNAME_FLOAT_ON_TOP" desc="The accessible name for the Float on top button on the Multitask Menu">
+        Float on top
+      </message>
 
       <!-- Scroll Bar Context Menu Labels -->
       <message name="IDS_APP_SCROLLBAR_CXMENU_SCROLLHERE" desc="The label for the 'Scroll Here' item">
@@ -729,7 +741,7 @@ need to be translated for each locale.-->
         <message name="IDS_APP_FULLSCREEN_KEY" desc="This refers to the 'Fullscreen' media key on certain keyboards.">
           Fullscreen
         </message>
-        <message name="IDS_APP_OVERVIEW_KEY" desc="This refers to the 'Overview' or 'Show All Windows' media key on Chrome OS keyboards.">
+        <message name="IDS_APP_OVERVIEW_KEY" desc="This refers to the 'Overview' or 'Show All Windows' media key on ChromeOS keyboards.">
           Overview
         </message>
       </if>
@@ -803,7 +815,7 @@ need to be translated for each locale.-->
         <ph name="NUMBER">$1<ex>75</ex></ph> %
       </message>
       <message name="IDS_MESSAGE_CENTER_NOTIFICATION_CHROMEOS_SYSTEM" desc="The label to describe the notification comes from ChromeOS system.">
-        <ph name="IDS_SHORT_PRODUCT_OS_NAME">$1<ex>Chrome OS</ex></ph> system
+        <ph name="IDS_SHORT_PRODUCT_OS_NAME">$1<ex>ChromeOS</ex></ph> system
       </message>
       <message name="IDS_MESSAGE_CENTER_NOTIFICATION_INLINE_REPLY_PLACEHOLDER" desc="The default placeholder text for notification inline reply.">
         Send message

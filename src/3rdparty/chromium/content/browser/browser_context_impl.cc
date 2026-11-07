@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include "content/browser/browsing_data/browsing_data_remover_impl.h"
 #include "content/browser/download/download_manager_impl.h"
 #include "content/browser/permissions/permission_controller_impl.h"
-#include "content/browser/speculation_rules/prefetch/prefetch_service.h"
+#include "content/browser/preloading/prefetch/prefetch_service.h"
 #include "content/browser/speech/tts_controller_impl.h"
 #include "content/browser/storage_partition_impl_map.h"
 #include "content/public/browser/browser_context.h"

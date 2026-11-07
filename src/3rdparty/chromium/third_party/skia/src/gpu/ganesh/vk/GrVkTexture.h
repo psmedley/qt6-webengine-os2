@@ -27,7 +27,8 @@ public:
                                              VkFormat format,
                                              uint32_t mipLevels,
                                              GrProtected,
-                                             GrMipmapStatus);
+                                             GrMipmapStatus,
+                                             std::string_view label);
 
     static sk_sp<GrVkTexture> MakeWrappedTexture(GrVkGpu*,
                                                  SkISize dimensions,
@@ -35,7 +36,7 @@ public:
                                                  GrWrapCacheable,
                                                  GrIOType,
                                                  const GrVkImageInfo&,
-                                                 sk_sp<GrBackendSurfaceMutableStateImpl>);
+                                                 sk_sp<skgpu::MutableTextureStateRef>);
 
     ~GrVkTexture() override;
 
@@ -75,7 +76,7 @@ protected:
 
     // In Vulkan we call the release proc after we are finished with the underlying
     // GrVkImage::Resource object (which occurs after the GPU has finished all work on it).
-    void onSetRelease(sk_sp<skgpu::RefCntedCallback> releaseHelper) override {
+    void onSetRelease(sk_sp<RefCntedReleaseProc> releaseHelper) override {
         // Forward the release proc onto the fTexture's GrVkImage
         fTexture->setResourceRelease(std::move(releaseHelper));
     }
@@ -92,6 +93,8 @@ private:
                 GrIOType,
                 bool isExternal,
                 std::string_view label);
+
+    void onSetLabel() override{}
 
     sk_sp<GrVkImage> fTexture;
 

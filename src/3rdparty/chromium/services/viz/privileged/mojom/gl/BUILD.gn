@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -14,9 +14,12 @@ mojom("gl") {
     "gpu_service.mojom",
   ]
 
+  parser_deps = [ "//components/viz/common:buildflags" ]
+
   public_deps = [
     "//gpu/ipc/common:interfaces",
     "//media/mojo/mojom",
+    "//third_party/blink/public/mojom/tokens:tokens",
     "//ui/gfx/geometry/mojom",
     "//ui/gfx/mojom",
     "//ui/gl/mojom",
@@ -31,6 +34,7 @@ mojom("gl") {
 
   if (is_win) {
     sources += [ "info_collection_gpu_service.mojom" ]
+    public_deps += [ "//ui/gfx/mojom:dxgi_info" ]
   }
 
   enabled_features = []

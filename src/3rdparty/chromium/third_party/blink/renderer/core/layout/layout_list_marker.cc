@@ -219,10 +219,11 @@ LayoutUnit LayoutListMarker::GetWidthOfText(
     ListMarker::ListStyleCategory category) const {
   NOT_DESTROYED();
   // TODO(crbug.com/1012289): this code doesn't support bidi algorithm.
-  if (text_.IsEmpty())
+  if (text_.empty())
     return LayoutUnit();
   const Font& font = StyleRef().GetFont();
-  LayoutUnit item_width = LayoutUnit(font.Width(TextRun(text_)));
+  LayoutUnit item_width =
+      LayoutUnit(font.Width(TextRun(text_))).ClampNegativeToZero();
   if (category == ListMarker::ListStyleCategory::kStaticString) {
     // Don't add a suffix.
     return item_width;
@@ -231,10 +232,14 @@ LayoutUnit LayoutListMarker::GetWidthOfText(
   // This doesn't seem correct, e.g., ligatures. We don't fix it since it's
   // legacy layout.
   const CounterStyle& counter_style = GetCounterStyle();
-  if (counter_style.GetPrefix())
-    item_width += LayoutUnit(font.Width(TextRun(counter_style.GetPrefix())));
-  if (counter_style.GetSuffix())
-    item_width += LayoutUnit(font.Width(TextRun(counter_style.GetSuffix())));
+  if (counter_style.GetPrefix()) {
+    item_width += LayoutUnit(font.Width(TextRun(counter_style.GetPrefix())))
+                      .ClampNegativeToZero();
+  }
+  if (counter_style.GetSuffix()) {
+    item_width += LayoutUnit(font.Width(TextRun(counter_style.GetSuffix())))
+                      .ClampNegativeToZero();
+  }
   return item_width;
 }
 

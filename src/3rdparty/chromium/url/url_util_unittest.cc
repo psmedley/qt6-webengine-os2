@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,9 @@
 
 #include <stddef.h>
 
-<<<<<<< HEAD
 #include "base/strings/string_piece.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest-message.h"
-=======
-#include "base/cxx17_backports.h"
-#include "build/build_config.h"
->>>>>>> 0e53634c96 (Better handle drive letters in urlbar - based on https://github.com/bitwiseworks/qtwebengine-chromium-os2/issues/50)
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/third_party/mozilla/url_parse.h"

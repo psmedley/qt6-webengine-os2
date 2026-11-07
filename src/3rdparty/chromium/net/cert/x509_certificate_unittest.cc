@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,9 +19,10 @@
 #include "crypto/rsa_private_key.h"
 #include "net/base/net_errors.h"
 #include "net/cert/asn1_util.h"
-#include "net/cert/internal/parse_certificate.h"
 #include "net/cert/pem.h"
+#include "net/cert/pki/parse_certificate.h"
 #include "net/cert/x509_util.h"
+#include "net/test/cert_builder.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_certificate_data.h"
 #include "net/test/test_data_directory.h"
@@ -921,66 +922,38 @@ TEST(X509CertificateTest, IsSelfSigned) {
 }
 
 TEST(X509CertificateTest, IsIssuedByEncodedWithIntermediates) {
-  static const unsigned char kPolicyRootDN[] = {
-    0x30, 0x1e, 0x31, 0x1c, 0x30, 0x1a, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c,
-    0x13, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x20, 0x54, 0x65, 0x73, 0x74,
-    0x20, 0x52, 0x6f, 0x6f, 0x74, 0x20, 0x43, 0x41
-  };
-  static const unsigned char kPolicyIntermediateDN[] = {
-    0x30, 0x26, 0x31, 0x24, 0x30, 0x22, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c,
-    0x1b, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x20, 0x54, 0x65, 0x73, 0x74,
-    0x20, 0x49, 0x6e, 0x74, 0x65, 0x72, 0x6d, 0x65, 0x64, 0x69, 0x61, 0x74,
-    0x65, 0x20, 0x43, 0x41
-  };
+  std::unique_ptr<CertBuilder> leaf, intermediate, root;
+  CertBuilder::CreateSimpleChain(&leaf, &intermediate, &root);
+  ASSERT_TRUE(leaf && intermediate && root);
 
-  base::FilePath certs_dir = GetTestCertsDirectory();
+  std::string intermediate_dn = intermediate->GetSubject();
+  std::string root_dn = root->GetSubject();
 
-  CertificateList policy_chain = CreateCertificateListFromFile(
-      certs_dir, "explicit-policy-chain.pem", X509Certificate::FORMAT_AUTO);
-  ASSERT_EQ(3u, policy_chain.size());
-
-  // The intermediate CA certificate's policyConstraints extension has a
-  // requireExplicitPolicy field with SkipCerts=0.
-  std::string policy_intermediate_dn(
-      reinterpret_cast<const char*>(kPolicyIntermediateDN),
-      sizeof(kPolicyIntermediateDN));
-  std::string policy_root_dn(reinterpret_cast<const char*>(kPolicyRootDN),
-                             sizeof(kPolicyRootDN));
-
-  std::vector<bssl::UniquePtr<CRYPTO_BUFFER>> intermediates;
-  intermediates.push_back(bssl::UpRef(policy_chain[1]->cert_buffer()));
-  scoped_refptr<X509Certificate> cert_chain = X509Certificate::CreateFromBuffer(
-      bssl::UpRef(policy_chain[0]->cert_buffer()), std::move(intermediates));
+  // Create an X509Certificate object containing the leaf and the intermediate
+  // but not the root.
+  scoped_refptr<X509Certificate> cert_chain = leaf->GetX509CertificateChain();
   ASSERT_TRUE(cert_chain);
 
-  std::vector<std::string> issuers;
-
   // Check that the chain is issued by the intermediate.
-  issuers.clear();
-  issuers.push_back(policy_intermediate_dn);
-  EXPECT_TRUE(cert_chain->IsIssuedByEncoded(issuers));
+  EXPECT_TRUE(cert_chain->IsIssuedByEncoded({intermediate_dn}));
 
   // Check that the chain is also issued by the root.
-  issuers.clear();
-  issuers.push_back(policy_root_dn);
-  EXPECT_TRUE(cert_chain->IsIssuedByEncoded(issuers));
+  EXPECT_TRUE(cert_chain->IsIssuedByEncoded({root_dn}));
 
   // Check that the chain is issued by either the intermediate or the root.
-  issuers.clear();
-  issuers.push_back(policy_intermediate_dn);
-  issuers.push_back(policy_root_dn);
-  EXPECT_TRUE(cert_chain->IsIssuedByEncoded(issuers));
+  EXPECT_TRUE(cert_chain->IsIssuedByEncoded({intermediate_dn, root_dn}));
 
   // Check that an empty issuers list returns false.
-  issuers.clear();
-  EXPECT_FALSE(cert_chain->IsIssuedByEncoded(issuers));
+  EXPECT_FALSE(cert_chain->IsIssuedByEncoded({}));
 
   // Check that the chain is not issued by Verisign
-  std::string mit_issuer(reinterpret_cast<const char*>(VerisignDN),
-                         sizeof(VerisignDN));
-  issuers.clear();
-  issuers.push_back(mit_issuer);
-  EXPECT_FALSE(cert_chain->IsIssuedByEncoded(issuers));
+  std::string verisign_issuer(reinterpret_cast<const char*>(VerisignDN),
+                              sizeof(VerisignDN));
+  EXPECT_FALSE(cert_chain->IsIssuedByEncoded({verisign_issuer}));
+
+  // Check that the chain is issued by root, though the extraneous Verisign
+  // name is also given.
+  EXPECT_TRUE(cert_chain->IsIssuedByEncoded({verisign_issuer, root_dn}));
 }
 
 const struct CertificateFormatTestData {
@@ -1092,7 +1065,7 @@ const struct CertificateFormatTestData {
 class X509CertificateParseTest
     : public testing::TestWithParam<CertificateFormatTestData> {
  public:
-  virtual ~X509CertificateParseTest() = default;
+  ~X509CertificateParseTest() override = default;
   void SetUp() override { test_data_ = GetParam(); }
   void TearDown() override {}
 
@@ -1324,13 +1297,13 @@ TEST_P(X509CertificateNameVerifyTest, VerifyHostname) {
         ip_addressses.push_back(std::move(bytes));
         ASSERT_EQ(16U, ip_addressses.back().size()) << i;
       } else {  // Decimal groups
-        std::vector<std::string> decimals_ascii = base::SplitString(
+        std::vector<std::string> decimals_ascii_list = base::SplitString(
             addr_ascii, ".", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
-        EXPECT_EQ(4U, decimals_ascii.size()) << i;
+        EXPECT_EQ(4U, decimals_ascii_list.size()) << i;
         std::string addr_bytes;
-        for (size_t j = 0; j < decimals_ascii.size(); ++j) {
+        for (const auto& decimals_ascii : decimals_ascii_list) {
           int decimal_value;
-          EXPECT_TRUE(base::StringToInt(decimals_ascii[j], &decimal_value));
+          EXPECT_TRUE(base::StringToInt(decimals_ascii, &decimal_value));
           EXPECT_GE(decimal_value, 0);
           EXPECT_LE(decimal_value, 255);
           addr_bytes.push_back(static_cast<char>(decimal_value));

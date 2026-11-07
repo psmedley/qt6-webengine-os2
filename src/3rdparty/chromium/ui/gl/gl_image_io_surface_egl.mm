@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,12 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/feature_list.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
-#include "ui/gl/gl_surface_egl.h"
+#include "ui/gl/gl_display.h"
+#include "ui/gl/gl_surface.h"
 #include "ui/gl/scoped_binders.h"
-#include "ui/gl/yuv_to_rgb_converter.h"
 
 // Enums for the EGL_ANGLE_iosurface_client_buffer extension
 #define EGL_IOSURFACE_ANGLE 0x3454
@@ -23,6 +24,13 @@
 namespace gl {
 
 namespace {
+
+// If enabled, this will release all EGL state as soon as the underlying
+// texture is released. This has the potential to cause performance regressions,
+// and so is disabled by default.
+BASE_FEATURE(kTightlyScopedIOSurfaceEGLState,
+             "TightlyScopedIOSurfaceEGLState",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 struct InternalFormatType {
   InternalFormatType(GLenum format, GLenum type) : format(format), type(type) {}
@@ -38,13 +46,13 @@ InternalFormatType BufferFormatToInternalFormatType(gfx::BufferFormat format) {
     case gfx::BufferFormat::R_8:
       return {GL_RED, GL_UNSIGNED_BYTE};
     case gfx::BufferFormat::R_16:
-      // TODO(https://crbug.com/1233228): This should be GL_RED.
-      return {GL_RED_INTEGER, GL_UNSIGNED_SHORT};
+      return {GL_RED, GL_UNSIGNED_SHORT};
     case gfx::BufferFormat::RG_88:
       return {GL_RG, GL_UNSIGNED_BYTE};
     case gfx::BufferFormat::RG_1616:
       return {GL_RG, GL_UNSIGNED_SHORT};
     case gfx::BufferFormat::BGRX_8888:
+    case gfx::BufferFormat::RGBX_8888:
       return {GL_RGB, GL_UNSIGNED_BYTE};
     case gfx::BufferFormat::BGRA_8888:
     case gfx::BufferFormat::RGBA_8888:
@@ -55,7 +63,6 @@ InternalFormatType BufferFormatToInternalFormatType(gfx::BufferFormat format) {
       return {GL_RGB10_A2, GL_UNSIGNED_INT_2_10_10_10_REV};
     case gfx::BufferFormat::BGR_565:
     case gfx::BufferFormat::RGBA_4444:
-    case gfx::BufferFormat::RGBX_8888:
     case gfx::BufferFormat::RGBA_1010102:
     case gfx::BufferFormat::YVU_420:
     case gfx::BufferFormat::YUV_420_BIPLANAR:
@@ -110,47 +117,62 @@ GLenum TargetGetterFromGLTarget(GLint gl_target) {
 
 }  // anonymous namespace
 
-GLImageIOSurfaceEGL::GLImageIOSurfaceEGL(const gfx::Size& size,
-                                         unsigned internalformat)
-    : GLImageIOSurface(size, internalformat),
-      display_(GLSurfaceEGL::GetHardwareDisplay()),
-      pbuffer_(EGL_NO_SURFACE),
-      dummy_config_(nullptr),
-      texture_target_(EGL_TEXTURE_RECTANGLE_ANGLE),
-      texture_bound_(false) {
-  DCHECK(display_ != EGL_NO_DISPLAY);
+EGLAccess::EGLAccess(GLDisplayEGL* display) {
+  display_ = display;
+  DCHECK_NE(display_, nullptr);
+  DCHECK_NE(display_->GetDisplay(), EGL_NO_DISPLAY);
 
   // When creating a pbuffer we need to supply an EGLConfig. On ANGLE and
   // Swiftshader on Mac, there's only ever one config. Query it from EGL.
   EGLint numConfigs = 0;
-  EGLBoolean result =
-      eglChooseConfig(display_, nullptr, &dummy_config_, 1, &numConfigs);
-  DCHECK(result == EGL_TRUE);
-  DCHECK(numConfigs = 1);
-  DCHECK(dummy_config_ != nullptr);
-  const char* extensions = eglQueryString(display_, EGL_EXTENSIONS);
-  if (GLSurface::ExtensionsContain(extensions,
-                                   "EGL_ANGLE_iosurface_client_buffer")) {
-    result =
-        eglGetConfigAttrib(display_, dummy_config_,
-                           EGL_BIND_TO_TEXTURE_TARGET_ANGLE, &texture_target_);
-    DCHECK(result == EGL_TRUE);
+  EGLBoolean result = eglChooseConfig(display_->GetDisplay(), nullptr,
+                                      &dummy_config_, 1, &numConfigs);
+  DCHECK_EQ(result, static_cast<EGLBoolean>(EGL_TRUE));
+  DCHECK_EQ(numConfigs, 1);
+  DCHECK_NE(dummy_config_, EGL_NO_CONFIG_KHR);
+
+  // If EGL_BIND_TO_TEXTURE_TARGET_ANGLE has already been queried, then don't
+  // query it again, since that depends only on the ANGLE backend (and we will
+  // not be mixing backends in a single process).
+  if (texture_target_ == EGL_NO_TEXTURE) {
+    texture_target_ = EGL_TEXTURE_RECTANGLE_ANGLE;
+    if (display_->ext->b_EGL_ANGLE_iosurface_client_buffer) {
+      result = eglGetConfigAttrib(display_->GetDisplay(), dummy_config_,
+                                  EGL_BIND_TO_TEXTURE_TARGET_ANGLE,
+                                  &texture_target_);
+      DCHECK_EQ(result, static_cast<EGLBoolean>(EGL_TRUE));
+    }
   }
-  DCHECK(texture_target_ != EGL_NO_TEXTURE);
+  DCHECK_NE(texture_target_, EGL_NO_TEXTURE);
 }
 
-GLImageIOSurfaceEGL::~GLImageIOSurfaceEGL() {
-  GLint target_gl = GLTargetFromEGLTarget(texture_target_);
-  if (target_gl == GL_NONE) {
-    return;
+EGLAccess::~EGLAccess() {
+  if (pbuffer_ != EGL_NO_SURFACE) {
+    EGLBoolean result = eglDestroySurface(display_->GetDisplay(), pbuffer_);
+    DCHECK_EQ(result, static_cast<EGLBoolean>(EGL_TRUE));
   }
+}
+
+GLImageIOSurfaceEGL::GLImageIOSurfaceEGL(const gfx::Size& size,
+                                         unsigned internalformat)
+    : GLImageIOSurface(size, internalformat) {}
+
+GLImageIOSurfaceEGL::~GLImageIOSurfaceEGL() {
   if (texture_bound_) {
+    GLint target_gl =
+        GLTargetFromEGLTarget(GetEGLAccessForCurrentContext().texture_target());
+    DCHECK_NE(target_gl, GL_NONE);
     ReleaseTexImage(target_gl);
   }
-  if (pbuffer_ != EGL_NO_SURFACE) {
-    EGLBoolean result = eglDestroySurface(display_, pbuffer_);
-    DCHECK(result == EGL_TRUE);
+}
+
+EGLAccess& GLImageIOSurfaceEGL::GetEGLAccessForCurrentContext() {
+  GLDisplayEGL* display = GLDisplayEGL::GetDisplayForCurrentContext();
+  DCHECK_NE(display, nullptr);
+  if (!egl_access_map_.contains(display)) {
+    egl_access_map_.emplace(display, EGLAccess(display));
   }
+  return egl_access_map_.at(display);
 }
 
 void GLImageIOSurfaceEGL::ReleaseTexImage(unsigned target) {
@@ -159,17 +181,26 @@ void GLImageIOSurfaceEGL::ReleaseTexImage(unsigned target) {
     return;
   }
 
-  DCHECK(texture_target_ == target_egl);
-
   if (!texture_bound_) {
     return;
   }
 
-  DCHECK(pbuffer_ != EGL_NO_SURFACE);
+  EGLAccess& egl_access = GetEGLAccessForCurrentContext();
 
-  EGLBoolean result = eglReleaseTexImage(display_, pbuffer_, EGL_BACK_BUFFER);
-  DCHECK(result == EGL_TRUE);
+  DCHECK(egl_access.texture_target() == target_egl);
+  DCHECK_NE(egl_access.pbuffer(), EGL_NO_SURFACE);
+
+  EGLBoolean result = eglReleaseTexImage(egl_access.display()->GetDisplay(),
+                                         egl_access.pbuffer(), EGL_BACK_BUFFER);
+  DCHECK_EQ(result, static_cast<EGLBoolean>(EGL_TRUE));
   texture_bound_ = false;
+
+  if (base::FeatureList::IsEnabled(kTightlyScopedIOSurfaceEGLState)) {
+    result = eglDestroySurface(egl_access.display()->GetDisplay(),
+                               egl_access.pbuffer());
+    DCHECK_EQ(result, static_cast<EGLBoolean>(EGL_TRUE));
+    egl_access.set_pbuffer(EGL_NO_SURFACE);
+  }
 }
 
 bool GLImageIOSurfaceEGL::BindTexImageImpl(unsigned target,
@@ -186,7 +217,9 @@ bool GLImageIOSurfaceEGL::BindTexImageImpl(unsigned target,
     return false;
   }
 
-  DCHECK(texture_target_ == target_egl);
+  EGLAccess& egl_access = GetEGLAccessForCurrentContext();
+
+  DCHECK_EQ(egl_access.texture_target(), target_egl);
 
   if (internalformat != 0) {
     LOG(ERROR) << "GLImageIOSurfaceEGL doesn't support binding with a custom "
@@ -197,7 +230,7 @@ bool GLImageIOSurfaceEGL::BindTexImageImpl(unsigned target,
   // Create the pbuffer representing this IOSurface lazily because we don't know
   // in the constructor if we're going to be used to bind plane 0 to a texture,
   // or to transform YUV to RGB.
-  if (pbuffer_ == EGL_NO_SURFACE) {
+  if (egl_access.pbuffer() == EGL_NO_SURFACE) {
     InternalFormatType formatType = BufferFormatToInternalFormatType(format_);
 
     // clang-format off
@@ -205,7 +238,7 @@ bool GLImageIOSurfaceEGL::BindTexImageImpl(unsigned target,
       EGL_WIDTH,                         size_.width(),
       EGL_HEIGHT,                        size_.height(),
       EGL_IOSURFACE_PLANE_ANGLE,         static_cast<EGLint>(io_surface_plane_),
-      EGL_TEXTURE_TARGET,                texture_target_,
+      EGL_TEXTURE_TARGET,                egl_access.texture_target(),
       EGL_TEXTURE_INTERNAL_FORMAT_ANGLE, static_cast<EGLint>(formatType.format),
       EGL_TEXTURE_FORMAT,                EGL_TEXTURE_RGBA,
       EGL_TEXTURE_TYPE_ANGLE,            static_cast<EGLint>(formatType.type),
@@ -213,9 +246,10 @@ bool GLImageIOSurfaceEGL::BindTexImageImpl(unsigned target,
     };
     // clang-format on
 
-    pbuffer_ = eglCreatePbufferFromClientBuffer(display_, EGL_IOSURFACE_ANGLE,
-        io_surface_.get(), dummy_config_, attribs);
-    if (pbuffer_ == EGL_NO_SURFACE) {
+    egl_access.set_pbuffer(eglCreatePbufferFromClientBuffer(
+        egl_access.display()->GetDisplay(), EGL_IOSURFACE_ANGLE,
+        io_surface_.get(), egl_access.dummy_config(), attribs));
+    if (egl_access.pbuffer() == EGL_NO_SURFACE) {
       LOG(ERROR) << "eglCreatePbufferFromClientBuffer failed, EGL error is "
                  << eglGetError();
       return false;
@@ -223,166 +257,18 @@ bool GLImageIOSurfaceEGL::BindTexImageImpl(unsigned target,
   }
 
   DCHECK(!texture_bound_);
-  EGLBoolean result = eglBindTexImage(display_, pbuffer_, EGL_BACK_BUFFER);
+  EGLBoolean result = eglBindTexImage(egl_access.display()->GetDisplay(),
+                                      egl_access.pbuffer(), EGL_BACK_BUFFER);
 
   if (result != EGL_TRUE) {
     LOG(ERROR) << "eglBindTexImage failed, EGL error is "
                << eglGetError();
+    eglDestroySurface(egl_access.display()->GetDisplay(), egl_access.pbuffer());
+    egl_access.set_pbuffer(EGL_NO_SURFACE);
     return false;
   }
 
   texture_bound_ = true;
-  return true;
-}
-
-bool GLImageIOSurfaceEGL::CopyTexImage(unsigned target) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  GLint target_gl = GLTargetFromEGLTarget(texture_target_);
-  if (target_gl == GL_NONE) {
-    return false;
-  }
-
-  if (format_ != gfx::BufferFormat::YUV_420_BIPLANAR &&
-      format_ != gfx::BufferFormat::P010) {
-    LOG(ERROR) << "non-YUV buffer format passed to CopyTexImage";
-    return false;
-  }
-
-  GLContext* gl_context = GLContext::GetCurrent();
-  DCHECK(gl_context);
-
-  YUVToRGBConverter* yuv_to_rgb_converter =
-      gl_context->GetYUVToRGBConverter(color_space_for_yuv_to_rgb_);
-  DCHECK(yuv_to_rgb_converter);
-
-  // Note that state restoration is done explicitly instead of scoped binders to
-  // avoid https://crbug.com/601729.
-  GLint rgb_texture = 0;
-  GLenum target_getter = TargetGetterFromGLTarget(target);
-  if (target_getter == GL_NONE) {
-    return false;
-  }
-
-  EGLSurface y_surface = EGL_NO_SURFACE;
-  EGLSurface uv_surface = EGL_NO_SURFACE;
-
-  EGLSurface* y_surface_ptr = &y_surface;
-  EGLSurface* uv_surface_ptr = &uv_surface;
-  glGetIntegerv(target_getter, &rgb_texture);
-  base::ScopedClosureRunner destroy_resources_runner(
-      base::BindOnce(base::RetainBlock(^{
-        if (*y_surface_ptr != EGL_NO_SURFACE) {
-          EGLBoolean result =
-              eglReleaseTexImage(display_, *y_surface_ptr, EGL_BACK_BUFFER);
-          DCHECK(result == EGL_TRUE);
-          result = eglDestroySurface(display_, *y_surface_ptr);
-          DCHECK(result == EGL_TRUE);
-        }
-        if (*uv_surface_ptr != EGL_NO_SURFACE) {
-          EGLBoolean result =
-              eglReleaseTexImage(display_, *uv_surface_ptr, EGL_BACK_BUFFER);
-          DCHECK(result == EGL_TRUE);
-          result = eglDestroySurface(display_, *uv_surface_ptr);
-          DCHECK(result == EGL_TRUE);
-        }
-        glBindTexture(target, rgb_texture);
-      })));
-
-  glBindTexture(target_gl, yuv_to_rgb_converter->y_texture());
-  if (glGetError() != GL_NO_ERROR) {
-    LOG(ERROR) << "Can't bind Y texture";
-    return false;
-  }
-
-  // Disable mipmap filtering since iosurface doesn't have mipmap. Rectangle
-  // textures have mipmap disabled by default but other types of texture don't.
-  glTexParameteri(target_gl, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(target_gl, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(target_gl, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-  const EGLint texture_type =
-      format_ == gfx::BufferFormat::P010 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE;
-
-  // GL_UNSIGNED_SHORT is not supported for all contexts. Use half-float
-  // instead.
-  // https://crbug.com/1282350
-  const GLenum rgb_texture_type =
-      format_ == gfx::BufferFormat::P010 ? GL_HALF_FLOAT_OES : GL_UNSIGNED_BYTE;
-
-  // clang-format off
-  const EGLint yAttribs[] = {
-    EGL_WIDTH,                         size_.width(),
-    EGL_HEIGHT,                        size_.height(),
-    EGL_IOSURFACE_PLANE_ANGLE,         0,
-    EGL_TEXTURE_TARGET,                texture_target_,
-    EGL_TEXTURE_INTERNAL_FORMAT_ANGLE, GL_RED,
-    EGL_TEXTURE_FORMAT,                EGL_TEXTURE_RGBA,
-    EGL_TEXTURE_TYPE_ANGLE,            texture_type,
-    EGL_NONE,                          EGL_NONE,
-  };
-  // clang-format on
-
-  y_surface = eglCreatePbufferFromClientBuffer(display_, EGL_IOSURFACE_ANGLE,
-                                               io_surface_.get(), dummy_config_,
-                                               yAttribs);
-  if (y_surface == EGL_NO_SURFACE) {
-    LOG(ERROR) << "eglCreatePbufferFromClientBuffer failed, EGL error is "
-               << eglGetError();
-    return false;
-  }
-
-  EGLBoolean result = eglBindTexImage(display_, y_surface, EGL_BACK_BUFFER);
-  if (result != EGL_TRUE) {
-    LOG(ERROR) << "eglBindTexImage failed, EGL error is " << eglGetError();
-    return false;
-  }
-
-  glBindTexture(target_gl, yuv_to_rgb_converter->uv_texture());
-  if (glGetError() != GL_NO_ERROR) {
-    LOG(ERROR) << "Can't bind UV texture";
-    return false;
-  }
-
-  glTexParameteri(target_gl, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(target_gl, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(target_gl, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-  // clang-format off
-  const EGLint uvAttribs[] = {
-    EGL_WIDTH,                         size_.width() / 2,
-    EGL_HEIGHT,                        size_.height() / 2,
-    EGL_IOSURFACE_PLANE_ANGLE,         1,
-    EGL_TEXTURE_TARGET,                texture_target_,
-    EGL_TEXTURE_INTERNAL_FORMAT_ANGLE, GL_RG,
-    EGL_TEXTURE_FORMAT,                EGL_TEXTURE_RGBA,
-    EGL_TEXTURE_TYPE_ANGLE,            texture_type,
-    EGL_NONE,                          EGL_NONE,
-  };
-  // clang-format on
-
-  uv_surface = eglCreatePbufferFromClientBuffer(display_, EGL_IOSURFACE_ANGLE,
-                                                io_surface_.get(),
-                                                dummy_config_, uvAttribs);
-  if (uv_surface == EGL_NO_SURFACE) {
-    LOG(ERROR) << "eglCreatePbufferFromClientBuffer failed, EGL error is "
-               << eglGetError();
-    return false;
-  }
-
-  result = eglBindTexImage(display_, uv_surface, EGL_BACK_BUFFER);
-  if (result != EGL_TRUE) {
-    LOG(ERROR) << "eglBindTexImage failed, EGL error is " << eglGetError();
-    return false;
-  }
-
-  yuv_to_rgb_converter->CopyYUV420ToRGB(target, size_, rgb_texture,
-                                        rgb_texture_type);
-  if (glGetError() != GL_NO_ERROR) {
-    LOG(ERROR) << "Failed converting from YUV to RGB";
-    return false;
-  }
-
   return true;
 }
 

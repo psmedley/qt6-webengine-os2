@@ -1,17 +1,14 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_CHROMEOS_MULTIDEVICE_INTERNALS_MULTIDEVICE_INTERNALS_LOGS_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_CHROMEOS_MULTIDEVICE_INTERNALS_MULTIDEVICE_INTERNALS_LOGS_HANDLER_H_
 
-#include "ash/components/multidevice/logging/log_buffer.h"
 #include "base/scoped_observation.h"
+#include "base/values.h"
+#include "chromeos/ash/components/multidevice/logging/log_buffer.h"
 #include "content/public/browser/web_ui_message_handler.h"
-
-namespace base {
-class ListValue;
-}  // namespace base
 
 namespace chromeos {
 
@@ -38,10 +35,10 @@ class MultideviceLogsHandler : public content::WebUIMessageHandler,
 
  private:
   // Message handler callback that returns the Log Buffer in dictionary form.
-  void HandleGetLogMessages(const base::ListValue* args);
+  void HandleGetLogMessages(const base::Value::List& args);
 
   // Message handler callback that clears the Log Buffer.
-  void ClearLogBuffer(const base::ListValue* args);
+  void ClearLogBuffer(const base::Value::List& args);
 
   base::ScopedObservation<LogBuffer, LogBuffer::Observer> observation_{this};
 };

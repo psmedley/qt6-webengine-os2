@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/http/http_stream_factory.h"
 
+#include <cstddef>
 #include <tuple>
 #include <utility>
 
@@ -46,11 +47,11 @@ const char kAlternativeServiceHeader[] = "Alt-Svc";
 HttpStreamFactory::HttpStreamFactory(HttpNetworkSession* session)
     : session_(session), job_factory_(std::make_unique<JobFactory>()) {}
 
-HttpStreamFactory::~HttpStreamFactory() {}
+HttpStreamFactory::~HttpStreamFactory() = default;
 
 void HttpStreamFactory::ProcessAlternativeServices(
     HttpNetworkSession* session,
-    const net::NetworkIsolationKey& network_isolation_key,
+    const net::NetworkAnonymizationKey& network_anonymization_key,
     const HttpResponseHeaders* headers,
     const url::SchemeHostPort& http_server) {
   if (!headers->HasHeader(kAlternativeServiceHeader))
@@ -67,7 +68,7 @@ void HttpStreamFactory::ProcessAlternativeServices(
   }
 
   session->http_server_properties()->SetAlternativeServices(
-      RewriteHost(http_server), network_isolation_key,
+      RewriteHost(http_server), network_anonymization_key,
       net::ProcessAlternativeServices(
           alternative_service_vector, session->params().enable_http2,
           session->params().enable_quic,
@@ -152,7 +153,11 @@ std::unique_ptr<HttpStreamRequest> HttpStreamFactory::RequestStreamInternal(
   auto job_controller = std::make_unique<JobController>(
       this, delegate, session_, job_factory_.get(), request_info,
       /* is_preconnect = */ false, is_websocket, enable_ip_based_pooling,
-      enable_alternative_services, server_ssl_config, proxy_ssl_config);
+      enable_alternative_services,
+      session_->context()
+          .quic_context->params()
+          ->delay_main_job_with_available_spdy_session,
+      server_ssl_config, proxy_ssl_config);
   JobController* job_controller_raw_ptr = job_controller.get();
   job_controller_set_.insert(std::move(job_controller));
   return job_controller_raw_ptr->Start(delegate,
@@ -161,7 +166,7 @@ std::unique_ptr<HttpStreamRequest> HttpStreamFactory::RequestStreamInternal(
 }
 
 void HttpStreamFactory::PreconnectStreams(int num_streams,
-                                          const HttpRequestInfo& request_info) {
+                                          HttpRequestInfo& request_info) {
   DCHECK(request_info.url.is_valid());
 
   auto job_controller = std::make_unique<JobController>(
@@ -169,7 +174,11 @@ void HttpStreamFactory::PreconnectStreams(int num_streams,
       /*is_preconnect=*/true,
       /*is_websocket=*/false,
       /*enable_ip_based_pooling=*/true,
-      /*enable_alternative_services=*/true, /*server_ssl_config=*/SSLConfig(),
+      /*enable_alternative_services=*/true,
+      session_->context()
+          .quic_context->params()
+          ->delay_main_job_with_available_spdy_session,
+      /*server_ssl_config=*/SSLConfig(),
       /*proxy_ssl_config=*/SSLConfig());
   JobController* job_controller_raw_ptr = job_controller.get();
   job_controller_set_.insert(std::move(job_controller));

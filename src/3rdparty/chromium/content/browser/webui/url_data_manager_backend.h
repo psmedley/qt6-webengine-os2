@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,7 +62,7 @@ class URLDataManagerBackend : public base::SupportsUserData::Data {
   // Creates and sets the response headers for the given request.
   static scoped_refptr<net::HttpResponseHeaders> GetHeaders(
       URLDataSourceImpl* source,
-      const std::string& path,
+      const GURL& url,
       const std::string& origin);
 
   // Returns whether |url| passes some sanity checks and is a valid GURL.

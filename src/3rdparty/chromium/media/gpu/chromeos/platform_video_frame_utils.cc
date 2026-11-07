@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -125,7 +125,7 @@ class GbmDeviceWrapper {
           version->name,
           base::checked_cast<std::string::size_type>(version->name_len));
       drmFreeVersion(version);
-      if (base::LowerCaseEqualsASCII(version_name, "vgem"))
+      if (base::EqualsCaseInsensitiveASCII(version_name, "vgem"))
         continue;
       gbm_device_ = ui::CreateGbmDevice(render_node_file_.GetPlatformFile());
       if (gbm_device_)
@@ -216,6 +216,8 @@ scoped_refptr<VideoFrame> CreateGpuMemoryBufferVideoFrame(
   auto frame = VideoFrame::WrapExternalGpuMemoryBuffer(
       visible_rect, natural_size, std::move(gpu_memory_buffer), mailbox_holders,
       base::NullCallback(), timestamp);
+  if (!frame)
+    return nullptr;
 
   // We only support importing non-DISJOINT multi-planar GbmBuffer right now.
   // TODO(crbug.com/1258986): Add DISJOINT support.

@@ -1,10 +1,11 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/files/memory_mapped_file.h"
 #include "base/logging.h"
@@ -65,6 +66,7 @@ TEST_F(H265ParserTest, RawHevcStreamFileParsing) {
     int num_parsed_nalus = 0;
     while (true) {
       H265NALU nalu;
+      H265SEIMessage sei_msg;
       H265Parser::Result res = parser_.AdvanceToNextNALU(&nalu);
       if (res == H265Parser::kEOStream) {
         DVLOG(1) << "Number of successfully parsed NALUs before EOS: "
@@ -93,6 +95,10 @@ TEST_F(H265ParserTest, RawHevcStreamFileParsing) {
           int pps_id;
           res = parser_.ParsePPS(nalu, &pps_id);
           EXPECT_TRUE(!!parser_.GetPPS(pps_id));
+          break;
+        case H265NALU::PREFIX_SEI_NUT:
+          res = parser_.ParseSEI(&sei_msg);
+          EXPECT_EQ(res, H265Parser::kOk);
           break;
         case H265NALU::TRAIL_N:
         case H265NALU::TRAIL_R:
@@ -314,4 +320,79 @@ TEST_F(H265ParserTest, SliceHeaderParsing) {
   EXPECT_TRUE(shdr.slice_loop_filter_across_slices_enabled_flag);
 }
 
+TEST_F(H265ParserTest, SliceHeaderParsingNoValidationOnFirstSliceInFrame) {
+  LoadParserFile("bear.hevc");
+  H265SliceHeader curr_slice_header;
+  H265SliceHeader last_slice_header;
+
+  while (true) {
+    H265NALU nalu;
+    H265Parser::Result result = parser_.AdvanceToNextNALU(&nalu);
+    ASSERT_TRUE(result == H265Parser::kOk || result == H265Parser::kEOStream);
+    if (result == H265Parser::kEOStream)
+      break;
+
+    switch (nalu.nal_unit_type) {
+      case H265NALU::TRAIL_R:
+        [[fallthrough]];
+      case H265NALU::IDR_W_RADL:
+        result = parser_.ParseSliceHeader(nalu, &curr_slice_header,
+                                          &last_slice_header);
+        EXPECT_EQ(result, H265Parser::kOk);
+        last_slice_header = curr_slice_header;
+        break;
+      case H265NALU::SPS_NUT:
+        int sps_id;
+        EXPECT_EQ(parser_.ParseSPS(&sps_id), H265Parser::kOk);
+        EXPECT_NE(parser_.GetSPS(sps_id), nullptr);
+        break;
+      case H265NALU::PPS_NUT:
+        int pps_id;
+        EXPECT_EQ(parser_.ParsePPS(nalu, &pps_id), H265Parser::kOk);
+        EXPECT_NE(parser_.GetPPS(pps_id), nullptr);
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+TEST_F(H265ParserTest, SEIParsing) {
+  LoadParserFile("bear-1280x720-hevc-10bit-hdr10.hevc");
+  H265NALU target_nalu;
+  EXPECT_TRUE(ParseNalusUntilNut(&target_nalu, H265NALU::VPS_NUT));
+  int vps_id;
+  EXPECT_EQ(H265Parser::kOk, parser_.ParseVPS(&vps_id));
+  EXPECT_TRUE(ParseNalusUntilNut(&target_nalu, H265NALU::SPS_NUT));
+  int sps_id;
+  EXPECT_EQ(H265Parser::kOk, parser_.ParseSPS(&sps_id));
+  EXPECT_TRUE(ParseNalusUntilNut(&target_nalu, H265NALU::PPS_NUT));
+  int pps_id;
+  EXPECT_EQ(H265Parser::kOk, parser_.ParsePPS(target_nalu, &pps_id));
+
+  // Parse the next content light level info SEI
+  EXPECT_TRUE(ParseNalusUntilNut(&target_nalu, H265NALU::PREFIX_SEI_NUT));
+  H265SEIMessage clli_sei;
+  EXPECT_EQ(H265Parser::kOk, parser_.ParseSEI(&clli_sei));
+  EXPECT_EQ(clli_sei.type, H265SEIMessage::kSEIContentLightLevelInfo);
+  EXPECT_EQ(clli_sei.content_light_level_info.max_content_light_level, 1000u);
+  EXPECT_EQ(clli_sei.content_light_level_info.max_picture_average_light_level,
+            400u);
+
+  // Parse the next mastering display colour volume info SEI
+  EXPECT_TRUE(ParseNalusUntilNut(&target_nalu, H265NALU::PREFIX_SEI_NUT));
+  H265SEIMessage mdcv_sei;
+  EXPECT_EQ(H265Parser::kOk, parser_.ParseSEI(&mdcv_sei));
+  EXPECT_EQ(mdcv_sei.type, H265SEIMessage::kSEIMasteringDisplayInfo);
+  EXPECT_EQ(mdcv_sei.mastering_display_info.display_primaries[0][0], 13250u);
+  EXPECT_EQ(mdcv_sei.mastering_display_info.display_primaries[0][1], 34500u);
+  EXPECT_EQ(mdcv_sei.mastering_display_info.display_primaries[1][0], 7500u);
+  EXPECT_EQ(mdcv_sei.mastering_display_info.display_primaries[1][1], 3000u);
+  EXPECT_EQ(mdcv_sei.mastering_display_info.display_primaries[2][0], 34000u);
+  EXPECT_EQ(mdcv_sei.mastering_display_info.display_primaries[2][1], 16000u);
+  EXPECT_EQ(mdcv_sei.mastering_display_info.white_points[0], 15635u);
+  EXPECT_EQ(mdcv_sei.mastering_display_info.white_points[1], 16450u);
+  EXPECT_EQ(mdcv_sei.mastering_display_info.max_luminance, 10000000u);
+  EXPECT_EQ(mdcv_sei.mastering_display_info.min_luminance, 500u);
+}
 }  // namespace media

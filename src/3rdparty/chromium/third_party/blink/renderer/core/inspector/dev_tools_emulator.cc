@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -280,7 +280,7 @@ TransformationMatrix DevToolsEmulator::EnableDeviceEmulation(
   }
   if (emulation_params_.device_scale_factor != params.device_scale_factor ||
       !device_metrics_enabled_)
-    GetMemoryCache()->EvictResources();
+    MemoryCache::Get()->EvictResources();
 
   emulation_params_ = params;
   device_metrics_enabled_ = true;
@@ -315,7 +315,7 @@ void DevToolsEmulator::DisableDeviceEmulation() {
   if (!device_metrics_enabled_)
     return;
 
-  GetMemoryCache()->EvictResources();
+  MemoryCache::Get()->EvictResources();
   device_metrics_enabled_ = false;
   web_view_->GetPage()->GetSettings().SetDeviceScaleAdjustment(
       embedder_device_scale_adjustment_);
@@ -355,7 +355,6 @@ void DevToolsEmulator::EnableMobileEmulation() {
       mojom::blink::ViewportStyle::kMobile);
   web_view_->GetPage()->GetSettings().SetViewportEnabled(true);
   web_view_->GetPage()->GetSettings().SetViewportMetaEnabled(true);
-  web_view_->GetPage()->GetVisualViewport().InitializeScrollbars();
   web_view_->GetPage()->GetSettings().SetShrinksViewportContentToFit(true);
   web_view_->GetPage()->GetSettings().SetTextAutosizingEnabled(true);
   web_view_->GetPage()->GetSettings().SetPreferCompositingToLCDTextEnabled(
@@ -365,6 +364,13 @@ void DevToolsEmulator::EnableMobileEmulation() {
       true);
   web_view_->SetZoomFactorOverride(1);
   web_view_->GetPage()->SetDefaultPageScaleLimits(0.25f, 5);
+
+  // If the viewport is active, refresh the scrollbar layers to reflect the
+  // emulated viewport style. If it's not active, either we're in an embedded
+  // frame and we don't have visual viewport scrollbars or the scrollbars will
+  // initialize as part of their regular lifecycle.
+  if (web_view_->GetPage()->GetVisualViewport().IsActiveViewport())
+    web_view_->GetPage()->GetVisualViewport().InitializeScrollbars();
 
   if (web_view_->MainFrameImpl()) {
     web_view_->MainFrameImpl()->GetFrameView()->UpdateLifecycleToLayoutClean(
@@ -431,7 +437,8 @@ TransformationMatrix DevToolsEmulator::ResetViewport() {
   return ComputeRootLayerTransform();
 }
 
-TransformationMatrix DevToolsEmulator::MainFrameScrollOrScaleChanged() {
+TransformationMatrix
+DevToolsEmulator::OutermostMainFrameScrollOrScaleChanged() {
   // Viewport override has to take current page scale and scroll offset into
   // account. Update the transform if override is active.
   DCHECK(viewport_override_);

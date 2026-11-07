@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -91,10 +91,12 @@ class NET_EXPORT CTLogVerifier
 
   std::string key_id_;
   std::string description_;
-  ct::DigitallySigned::HashAlgorithm hash_algorithm_;
-  ct::DigitallySigned::SignatureAlgorithm signature_algorithm_;
+  ct::DigitallySigned::HashAlgorithm hash_algorithm_ =
+      ct::DigitallySigned::HASH_ALGO_NONE;
+  ct::DigitallySigned::SignatureAlgorithm signature_algorithm_ =
+      ct::DigitallySigned::SIG_ALGO_ANONYMOUS;
 
-  raw_ptr<EVP_PKEY> public_key_;
+  raw_ptr<EVP_PKEY> public_key_ = nullptr;
 };
 
 }  // namespace net

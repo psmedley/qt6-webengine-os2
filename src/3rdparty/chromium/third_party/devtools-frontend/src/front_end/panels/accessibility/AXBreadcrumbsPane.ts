@@ -14,7 +14,7 @@ import axBreadcrumbsStyles from './axBreadcrumbs.css.js';
 
 import type * as Protocol from '../../generated/protocol.js';
 
-import type {AccessibilitySidebarView} from './AccessibilitySidebarView.js';
+import {type AccessibilitySidebarView} from './AccessibilitySidebarView.js';
 import {AccessibilitySubPane} from './AccessibilitySubPane.js';
 
 const UIStrings = {
@@ -78,7 +78,7 @@ export class AXBreadcrumbsPane extends AccessibilitySubPane {
     };
     if (Root.Runtime.experiments.isEnabled(experiment)) {
       this.#legacyTreeDisabled = true;
-      const feedbackURL = 'https://goo.gle/devtools-a11y-tree-feedback';
+      const feedbackURL = 'https://g.co/devtools/a11y-tree-feedback';
       previewToggle.data = {
         name,
         helperText: i18nString(UIStrings.fullTreeExperimentDescription),

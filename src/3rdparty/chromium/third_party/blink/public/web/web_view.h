@@ -79,11 +79,11 @@ class WebWidget;
 struct DeviceEmulationParams;
 struct WebWindowFeatures;
 
-class WebView {
+class BLINK_EXPORT WebView {
  public:
-  BLINK_EXPORT static const double kTextSizeMultiplierRatio;
-  BLINK_EXPORT static const double kMinTextSizeMultiplier;
-  BLINK_EXPORT static const double kMaxTextSizeMultiplier;
+  static const double kTextSizeMultiplierRatio;
+  static const double kMinTextSizeMultiplier;
+  static const double kMaxTextSizeMultiplier;
 
   enum StyleInjectionTarget {
     kInjectStyleInAllFrames,
@@ -97,10 +97,15 @@ class WebView {
   // as appropriate. It is legal to modify settings before completing
   // initialization.
   //
+  // The WebView is kept alive as long as the `page_handle` mojo interface
+  // is alive. The WebView will be destroyed when that interface closes, if
+  // a client wishes to close the WebView synchronously it can call `Close`
+  // directly.
+  //
   // clients may be null, but should both be null or not together.
   // |is_hidden| defines the initial visibility of the page.
   // |is_prerendering| defines whether the page is being prerendered by the
-  // Prerender2 feature (see content/browser/prerender/README.md).
+  // Prerender2 feature (see content/browser/preloading/prerender/README.md).
   // [is_inside_portal] defines whether the page is inside_portal.
   // [is_fenced_frame] defines whether the page is for a fenced frame.
   // |compositing_enabled| dictates whether accelerated compositing should be
@@ -122,7 +127,7 @@ class WebView {
   // frame. Set on create to avoid races. Passing in nullopt indicates the
   // default base background color should be used.
   // TODO(yuzus): Remove |is_hidden| and start using |PageVisibilityState|.
-  BLINK_EXPORT static WebView* Create(
+  static WebView* Create(
       WebViewClient*,
       bool is_hidden,
       bool is_prerendering,
@@ -137,7 +142,7 @@ class WebView {
       const SessionStorageNamespaceId& session_storage_namespace_id,
       absl::optional<SkColor> page_base_background_color);
 
-  // Destroys the WebView.
+  // Destroys the WebView synchronously.
   virtual void Close() = 0;
 
   // Called to inform WebViewImpl that a local main frame has been attached.
@@ -290,9 +295,6 @@ class WebView {
   virtual void SetScreenOrientationOverrideForTesting(
       absl::optional<display::mojom::ScreenOrientation> orientation) = 0;
 
-  // Enable/Disable synchronous resize mode that is used for web tests.
-  virtual void UseSynchronousResizeModeForTesting(bool enable) = 0;
-
   // Set the window rect synchronously for testing. The normal flow is an
   // asynchronous request to the browser.
   virtual void SetWindowRectSynchronouslyForTesting(
@@ -335,7 +337,7 @@ class WebView {
   // Popup menu ----------------------------------------------------------
 
   // Sets whether select popup menus should be rendered by the browser.
-  BLINK_EXPORT static void SetUseExternalPopupMenus(bool);
+  static void SetUseExternalPopupMenus(bool);
 
   // Cancels and hides the current popup (datetime, select...) if any.
   virtual void CancelPagePopup() = 0;
@@ -347,14 +349,13 @@ class WebView {
 
   // Tells all WebView instances to update the visited link state for the
   // specified hash.
-  BLINK_EXPORT static void UpdateVisitedLinkState(uint64_t hash);
+  static void UpdateVisitedLinkState(uint64_t hash);
 
   // Tells all WebView instances to update the visited state for all
   // their links. Use invalidateVisitedLinkHashes to inform that the visitedlink
   // table was changed and the salt was changed too. And all cached visitedlink
   // hashes need to be recalculated.
-  BLINK_EXPORT static void ResetVisitedLinkState(
-      bool invalidate_visited_link_hashes);
+  static void ResetVisitedLinkState(bool invalidate_visited_link_hashes);
 
   // Custom colors -------------------------------------------------------
 
@@ -440,9 +441,8 @@ class WebView {
   // Web preferences ---------------------------------------------------
 
   // Applies blink related preferences to this view.
-  BLINK_EXPORT static void ApplyWebPreferences(
-      const web_pref::WebPreferences& prefs,
-      WebView* web_view);
+  static void ApplyWebPreferences(const web_pref::WebPreferences& prefs,
+                                  WebView* web_view);
 
   virtual void SetWebPreferences(
       const web_pref::WebPreferences& preferences) = 0;
@@ -470,7 +470,7 @@ class WebView {
   // Misc -------------------------------------------------------------
 
   // Returns the number of live WebView instances in this process.
-  BLINK_EXPORT static size_t GetWebViewCount();
+  static size_t GetWebViewCount();
 
  protected:
   ~WebView() = default;

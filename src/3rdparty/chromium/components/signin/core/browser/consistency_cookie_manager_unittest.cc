@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,10 @@
 
 #include <memory>
 
-#include "base/test/scoped_feature_list.h"
+#include "base/memory/raw_ptr.h"
 #include "components/signin/core/browser/account_reconcilor.h"
 #include "components/signin/core/browser/account_reconcilor_delegate.h"
 #include "components/signin/public/base/signin_metrics.h"
-#include "components/signin/public/base/signin_switches.h"
 #include "components/signin/public/base/test_signin_client.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/cookies/canonical_cookie.h"
@@ -18,6 +17,10 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+
+#if BUILDFLAG(IS_CHROMEOS)
+#include "components/account_manager_core/mock_account_manager_facade.h"
+#endif
 
 namespace signin {
 
@@ -51,6 +54,9 @@ class ConsistencyCookieManagerTest : public testing::Test {
     signin_client_.set_cookie_manager(std::move(mock_cookie_manager));
     reconcilor_ = std::make_unique<AccountReconcilor>(
         /*identity_manager=*/nullptr, &signin_client_,
+#if BUILDFLAG(IS_CHROMEOS)
+        &account_manager_facade_,
+#endif
         std::make_unique<AccountReconcilorDelegate>());
   }
 
@@ -127,14 +133,12 @@ class ConsistencyCookieManagerTest : public testing::Test {
   MockCookieManager* cookie_manager() { return cookie_manager_; }
 
  private:
-  // The kLacrosNonSyncingProfiles flags bundles several features: non-syncing
-  // profiles, signed out profiles, and Mirror Landing. The
-  // `ConsistencyCookieManager` is related to MirrorLanding.
-  base::test::ScopedFeatureList feature_list_{
-      switches::kLacrosNonSyncingProfiles};
-
   TestSigninClient signin_client_{/*prefs=*/nullptr};
-  MockCookieManager* cookie_manager_ = nullptr;  // Owned by `signin_client_`.
+  raw_ptr<MockCookieManager> cookie_manager_ =
+      nullptr;  // Owned by `signin_client_`.
+#if BUILDFLAG(IS_CHROMEOS)
+  account_manager::MockAccountManagerFacade account_manager_facade_;
+#endif
   std::unique_ptr<AccountReconcilor> reconcilor_;
 };
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,7 +80,7 @@ bool DevToolsDownloadManagerDelegate::DetermineDownloadTarget(
         empty_path, download::DownloadItem::TARGET_DISPOSITION_OVERWRITE,
         download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
         download::DownloadItem::MixedContentStatus::UNKNOWN, empty_path,
-        empty_path, absl::nullopt /*download_schedule*/,
+        empty_path, std::string() /*mime_type*/,
         download::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED);
     return true;
   }
@@ -162,7 +162,7 @@ void DevToolsDownloadManagerDelegate::OnDownloadPathGenerated(
       download::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT,
       download::DownloadItem::MixedContentStatus::UNKNOWN,
       suggested_path.AddExtension(FILE_PATH_LITERAL(".crdownload")),
-      suggested_path.BaseName(), absl::nullopt /*download_schedule*/,
+      suggested_path.BaseName(), std::string(),
       download::DOWNLOAD_INTERRUPT_REASON_NONE);
 }
 

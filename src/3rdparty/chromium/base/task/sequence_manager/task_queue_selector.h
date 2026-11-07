@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/base_export.h"
+#include "base/dcheck_is_on.h"
 #include "base/memory/raw_ptr.h"
 #include "base/pending_task.h"
 #include "base/task/sequence_manager/sequence_manager.h"
@@ -32,7 +33,7 @@ class BASE_EXPORT TaskQueueSelector : public WorkQueueSets::Observer {
  public:
   using SelectTaskOption = SequencedTaskSource::SelectTaskOption;
 
-  TaskQueueSelector(scoped_refptr<AssociatedThreadId> associated_thread,
+  TaskQueueSelector(scoped_refptr<const AssociatedThreadId> associated_thread,
                     const SequenceManager::Settings& settings);
 
   TaskQueueSelector(const TaskQueueSelector&) = delete;
@@ -65,7 +66,7 @@ class BASE_EXPORT TaskQueueSelector : public WorkQueueSets::Observer {
       SelectTaskOption option = SelectTaskOption::kDefault);
 
   // Serialize the selector state for tracing/debugging.
-  Value AsValue() const;
+  Value::Dict AsValue() const;
 
   class BASE_EXPORT Observer {
    public:
@@ -103,11 +104,11 @@ class BASE_EXPORT TaskQueueSelector : public WorkQueueSets::Observer {
 
   // This method will force select an immediate task if those are being
   // starved by delayed tasks.
-  void SetImmediateStarvationCountForTest(size_t immediate_starvation_count);
+  void SetImmediateStarvationCountForTest(int immediate_starvation_count);
 
   // Maximum number of delayed tasks tasks which can be run while there's a
   // waiting non-delayed task.
-  static const size_t kMaxDelayedStarvationTasks = 3;
+  static const int kMaxDelayedStarvationTasks = 3;
 
   // Tracks which priorities are currently active, meaning there are pending
   // runnable tasks with that priority. Because there are only a handful of
@@ -230,7 +231,7 @@ class BASE_EXPORT TaskQueueSelector : public WorkQueueSets::Observer {
   // Returns true if there are pending tasks with priority |priority|.
   bool HasTasksWithPriority(TaskQueue::QueuePriority priority) const;
 
-  scoped_refptr<AssociatedThreadId> associated_thread_;
+  const scoped_refptr<const AssociatedThreadId> associated_thread_;
 
 #if DCHECK_IS_ON()
   const bool random_task_selection_ = false;
@@ -248,7 +249,7 @@ class BASE_EXPORT TaskQueueSelector : public WorkQueueSets::Observer {
 
   WorkQueueSets delayed_work_queue_sets_;
   WorkQueueSets immediate_work_queue_sets_;
-  size_t immediate_starvation_count_ = 0;
+  int immediate_starvation_count_ = 0;
 
   raw_ptr<Observer> task_queue_selector_observer_ = nullptr;  // Not owned.
 };

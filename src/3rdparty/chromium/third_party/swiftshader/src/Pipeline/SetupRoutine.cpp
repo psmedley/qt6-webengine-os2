@@ -165,8 +165,8 @@ void SetupRoutine::generate()
 
 		if(state.enableMultiSampling)
 		{
-			yMin = (yMin + Constants::yMinMultiSampleOffset) >> subPixB;
-			yMax = (yMax + Constants::yMaxMultiSampleOffset) >> subPixB;
+			yMin = (yMin + yMinMultiSampleOffset) >> subPixB;
+			yMax = (yMax + yMaxMultiSampleOffset) >> subPixB;
 		}
 		else
 		{
@@ -314,20 +314,16 @@ void SetupRoutine::generate()
 		Int Y1 = *Pointer<Int>(v1 + OFFSET(Vertex, projected.y));
 		Int Y2 = *Pointer<Int>(v2 + OFFSET(Vertex, projected.y));
 
-		if(point)
-		{
-			*Pointer<Float>(primitive + OFFSET(Primitive, pointCoordX)) = Float(1.0f / subPixF) * Float(X0);
-			*Pointer<Float>(primitive + OFFSET(Primitive, pointCoordY)) = Float(1.0f / subPixF) * Float(Y0);
-		}
-
 		if(line)
 		{
 			X2 = X1 + Y1 - Y0;
 			Y2 = Y1 + X0 - X1;
 		}
 
-		Float dx = Float(X0) * (1.0f / subPixF);
-		Float dy = Float(Y0) * (1.0f / subPixF);
+		Float x0 = Float(X0) * (1.0f / subPixF);
+		Float y0 = Float(Y0) * (1.0f / subPixF);
+		*Pointer<Float>(primitive + OFFSET(Primitive, x0)) = x0;
+		*Pointer<Float>(primitive + OFFSET(Primitive, y0)) = y0;
 
 		X1 -= X0;
 		Y1 -= Y0;
@@ -342,12 +338,6 @@ void SetupRoutine::generate()
 		Float y2 = w2 * (1.0f / subPixF) * Float(Y2);
 
 		Float a = x1 * y2 - x2 * y1;
-
-		Float4 xQuad = Float4(0, 1, 0, 1) - Float4(dx);
-		Float4 yQuad = Float4(0, 0, 1, 1) - Float4(dy);
-
-		*Pointer<Float4>(primitive + OFFSET(Primitive, xQuad), 16) = xQuad;
-		*Pointer<Float4>(primitive + OFFSET(Primitive, yQuad), 16) = yQuad;
 
 		Float4 M[3];
 
@@ -382,13 +372,9 @@ void SetupRoutine::generate()
 		{
 			Float4 ABC = M[0] + M[1] + M[2];
 
-			Float4 A = ABC.x;
-			Float4 B = ABC.y;
-			Float4 C = ABC.z;
-
-			*Pointer<Float4>(primitive + OFFSET(Primitive, w.A), 16) = A;
-			*Pointer<Float4>(primitive + OFFSET(Primitive, w.B), 16) = B;
-			*Pointer<Float4>(primitive + OFFSET(Primitive, w.C), 16) = C;
+			*Pointer<Float>(primitive + OFFSET(Primitive, w.A)) = ABC.x;
+			*Pointer<Float>(primitive + OFFSET(Primitive, w.B)) = ABC.y;
+			*Pointer<Float>(primitive + OFFSET(Primitive, w.C)) = ABC.z;
 		}
 
 		if(state.interpolateZ)
@@ -424,9 +410,9 @@ void SetupRoutine::generate()
 
 			C = z0 * *Pointer<Float>(data + OFFSET(DrawData, depthRange)) + *Pointer<Float>(data + OFFSET(DrawData, depthNear));
 
-			*Pointer<Float4>(primitive + OFFSET(Primitive, z.A), 16) = Float4(A);
-			*Pointer<Float4>(primitive + OFFSET(Primitive, z.B), 16) = Float4(B);
-			*Pointer<Float4>(primitive + OFFSET(Primitive, z.C), 16) = Float4(C);
+			*Pointer<Float>(primitive + OFFSET(Primitive, z.A)) = A;
+			*Pointer<Float>(primitive + OFFSET(Primitive, z.B)) = B;
+			*Pointer<Float>(primitive + OFFSET(Primitive, z.C)) = C;
 
 			Float bias = 0.0f;
 
@@ -485,7 +471,7 @@ void SetupRoutine::generate()
 					bias = IfThenElse(clamp > 0.0f, Min(bias, clamp), Max(bias, clamp));
 				}
 
-				*Pointer<Float4>(primitive + OFFSET(Primitive, zBias), 16) = Float4(bias);
+				*Pointer<Float>(primitive + OFFSET(Primitive, zBias)) = bias;
 			}
 		}
 
@@ -544,24 +530,20 @@ void SetupRoutine::setupGradient(Pointer<Byte> &primitive, Pointer<Byte> &triang
 		Float4 B = i.yyyy * m[1];
 		Float4 C = i.zzzz * m[2];
 
-		C = A + B + C;
+		Float4 P = A + B + C;
 
-		A = C.xxxx;
-		B = C.yyyy;
-		C = C.zzzz;
-
-		*Pointer<Float4>(primitive + planeEquation + 0, 16) = A;
-		*Pointer<Float4>(primitive + planeEquation + 16, 16) = B;
-		*Pointer<Float4>(primitive + planeEquation + 32, 16) = C;
+		*Pointer<Float>(primitive + planeEquation + 0) = P.x;
+		*Pointer<Float>(primitive + planeEquation + 4) = P.y;
+		*Pointer<Float>(primitive + planeEquation + 8) = P.z;
 	}
 	else
 	{
 		int leadingVertex = OFFSET(Triangle, v0);
 		Float C = *Pointer<Float>(triangle + leadingVertex + attribute);
 
-		*Pointer<Float4>(primitive + planeEquation + 0, 16) = Float4(0, 0, 0, 0);
-		*Pointer<Float4>(primitive + planeEquation + 16, 16) = Float4(0, 0, 0, 0);
-		*Pointer<Float4>(primitive + planeEquation + 32, 16) = Float4(C);
+		*Pointer<Float>(primitive + planeEquation + 0) = 0;
+		*Pointer<Float>(primitive + planeEquation + 4) = 0;
+		*Pointer<Float>(primitive + planeEquation + 8) = C;
 	}
 }
 

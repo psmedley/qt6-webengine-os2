@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,17 @@ class COMPONENT_EXPORT(UI_LOTTIE) AnimationObserver
 
   // Called when the animation has successfully resumed.
   virtual void AnimationResuming(const Animation* animation) {}
+
+  // Called after each animation frame is painted. Note this is not synonymous
+  // with the frame ultimately being rendered on screen; it only means the frame
+  // has been submitted to the rest of the graphics pipeline for rendering.
+  //
+  // |t| is the normalized timestamp in range [0, 1] of the frame just painted.
+  virtual void AnimationFramePainted(const Animation* animation, float t) {}
+
+  // Called in the Animation's destructor. Observers may remove themselves
+  // within their implementation.
+  virtual void AnimationIsDeleting(const Animation* animation) {}
 
  protected:
   ~AnimationObserver() override = default;

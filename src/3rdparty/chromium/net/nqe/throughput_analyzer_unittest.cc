@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,9 +45,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
-namespace net {
-
-namespace nqe {
+namespace net::nqe {
 
 namespace {
 
@@ -60,7 +58,7 @@ std::unique_ptr<HostResolver> CreateMockHostResolver() {
   // local.com resolves to a private IP address.
   host_resolver->rules()->AddRule("local.com", "127.0.0.1");
   host_resolver->LoadIntoCache(HostPortPair("local.com", 80),
-                               NetworkIsolationKey(), absl::nullopt);
+                               NetworkAnonymizationKey(), absl::nullopt);
   // Hosts not listed here (e.g., "example.com") are treated as external. See
   // ThroughputAnalyzerTest.PrivateHost below.
 
@@ -80,9 +78,7 @@ class TestThroughputAnalyzer : public internal::ThroughputAnalyzer {
                 &TestThroughputAnalyzer::OnNewThroughputObservationAvailable,
                 base::Unretained(this)),
             tick_clock,
-            NetLogWithSource::Make(NetLogSourceType::NONE)),
-        throughput_observations_received_(0),
-        bits_received_(0) {}
+            NetLogWithSource::Make(NetLogSourceType::NONE)) {}
 
   TestThroughputAnalyzer(const TestThroughputAnalyzer&) = delete;
   TestThroughputAnalyzer& operator=(const TestThroughputAnalyzer&) = delete;
@@ -110,9 +106,9 @@ class TestThroughputAnalyzer : public internal::ThroughputAnalyzer {
   using internal::ThroughputAnalyzer::IsHangingWindow;
 
  private:
-  int throughput_observations_received_;
+  int throughput_observations_received_ = 0;
 
-  int64_t bits_received_;
+  int64_t bits_received_ = 0;
 };
 
 using ThroughputAnalyzerTest = TestWithTaskEnvironment;
@@ -121,10 +117,10 @@ TEST_F(ThroughputAnalyzerTest, PrivateHost) {
   auto host_resolver = CreateMockHostResolver();
   EXPECT_FALSE(nqe::internal::IsPrivateHostForTesting(
       host_resolver.get(), HostPortPair("example.com", 80),
-      NetworkIsolationKey()));
+      NetworkAnonymizationKey()));
   EXPECT_TRUE(nqe::internal::IsPrivateHostForTesting(
       host_resolver.get(), HostPortPair("local.com", 80),
-      NetworkIsolationKey()));
+      NetworkAnonymizationKey()));
 }
 
 #if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
@@ -163,10 +159,10 @@ TEST_F(ThroughputAnalyzerTest, MAYBE_MaximumRequests) {
 
     // Start more requests than the maximum number of requests that can be held
     // in the memory.
-    EXPECT_EQ(test_case.is_local,
-              nqe::internal::IsPrivateHostForTesting(
-                  context->host_resolver(),
-                  HostPortPair::FromURL(test_case.url), NetworkIsolationKey()));
+    EXPECT_EQ(test_case.is_local, nqe::internal::IsPrivateHostForTesting(
+                                      context->host_resolver(),
+                                      HostPortPair::FromURL(test_case.url),
+                                      NetworkAnonymizationKey()));
     for (size_t i = 0; i < 1000; ++i) {
       std::unique_ptr<URLRequest> request(
           context->CreateRequest(test_case.url, DEFAULT_PRIORITY,
@@ -183,16 +179,18 @@ TEST_F(ThroughputAnalyzerTest, MAYBE_MaximumRequests) {
 
 #if BUILDFLAG(IS_IOS)
 // Flaky on iOS: crbug.com/672917.
-#define MAYBE_MaximumRequestsWithNetworkIsolationKey \
-  DISABLED_MaximumRequestsWithNetworkIsolationKey
+#define MAYBE_MaximumRequestsWithNetworkAnonymizationKey \
+  DISABLED_MaximumRequestsWithNetworkAnonymizationKey
 #else
-#define MAYBE_MaximumRequestsWithNetworkIsolationKey \
-  MaximumRequestsWithNetworkIsolationKey
+#define MAYBE_MaximumRequestsWithNetworkAnonymizationKey \
+  MaximumRequestsWithNetworkAnonymizationKey
 #endif
-// Make sure that the NetworkIsolationKey is respected when resolving a host
+// Make sure that the NetworkAnonymizationKey is respected when resolving a host
 // from the cache.
-TEST_F(ThroughputAnalyzerTest, MAYBE_MaximumRequestsWithNetworkIsolationKey) {
+TEST_F(ThroughputAnalyzerTest,
+       MAYBE_MaximumRequestsWithNetworkAnonymizationKey) {
   const SchemefulSite kSite(GURL("https://foo.test/"));
+  const net::NetworkAnonymizationKey kNetworkAnonymizationKey(kSite, kSite);
   const net::NetworkIsolationKey kNetworkIsolationKey(kSite, kSite);
   const GURL kUrl = GURL("http://foo.test/test.html");
 
@@ -213,17 +211,17 @@ TEST_F(ThroughputAnalyzerTest, MAYBE_MaximumRequestsWithNetworkIsolationKey) {
     auto mock_host_resolver = std::make_unique<MockCachingHostResolver>();
 
     // Add an entry to the host cache mapping kUrl to non-local IP when using an
-    // empty NetworkIsolationKey.
+    // empty NetworkAnonymizationKey.
     mock_host_resolver->rules()->AddRule(kUrl.host(), "1.2.3.4");
     mock_host_resolver->LoadIntoCache(HostPortPair::FromURL(kUrl),
-                                      NetworkIsolationKey(), absl::nullopt);
+                                      NetworkAnonymizationKey(), absl::nullopt);
 
     // Add an entry to the host cache mapping kUrl to local IP when using
-    // kNetworkIsolationKey.
+    // kNetworkAnonymizationKey.
     mock_host_resolver->rules()->ClearRules();
     mock_host_resolver->rules()->AddRule(kUrl.host(), "127.0.0.1");
     mock_host_resolver->LoadIntoCache(HostPortPair::FromURL(kUrl),
-                                      kNetworkIsolationKey, absl::nullopt);
+                                      kNetworkAnonymizationKey, absl::nullopt);
 
     context_builder->set_host_resolver(std::move(mock_host_resolver));
     auto context = context_builder->Build();
@@ -236,8 +234,8 @@ TEST_F(ThroughputAnalyzerTest, MAYBE_MaximumRequestsWithNetworkIsolationKey) {
     EXPECT_EQ(use_network_isolation_key,
               nqe::internal::IsPrivateHostForTesting(
                   context->host_resolver(), HostPortPair::FromURL(kUrl),
-                  use_network_isolation_key ? kNetworkIsolationKey
-                                            : NetworkIsolationKey()));
+                  use_network_isolation_key ? kNetworkAnonymizationKey
+                                            : NetworkAnonymizationKey()));
     for (size_t i = 0; i < 1000; ++i) {
       std::unique_ptr<URLRequest> request(
           context->CreateRequest(kUrl, DEFAULT_PRIORITY, &test_delegate,
@@ -279,12 +277,12 @@ TEST_F(ThroughputAnalyzerTest, TestMinRequestsForThroughputSample) {
     std::vector<std::unique_ptr<URLRequest>> requests_not_local;
 
     std::vector<TestDelegate> not_local_test_delegates(num_requests);
-    for (size_t i = 0; i < num_requests; ++i) {
+    for (auto& delegate : not_local_test_delegates) {
       // We don't care about completion, except for the first one (see below).
-      not_local_test_delegates[i].set_on_complete(base::DoNothing());
+      delegate.set_on_complete(base::DoNothing());
       std::unique_ptr<URLRequest> request_not_local(context->CreateRequest(
-          GURL("http://example.com/echo.html"), DEFAULT_PRIORITY,
-          &not_local_test_delegates[i], TRAFFIC_ANNOTATION_FOR_TESTS));
+          GURL("http://example.com/echo.html"), DEFAULT_PRIORITY, &delegate,
+          TRAFFIC_ANNOTATION_FOR_TESTS));
       request_not_local->Start();
       requests_not_local.push_back(std::move(request_not_local));
     }
@@ -292,16 +290,16 @@ TEST_F(ThroughputAnalyzerTest, TestMinRequestsForThroughputSample) {
 
     EXPECT_EQ(0, throughput_analyzer.throughput_observations_received());
 
-    for (size_t i = 0; i < requests_not_local.size(); ++i) {
-      throughput_analyzer.NotifyStartTransaction(*requests_not_local.at(i));
+    for (const auto& request : requests_not_local) {
+      throughput_analyzer.NotifyStartTransaction(*request);
     }
 
     // Increment the bytes received count to emulate the bytes received for
     // |request_local| and |requests_not_local|.
     throughput_analyzer.IncrementBitsReceived(100 * 1000 * 8);
 
-    for (size_t i = 0; i < requests_not_local.size(); ++i) {
-      throughput_analyzer.NotifyRequestCompleted(*requests_not_local.at(i));
+    for (const auto& request : requests_not_local) {
+      throughput_analyzer.NotifyRequestCompleted(*request);
     }
     base::RunLoop().RunUntilIdle();
 
@@ -699,8 +697,8 @@ TEST_F(ThroughputAnalyzerTest,
     if (test.start_local_request)
       throughput_analyzer.NotifyStartTransaction(*request_local);
 
-    for (size_t i = 0; i < requests_not_local.size(); ++i) {
-      throughput_analyzer.NotifyStartTransaction(*requests_not_local.at(i));
+    for (const auto& request : requests_not_local) {
+      throughput_analyzer.NotifyStartTransaction(*request);
     }
 
     if (test.local_request_completes_first) {
@@ -712,8 +710,8 @@ TEST_F(ThroughputAnalyzerTest,
     // |request_local| and |requests_not_local|.
     throughput_analyzer.IncrementBitsReceived(100 * 1000 * 8);
 
-    for (size_t i = 0; i < requests_not_local.size(); ++i) {
-      throughput_analyzer.NotifyRequestCompleted(*requests_not_local.at(i));
+    for (const auto& request : requests_not_local) {
+      throughput_analyzer.NotifyRequestCompleted(*request);
     }
     if (test.start_local_request && !test.local_request_completes_first)
       throughput_analyzer.NotifyRequestCompleted(*request_local);
@@ -958,6 +956,4 @@ TEST_F(ThroughputAnalyzerTest, TestHangingWindow) {
 
 }  // namespace
 
-}  // namespace nqe
-
-}  // namespace net
+}  // namespace net::nqe

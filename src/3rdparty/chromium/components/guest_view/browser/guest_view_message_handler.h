@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 
 #include <string>
 
+#include "base/values.h"
 #include "components/guest_view/common/guest_view.mojom.h"
 
 namespace content {
@@ -51,7 +52,7 @@ class GuestViewMessageHandler : public mojom::GuestViewHost {
   void AttachToEmbedderFrame(int embedder_local_render_frame_id,
                              int element_instance_id,
                              int guest_instance_id,
-                             base::Value params,
+                             base::Value::Dict params,
                              AttachToEmbedderFrameCallback callback) override;
   void ViewCreated(int view_instance_id, const std::string& view_type) override;
   void ViewGarbageCollected(int view_instance_id) override;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -162,13 +162,17 @@ const std::u16string& GetTitle(Page& page) {
   return base::EmptyString16();
 }
 
+bool IsSavableFrame(RenderFrameHost* rfh) {
+  return rfh->IsRenderFrameLive() && !rfh->IsNestedWithinFencedFrame();
+}
+
 }  // namespace
 
 const base::FilePath::CharType SavePackage::kDefaultHtmlExtension[] =
     FILE_PATH_LITERAL("html");
 
-SavePackage::SavePackage(Page& page)
-    : page_(page.GetWeakPtr()),
+SavePackage::SavePackage(PageImpl& page)
+    : page_(page.GetWeakPtrImpl()),
       page_url_(GetUrlToBeSaved(&page.GetMainDocument())),
       title_(GetTitle(page)),
       start_tick_(base::TimeTicks::Now()),
@@ -179,11 +183,11 @@ SavePackage::SavePackage(Page& page)
 }
 
 // Used for tests.
-SavePackage::SavePackage(Page& page,
+SavePackage::SavePackage(PageImpl& page,
                          SavePageType save_type,
                          const base::FilePath& file_full_path,
                          const base::FilePath& directory_full_path)
-    : page_(page.GetWeakPtr()),
+    : page_(page.GetWeakPtrImpl()),
       page_url_(GetUrlToBeSaved(&page.GetMainDocument())),
       saved_main_file_path_(file_full_path),
       saved_main_directory_path_(directory_full_path),
@@ -1022,7 +1026,7 @@ void SavePackage::GetSerializedHtmlWithLocalLinks() {
 
     FrameTreeNode* frame_tree_node = frame_tree->FindByID(frame_tree_node_id);
     if (frame_tree_node &&
-        frame_tree_node->current_frame_host()->IsRenderFrameLive()) {
+        IsSavableFrame(frame_tree_node->current_frame_host())) {
       // Ask the frame for HTML to be written to the associated SaveItem.
       GetSerializedHtmlWithLocalLinksForFrame(frame_tree_node);
       number_of_frames_pending_response_++;
@@ -1068,9 +1072,6 @@ void SavePackage::GetSerializedHtmlWithLocalLinksForFrame(
 
       // Calculate the relative path for referring to the |save_item|.
       base::FilePath local_path(base::FilePath::kCurrentDirectory);
-      // TODO(crbug.com/1314749): With MPArch there may be multiple main frames
-      // and so IsMainFrame should not be used to identify subframes. Follow up
-      // to confirm correctness.
       if (target_tree_node->IsOutermostMainFrame()) {
         local_path = local_path.Append(saved_main_directory_path_.BaseName());
       }
@@ -1199,11 +1200,11 @@ const SaveItem* SavePackage::LookupSaveItemForSender(
 }
 
 void SavePackage::GetSavableResourceLinksForRenderFrameHost(
-    RenderFrameHost* rfh) {
-  if (!rfh->IsRenderFrameLive())
+    RenderFrameHostImpl* rfh) {
+  if (!IsSavableFrame(rfh))
     return;
   ++number_of_frames_pending_response_;
-  static_cast<RenderFrameHostImpl*>(rfh)->GetSavableResourceLinksFromRenderer();
+  rfh->GetSavableResourceLinksFromRenderer();
 }
 
 // Ask for all savable resource links from backend, include main frame and
@@ -1217,8 +1218,10 @@ void SavePackage::GetSavableResourceLinks() {
   wait_state_ = RESOURCES_LIST;
 
   DCHECK_EQ(0, number_of_frames_pending_response_);
-  page_->GetMainDocument().ForEachRenderFrameHost(base::BindRepeating(
-      &SavePackage::GetSavableResourceLinksForRenderFrameHost, this));
+  page_->GetMainDocument().ForEachRenderFrameHost(
+      [this](RenderFrameHostImpl* rfh) {
+        GetSavableResourceLinksForRenderFrameHost(rfh);
+      });
   DCHECK_LT(0, number_of_frames_pending_response_);
 
   // Enqueue the main frame separately (because this frame won't show up in any

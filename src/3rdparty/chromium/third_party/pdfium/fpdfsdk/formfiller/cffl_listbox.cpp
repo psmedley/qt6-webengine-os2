@@ -41,11 +41,10 @@ CPWL_Wnd::CreateParams CFFL_ListBox::GetCreateParam() {
 
 std::unique_ptr<CPWL_Wnd> CFFL_ListBox::NewPWLWindow(
     const CPWL_Wnd::CreateParams& cp,
-    std::unique_ptr<IPWL_SystemHandler::PerWindowData> pAttachedData) {
+    std::unique_ptr<IPWL_FillerNotify::PerWindowData> pAttachedData) {
   static_cast<CFFL_PerWindowData*>(pAttachedData.get())->SetFormField(this);
   auto pWnd = std::make_unique<CPWL_ListBox>(cp, std::move(pAttachedData));
   pWnd->Realize();
-  pWnd->SetFillerNotify(m_pFormFiller.Get());
 
   for (int32_t i = 0, sz = m_pWidget->CountOptions(); i < sz; i++)
     pWnd->AddString(m_pWidget->GetOptionLabel(i));
@@ -111,19 +110,26 @@ void CFFL_ListBox::SaveData(const CPDFSDK_PageView* pPageView) {
   }
   int32_t nNewTopIndex = pListBox->GetTopVisibleIndex();
   ObservedPtr<CPWL_ListBox> observed_box(pListBox);
+  ObservedPtr<CPDFSDK_Widget> observed_widget(m_pWidget.Get());
   m_pWidget->ClearSelection();
-  if (!observed_box) {
+  if (!observed_box || !observed_widget) {
     return;
   }
   if (m_pWidget->GetFieldFlags() & pdfium::form_flags::kChoiceMultiSelect) {
     for (int32_t i = 0, sz = pListBox->GetCount(); i < sz; i++) {
-      if (pListBox->IsItemSelected(i))
+      if (pListBox->IsItemSelected(i)) {
         m_pWidget->SetOptionSelection(i);
+        if (!observed_box || !observed_widget) {
+          return;
+        }
+      }
     }
   } else {
     m_pWidget->SetOptionSelection(pListBox->GetCurSel());
+    if (!observed_box || !observed_widget) {
+      return;
+    }
   }
-  ObservedPtr<CPDFSDK_Widget> observed_widget(m_pWidget.Get());
   ObservedPtr<CFFL_ListBox> observed_this(this);
   m_pWidget->SetTopVisibleIndex(nNewTopIndex);
   if (!observed_widget) {

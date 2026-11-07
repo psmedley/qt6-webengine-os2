@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -1962,6 +1962,34 @@ TEST_P(PaintControllerTest, TransientPaintControllerIncompleteCycle) {
   // The client of a transient paint controller can abort without
   // CommintNewDisplayItems() and FinishCycle(). This should not crash.
   paint_controller = nullptr;
+}
+
+TEST_P(PaintControllerTest, AllowDuplicatedIdForTransientPaintController) {
+  auto paint_controller =
+      std::make_unique<PaintController>(PaintController::kTransient);
+  GraphicsContext context(*paint_controller);
+  FakeDisplayItemClient& client =
+      *MakeGarbageCollected<FakeDisplayItemClient>("client");
+  {
+    CommitCycleScope cycle_scope(*paint_controller);
+    InitRootChunk(*paint_controller);
+    {
+      paint_controller->SetWillForceNewChunk(true);
+      ScopedPaintChunkProperties p(*paint_controller,
+                                   DefaultPaintChunkProperties(), client,
+                                   kBackgroundType);
+      DrawRect(context, client, kBackgroundType, gfx::Rect(100, 100, 50, 50));
+    }
+    {
+      paint_controller->SetWillForceNewChunk(true);
+      ScopedPaintChunkProperties p(*paint_controller,
+                                   DefaultPaintChunkProperties(), client,
+                                   kBackgroundType);
+      DrawRect(context, client, kBackgroundType, gfx::Rect(100, 100, 50, 50));
+    }
+  }
+  EXPECT_EQ(2u, paint_controller->GetDisplayItemList().size());
+  EXPECT_EQ(2u, paint_controller->PaintChunks().size());
 }
 
 TEST_P(PaintControllerTest, AllowDuplicatedIdForUncacheableItem) {

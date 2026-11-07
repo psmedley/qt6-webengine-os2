@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,10 @@
 
 #include "base/base_export.h"
 #include "base/check.h"
-#include "base/check_op.h"
 #include "base/containers/linked_list.h"
+#include "base/dcheck_is_on.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list_types.h"
 
@@ -50,7 +52,7 @@ class BASE_EXPORT UncheckedObserverAdapter {
 #endif  // EXPENSIVE_DCHECKS_ARE_ON()
 
  private:
-  void* ptr_;
+  raw_ptr<void> ptr_;
 #if EXPENSIVE_DCHECKS_ARE_ON()
   base::debug::StackTrace stack_;
 #endif  // EXPENSIVE_DCHECKS_ARE_ON()
@@ -161,7 +163,7 @@ class WeakLinkNode : public base::LinkNode<WeakLinkNode<ObserverList>> {
  private:
   // `list_` is not a raw_ptr<...> for performance reasons: on-stack pointer +
   // based on analysis of sampling profiler data and tab_search:top100:2020.
-  ObserverList* list_ = nullptr;
+  RAW_PTR_EXCLUSION ObserverList* list_ = nullptr;
 };
 
 }  // namespace internal

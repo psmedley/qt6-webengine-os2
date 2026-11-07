@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,6 +35,7 @@
 #include "components/feed/core/proto/v2/xsurface.pb.h"
 #include "components/feed/core/shared_prefs/pref_names.h"
 #include "components/feed/core/v2/config.h"
+#include "components/feed/core/v2/feedstore_util.h"
 #include "components/feed/core/v2/prefs.h"
 #include "components/feed/core/v2/test/callback_receiver.h"
 #include "components/feed/core/v2/test/proto_printer.h"
@@ -70,7 +71,8 @@ std::unique_ptr<StreamModelUpdateRequest> StoredModelData(
   };
   LoadStreamFromStoreTask load_task(
       LoadStreamFromStoreTask::LoadType::kFullLoad, nullptr, stream_type, store,
-      /*missed_last_refresh=*/false, base::BindLambdaForTesting(complete));
+      /*missed_last_refresh=*/false, /*is_web_feed_subscriber=*/true,
+      base::BindLambdaForTesting(complete));
   // We want to load the data no matter how stale, or which account.
   load_task.IgnoreStalenessForTesting();
   load_task.IngoreAccountForTesting();
@@ -327,9 +329,11 @@ bool TestSurfaceBase::IsInitialLoadSpinnerUpdate(
 }
 
 TestForYouSurface::TestForYouSurface(FeedStream* stream)
-    : TestSurfaceBase(kForYouStream, stream) {}
+    : TestSurfaceBase(StreamType(StreamKind::kForYou), stream) {}
 TestWebFeedSurface::TestWebFeedSurface(FeedStream* stream)
-    : TestSurfaceBase(kWebFeedStream, stream) {}
+    : TestSurfaceBase(StreamType(StreamKind::kFollowing), stream) {}
+TestChannelSurface::TestChannelSurface(FeedStream* stream, std::string channel)
+    : TestSurfaceBase(StreamType(StreamKind::kChannel, channel), stream) {}
 
 TestReliabilityLoggingBridge::TestReliabilityLoggingBridge() = default;
 TestReliabilityLoggingBridge::~TestReliabilityLoggingBridge() = default;
@@ -779,7 +783,7 @@ void TestMetricsReporter::OnLoadStream(
     bool loaded_new_content_from_network,
     base::TimeDelta stored_content_age,
     const ContentStats& content_stats,
-    const RequestMetadata& request_metadata,
+    ContentOrder content_order,
     std::unique_ptr<LoadLatencyTimes> latencies) {
   load_stream_from_store_status = load_from_store_status;
   load_stream_status = final_status;
@@ -788,7 +792,7 @@ void TestMetricsReporter::OnLoadStream(
   MetricsReporter::OnLoadStream(
       stream_type, load_from_store_status, final_status, is_initial_load,
       loaded_new_content_from_network, stored_content_age, content_stats,
-      request_metadata, std::move(latencies));
+      content_order, std::move(latencies));
 }
 void TestMetricsReporter::OnLoadMoreBegin(const StreamType& stream_type,
                                           SurfaceId surface_id) {
@@ -839,9 +843,9 @@ void FeedApiTest::SetUp() {
   // Disable fetching of recommended web feeds at startup to
   // avoid a delayed task in tests that don't need it.
   config.fetch_web_feed_info_delay = base::TimeDelta();
-  // `use_feed_query_requests_for_web_feeds` is a temporary option for
+  // `use_feed_query_requests` is a temporary option for
   // debugging, setting it to false tests the preferred endpoint.
-  config.use_feed_query_requests_for_web_feeds = false;
+  config.use_feed_query_requests = false;
   SetFeedConfigForTesting(config);
 
   feed::prefs::RegisterFeedSharedProfilePrefs(profile_prefs_.registry());
@@ -904,6 +908,9 @@ std::string FeedApiTest::GetLanguageTag() {
 bool FeedApiTest::IsAutoplayEnabled() {
   return false;
 }
+TabGroupEnabledState FeedApiTest::GetTabGroupEnabledState() {
+  return TabGroupEnabledState::kNone;
+}
 void FeedApiTest::ClearAll() {
   if (on_clear_all_)
     on_clear_all_.Run();
@@ -959,6 +966,11 @@ void FeedApiTest::WaitForIdleTaskQueue() {
       }));
 }
 
+void FeedApiTest::WaitForModelToAutoUnload() {
+  task_environment_.FastForwardBy(GetFeedConfig().model_unload_timeout +
+                                  base::Seconds(1));
+}
+
 void FeedApiTest::UnloadModel(const StreamType& stream_type) {
   WaitForIdleTaskQueue();
   stream_->UnloadModel(stream_type);
@@ -990,7 +1002,9 @@ std::string FeedApiTest::DumpStoreState(bool print_keys) {
 void FeedApiTest::FollowWebFeed(const WebFeedPageInformation page_info) {
   CallbackReceiver<WebFeedSubscriptions::FollowWebFeedResult> callback;
   network_.InjectResponse(SuccessfulFollowResponse(page_info.url().host()));
-  stream_->subscriptions().FollowWebFeed(page_info, callback.Bind());
+  stream_->subscriptions().FollowWebFeed(
+      page_info, feedwire::webfeed::WebFeedChangeReason::WEB_PAGE_MENU,
+      callback.Bind());
 
   EXPECT_EQ(WebFeedSubscriptionRequestStatus::kSuccess,
             callback.RunAndGetResult().request_status);

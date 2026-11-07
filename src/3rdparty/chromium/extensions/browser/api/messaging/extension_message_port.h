@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,17 +81,15 @@ class ExtensionMessagePort : public MessagePort {
   bool HasFrame(content::RenderFrameHost* rfh) const override;
   bool IsValidPort() override;
   void RevalidatePort() override;
-  void DispatchOnConnect(
-      const std::string& channel_name,
-      std::unique_ptr<base::DictionaryValue> source_tab,
-      int source_frame_id,
-      const ExtensionApiFrameIdMap::DocumentId& source_document_id,
-      int guest_process_id,
-      int guest_render_frame_routing_id,
-      const MessagingEndpoint& source_endpoint,
-      const std::string& target_extension_id,
-      const GURL& source_url,
-      absl::optional<url::Origin> source_origin) override;
+  void DispatchOnConnect(const std::string& channel_name,
+                         absl::optional<base::Value::Dict> source_tab,
+                         const ExtensionApiFrameIdMap::FrameData& source_frame,
+                         int guest_process_id,
+                         int guest_render_frame_routing_id,
+                         const MessagingEndpoint& source_endpoint,
+                         const std::string& target_extension_id,
+                         const GURL& source_url,
+                         absl::optional<url::Origin> source_origin) override;
   void DispatchOnDisconnect(const std::string& error_message) override;
   void DispatchOnMessage(const Message& message) override;
   void IncrementLazyKeepaliveCount(bool is_for_native_message_connect) override;
@@ -135,9 +133,8 @@ class ExtensionMessagePort : public MessagePort {
   // Builds specific IPCs for a port, with correct frame or worker identifiers.
   std::unique_ptr<IPC::Message> BuildDispatchOnConnectIPC(
       const std::string& channel_name,
-      const base::DictionaryValue* source_tab,
-      int source_frame_id,
-      const ExtensionApiFrameIdMap::DocumentId& source_document_id,
+      const base::Value::Dict* source_tab,
+      const ExtensionApiFrameIdMap::FrameData& source_frame,
       int guest_process_id,
       int guest_render_frame_routing_id,
       const MessagingEndpoint& source_endpoint,

@@ -1,16 +1,17 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_CAST_STREAMING_BROWSER_RECEIVER_SESSION_IMPL_H_
 #define COMPONENTS_CAST_STREAMING_BROWSER_RECEIVER_SESSION_IMPL_H_
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "components/cast_streaming/browser/cast_streaming_session.h"
 #include "components/cast_streaming/browser/demuxer_stream_data_provider.h"
 #include "components/cast_streaming/browser/public/receiver_session.h"
-#include "components/cast_streaming/public/mojom/cast_streaming_session.mojom.h"
+#include "components/cast_streaming/public/mojom/demuxer_connector.mojom.h"
 #include "components/cast_streaming/public/mojom/renderer_controller.mojom.h"
 #include "media/mojo/mojom/media_types.mojom.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
@@ -37,12 +38,12 @@ class ReceiverSessionImpl final
   ReceiverSessionImpl& operator=(const ReceiverSessionImpl&) = delete;
 
   // ReceiverSession implementation.
-  void StartStreamingAsync(mojo::AssociatedRemote<mojom::CastStreamingReceiver>
-                               cast_streaming_receiver) override;
-  void StartStreamingAsync(mojo::AssociatedRemote<mojom::CastStreamingReceiver>
-                               cast_streaming_receiver,
-                           mojo::AssociatedRemote<mojom::RendererController>
-                               renderer_controller) override;
+  void StartStreamingAsync(mojo::AssociatedRemote<mojom::DemuxerConnector>
+                               demuxer_connector) override;
+  void StartStreamingAsync(
+      mojo::AssociatedRemote<mojom::DemuxerConnector> demuxer_connector,
+      mojo::AssociatedRemote<mojom::RendererController> renderer_controller)
+      override;
   RendererController* GetRendererControls() override;
 
  private:
@@ -66,10 +67,10 @@ class ReceiverSessionImpl final
     mojo::Remote<media::mojom::Renderer> renderer_controls_;
   };
 
-  // Handler for |cast_streaming_receiver_| disconnect.
+  // Handler for |demuxer_connector_| disconnect.
   void OnMojoDisconnect();
 
-  // Callback for mojom::CastStreamingReceiver::EnableReceiver()
+  // Callback for mojom::DemuxerConnector::EnableReceiver()
   void OnReceiverEnabled();
 
   // Informs the client of updated configs.
@@ -77,17 +78,18 @@ class ReceiverSessionImpl final
 
   // cast_streaming::CastStreamingSession::Client implementation.
   void OnSessionInitialization(
-      absl::optional<cast_streaming::CastStreamingSession::AudioStreamInfo>
-          audio_stream_info,
-      absl::optional<cast_streaming::CastStreamingSession::VideoStreamInfo>
-          video_stream_info) override;
+      StreamingInitializationInfo initialization_info,
+      absl::optional<mojo::ScopedDataPipeConsumerHandle> audio_pipe_consumer,
+      absl::optional<mojo::ScopedDataPipeConsumerHandle> video_pipe_consumer)
+      override;
   void OnAudioBufferReceived(media::mojom::DecoderBufferPtr buffer) override;
   void OnVideoBufferReceived(media::mojom::DecoderBufferPtr buffer) override;
+  void OnSessionReinitializationPending() override;
   void OnSessionReinitialization(
-      absl::optional<cast_streaming::CastStreamingSession::AudioStreamInfo>
-          audio_stream_info,
-      absl::optional<cast_streaming::CastStreamingSession::VideoStreamInfo>
-          video_stream_info) override;
+      StreamingInitializationInfo initialization_info,
+      absl::optional<mojo::ScopedDataPipeConsumerHandle> audio_pipe_consumer,
+      absl::optional<mojo::ScopedDataPipeConsumerHandle> video_pipe_consumer)
+      override;
   void OnSessionEnded() override;
 
   // Populated in the ctor, and empty following a call to either
@@ -95,7 +97,7 @@ class ReceiverSessionImpl final
   MessagePortProvider message_port_provider_;
   std::unique_ptr<ReceiverSession::AVConstraints> av_constraints_;
 
-  mojo::AssociatedRemote<mojom::CastStreamingReceiver> cast_streaming_receiver_;
+  mojo::AssociatedRemote<mojom::DemuxerConnector> demuxer_connector_;
   cast_streaming::CastStreamingSession cast_streaming_session_;
 
   std::unique_ptr<AudioDemuxerStreamDataProvider>
@@ -103,7 +105,7 @@ class ReceiverSessionImpl final
   std::unique_ptr<VideoDemuxerStreamDataProvider>
       video_demuxer_stream_data_provider_;
 
-  ReceiverSession::Client* const client_;
+  const raw_ptr<ReceiverSession::Client> client_;
   std::unique_ptr<RendererControllerImpl> external_renderer_controls_;
   absl::optional<RendererControllerConfig> renderer_control_config_;
 

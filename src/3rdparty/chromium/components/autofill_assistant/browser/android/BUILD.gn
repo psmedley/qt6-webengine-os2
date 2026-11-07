@@ -1,5 +1,5 @@
-# Copyright 2022 The Chromium Authors.All rights reserved.
-# Use of this source code is governed by a BSD - style license that can be
+# Copyright 2022 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 static_library("android") {
@@ -18,6 +18,14 @@ static_library("android") {
     "assistant_header_model.h",
     "assistant_overlay_delegate.cc",
     "assistant_overlay_delegate.h",
+    "assistant_qr_code_camera_scan_model_wrapper.cc",
+    "assistant_qr_code_camera_scan_model_wrapper.h",
+    "assistant_qr_code_image_picker_model_wrapper.cc",
+    "assistant_qr_code_image_picker_model_wrapper.h",
+    "assistant_qr_code_native_delegate.cc",
+    "assistant_qr_code_native_delegate.h",
+    "assistant_ui_action_delegate.cc",
+    "assistant_ui_action_delegate.h",
     "client_android.cc",
     "client_android.h",
     "features_android.cc",
@@ -57,6 +65,9 @@ static_library("android") {
     "//components/autofill_assistant/browser:autofill_assistant_enums_java",
     "//components/autofill_assistant/browser:proto",
     "//components/autofill_assistant/browser/public",
+    "//components/autofill_assistant/browser/public:password_change",
+    "//components/autofill_assistant/browser/public:proto",
+    "//components/autofill_assistant/browser/public/assistant_ui/proto:proto",
     "//components/autofill_assistant/content/browser",
     "//components/image_fetcher:android",
     "//components/keyed_service/content",
@@ -64,7 +75,6 @@ static_library("android") {
     "//components/password_manager/content/browser",
     "//components/password_manager/core/browser",
     "//components/strings:components_strings_grit",
-    "//components/variations/service",
     "//components/version_info:channel",
     "//components/version_info/android:channel_getter",
     "//content/public/browser",
@@ -79,8 +89,8 @@ static_library("android") {
 
 static_library("dependencies_android") {
   sources = [
-    "dependencies.cc",
-    "dependencies.h",
+    "dependencies_android.cc",
+    "dependencies_android.h",
   ]
 
   deps = [
@@ -92,5 +102,21 @@ static_library("dependencies_android") {
     "//components/password_manager/core/browser",
     "//components/variations/service",
     "//content/public/browser",
+  ]
+}
+
+source_set("unit_tests") {
+  testonly = true
+  sources = [ "assistant_ui_action_delegate_unittest.cc" ]
+  deps = [
+    ":android",
+    "//base",
+    "//base/test:test_support",
+    "//components/autofill_assistant/browser:proto",
+    "//components/autofill_assistant/browser/public:proto",
+    "//components/autofill_assistant/browser/public:public",
+    "//components/autofill_assistant/browser/public/assistant_ui/proto:proto",
+    "//testing/gmock",
+    "//testing/gtest",
   ]
 }

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,6 +64,9 @@ class AutomationEventRouter : public content::RenderProcessHostObserver,
       int listener_process_id,
       content::WebContents* web_contents);
 
+  // Undoes the Register call above. May result in disabling of automation.
+  void UnregisterListenerWithDesktopPermission(int lsitener_process_id);
+
   // The following two methods should only be called by Lacros.
   void NotifyAllAutomationExtensionsGone();
   void NotifyExtensionListenerAdded();
@@ -103,8 +106,7 @@ class AutomationEventRouter : public content::RenderProcessHostObserver,
     ~AutomationListener() override;
 
     // content:WebContentsObserver:
-    void DidFinishNavigation(
-        content::NavigationHandle* navigation_handle) override;
+    void PrimaryPageChanged(content::Page& page) override;
 
     raw_ptr<AutomationEventRouter> router;
     ExtensionId extension_id;

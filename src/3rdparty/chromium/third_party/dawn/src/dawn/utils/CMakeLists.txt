@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_library(dawn_utils STATIC ${DAWN_DUMMY_FILE})
+add_library(dawn_utils STATIC ${DAWN_PLACEHOLDER_FILE})
 common_compile_options(dawn_utils)
 target_sources(dawn_utils PRIVATE
     "ComboRenderBundleEncoderDescriptor.cpp"
@@ -73,8 +73,6 @@ if(DAWN_SUPPORTS_GLFW_FOR_WINDOWING)
     target_sources(dawn_utils PRIVATE
         "BackendBinding.cpp"
         "BackendBinding.h"
-        "GLFWUtils.cpp"
-        "GLFWUtils.h"
     )
     target_link_libraries(dawn_utils PRIVATE glfw)
 
@@ -84,7 +82,6 @@ if(DAWN_SUPPORTS_GLFW_FOR_WINDOWING)
 
     if (DAWN_ENABLE_METAL)
         target_sources(dawn_utils PRIVATE
-            "GLFWUtils_metal.mm"
             "MetalBinding.mm"
         )
     endif()

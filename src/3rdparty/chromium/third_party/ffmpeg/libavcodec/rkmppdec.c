@@ -563,13 +563,13 @@ static const AVCodecHWConfigInternal *const rkmpp_hw_configs[] = {
     RKMPP_DEC_CLASS(NAME) \
     const FFCodec ff_##NAME##_rkmpp_decoder = { \
         .p.name         = #NAME "_rkmpp", \
-        .p.long_name    = NULL_IF_CONFIG_SMALL(#NAME " (rkmpp)"), \
+        CODEC_LONG_NAME(#NAME " (rkmpp)"), \
         .p.type         = AVMEDIA_TYPE_VIDEO, \
         .p.id           = ID, \
         .priv_data_size = sizeof(RKMPPDecodeContext), \
         .init           = rkmpp_init_decoder, \
         .close          = rkmpp_close_decoder, \
-        .receive_frame  = rkmpp_receive_frame, \
+        FF_CODEC_RECEIVE_FRAME_CB(rkmpp_receive_frame), \
         .flush          = rkmpp_flush, \
         .p.priv_class   = &rkmpp_##NAME##_dec_class, \
         .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING | AV_CODEC_CAP_HARDWARE, \
@@ -578,6 +578,7 @@ static const AVCodecHWConfigInternal *const rkmpp_hw_configs[] = {
         .hw_configs     = rkmpp_hw_configs, \
         .bsfs           = BSFS, \
         .p.wrapper_name = "rkmpp", \
+        .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE, \
     };
 
 RKMPP_DEC(h264,  AV_CODEC_ID_H264,          "h264_mp4toannexb")

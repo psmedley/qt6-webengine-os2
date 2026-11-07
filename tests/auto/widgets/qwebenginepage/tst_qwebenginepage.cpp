@@ -20,7 +20,9 @@
 */
 
 #include <widgetutil.h>
+#include <QtNetwork/private/qtnetworkglobal_p.h>
 #include <QtWebEngineCore/qtwebenginecore-config.h>
+#include <QtWebEngineCore/private/qtwebenginecoreglobal_p.h>
 #include <QByteArray>
 #include <QClipboard>
 #include <QDir>
@@ -34,6 +36,7 @@
 #include <QPaintEngine>
 #include <QPushButton>
 #include <QScreen>
+#include <QWheelEvent>
 #if defined(QT_STATEMACHINE_LIB)
 #    include <QStateMachine>
 #endif
@@ -47,7 +50,6 @@
 #include <qnetworkcookiejar.h>
 #include <qnetworkreply.h>
 #include <qnetworkrequest.h>
-#include <QtNetwork/private/qtnetwork-config_p.h>
 #include <qwebenginedownloadrequest.h>
 #include <qwebenginefilesystemaccessrequest.h>
 #include <qwebenginefindtextresult.h>
@@ -164,7 +166,8 @@ private Q_SLOTS:
     void runJavaScriptDisabled();
     void runJavaScriptFromSlot();
     void fullScreenRequested();
-    void quotaRequested();
+    void requestQuota_data();
+    void requestQuota();
 
 
     // Tests from tst_QWebEngineFrame
@@ -262,6 +265,10 @@ private Q_SLOTS:
     void fileSystemAccessDialog();
 
     void localToRemoteNavigation();
+    void clientHints();
+    void childFrameInput();
+    void openLinkInNewPageWithWebWindowType_data();
+    void openLinkInNewPageWithWebWindowType();
 
 private:
     static QPoint elementCenter(QWebEnginePage *page, const QString &id);
@@ -271,6 +278,9 @@ private:
 
     QWebEngineView* m_view;
     QWebEnginePage* m_page;
+    QScopedPointer<QPointingDevice> s_touchDevice =
+            QScopedPointer<QPointingDevice>(QTest::createTouchDevice());
+
     QString tmpDirPath() const
     {
         static QString tmpd = QDir::tempPath() + "/tst_qwebenginepage-"
@@ -278,17 +288,24 @@ private:
         return tmpd;
     }
 
-    QScopedPointer<QPointingDevice> s_touchDevice;
-    void makeClick(QWindow *window, bool withTouch = false, const QPoint &p = QPoint()) {
+    void makeClick(const QPointer<QWindow> window, bool withTouch = false,
+                   const QPoint &p = QPoint())
+    {
+        QVERIFY2(window, "window is gone");
         if (!withTouch) {
             QTest::mouseClick(window, Qt::LeftButton, Qt::KeyboardModifiers(), p);
         } else {
-            if (!s_touchDevice)
-                s_touchDevice.reset(QTest::createTouchDevice());
             QTest::touchEvent(window, s_touchDevice.get()).press(1, p);
             QTest::touchEvent(window, s_touchDevice.get()).release(1, p);
         }
     };
+
+    void makeScroll(QWidget *target, QPointF pos, QPoint globalPos, QPoint angleDelta)
+    {
+        QWheelEvent ev(pos, globalPos, QPoint(0, 0), angleDelta, Qt::NoButton, Qt::NoModifier,
+                       Qt::NoScrollPhase, false);
+        QGuiApplication::sendEvent(target, &ev);
+    }
 };
 
 tst_QWebEnginePage::tst_QWebEnginePage()
@@ -1344,6 +1361,9 @@ void tst_QWebEnginePage::comboBoxPopupPositionAfterMove_data()
 
 void tst_QWebEnginePage::comboBoxPopupPositionAfterMove()
 {
+#if defined(Q_OS_MACOS) && (defined(__arm64__) || defined(__aarch64__))
+    QSKIP("This test crashes for Apple M1");
+#endif
     QWebEngineView view;
     view.move(QGuiApplication::primaryScreen()->availableGeometry().topLeft());
     view.resize(640, 480);
@@ -1356,7 +1376,7 @@ void tst_QWebEnginePage::comboBoxPopupPositionAfterMove()
     QTRY_COMPARE(spyLoadFinished.size(), 1);
     const auto oldTlws = QGuiApplication::topLevelWindows();
     QFETCH(bool, withTouch);
-    QWindow *window = view.windowHandle();
+    QPointer<QWindow> window = view.windowHandle();
     auto pos = elementCenter(view.page(), "foo");
     makeClick(window, withTouch, pos);
     QWindow *popup = nullptr;
@@ -1406,6 +1426,9 @@ void tst_QWebEnginePage::comboBoxPopupPositionAfterChildMove_data()
 
 void tst_QWebEnginePage::comboBoxPopupPositionAfterChildMove()
 {
+#if defined(Q_OS_MACOS) && (defined(__arm64__) || defined(__aarch64__))
+    QSKIP("This test crashes for Apple M1");
+#endif
     QWidget mainWidget;
     mainWidget.setLayout(new QHBoxLayout);
 
@@ -1429,7 +1452,7 @@ void tst_QWebEnginePage::comboBoxPopupPositionAfterChildMove()
     const auto oldTlws = QGuiApplication::topLevelWindows();
 
     QFETCH(bool, withTouch);
-    QWindow *window = view.window()->windowHandle();
+    QPointer<QWindow> window = view.window()->windowHandle();
     makeClick(window, withTouch, view.mapTo(view.window(), elementCenter(view.page(), "foo")));
 
     QWindow *popup = nullptr;
@@ -2013,8 +2036,18 @@ void tst_QWebEnginePage::fullScreenRequested()
     QTRY_VERIFY(isFalseJavaScriptResult(page, "document.webkitIsFullScreen"));
 }
 
-void tst_QWebEnginePage::quotaRequested()
+void tst_QWebEnginePage::requestQuota_data()
 {
+    QTest::addColumn<QString>("storage");
+    QTest::addRow("webkitPersistentStorage") << "navigator.webkitPersistentStorage";
+    QTest::addRow("webkitTemporaryStorage") << "navigator.webkitTemporaryStorage";
+
+}
+
+void tst_QWebEnginePage::requestQuota()
+{
+    QFETCH(QString, storage);
+
     ConsolePage page;
     QWebEngineView view;
     view.setPage(&page);
@@ -2022,35 +2055,23 @@ void tst_QWebEnginePage::quotaRequested()
     page.load(QUrl("qrc:///resources/content.html"));
     QVERIFY(loadFinishedSpy.wait());
 
-    connect(&page, &QWebEnginePage::quotaRequested,
-            [] (QWebEngineQuotaRequest request)
-    {
-        if (request.requestedSize() <= 5000)
-            request.accept();
-        else
-            request.reject();
-    });
-
-    evaluateJavaScriptSync(&page,
-        "navigator.webkitPersistentStorage.requestQuota(1024, function(grantedSize) {" \
-            "console.log(grantedSize);" \
-        "});");
+    evaluateJavaScriptSync(&page, QString(
+        "var storage = %1;"
+        "storage.requestQuota(1024, function(grantedSize) {"
+        "   console.log(grantedSize);"
+        "});").arg(storage));
     QTRY_COMPARE(page.messages.size(), 1);
     QTRY_COMPARE(page.messages[0], QString("1024"));
 
-    evaluateJavaScriptSync(&page,
-        "navigator.webkitPersistentStorage.requestQuota(6000, function(grantedSize) {" \
-            "console.log(grantedSize);" \
-        "});");
-    QTRY_COMPARE(page.messages.size(), 2);
-    QTRY_COMPARE(page.messages[1], QString("1024"));
-
-    evaluateJavaScriptSync(&page,
-        "navigator.webkitPersistentStorage.queryUsageAndQuota(function(usedBytes, grantedBytes) {" \
-            "console.log(usedBytes + ', ' + grantedBytes);" \
-        "});");
+    evaluateJavaScriptSync(&page, QString(
+        "var storage = %1;"
+        "storage.queryUsageAndQuota(function(usedBytes, grantedBytes) {"
+        "   console.log(usedBytes);"
+        "   console.log(grantedBytes);"
+        "});").arg(storage));
     QTRY_COMPARE(page.messages.size(), 3);
-    QTRY_COMPARE(page.messages[2], QString("0, 1024"));
+    QTRY_COMPARE(page.messages[1], QString("0"));
+    QTRY_VERIFY(page.messages[2].toLongLong() >= 1024);
 }
 
 void tst_QWebEnginePage::symmetricUrl()
@@ -2481,7 +2502,8 @@ void tst_QWebEnginePage::baseUrl()
 void tst_QWebEnginePage::scrollPosition()
 {
     // enlarged image in a small viewport, to provoke the scrollbars to appear
-    QString html("<html><body><img src='qrc:/image.png' height=500 width=500/></body></html>");
+    QString html(
+            "<html><body><img src='qrc:/resources/image.png' height=500 width=500/></body></html>");
 
     QWebEngineView view;
     view.setFixedSize(200,200);
@@ -2495,8 +2517,8 @@ void tst_QWebEnginePage::scrollPosition()
 
     // try to set the scroll offset programmatically
     view.page()->runJavaScript("window.scrollTo(23, 29);");
-    QTRY_COMPARE(view.page()->scrollPosition().x(), 23 * view.windowHandle()->devicePixelRatio());
-    QCOMPARE(view.page()->scrollPosition().y(), 29 * view.windowHandle()->devicePixelRatio());
+    QTRY_COMPARE(view.page()->scrollPosition().x(), 23);
+    QCOMPARE(view.page()->scrollPosition().y(), 29);
 
     int x = evaluateJavaScriptSync(view.page(), "window.scrollX").toInt();
     int y = evaluateJavaScriptSync(view.page(), "window.scrollY").toInt();
@@ -3063,7 +3085,7 @@ void tst_QWebEnginePage::loadInSignalHandlers()
     URLSetter setter(m_page, signal, type, urlForSetter);
     QSignalSpy spy(&setter, &URLSetter::finished);
     m_page->load(url);
-    QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 1, 20000);
+    QTRY_VERIFY_WITH_TIMEOUT(spy.size() >= 1, 20000);
     QCOMPARE(m_page->url(), urlForSetter);
 }
 
@@ -4822,10 +4844,6 @@ public:
         Q_UNUSED(oldFiles);
         chosenFileSelectionMode = mode;
         chosenAcceptedMimeTypes = acceptedMimeTypes;
-
-        if (chosenFileSelectionMode == QWebEnginePage::FileSelectUploadFolder)
-          return QStringList() << m_tempDir.path();
-
         return QStringList() << (m_tempDir.path() + "/file.txt");
     }
 
@@ -5120,6 +5138,204 @@ void tst_QWebEnginePage::localToRemoteNavigation()
     page.runJavaScript(QStringLiteral("document.getElementById(\"link\").click()"));
     QTest::qWait(500);
     QVERIFY(!remote.loaded);
+}
+
+void tst_QWebEnginePage::clientHints()
+{
+    HttpServer server;
+    connect(&server, &HttpServer::newRequest, [&] (HttpReqRep *r) {
+        r->setResponseBody(r->requestHeader("Sec-Ch-Ua-Platform"));
+        r->sendResponse();
+    });
+    QVERIFY(server.start());
+
+    QWebEnginePage page;
+    QSignalSpy loadSpy(&page, SIGNAL(loadFinished(bool)));
+
+    page.setUrl(server.url());
+    QTRY_COMPARE(loadSpy.size(), 1);
+    QVERIFY(loadSpy.takeFirst().value(0).toBool());
+
+    QString platform = toPlainTextSync(&page);
+#ifdef Q_OS_LINUX
+    QCOMPARE(platform.toLower(), "\"linux\"");
+#elif defined (Q_OS_MACOS)
+    QCOMPARE(platform.toLower(), "\"macos\"");
+#elif defined (Q_OS_WIN)
+    QCOMPARE(platform.toLower(), "\"windows\"");
+#endif
+
+}
+
+void tst_QWebEnginePage::childFrameInput()
+{
+    HttpServer server;
+    server.setHostDomain("localhost");
+
+    // The cross-origin policy blocks scripting this frame with QWebEnginePage::runJavaScript.
+    // Use console messages to validate events.
+    QString innerHtml(
+            "<html><head><style>body{height:1200px;width:1200px;}</style></head><body>test<script>"
+            "  let lastX, lastY = 0;"
+            "  document.onscroll = (e) => {"
+            "    if (window.scrollY > lastY) console.log(\"Down\");"
+            "    if (window.scrollY < lastY) console.log(\"Up\");"
+            "    if (window.scrollX > lastX) console.log(\"Right\");"
+            "    if (window.scrollX < lastX) console.log(\"Left\");"
+            "    lastX = window.scrollX;"
+            "    lastY = window.scrollY;"
+            "  };"
+            "  window.onload = () => {console.log('loaded');};"
+            "</script></body></html>");
+
+    QVERIFY(server.start());
+    connect(&server, &HttpServer::newRequest, [&](HttpReqRep *rr) {
+        if (rr->requestPath() == "/main.html") {
+            // the Origin-Agent-Cluster header enables dedicated processes for origins
+            rr->setResponseHeader("Origin-Agent-Cluster", "?1");
+            // the same-site-cross-origin page forces to create the frame in a different process
+            server.setHostDomain("sub.localhost");
+            rr->setResponseBody(("<html><body>"
+                                 "<iframe id=\"iframe\" width=90% height=90% src=\""
+                                 + server.url().toString().toUtf8()
+                                 + "inner.html\"></iframe>"
+                                   "</body></html>"));
+        }
+        if (rr->requestPath() == "/inner.html")
+            rr->setResponseBody(innerHtml.toUtf8());
+        rr->sendResponse();
+    });
+
+    QWebEngineView view;
+    ConsolePage page;
+    view.setPage(&page);
+    view.resize(640, 480);
+    QSignalSpy loadSpy(&page, &QWebEnginePage::loadFinished);
+    page.load(server.url("/main.html"));
+    QTRY_COMPARE_WITH_TIMEOUT(loadSpy.size(), 1, 20000);
+
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QTRY_VERIFY(evaluateJavaScriptSync(&page, "window.originAgentCluster").toBool());
+
+    // make sure the frame is loaded
+    QTRY_COMPARE(page.messages.size(), 1);
+    QTRY_COMPARE(page.messages[0], QString("loaded"));
+
+    // focus
+    evaluateJavaScriptSync(&page, "document.getElementById('iframe').contentWindow.focus()");
+    QTRY_COMPARE(evaluateJavaScriptSync(&page, "document.activeElement.id").toString(),
+                 QStringLiteral("iframe"));
+
+    QPoint globalPos = view.windowHandle()->position();
+    QPoint p = elementCenter(&page, QString("iframe"));
+
+    // Even if the document is loaded, it is not necessarily drawn.
+    // Hit-testing (in Viz) for pointer events will be flacky in this scenario.
+    // Send keyClick events first so the target frame will be cached for wheel events.
+    QTest::keyClick(view.focusProxy(), Qt::Key_Down);
+    QTRY_COMPARE(page.messages.size(), 2);
+    QTRY_COMPARE(page.messages[1], QString("Down"));
+
+    QTest::keyClick(view.focusProxy(), Qt::Key_Up);
+    QTRY_COMPARE(page.messages.size(), 3);
+    QTRY_COMPARE(page.messages[2], QString("Up"));
+
+    QTest::keyClick(view.focusProxy(), Qt::Key_Right);
+    QTRY_COMPARE(page.messages.size(), 4);
+    QTRY_COMPARE(page.messages[3], QString("Right"));
+
+    QTest::keyClick(view.focusProxy(), Qt::Key_Left);
+    QTRY_COMPARE(page.messages.size(), 5);
+    QTRY_COMPARE(page.messages[4], QString("Left"));
+
+    makeScroll(view.focusProxy(), p, globalPos, QPoint(0, -120));
+    QTRY_COMPARE(page.messages.size(), 6);
+    QTRY_COMPARE(page.messages[5], QString("Down"));
+
+    makeScroll(view.focusProxy(), p, globalPos, QPoint(0, 120));
+    QTRY_COMPARE(page.messages.size(), 7);
+    QTRY_COMPARE(page.messages[6], QString("Up"));
+
+    makeScroll(view.focusProxy(), p, globalPos, QPoint(-120, 0));
+    QTRY_COMPARE(page.messages.size(), 8);
+    QTRY_COMPARE(page.messages[7], QString("Right"));
+
+    makeScroll(view.focusProxy(), p, globalPos, QPoint(120, 0));
+    QTRY_COMPARE(page.messages.size(), 9);
+    QTRY_COMPARE(page.messages[8], QString("Left"));
+}
+
+void tst_QWebEnginePage::openLinkInNewPageWithWebWindowType_data()
+{
+    QTest::addColumn<QWebEnginePage::WebWindowType>("webWindowType");
+    QTest::addColumn<QString>("elementId");
+    QTest::addColumn<Qt::MouseButton>("button");
+    QTest::addColumn<Qt::KeyboardModifier>("keyboardModififer");
+    QTest::newRow("webBrowserWindow")
+            << QWebEnginePage::WebBrowserWindow << "link" << Qt::LeftButton << Qt::ShiftModifier;
+    QTest::newRow("webBrowserTab")
+            << QWebEnginePage::WebBrowserTab << "link" << Qt::LeftButton << Qt::NoModifier;
+    QTest::newRow("webDialog") << QWebEnginePage::WebDialog << "openWindow" << Qt::LeftButton
+                               << Qt::NoModifier;
+    QTest::newRow("webBrowserBackgroundTab") << QWebEnginePage::WebBrowserBackgroundTab << "link"
+                                             << Qt::MiddleButton << Qt::NoModifier;
+}
+
+class WebWindowTypeTestPage : public QWebEnginePage
+{
+    Q_OBJECT
+
+public:
+    WebWindowType windowType;
+
+signals:
+    void windowCreated();
+
+private:
+    QWebEnginePage *createWindow(WebWindowType type) override
+    {
+        windowType = type;
+        emit windowCreated();
+        return nullptr;
+    }
+};
+
+void tst_QWebEnginePage::openLinkInNewPageWithWebWindowType()
+{
+    QFETCH(QWebEnginePage::WebWindowType, webWindowType);
+    QFETCH(QString, elementId);
+    QFETCH(Qt::MouseButton, button);
+    QFETCH(Qt::KeyboardModifier, keyboardModififer);
+
+    WebWindowTypeTestPage page;
+    QSignalSpy loadFinishedSpy(&page, SIGNAL(loadFinished(bool)));
+    QSignalSpy windowCreatedSpy(&page, &WebWindowTypeTestPage::windowCreated);
+    QWebEngineView view(&page);
+    view.resize(640, 480);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    page.settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
+    page.settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, true);
+    QString html = "<html><body>"
+                   "<a id='link' href='hello' target='_blank'>link</a>"
+                   "<br><br>"
+                   "<button id='openWindow' onclick='myFunction()'>Try it</button>"
+                   "<script>"
+                   "function myFunction() {"
+                   " const myWindow = window.open('', '', 'width=300,height=300');"
+                   "}"
+                   "</script>"
+                   "</body></html>";
+
+    page.setHtml(html);
+    QVERIFY(loadFinishedSpy.wait());
+
+    QTest::mouseClick(view.focusProxy(), button, keyboardModififer,
+                      elementCenter(&page, elementId));
+    QVERIFY(windowCreatedSpy.wait());
+    QCOMPARE(page.windowType, webWindowType);
 }
 
 static QByteArrayList params = {QByteArrayLiteral("--use-fake-device-for-media-stream")};

@@ -17,6 +17,9 @@
 
 #include "dawn/native/D3D12Backend.h"
 
+#include <memory>
+#include <utility>
+
 #include "dawn/common/Log.h"
 #include "dawn/common/Math.h"
 #include "dawn/common/SwapChainUtils.h"
@@ -29,84 +32,89 @@
 
 namespace dawn::native::d3d12 {
 
-    ComPtr<ID3D12Device> GetD3D12Device(WGPUDevice device) {
-        return ToBackend(FromAPI(device))->GetD3D12Device();
+ComPtr<ID3D12Device> GetD3D12Device(WGPUDevice device) {
+    return ToBackend(FromAPI(device))->GetD3D12Device();
+}
+
+DawnSwapChainImplementation CreateNativeSwapChainImpl(WGPUDevice device, HWND window) {
+    Device* backendDevice = ToBackend(FromAPI(device));
+
+    DawnSwapChainImplementation impl;
+    impl = CreateSwapChainImplementation(new NativeSwapChainImpl(backendDevice, window));
+    impl.textureUsage = WGPUTextureUsage_Present;
+
+    return impl;
+}
+
+WGPUTextureFormat GetNativeSwapChainPreferredFormat(const DawnSwapChainImplementation* swapChain) {
+    NativeSwapChainImpl* impl = reinterpret_cast<NativeSwapChainImpl*>(swapChain->userData);
+    return static_cast<WGPUTextureFormat>(impl->GetPreferredFormat());
+}
+
+ExternalImageDescriptorDXGISharedHandle::ExternalImageDescriptorDXGISharedHandle()
+    : ExternalImageDescriptor(ExternalImageType::DXGISharedHandle) {}
+
+ExternalImageDXGI::ExternalImageDXGI(std::unique_ptr<ExternalImageDXGIImpl> impl)
+    : mImpl(std::move(impl)) {
+    ASSERT(mImpl != nullptr);
+}
+
+ExternalImageDXGI::~ExternalImageDXGI() = default;
+
+bool ExternalImageDXGI::IsValid() const {
+    return mImpl->IsValid();
+}
+
+WGPUTexture ExternalImageDXGI::ProduceTexture(
+    WGPUDevice device,
+    const ExternalImageDXGIBeginAccessDescriptor* descriptor) {
+    return BeginAccess(descriptor);
+}
+
+WGPUTexture ExternalImageDXGI::BeginAccess(
+    const ExternalImageDXGIBeginAccessDescriptor* descriptor) {
+    if (!IsValid()) {
+        dawn::ErrorLog() << "Cannot use external image after device destruction";
+        return nullptr;
     }
+    return mImpl->BeginAccess(descriptor);
+}
 
-    DawnSwapChainImplementation CreateNativeSwapChainImpl(WGPUDevice device, HWND window) {
-        Device* backendDevice = ToBackend(FromAPI(device));
-
-        DawnSwapChainImplementation impl;
-        impl = CreateSwapChainImplementation(new NativeSwapChainImpl(backendDevice, window));
-        impl.textureUsage = WGPUTextureUsage_Present;
-
-        return impl;
+void ExternalImageDXGI::EndAccess(WGPUTexture texture,
+                                  ExternalImageDXGIFenceDescriptor* signalFence) {
+    if (!IsValid()) {
+        dawn::ErrorLog() << "Cannot use external image after device destruction";
+        return;
     }
+    mImpl->EndAccess(texture, signalFence);
+}
 
-    WGPUTextureFormat GetNativeSwapChainPreferredFormat(
-        const DawnSwapChainImplementation* swapChain) {
-        NativeSwapChainImpl* impl = reinterpret_cast<NativeSwapChainImpl*>(swapChain->userData);
-        return static_cast<WGPUTextureFormat>(impl->GetPreferredFormat());
+// static
+std::unique_ptr<ExternalImageDXGI> ExternalImageDXGI::Create(
+    WGPUDevice device,
+    const ExternalImageDescriptorDXGISharedHandle* descriptor) {
+    Device* backendDevice = ToBackend(FromAPI(device));
+    std::unique_ptr<ExternalImageDXGIImpl> impl =
+        backendDevice->CreateExternalImageDXGIImpl(descriptor);
+    if (!impl) {
+        dawn::ErrorLog() << "Failed to create DXGI external image";
+        return nullptr;
     }
+    return std::unique_ptr<ExternalImageDXGI>(new ExternalImageDXGI(std::move(impl)));
+}
 
-    ExternalImageDescriptorDXGISharedHandle::ExternalImageDescriptorDXGISharedHandle()
-        : ExternalImageDescriptor(ExternalImageType::DXGISharedHandle) {
-    }
+uint64_t SetExternalMemoryReservation(WGPUDevice device,
+                                      uint64_t requestedReservationSize,
+                                      MemorySegment memorySegment) {
+    Device* backendDevice = ToBackend(FromAPI(device));
 
-    ExternalImageDXGI::ExternalImageDXGI(std::unique_ptr<ExternalImageDXGIImpl> impl)
-        : mImpl(std::move(impl)) {
-        ASSERT(mImpl != nullptr);
-    }
+    return backendDevice->GetResidencyManager()->SetExternalMemoryReservation(
+        memorySegment, requestedReservationSize);
+}
 
-    ExternalImageDXGI::~ExternalImageDXGI() = default;
+AdapterDiscoveryOptions::AdapterDiscoveryOptions()
+    : AdapterDiscoveryOptionsBase(WGPUBackendType_D3D12), dxgiAdapter(nullptr) {}
 
-    bool ExternalImageDXGI::IsValid() const {
-        return mImpl->IsValid();
-    }
-
-    WGPUTexture ExternalImageDXGI::ProduceTexture(
-        WGPUDevice device,
-        const ExternalImageAccessDescriptorDXGIKeyedMutex* descriptor) {
-        return ProduceTexture(descriptor);
-    }
-
-    WGPUTexture ExternalImageDXGI::ProduceTexture(
-        const ExternalImageAccessDescriptorDXGIKeyedMutex* descriptor) {
-        if (!IsValid()) {
-            return nullptr;
-        }
-        return mImpl->ProduceTexture(descriptor);
-    }
-
-    // static
-    std::unique_ptr<ExternalImageDXGI> ExternalImageDXGI::Create(
-        WGPUDevice device,
-        const ExternalImageDescriptorDXGISharedHandle* descriptor) {
-        Device* backendDevice = ToBackend(FromAPI(device));
-
-        std::unique_ptr<ExternalImageDXGIImpl> impl =
-            backendDevice->CreateExternalImageDXGIImpl(descriptor);
-        if (!impl) {
-            dawn::ErrorLog() << "Failed to create DXGI external image"; 
-           return nullptr;
-        }
-        return std::unique_ptr<ExternalImageDXGI>(new ExternalImageDXGI(std::move(impl)));
-    }
-
-    uint64_t SetExternalMemoryReservation(WGPUDevice device,
-                                          uint64_t requestedReservationSize,
-                                          MemorySegment memorySegment) {
-        Device* backendDevice = ToBackend(FromAPI(device));
-
-        return backendDevice->GetResidencyManager()->SetExternalMemoryReservation(
-            memorySegment, requestedReservationSize);
-    }
-
-    AdapterDiscoveryOptions::AdapterDiscoveryOptions()
-        : AdapterDiscoveryOptionsBase(WGPUBackendType_D3D12), dxgiAdapter(nullptr) {
-    }
-
-    AdapterDiscoveryOptions::AdapterDiscoveryOptions(ComPtr<IDXGIAdapter> adapter)
-        : AdapterDiscoveryOptionsBase(WGPUBackendType_D3D12), dxgiAdapter(std::move(adapter)) {
-    }
+AdapterDiscoveryOptions::AdapterDiscoveryOptions(ComPtr<IDXGIAdapter> adapter)
+    : AdapterDiscoveryOptionsBase(WGPUBackendType_D3D12), dxgiAdapter(std::move(adapter)) {}
 }  // namespace dawn::native::d3d12

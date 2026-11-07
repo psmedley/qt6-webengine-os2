@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,10 @@
 
 namespace discardable_memory {
 namespace {
+
+BASE_FEATURE(kShorterPeriodicPurge,
+             "ShorterPeriodicPurge",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Global atomic to generate unique discardable shared memory IDs.
 base::AtomicSequenceNumber g_next_discardable_shared_memory_id;
@@ -420,8 +424,13 @@ void ClientDiscardableSharedMemoryManager::ScheduledPurge() {
   // recover the memory without adverse latency effects.
   // TODO(crbug.com/1123679): Determine if |kMinAgeForScheduledPurge| and the
   // constant from |ScheduledPurge| need to be tuned.
-  PurgeUnlockedMemory(
-      ClientDiscardableSharedMemoryManager::kMinAgeForScheduledPurge);
+  if (base::FeatureList::IsEnabled(kShorterPeriodicPurge)) {
+    PurgeUnlockedMemory(
+        ClientDiscardableSharedMemoryManager::kMinAgeForScheduledPurge / 2);
+  } else {
+    PurgeUnlockedMemory(
+        ClientDiscardableSharedMemoryManager::kMinAgeForScheduledPurge);
+  }
 
   bool should_schedule = false;
   {

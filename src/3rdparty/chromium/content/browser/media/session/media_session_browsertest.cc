@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -102,14 +102,14 @@ class MediaSessionBrowserTestBase : public ContentBrowserTest {
   }
 
   void StartPlaybackAndWait(Shell* shell, const std::string& id) {
-    shell->web_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
+    shell->web_contents()->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(
         u"document.querySelector('#" + base::ASCIIToUTF16(id) + u"').play();",
         base::NullCallback());
     WaitForStart(shell);
   }
 
   void StopPlaybackAndWait(Shell* shell, const std::string& id) {
-    shell->web_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
+    shell->web_contents()->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(
         u"document.querySelector('#" + base::ASCIIToUTF16(id) + u"').pause();",
         base::NullCallback());
     WaitForStop(shell);

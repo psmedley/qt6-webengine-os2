@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,13 +54,14 @@ class CONTENT_EXPORT WebContentsViewAura
       public aura::client::DragDropDelegate {
  public:
   WebContentsViewAura(WebContentsImpl* web_contents,
-                      WebContentsViewDelegate* delegate);
+                      std::unique_ptr<WebContentsViewDelegate> delegate);
+  ~WebContentsViewAura() override;
 
   WebContentsViewAura(const WebContentsViewAura&) = delete;
   WebContentsViewAura& operator=(const WebContentsViewAura&) = delete;
 
   // Allow the WebContentsViewDelegate to be set explicitly.
-  void SetDelegateForTesting(WebContentsViewDelegate* delegate);
+  void SetDelegateForTesting(std::unique_ptr<WebContentsViewDelegate> delegate);
 
   // Set a flag to pass nullptr as the parent_view argument to
   // RenderWidgetHostViewAura::InitAsChild().
@@ -145,8 +146,6 @@ class CONTENT_EXPORT WebContentsViewAura
 
   class WindowObserver;
 
-  ~WebContentsViewAura() override;
-
   // Utility to fill a DropData object from ui::OSExchangeData.
   void PrepareDropData(DropData* drop_data,
                        const ui::OSExchangeData& data) const;
@@ -164,7 +163,7 @@ class CONTENT_EXPORT WebContentsViewAura
 
   // Returns whether |target_rwh| is a valid RenderWidgetHost to be dragging
   // over. This enforces that same-page, cross-site drags are not allowed. See
-  // crbug.com/666858.
+  // crbug.com/666858, crbug.com/1266953, crbug.com/1485266.
   bool IsValidDragTarget(RenderWidgetHostImpl* target_rwh) const;
 
   // Called from CreateView() to create |window_|.
@@ -199,6 +198,7 @@ class CONTENT_EXPORT WebContentsViewAura
                              RenderViewHost* new_host) override;
   void SetOverscrollControllerEnabled(bool enabled) override;
   void OnCapturerCountChanged() override;
+  void FullscreenStateChanged(bool is_fullscreen) override;
 
   // Overridden from RenderViewHostDelegateView:
   void ShowContextMenu(RenderFrameHost& render_frame_host,
@@ -206,7 +206,8 @@ class CONTENT_EXPORT WebContentsViewAura
   void StartDragging(const DropData& drop_data,
                      blink::DragOperationsMask operations,
                      const gfx::ImageSkia& image,
-                     const gfx::Vector2d& image_offset,
+                     const gfx::Vector2d& cursor_offset,
+                     const gfx::Rect& drag_obj_rect,
                      const blink::mojom::DragEventSourceInfo& event_info,
                      RenderWidgetHostImpl* source_rwh) override;
   void UpdateDragCursor(ui::mojom::DragOperation operation) override;
@@ -281,9 +282,11 @@ class CONTENT_EXPORT WebContentsViewAura
   void CompleteDragExit();
 
   // Called from PerformDropCallback() to finish processing the drop.
-  void FinishOnPerformDropCallback(
-      OnPerformDropContext context,
-      WebContentsViewDelegate::DropCompletionResult result);
+  // The override with `drop_data` updates `current_drop_data_` before
+  // completing the drop.
+  void FinishOnPerformDrop(OnPerformDropContext context);
+  void FinishOnPerformDropCallback(OnPerformDropContext context,
+                                   absl::optional<DropData> drop_data);
 
   // Completes a drop operation by communicating the drop data to the renderer
   // process.
@@ -339,7 +342,7 @@ class CONTENT_EXPORT WebContentsViewAura
   std::unique_ptr<WindowObserver> window_observer_;
 
   // The WebContentsImpl whose contents we display.
-  raw_ptr<WebContentsImpl> web_contents_;
+  const raw_ptr<WebContentsImpl> web_contents_;
 
   std::unique_ptr<WebContentsViewDelegate> delegate_;
 
@@ -357,33 +360,21 @@ class CONTENT_EXPORT WebContentsViewAura
   // avoid sending the drag exited message after leaving the current view.
   GlobalRoutingID current_rvh_for_drag_;
 
-  // We track the IDs of the source RenderProcessHost and RenderViewHost from
-  // which the current drag originated. These are used to ensure that drag
-  // events do not fire over a cross-site frame (with respect to the source
-  // frame) in the same page (see crbug.com/666858). Specifically, the
-  // RenderViewHost is used to check the "same page" property, while the
-  // RenderProcessHost is used to check the "cross-site" property. Note that the
-  // reason the RenderProcessHost is tracked instead of the RenderWidgetHost is
-  // so that we still allow drags between non-contiguous same-site frames (such
-  // frames will have the same process, but different widgets). Note also that
-  // the RenderViewHost may not be in the same process as the RenderProcessHost,
-  // since the view corresponds to the page, while the process is specific to
-  // the frame from which the drag started.
-  // We also track whether a dragged image is accessible from its frame, so we
-  // can disallow tainted-cross-origin same-page drag-drop.
+  // Used to track security-salient details about a drag source. See
+  // documentation in `IsValidDragTarget()` for `site_instance_group_id`.
+  // See crbug.com/1264873 for `image_accessible_from_frame`.
   struct DragStart {
     DragStart(SiteInstanceGroupId site_instance_group_id,
-              GlobalRoutingID view_id,
               bool image_accessible_from_frame)
         : site_instance_group_id(site_instance_group_id),
-          view_id(view_id),
           image_accessible_from_frame(image_accessible_from_frame) {}
     ~DragStart() = default;
 
     SiteInstanceGroupId site_instance_group_id;
-    GlobalRoutingID view_id;
     bool image_accessible_from_frame;
   };
+  // Will hold a value when the current drag started in this page (outermost
+  // WebContents).
   absl::optional<DragStart> drag_start_;
 
   // Responsible for handling gesture-nav and pull-to-refresh UI.

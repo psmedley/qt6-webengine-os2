@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -235,8 +235,8 @@ void LogExponentialBackoffDelay(
 }
 
 net::NetworkTrafficAnnotationTag GetNetworkTrafficAnnotation(
-    const autofill::AutofillDownloadManager::RequestType& request_type) {
-  if (request_type == autofill::AutofillDownloadManager::REQUEST_QUERY) {
+    const AutofillDownloadManager::RequestType& request_type) {
+  if (request_type == AutofillDownloadManager::REQUEST_QUERY) {
     return net::DefineNetworkTrafficAnnotation("autofill_query", R"(
         semantics {
           sender: "Autofill"
@@ -268,7 +268,7 @@ net::NetworkTrafficAnnotationTag GetNetworkTrafficAnnotation(
         })");
   }
 
-  DCHECK_EQ(request_type, autofill::AutofillDownloadManager::REQUEST_UPLOAD);
+  DCHECK_EQ(request_type, AutofillDownloadManager::REQUEST_UPLOAD);
   return net::DefineNetworkTrafficAnnotation("autofill_upload", R"(
       semantics {
         sender: "Autofill"
@@ -321,7 +321,7 @@ const char* RequestTypeToString(AutofillDownloadManager::RequestType type) {
 }
 
 std::ostream& operator<<(std::ostream& out,
-                         const autofill::AutofillPageQueryRequest& query) {
+                         const AutofillPageQueryRequest& query) {
   out << "client_version: " << query.client_version();
   for (const auto& form : query.forms()) {
     out << "\nForm\n signature: " << form.signature();
@@ -337,7 +337,7 @@ std::ostream& operator<<(std::ostream& out,
 }
 
 std::ostream& operator<<(std::ostream& out,
-                         const autofill::AutofillUploadContents& upload) {
+                         const AutofillUploadContents& upload) {
   out << "client_version: " << upload.client_version() << "\n";
   out << "form_signature: " << upload.form_signature() << "\n";
   out << "data_present: " << upload.data_present() << "\n";
@@ -381,8 +381,7 @@ std::string FieldTypeToString(int type) {
        AutofillType(ToSafeServerFieldType(type, UNKNOWN_TYPE)).ToString()});
 }
 
-LogBuffer& operator<<(LogBuffer& out,
-                      const autofill::AutofillUploadContents& upload) {
+LogBuffer& operator<<(LogBuffer& out, const AutofillUploadContents& upload) {
   if (!out.active())
     return out;
   out << Tag{"div"} << Attrib{"class", "form"};
@@ -407,7 +406,7 @@ LogBuffer& operator<<(LogBuffer& out,
     out << Tr{} << "has_form_tag:" << upload.has_form_tag();
 
   if (upload.has_single_username_data()) {
-    LogBuffer single_username_data;
+    LogBuffer single_username_data(LogBuffer::IsActive(true));
     single_username_data << Tag{"span"} << "[";
     single_username_data
         << Tr{} << "username_form_signature:"
@@ -477,10 +476,9 @@ bool CanThrottleUpload(const FormStructure& form,
   std::string key = base::StringPrintf(
       "%03X",
       static_cast<int>(form.form_signature().value() % kNumUploadBuckets));
-  auto* upload_events =
-      pref_service->GetDictionary(prefs::kAutofillUploadEvents);
-  auto* found = upload_events->FindKeyOfType(key, base::Value::Type::INTEGER);
-  int value = found ? found->GetInt() : 0;
+  const auto& upload_events =
+      pref_service->GetDict(prefs::kAutofillUploadEvents);
+  int value = upload_events.FindInt(key).value_or(0);
 
   // Calculate the mask we expect to be set for the form's upload bucket.
   const int bit = static_cast<int>(form.submission_source());
@@ -492,8 +490,8 @@ bool CanThrottleUpload(const FormStructure& form,
   // event pref to set the appropriate bit.
   bool is_first_upload_for_event = ((value & mask) == 0);
   if (is_first_upload_for_event) {
-    DictionaryPrefUpdate update(pref_service, prefs::kAutofillUploadEvents);
-    update->SetKey(std::move(key), base::Value(value | mask));
+    ScopedDictPrefUpdate update(pref_service, prefs::kAutofillUploadEvents);
+    update->Set(std::move(key), value | mask);
   }
 
   return !is_first_upload_for_event;
@@ -737,12 +735,10 @@ bool AutofillDownloadManager::StartUploadRequest(
     request_data.payload = std::move(payload);
 
     DVLOG(1) << "Sending Autofill Upload Request:\n" << upload;
-    if (log_manager_) {
-      log_manager_->Log() << LoggingScope::kAutofillServer
-                          << LogMessage::kSendAutofillUpload << Br{}
-                          << "Allow upload?: " << allow_upload << Br{}
-                          << "Data: " << Br{} << upload;
-    }
+    LOG_AF(log_manager_) << LoggingScope::kAutofillServer
+                         << LogMessage::kSendAutofillUpload << Br{}
+                         << "Allow upload?: " << allow_upload << Br{}
+                         << "Data: " << Br{} << upload;
 
     if (!allow_upload)
       return false;
@@ -1019,14 +1015,22 @@ void AutofillDownloadManager::InitActiveExperiments() {
       variations::VariationsIdsProvider::GetInstance();
   DCHECK(variations_ids_provider != nullptr);
 
-  delete active_experiments_;
-  active_experiments_ = new std::vector<variations::VariationID>(
+  // TODO(crbug.com/1331322): Retire the hardcoded GWS ID ranges and only read
+  // the finch parameter.
+  base::flat_set<int> active_experiments(
       variations_ids_provider->GetVariationsVector(
           {variations::GOOGLE_WEB_PROPERTIES_TRIGGER_ANY_CONTEXT,
            variations::GOOGLE_WEB_PROPERTIES_TRIGGER_FIRST_PARTY}));
-  base::EraseIf(*active_experiments_, [](variations::VariationID id) {
-    return !IsAutofillExperimentId(id);
-  });
+  base::EraseIf(active_experiments, base::not_fn(&IsAutofillExperimentId));
+  if (base::FeatureList::IsEnabled(
+          autofill::features::kAutofillServerBehaviors)) {
+    active_experiments.insert(
+        autofill::features::kAutofillServerBehaviorsParam.Get());
+  }
+
+  delete active_experiments_;
+  active_experiments_ = new std::vector<int>(active_experiments.begin(),
+                                             active_experiments.end());
   std::sort(active_experiments_->begin(), active_experiments_->end());
 }
 

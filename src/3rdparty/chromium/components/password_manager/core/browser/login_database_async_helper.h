@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/password_manager/core/browser/password_store_backend.h"
-#include "components/password_manager/core/browser/password_store_backend_metrics_recorder.h"
 #include "components/password_manager/core/browser/password_store_sync.h"
 
 namespace syncer {
@@ -42,33 +41,22 @@ class LoginDatabaseAsyncHelper : private PasswordStoreSync {
       base::RepeatingClosure sync_enabled_or_disabled_cb);
 
   // Synchronous implementation of PasswordStoreBackend interface.
-  LoginsResult GetAllLogins(
-      PasswordStoreBackendMetricsRecorder metrics_recorder);
-  LoginsResult GetAutofillableLogins(
-      PasswordStoreBackendMetricsRecorder metrics_recorder);
-  LoginsResult FillMatchingLogins(
+  LoginsResultOrError GetAllLogins();
+  LoginsResultOrError GetAutofillableLogins();
+  LoginsResultOrError FillMatchingLogins(
       const std::vector<PasswordFormDigest>& forms,
-      bool include_psl,
-      PasswordStoreBackendMetricsRecorder metrics_recorder);
-  PasswordStoreChangeList AddLogin(
-      const PasswordForm& form,
-      PasswordStoreBackendMetricsRecorder metrics_recorder);
-  PasswordStoreChangeList UpdateLogin(
-      const PasswordForm& form,
-      PasswordStoreBackendMetricsRecorder metrics_recorder);
-  PasswordStoreChangeList RemoveLogin(
-      const PasswordForm& form,
-      PasswordStoreBackendMetricsRecorder metrics_recorder);
-  PasswordStoreChangeList RemoveLoginsCreatedBetween(
-      base::Time delete_begin,
-      base::Time delete_end,
-      PasswordStoreBackendMetricsRecorder metrics_recorder);
-  PasswordStoreChangeList RemoveLoginsByURLAndTime(
+      bool include_psl);
+
+  PasswordChangesOrError AddLogin(const PasswordForm& form);
+  PasswordChangesOrError UpdateLogin(const PasswordForm& form);
+  PasswordChangesOrError RemoveLogin(const PasswordForm& form);
+  PasswordChangesOrError RemoveLoginsCreatedBetween(base::Time delete_begin,
+                                                    base::Time delete_end);
+  PasswordChangesOrError RemoveLoginsByURLAndTime(
       const base::RepeatingCallback<bool(const GURL&)>& url_filter,
       base::Time delete_begin,
       base::Time delete_end,
-      base::OnceCallback<void(bool)> sync_completion,
-      PasswordStoreBackendMetricsRecorder metrics_recorder);
+      base::OnceCallback<void(bool)> sync_completion);
   PasswordStoreChangeList DisableAutoSignInForOrigins(
       const base::RepeatingCallback<bool(const GURL&)>& origin_filter);
 
@@ -92,25 +80,33 @@ class LoginDatabaseAsyncHelper : private PasswordStoreSync {
 
  private:
   // Implements PasswordStoreSync interface.
-  PasswordStoreChangeList AddLoginSync(const PasswordForm& form,
-                                       AddLoginError* error) override;
-  PasswordStoreChangeList UpdateLoginSync(const PasswordForm& form,
-                                          UpdateLoginError* error) override;
-  void NotifyLoginsChanged(const PasswordStoreChangeList& changes) override;
+  PasswordStoreChangeList AddCredentialSync(
+      const sync_pb::PasswordSpecificsData& password,
+      AddCredentialError* error) override;
+  PasswordStoreChangeList UpdateCredentialSync(
+      const sync_pb::PasswordSpecificsData& password,
+      UpdateCredentialError* error) override;
+  void NotifyCredentialsChanged(
+      const PasswordStoreChangeList& changes) override;
   void NotifyDeletionsHaveSynced(bool success) override;
   void NotifyUnsyncedCredentialsWillBeDeleted(
       std::vector<PasswordForm> unsynced_credentials) override;
   bool BeginTransaction() override;
   void RollbackTransaction() override;
   bool CommitTransaction() override;
-  FormRetrievalResult ReadAllLogins(
-      PrimaryKeyToFormMap* key_to_form_map) override;
-  PasswordStoreChangeList RemoveLoginByPrimaryKeySync(
+  FormRetrievalResult ReadAllCredentials(
+      PrimaryKeyToPasswordSpecificsDataMap* key_to_form_map) override;
+  PasswordStoreChangeList RemoveCredentialByPrimaryKeySync(
       FormPrimaryKey primary_key) override;
   PasswordStoreSync::MetadataStore* GetMetadataStore() override;
   bool IsAccountStore() const override;
   bool DeleteAndRecreateDatabaseFile() override;
-  DatabaseCleanupResult DeleteUndecryptableLogins() override;
+  DatabaseCleanupResult DeleteUndecryptableCredentials() override;
+
+  PasswordStoreChangeList AddLoginImpl(const PasswordForm& form,
+                                       AddCredentialError* error);
+  PasswordStoreChangeList UpdateLoginImpl(const PasswordForm& form,
+                                          UpdateCredentialError* error);
 
   // Reports password store metrics that aren't reported by the
   // StoreMetricsReporter. Namely, metrics related to inaccessible passwords,

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include <string>
 
 #include "base/metrics/histogram_macros.h"
+#include "base/strings/escape.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_reuse_detector.h"
 #include "components/safe_browsing/content/browser/password_protection/password_protection_commit_deferring_condition.h"
@@ -21,7 +22,6 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "google_apis/google_api_keys.h"
-#include "net/base/escape.h"
 #include "net/base/url_util.h"
 #include "third_party/blink/public/common/page/page_zoom.h"
 
@@ -29,6 +29,12 @@ using content::WebContents;
 using password_manager::metrics_util::PasswordType;
 
 namespace safe_browsing {
+
+PasswordReuseInfo::PasswordReuseInfo() = default;
+
+PasswordReuseInfo::PasswordReuseInfo(const PasswordReuseInfo& other) = default;
+
+PasswordReuseInfo::~PasswordReuseInfo() = default;
 
 #if defined(ON_FOCUS_PING_ENABLED)
 void PasswordProtectionService::MaybeStartPasswordFieldOnFocusRequest(

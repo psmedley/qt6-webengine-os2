@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -93,6 +93,6 @@ void ProfilePickerLacrosSignInProvider::OnLacrosProfileCreated(
 }
 
 void ProfilePickerLacrosSignInProvider::OnProfileSignedIn() {
-  std::move(callback_).Run(profile_);
+  std::move(callback_).Run(profile_.get());
   // The object gets deleted now.
 }

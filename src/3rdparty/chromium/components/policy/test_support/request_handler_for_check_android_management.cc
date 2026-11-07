@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,10 +25,8 @@ const char kManagedAuthToken[] = "managed-auth-token";
 const char kUnmanagedAuthToken[] = "unmanaged-auth-token";
 
 RequestHandlerForCheckAndroidManagement::
-    RequestHandlerForCheckAndroidManagement(ClientStorage* client_storage,
-                                            PolicyStorage* policy_storage)
-    : EmbeddedPolicyTestServer::RequestHandler(client_storage, policy_storage) {
-}
+    RequestHandlerForCheckAndroidManagement(EmbeddedPolicyTestServer* parent)
+    : EmbeddedPolicyTestServer::RequestHandler(parent) {}
 
 RequestHandlerForCheckAndroidManagement::
     ~RequestHandlerForCheckAndroidManagement() = default;

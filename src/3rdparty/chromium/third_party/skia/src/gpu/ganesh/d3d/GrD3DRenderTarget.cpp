@@ -124,10 +124,11 @@ sk_sp<GrD3DRenderTarget> GrD3DRenderTarget::MakeWrappedRenderTarget(
         d3dRT = new GrD3DRenderTarget(gpu, dimensions, info, std::move(state), msInfo,
                                       std::move(msState), msaaRenderTargetView, renderTargetView,
                                       kWrapped,
-                                      /*label=*/{});
+                                      /*label=*/"MakeWrappedRenderTargetWithMSAASurface");
     } else {
         d3dRT = new GrD3DRenderTarget(
-                gpu, dimensions, info, std::move(state), renderTargetView, kWrapped, /*label=*/{});
+                gpu, dimensions, info, std::move(state), renderTargetView, kWrapped,
+                /*label=*/"MakeWrappedRenderTarget");
     }
 
     return sk_sp<GrD3DRenderTarget>(d3dRT);
@@ -206,4 +207,21 @@ void GrD3DRenderTarget::genKey(skgpu::KeyBuilder* b) const {
     }
 #endif
     b->add32(this->sampleQualityPattern());
+}
+
+void GrD3DRenderTarget::onSetLabel() {
+    SkASSERT(this->d3dResource());
+    if (!this->getLabel().empty()) {
+        if (fMSAATextureResource) {
+            SkASSERT(fMSAATextureResource->d3dResource());
+            const std::wstring suffix = GrD3DMultiByteToWide(this->getLabel());
+            const std::wstring msaaLabel = L"_Skia_MSAA_" + suffix;
+            fMSAATextureResource->d3dResource()->SetName(msaaLabel.c_str());
+            const std::wstring resolveLabel = L"_Skia_Resolve_" + suffix;
+            this->d3dResource()->SetName(resolveLabel.c_str());
+        } else {
+            const std::wstring label = L"_Skia_" + GrD3DMultiByteToWide(this->getLabel());
+            this->d3dResource()->SetName(label.c_str());
+        }
+    }
 }

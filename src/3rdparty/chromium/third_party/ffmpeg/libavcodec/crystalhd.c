@@ -546,7 +546,7 @@ static inline CopyRet copy_frame(AVCodecContext *avctx,
     frame->pts = pkt_pts;
 
     frame->pkt_pos = -1;
-    frame->pkt_duration = 0;
+    frame->duration = 0;
     frame->pkt_size = -1;
 
     if (!priv->need_second_field) {
@@ -776,18 +776,19 @@ static int crystalhd_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     }; \
     const FFCodec ff_##x##_crystalhd_decoder = { \
         .p.name         = #x "_crystalhd", \
-        .p.long_name    = NULL_IF_CONFIG_SMALL("CrystalHD " #X " decoder"), \
+        CODEC_LONG_NAME("CrystalHD " #X " decoder"), \
         .p.type         = AVMEDIA_TYPE_VIDEO, \
         .p.id           = AV_CODEC_ID_##X, \
         .priv_data_size = sizeof(CHDContext), \
         .p.priv_class   = &x##_crystalhd_class, \
         .init           = init, \
         .close          = uninit, \
-        .receive_frame  = crystalhd_receive_frame, \
+        FF_CODEC_RECEIVE_FRAME_CB(crystalhd_receive_frame), \
         .flush          = flush, \
         .bsfs           = bsf_name, \
         .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING | AV_CODEC_CAP_HARDWARE, \
-        .caps_internal  = FF_CODEC_CAP_SETS_FRAME_PROPS, \
+        .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE | \
+                          FF_CODEC_CAP_SETS_FRAME_PROPS, \
         .p.pix_fmts     = (const enum AVPixelFormat[]){AV_PIX_FMT_YUYV422, AV_PIX_FMT_NONE}, \
         .p.wrapper_name = "crystalhd", \
     };

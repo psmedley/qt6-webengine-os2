@@ -9,9 +9,8 @@
 #include "include/core/SkString.h"
 #include "include/core/SkUnPreMultiply.h"
 #include "include/effects/SkRuntimeEffect.h"
-#include "include/private/SkNx.h"
 #include "include/private/SkTDArray.h"
-#include "include/third_party/skcms/skcms.h"
+#include "modules/skcms/skcms.h"
 #include "src/core/SkArenaAlloc.h"
 #include "src/core/SkColorFilterBase.h"
 #include "src/core/SkColorFilterPriv.h"
@@ -28,6 +27,11 @@
 #include "src/gpu/ganesh/GrColorInfo.h"
 #include "src/gpu/ganesh/GrColorSpaceXform.h"
 #include "src/gpu/ganesh/GrFragmentProcessor.h"
+#endif
+
+#ifdef SK_ENABLE_SKSL
+#include "src/core/SkKeyHelpers.h"
+#include "src/core/SkPaintParamsKey.h"
 #endif
 
 bool SkColorFilter::asAColorMode(SkColor* color, SkBlendMode* mode) const {
@@ -62,7 +66,8 @@ bool SkColorFilterBase::onAsAColorMatrix(float matrix[20]) const {
 #if SK_SUPPORT_GPU
 GrFPResult SkColorFilterBase::asFragmentProcessor(std::unique_ptr<GrFragmentProcessor> inputFP,
                                                   GrRecordingContext* context,
-                                                  const GrColorInfo& dstColorInfo) const {
+                                                  const GrColorInfo& dstColorInfo,
+                                                  const SkSurfaceProps& props) const {
     // This color filter doesn't implement `asFragmentProcessor`.
     return GrFPFailure(std::move(inputFP));
 }
@@ -109,8 +114,9 @@ SkPMColor4f SkColorFilterBase::onFilterColor4f(const SkPMColor4f& color,
     pipeline.append_constant_color(&alloc, color.vec());
     SkPaint blankPaint;
     SkMatrixProvider matrixProvider(SkMatrix::I());
+    SkSurfaceProps props{}; // default OK; colorFilters don't render text
     SkStageRec rec = {
-        &pipeline, &alloc, kRGBA_F32_SkColorType, dstCS, blankPaint, nullptr, matrixProvider
+        &pipeline, &alloc, kRGBA_F32_SkColorType, dstCS, blankPaint, nullptr, matrixProvider, props
     };
 
     if (as_CFB(this)->onAppendStages(rec, color.fA == 1)) {
@@ -141,9 +147,19 @@ SkPMColor4f SkColorFilterBase::onFilterColor4f(const SkPMColor4f& color,
     return SkPMColor4f{0,0,0,0};
 }
 
+#ifdef SK_ENABLE_SKSL
+void SkColorFilterBase::addToKey(const SkKeyContext& keyContext,
+                                 SkPaintParamsKeyBuilder* builder,
+                                 SkPipelineDataGatherer* gatherer) const {
+    // Return the input color as-is.
+    PassthroughShaderBlock::BeginBlock(keyContext, builder, gatherer);
+    builder->endBlock();
+}
+#endif
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-class SkComposeColorFilter : public SkColorFilterBase {
+class SkComposeColorFilter final : public SkColorFilterBase {
 public:
     bool onIsAlphaUnchanged() const override {
         // Can only claim alphaunchanged support if both our proxys do.
@@ -169,29 +185,40 @@ public:
 #if SK_SUPPORT_GPU
     GrFPResult asFragmentProcessor(std::unique_ptr<GrFragmentProcessor> inputFP,
                                    GrRecordingContext* context,
-                                   const GrColorInfo& dstColorInfo) const override {
-        GrFragmentProcessor* originalInputFP = inputFP.get();
+                                   const GrColorInfo& dstColorInfo,
+                                   const SkSurfaceProps& props) const override {
+        // Unfortunately, we need to clone the input before we know we need it. This lets us return
+        // the original FP if either internal color filter fails.
+        auto inputClone = inputFP ? inputFP->clone() : nullptr;
 
         auto [innerSuccess, innerFP] =
-                fInner->asFragmentProcessor(std::move(inputFP), context, dstColorInfo);
+                fInner->asFragmentProcessor(std::move(inputFP), context, dstColorInfo, props);
         if (!innerSuccess) {
-            return GrFPFailure(std::move(innerFP));
+            return GrFPFailure(std::move(inputClone));
         }
 
         auto [outerSuccess, outerFP] =
-                fOuter->asFragmentProcessor(std::move(innerFP), context, dstColorInfo);
+                fOuter->asFragmentProcessor(std::move(innerFP), context, dstColorInfo, props);
         if (!outerSuccess) {
-            // In the rare event that the outer FP cannot be built, we have no good way of
-            // separating the inputFP from the innerFP, so we need to return a cloned inputFP.
-            // This could hypothetically be expensive, but failure here should be extremely rare.
-            return GrFPFailure(originalInputFP->clone());
+            return GrFPFailure(std::move(inputClone));
         }
 
         return GrFPSuccess(std::move(outerFP));
     }
 #endif
 
-    SK_FLATTENABLE_HOOKS(SkComposeColorFilter)
+#ifdef SK_ENABLE_SKSL
+    void addToKey(const SkKeyContext& keyContext,
+                  SkPaintParamsKeyBuilder* builder,
+                  SkPipelineDataGatherer* gatherer) const override {
+        ComposeColorFilterBlock::BeginBlock(keyContext, builder, gatherer);
+
+        as_CFB(fInner)->addToKey(keyContext, builder, gatherer);
+        as_CFB(fOuter)->addToKey(keyContext, builder, gatherer);
+
+        builder->endBlock();
+    }
+#endif // SK_ENABLE_SKSL
 
 protected:
     void flatten(SkWriteBuffer& buffer) const override {
@@ -200,6 +227,9 @@ protected:
     }
 
 private:
+    friend void ::SkRegisterComposeColorFilterFlattenable();
+    SK_FLATTENABLE_HOOKS(SkComposeColorFilter)
+
     SkComposeColorFilter(sk_sp<SkColorFilter> outer, sk_sp<SkColorFilter> inner)
         : fOuter(as_CFB_sp(std::move(outer)))
         , fInner(as_CFB_sp(std::move(inner)))
@@ -229,7 +259,7 @@ sk_sp<SkColorFilter> SkColorFilter::makeComposed(sk_sp<SkColorFilter> inner) con
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-class SkSRGBGammaColorFilter : public SkColorFilterBase {
+class SkSRGBGammaColorFilter final : public SkColorFilterBase {
 public:
     enum class Direction {
         kLinearToSRGB,
@@ -249,7 +279,8 @@ public:
 #if SK_SUPPORT_GPU
     GrFPResult asFragmentProcessor(std::unique_ptr<GrFragmentProcessor> inputFP,
                                    GrRecordingContext* context,
-                                   const GrColorInfo& dstColorInfo) const override {
+                                   const GrColorInfo& dstColorInfo,
+                                   const SkSurfaceProps& props) const override {
         // wish our caller would let us know if our input was opaque...
         constexpr SkAlphaType alphaType = kPremul_SkAlphaType;
         switch (fDir) {
@@ -286,14 +317,15 @@ public:
         return premul(fSteps.program(p, uniforms, unpremul(c)));
     }
 
-    SK_FLATTENABLE_HOOKS(SkSRGBGammaColorFilter)
-
 protected:
     void flatten(SkWriteBuffer& buffer) const override {
         buffer.write32(static_cast<uint32_t>(fDir));
     }
 
 private:
+    friend void ::SkRegisterSRGBGammaColorFilterFlattenable();
+    SK_FLATTENABLE_HOOKS(SkSRGBGammaColorFilter)
+
     const Direction fDir;
     SkColorSpaceXformSteps fSteps;
 
@@ -323,12 +355,8 @@ sk_sp<SkColorFilter> SkColorFilters::SRGBToLinearGamma() {
     return MakeSRGBGammaCF<SkSRGBGammaColorFilter::Direction::kSRGBToLinear>();
 }
 
-struct SkWorkingFormatColorFilter : public SkColorFilterBase {
-    sk_sp<SkColorFilter>   fChild;
-    skcms_TransferFunction fTF;     bool fUseDstTF    = true;
-    skcms_Matrix3x3        fGamut;  bool fUseDstGamut = true;
-    SkAlphaType            fAT;     bool fUseDstAT    = true;
-
+class SkWorkingFormatColorFilter final : public SkColorFilterBase {
+public:
     SkWorkingFormatColorFilter(sk_sp<SkColorFilter>          child,
                                const skcms_TransferFunction* tf,
                                const skcms_Matrix3x3*        gamut,
@@ -338,7 +366,6 @@ struct SkWorkingFormatColorFilter : public SkColorFilterBase {
         if (gamut) { fGamut = *gamut; fUseDstGamut = false; }
         if (at)    { fAT    = *at;    fUseDstAT    = false; }
     }
-
 
     sk_sp<SkColorSpace> workingFormat(const sk_sp<SkColorSpace>& dstCS, SkAlphaType* at) const {
         skcms_TransferFunction tf    = fTF;
@@ -354,7 +381,8 @@ struct SkWorkingFormatColorFilter : public SkColorFilterBase {
 #if SK_SUPPORT_GPU
     GrFPResult asFragmentProcessor(std::unique_ptr<GrFragmentProcessor> inputFP,
                                    GrRecordingContext* context,
-                                   const GrColorInfo& dstColorInfo) const override {
+                                   const GrColorInfo& dstColorInfo,
+                                   const SkSurfaceProps& props) const override {
         sk_sp<SkColorSpace> dstCS = dstColorInfo.refColorSpace();
         if (!dstCS) { dstCS = SkColorSpace::MakeSRGB(); }
 
@@ -365,7 +393,8 @@ struct SkWorkingFormatColorFilter : public SkColorFilterBase {
                 working = {dstColorInfo.colorType(), workingAT, workingCS};
 
         auto [ok, fp] = as_CFB(fChild)->asFragmentProcessor(
-                GrColorSpaceXformEffect::Make(std::move(inputFP), dst,working), context, working);
+                GrColorSpaceXformEffect::Make(std::move(inputFP), dst,working), context, working,
+                                              props);
 
         return ok ? GrFPSuccess(GrColorSpaceXformEffect::Make(std::move(fp), working,dst))
                   : GrFPFailure(std::move(fp));
@@ -411,7 +440,10 @@ struct SkWorkingFormatColorFilter : public SkColorFilterBase {
 
     bool onIsAlphaUnchanged() const override { return fChild->isAlphaUnchanged(); }
 
+private:
+    friend void ::SkRegisterWorkingFormatColorFilterFlattenable();
     SK_FLATTENABLE_HOOKS(SkWorkingFormatColorFilter)
+
     void flatten(SkWriteBuffer& buffer) const override {
         buffer.writeFlattenable(fChild.get());
         buffer.writeBool(fUseDstTF);
@@ -421,6 +453,11 @@ struct SkWorkingFormatColorFilter : public SkColorFilterBase {
         if (!fUseDstGamut) { buffer.writeScalarArray(&fGamut.vals[0][0], 9); }
         if (!fUseDstAT)    { buffer.writeInt(fAT); }
     }
+
+    sk_sp<SkColorFilter>   fChild;
+    skcms_TransferFunction fTF;     bool fUseDstTF    = true;
+    skcms_Matrix3x3        fGamut;  bool fUseDstGamut = true;
+    SkAlphaType            fAT;     bool fUseDstAT    = true;
 };
 
 sk_sp<SkFlattenable> SkWorkingFormatColorFilter::CreateProc(SkReadBuffer& buffer) {
@@ -473,7 +510,7 @@ sk_sp<SkColorFilter> SkColorFilters::Lerp(float weight, sk_sp<SkColorFilter> cf0
         return cf1;
     }
 
-    sk_sp<SkRuntimeEffect> effect = SkMakeCachedRuntimeEffect(
+    static const SkRuntimeEffect* effect = SkMakeCachedRuntimeEffect(
         SkRuntimeEffect::MakeForColorFilter,
         "uniform colorFilter cf0;"
         "uniform colorFilter cf1;"
@@ -481,12 +518,12 @@ sk_sp<SkColorFilter> SkColorFilters::Lerp(float weight, sk_sp<SkColorFilter> cf0
         "half4 main(half4 color) {"
             "return mix(cf0.eval(color), cf1.eval(color), weight);"
         "}"
-    );
+    ).release();
     SkASSERT(effect);
 
     sk_sp<SkColorFilter> inputs[] = {cf0,cf1};
     return effect->makeColorFilter(SkData::MakeWithCopy(&weight, sizeof(weight)),
-                                   inputs, SK_ARRAY_COUNT(inputs));
+                                   inputs, std::size(inputs));
 #else
     // TODO(skia:12197)
     return nullptr;
@@ -495,11 +532,14 @@ sk_sp<SkColorFilter> SkColorFilters::Lerp(float weight, sk_sp<SkColorFilter> cf0
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-#include "src/core/SkModeColorFilter.h"
-
-void SkColorFilterBase::RegisterFlattenables() {
+void SkRegisterComposeColorFilterFlattenable() {
     SK_REGISTER_FLATTENABLE(SkComposeColorFilter);
-    SK_REGISTER_FLATTENABLE(SkModeColorFilter);
+}
+
+void SkRegisterSRGBGammaColorFilterFlattenable() {
     SK_REGISTER_FLATTENABLE(SkSRGBGammaColorFilter);
+}
+
+void SkRegisterWorkingFormatColorFilterFlattenable() {
     SK_REGISTER_FLATTENABLE(SkWorkingFormatColorFilter);
 }

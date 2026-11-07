@@ -1,5 +1,5 @@
 #!/usr/bin/env vpython3
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -43,11 +43,24 @@ download_parser.set_defaults(func=download.run)
 
 gen_parser = subparsers.add_parser("gen")
 gen_parser.add_argument(
+    "--force",
+    help="Run anyway, despite deprecation and replacement with gnrt.")
+gen_parser.add_argument(
     "--target",
     help=("The single target to generate BUILD.gn files for, from " +
           "'rustc --print=target-list'. When not specified, the BUILD.gn " +
           "files are generated for all Chromium targets. Used for faster " +
           "debugging of this tool."))
+gen_parser.add_argument(
+    "--crate",
+    action="append",
+    dest="crates",
+    default=None,
+    help="Only generate BUILD.gn files for specified crate(s). Can be passed "
+    "multiple times. Used for testing this tool.")
+gen_parser.add_argument("--skip-patch",
+                        action="store_true",
+                        help="Skip applying .patch file to third_party/rust")
 gen_parser.add_argument("--verbose",
                         action="store_true",
                         help="Used for debugging of this tool.")

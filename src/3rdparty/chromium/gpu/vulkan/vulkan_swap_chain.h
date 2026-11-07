@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -76,6 +76,7 @@ class COMPONENT_EXPORT(VULKAN) VulkanSwapChain {
                   uint32_t min_image_count,
                   VkImageUsageFlags image_usage_flags,
                   VkSurfaceTransformFlagBitsKHR pre_transform,
+                  VkCompositeAlphaFlagBitsKHR composite_alpha,
                   std::unique_ptr<VulkanSwapChain> old_swap_chain);
 
   // Destroy() should be called when all related GPU tasks have been finished.
@@ -125,6 +126,7 @@ class COMPONENT_EXPORT(VULKAN) VulkanSwapChain {
                            uint32_t min_image_count,
                            VkImageUsageFlags image_usage_flags,
                            VkSurfaceTransformFlagBitsKHR pre_transform,
+                           VkCompositeAlphaFlagBitsKHR composite_alpha,
                            std::unique_ptr<VulkanSwapChain> old_swap_chain)
       EXCLUSIVE_LOCKS_REQUIRED(lock_);
   void DestroySwapChain() EXCLUSIVE_LOCKS_REQUIRED(lock_);

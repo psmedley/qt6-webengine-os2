@@ -36,7 +36,7 @@
 #include <stdint.h>
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/scheduler/public/non_main_thread.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -646,7 +646,7 @@ TEST(KURLTest, Empty) {
   EXPECT_FALSE(kurl.IsValid());
   EXPECT_TRUE(kurl.IsNull());
   EXPECT_TRUE(kurl.GetString().IsNull());
-  EXPECT_TRUE(kurl.GetString().IsEmpty());
+  EXPECT_TRUE(kurl.GetString().empty());
 
   // Test resolving a null URL on an empty string.
   const KURL kurl2(kurl, "");
@@ -654,9 +654,9 @@ TEST(KURLTest, Empty) {
   EXPECT_TRUE(kurl2.IsEmpty());
   EXPECT_FALSE(kurl2.IsValid());
   EXPECT_FALSE(kurl2.GetString().IsNull());
-  EXPECT_TRUE(kurl2.GetString().IsEmpty());
+  EXPECT_TRUE(kurl2.GetString().empty());
   EXPECT_FALSE(kurl2.GetString().IsNull());
-  EXPECT_TRUE(kurl2.GetString().IsEmpty());
+  EXPECT_TRUE(kurl2.GetString().empty());
 
   // Resolve the null URL on a null string.
   const KURL kurl22(kurl, String());
@@ -664,9 +664,9 @@ TEST(KURLTest, Empty) {
   EXPECT_TRUE(kurl22.IsEmpty());
   EXPECT_FALSE(kurl22.IsValid());
   EXPECT_FALSE(kurl22.GetString().IsNull());
-  EXPECT_TRUE(kurl22.GetString().IsEmpty());
+  EXPECT_TRUE(kurl22.GetString().empty());
   EXPECT_FALSE(kurl22.GetString().IsNull());
-  EXPECT_TRUE(kurl22.GetString().IsEmpty());
+  EXPECT_TRUE(kurl22.GetString().empty());
 
   // Test non-hierarchical schemes resolving. The actual URLs will be different.
   // WebKit's one will set the string to "something.gif" and we'll set it to an
@@ -681,7 +681,7 @@ TEST(KURLTest, Empty) {
   EXPECT_TRUE(kurl4.IsEmpty());
   EXPECT_FALSE(kurl4.IsValid());
   EXPECT_TRUE(kurl4.GetString().IsNull());
-  EXPECT_TRUE(kurl4.GetString().IsEmpty());
+  EXPECT_TRUE(kurl4.GetString().empty());
 
   // Resolving an empty URL on an invalid string.
   const KURL kurl5("foo.js");
@@ -696,7 +696,7 @@ TEST(KURLTest, Empty) {
   EXPECT_TRUE(kurl6.IsEmpty());
   EXPECT_FALSE(kurl6.IsValid());
   EXPECT_FALSE(kurl6.GetString().IsNull());
-  EXPECT_TRUE(kurl6.GetString().IsEmpty());
+  EXPECT_TRUE(kurl6.GetString().empty());
 
   // Non-empty but invalid C string as input.
   const KURL kurl7("foo.js");
@@ -754,26 +754,13 @@ TEST(KURLTest, Offsets) {
   EXPECT_EQ(11u, kurl3.PathAfterLastSlash());
 }
 
-TEST(KURLTest, DeepCopy) {
-  const char kUrl[] = "http://www.google.com/";
-  const KURL src(kUrl);
-  EXPECT_TRUE(src.GetString() ==
-              kUrl);  // This really just initializes the cache.
-  const KURL dest = src.Copy();
-  EXPECT_TRUE(dest.GetString() ==
-              kUrl);  // This really just initializes the cache.
-
-  // The pointers should be different for both UTF-8 and UTF-16.
-  EXPECT_NE(dest.GetString().Impl(), src.GetString().Impl());
-}
-
 TEST(KURLTest, DeepCopyInnerURL) {
   const char kUrl[] = "filesystem:http://www.google.com/temporary/test.txt";
   const char kInnerURL[] = "http://www.google.com/temporary";
   const KURL src(kUrl);
   EXPECT_TRUE(src.GetString() == kUrl);
   EXPECT_TRUE(src.InnerURL()->GetString() == kInnerURL);
-  const KURL dest = src.Copy();
+  const KURL dest = src;
   EXPECT_TRUE(dest.GetString() == kUrl);
   EXPECT_TRUE(dest.InnerURL()->GetString() == kInnerURL);
 }
@@ -937,8 +924,8 @@ TEST(KURLTest, ThreadSafesStaticKurlGetters) {
   KURL null_url = NullURL();
   EXPECT_TRUE(null_url.IsNull());
 
-  auto thread =
-      Thread::CreateThread(ThreadCreationParams(ThreadType::kTestThread));
+  auto thread = NonMainThread::CreateThread(
+      ThreadCreationParams(ThreadType::kTestThread));
   thread->GetTaskRunner()->PostTask(FROM_HERE, base::BindOnce([]() {
                                       // Reference each of the static KURLs
                                       // again, from the background thread,
@@ -1083,7 +1070,7 @@ TEST(KURLTest, InvalidKURLToGURL) {
 
   // This passes the original internal url to GURL, check that it arrives
   // in an internally self-consistent state.
-  GURL gurl = kurl;
+  GURL gurl = GURL(kurl);
   EXPECT_FALSE(gurl.is_valid());
   EXPECT_TRUE(gurl.SchemeIs(url::kHttpScheme));
 

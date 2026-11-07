@@ -90,10 +90,13 @@ void LayoutSVGContainer::UpdateLayout() {
 
   if (!IsSVGHiddenContainer()) {
     SetTransformAffectsVectorEffect(false);
+    ClearSVGDescendantMayHaveTransformRelatedAnimation();
     for (auto* child = FirstChild(); child; child = child->NextSibling()) {
-      if (child->TransformAffectsVectorEffect()) {
+      if (child->TransformAffectsVectorEffect())
         SetTransformAffectsVectorEffect(true);
-        break;
+      if (child->StyleRef().HasCurrentTransformRelatedAnimation() ||
+          child->SVGDescendantMayHaveTransformRelatedAnimation()) {
+        SetSVGDescendantMayHaveTransformRelatedAnimation();
       }
     }
   }
@@ -197,7 +200,7 @@ bool LayoutSVGContainer::UpdateCachedBoundaries() {
 bool LayoutSVGContainer::NodeAtPoint(HitTestResult& result,
                                      const HitTestLocation& hit_test_location,
                                      const PhysicalOffset& accumulated_offset,
-                                     HitTestAction hit_test_action) {
+                                     HitTestPhase phase) {
   NOT_DESTROYED();
   DCHECK_EQ(accumulated_offset, PhysicalOffset());
   TransformedHitTestLocation local_location(hit_test_location,
@@ -209,7 +212,7 @@ bool LayoutSVGContainer::NodeAtPoint(HitTestResult& result,
     return false;
 
   if (!ChildPaintBlockedByDisplayLock() &&
-      content_.HitTest(result, *local_location, hit_test_action))
+      content_.HitTest(result, *local_location, phase))
     return true;
 
   // pointer-events: bounding-box makes it possible for containers to be direct

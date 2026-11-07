@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,7 @@
 #include "base/trace_event/typed_macros.h"
 #include "net/test/embedded_test_server/http_response.h"
 
-namespace net {
-
-namespace test_server {
+namespace net::test_server {
 
 class ControllableHttpResponse::Interceptor : public HttpResponse {
  public:
@@ -28,7 +26,7 @@ class ControllableHttpResponse::Interceptor : public HttpResponse {
   Interceptor(const Interceptor&) = delete;
   Interceptor& operator=(const Interceptor&) = delete;
 
-  ~Interceptor() override {}
+  ~Interceptor() override = default;
 
  private:
   void SendResponse(base::WeakPtr<HttpResponseDelegate> delegate) override {
@@ -56,7 +54,7 @@ ControllableHttpResponse::ControllableHttpResponse(
       relative_url, relative_url_is_prefix));
 }
 
-ControllableHttpResponse::~ControllableHttpResponse() {}
+ControllableHttpResponse::~ControllableHttpResponse() = default;
 
 void ControllableHttpResponse::WaitForRequest() {
   TRACE_EVENT("test", "ControllableHttpResponse::WaitForRequest");
@@ -113,6 +111,10 @@ void ControllableHttpResponse::Done() {
   state_ = State::DONE;
 }
 
+bool ControllableHttpResponse::has_received_request() {
+  return loop_.AnyQuitCalled();
+}
+
 void ControllableHttpResponse::OnRequest(
     scoped_refptr<base::SingleThreadTaskRunner>
         embedded_test_server_task_runner,
@@ -151,6 +153,4 @@ std::unique_ptr<HttpResponse> ControllableHttpResponse::RequestHandler(
   return nullptr;
 }
 
-}  // namespace test_server
-
-}  // namespace net
+}  // namespace net::test_server

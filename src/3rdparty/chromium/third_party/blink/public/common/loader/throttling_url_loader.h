@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -159,18 +159,17 @@ class BLINK_COMMON_EXPORT ThrottlingURLLoader
 
   // network::mojom::URLLoaderClient implementation:
   void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override;
-  void OnReceiveResponse(network::mojom::URLResponseHeadPtr response_head,
-                         mojo::ScopedDataPipeConsumerHandle body) override;
+  void OnReceiveResponse(
+      network::mojom::URLResponseHeadPtr response_head,
+      mojo::ScopedDataPipeConsumerHandle body,
+      absl::optional<mojo_base::BigBuffer> cached_metadata) override;
   void OnReceiveRedirect(
       const net::RedirectInfo& redirect_info,
       network::mojom::URLResponseHeadPtr response_head) override;
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
                         OnUploadProgressCallback ack_callback) override;
-  void OnReceiveCachedMetadata(mojo_base::BigBuffer data) override;
   void OnTransferSizeUpdated(int32_t transfer_size_diff) override;
-  void OnStartLoadingResponseBody(
-      mojo::ScopedDataPipeConsumerHandle body) override;
   void OnComplete(const network::URLLoaderCompletionStatus& status) override;
 
   void OnClientConnectionError();
@@ -182,7 +181,8 @@ class BLINK_COMMON_EXPORT ThrottlingURLLoader
       const net::HttpRequestHeaders& modified_cors_exempt_request_headers);
   void UpdateRequestHeaders(network::ResourceRequest& resource_request);
   void UpdateDeferredResponseHead(
-      network::mojom::URLResponseHeadPtr new_response_head);
+      network::mojom::URLResponseHeadPtr new_response_head,
+      mojo::ScopedDataPipeConsumerHandle body);
   void PauseReadingBodyFromNet(URLLoaderThrottle* throttle);
   void ResumeReadingBodyFromNet(URLLoaderThrottle* throttle);
   void InterceptResponse(
@@ -218,8 +218,8 @@ class BLINK_COMMON_EXPORT ThrottlingURLLoader
     ThrottleEntry& operator=(ThrottleEntry&& other);
     ~ThrottleEntry();
 
-    std::unique_ptr<ForwardingThrottleDelegate> delegate;
     std::unique_ptr<URLLoaderThrottle> throttle;
+    std::unique_ptr<ForwardingThrottleDelegate> delegate;
   };
 
   std::vector<ThrottleEntry> throttles_;
@@ -268,6 +268,7 @@ class BLINK_COMMON_EXPORT ThrottlingURLLoader
   // Set if response is deferred.
   std::unique_ptr<ResponseInfo> response_info_;
   mojo::ScopedDataPipeConsumerHandle body_;
+  absl::optional<mojo_base::BigBuffer> cached_metadata_;
 
   struct RedirectInfo {
     RedirectInfo(const net::RedirectInfo& in_redirect_info,

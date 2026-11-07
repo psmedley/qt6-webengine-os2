@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@ namespace {
 // Returns true iff `task_order1` Comparator{} `task_order2`. Used to
 // implement other comparison operators.
 template <typename Comparator>
-static bool Compare(const base::sequence_manager::TaskOrder& task_order1,
+static bool CompareTO(const base::sequence_manager::TaskOrder& task_order1,
                     const base::sequence_manager::TaskOrder& task_order2) {
   Comparator cmp{};
 
@@ -60,19 +60,19 @@ TaskOrder& TaskOrder::operator=(const TaskOrder& other) = default;
 TaskOrder::~TaskOrder() = default;
 
 bool TaskOrder::operator>(const TaskOrder& other) const {
-  return Compare<std::greater<>>(*this, other);
+  return CompareTO<std::greater<>>(*this, other);
 }
 
 bool TaskOrder::operator<(const TaskOrder& other) const {
-  return Compare<std::less<>>(*this, other);
+  return CompareTO<std::less<>>(*this, other);
 }
 
 bool TaskOrder::operator<=(const TaskOrder& other) const {
-  return Compare<std::less_equal<>>(*this, other);
+  return CompareTO<std::less_equal<>>(*this, other);
 }
 
 bool TaskOrder::operator>=(const TaskOrder& other) const {
-  return Compare<std::greater_equal<>>(*this, other);
+  return CompareTO<std::greater_equal<>>(*this, other);
 }
 
 bool TaskOrder::operator==(const TaskOrder& other) const {

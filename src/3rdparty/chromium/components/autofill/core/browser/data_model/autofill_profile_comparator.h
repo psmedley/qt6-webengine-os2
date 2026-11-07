@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -82,7 +82,8 @@ class AutofillProfileComparator {
   // settings-visible value that is different.
   static bool ProfilesHaveDifferentSettingsVisibleValues(
       const AutofillProfile& p1,
-      const AutofillProfile& p2);
+      const AutofillProfile& p2,
+      const std::string& app_locale);
 
   // Returns true if |text| is empty or contains only skippable characters. A
   // character is skippable if it is punctuation or white space.

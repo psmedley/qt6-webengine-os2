@@ -20,8 +20,8 @@
 #include "src/gpu/ganesh/GrProxyProvider.h"
 #include "src/gpu/ganesh/GrResourceProvider.h"
 #include "src/gpu/ganesh/SkGr.h"
+#include "src/gpu/ganesh/SurfaceDrawContext.h"
 #include "src/gpu/ganesh/effects/GrTextureEffect.h"
-#include "src/gpu/ganesh/v1/SurfaceDrawContext_v1.h"
 #include "tools/gpu/ProxyUtils.h"
 
 static GrSurfaceProxyView create_view(GrDirectContext* dContext,
@@ -55,7 +55,8 @@ static GrSurfaceProxyView create_view(GrDirectContext* dContext,
                                              desc.fBudgeted,
                                              desc.fFit,
                                              desc.fProtected,
-                                             mipLevel);
+                                             mipLevel,
+                                             desc.fLabel);
                 },
                 format, GrRenderable::kNo, 1, GrProtected::kNo, *dContext->priv().caps(),
                 GrSurfaceProxy::UseAllocator::kYes);
@@ -206,9 +207,6 @@ protected:
     }
 
     DrawResult onDraw(GrRecordingContext* rContext, SkCanvas* canvas, SkString* errorMsg) override {
-        SkSamplingOptions sampling(SkFilterMode::kNearest, SkMipmapMode::kNone);
-        SkPaint p;
-
         auto sdc = SkCanvasPriv::TopDeviceSurfaceDrawContext(canvas);
         if (!sdc) {
             *errorMsg = kErrorMsg_DrawSkippedGpuOnly;

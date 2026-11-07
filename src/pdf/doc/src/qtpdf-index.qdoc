@@ -17,7 +17,7 @@
     and holds the search results. The QPdfBookmarkModel class holds the
     table of contents, if present. The QPdfLinkModel holds information
     about hyperlinks on a page. The \l QPdfView widget is a complete
-    PDF viewer, and the \l {PDF Viewer Example} shows how to use it.
+    PDF viewer, and the \l {PDF Viewer Widget Example} shows how to use it.
 
     For Qt Quick applications, three kinds of full-featured viewer
     components are provided. \l PdfMultiPageView should be your
@@ -64,4 +64,17 @@
         \li \l{Qt PDF C++ Classes}
         \li \l{Qt Quick PDF QML Types}
     \endlist
+
+    \section1 Articles and Guides
+    \list
+        \li {Qt PDF Platform Notes} {Platform Notes}
+    \endlist
+
+    \section1 Licenses and Attributions
+
+    Qt PDF is available under commercial licenses from \l{The Qt Company}.
+    In addition, it is available under the
+    \l{GNU Lesser General Public License, version 3}, or
+    the \l{GNU General Public License, version 2}.
+    See \l{Qt PDF Licensing} for further details about this module.
 */

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -205,16 +205,18 @@ TEST(MixedContentCheckerTest, DetectMixedFavicon) {
   // Test that a mixed content favicon is correctly blocked.
   EXPECT_TRUE(MixedContentChecker::ShouldBlockFetch(
       &dummy_page_holder->GetFrame(), mojom::blink::RequestContextType::FAVICON,
-      http_favicon_url, ResourceRequest::RedirectStatus::kNoRedirect,
-      http_favicon_url, absl::optional<String>(),
-      ReportingDisposition::kSuppressReporting, *notifier_remote));
+      network::mojom::blink::IPAddressSpace::kPublic, http_favicon_url,
+      ResourceRequest::RedirectStatus::kNoRedirect, http_favicon_url,
+      absl::optional<String>(), ReportingDisposition::kSuppressReporting,
+      *notifier_remote));
 
   // Test that a secure favicon is not blocked.
   EXPECT_FALSE(MixedContentChecker::ShouldBlockFetch(
       &dummy_page_holder->GetFrame(), mojom::blink::RequestContextType::FAVICON,
-      https_favicon_url, ResourceRequest::RedirectStatus::kNoRedirect,
-      https_favicon_url, absl::optional<String>(),
-      ReportingDisposition::kSuppressReporting, *notifier_remote));
+      network::mojom::blink::IPAddressSpace::kPublic, https_favicon_url,
+      ResourceRequest::RedirectStatus::kNoRedirect, https_favicon_url,
+      absl::optional<String>(), ReportingDisposition::kSuppressReporting,
+      *notifier_remote));
 }
 
 class TestFetchClientSettingsObject : public FetchClientSettingsObject {
@@ -237,9 +239,6 @@ class TestFetchClientSettingsObject : public FetchClientSettingsObject {
   AllowedByNosniff::MimeTypeCheck MimeTypeCheckForClassicWorkerScript()
       const override {
     return AllowedByNosniff::MimeTypeCheck::kStrict;
-  }
-  network::mojom::IPAddressSpace GetAddressSpace() const override {
-    return network::mojom::IPAddressSpace::kLocal;
   }
   const InsecureNavigationsSet& GetUpgradeInsecureNavigationsSet()
       const override {

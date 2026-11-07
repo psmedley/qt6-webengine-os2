@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,16 @@
 #include <memory>
 #include <utility>
 
-#include "base/allocator/allocator_shim_default_dispatch_to_partition_alloc.h"
-#include "base/allocator/buildflags.h"
 #include "base/allocator/partition_allocator/partition_alloc.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/compiler_specific.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/logging.h"
+#include "base/allocator/partition_allocator/partition_alloc_buildflags.h"
 #include "base/allocator/partition_allocator/partition_alloc_config.h"
-#include "base/logging.h"
+#include "base/allocator/partition_allocator/shim/allocator_shim_default_dispatch_to_partition_alloc.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && \
+#if BUILDFLAG(ENABLE_PARTITION_ALLOC_AS_MALLOC_SUPPORT) && \
     defined(PA_THREAD_CACHE_SUPPORTED)
 #include "base/allocator/partition_allocator/thread_cache.h"
 #endif
@@ -29,7 +30,7 @@ namespace partition_alloc {
 namespace {
 
 void HandleOOM(size_t unused_size) {
-  LOG(FATAL) << "Out of memory";
+  PA_LOG(FATAL) << "Out of memory";
 }
 
 }  // namespace
@@ -40,7 +41,7 @@ class MemoryReclaimerTest : public ::testing::Test {
 
  protected:
   void SetUp() override {
-    base::PartitionAllocGlobalInit(HandleOOM);
+    PartitionAllocGlobalInit(HandleOOM);
     MemoryReclaimer::Instance()->ResetForTesting();
     allocator_ = std::make_unique<PartitionAllocator>();
     allocator_->init({
@@ -49,6 +50,7 @@ class MemoryReclaimerTest : public ::testing::Test {
         PartitionOptions::Quarantine::kAllowed,
         PartitionOptions::Cookie::kAllowed,
         PartitionOptions::BackupRefPtr::kDisabled,
+        PartitionOptions::BackupRefPtrZapping::kDisabled,
         PartitionOptions::UseConfigurablePool::kNo,
     });
     allocator_->root()->UncapEmptySlotSpanMemoryForTesting();
@@ -57,7 +59,7 @@ class MemoryReclaimerTest : public ::testing::Test {
   void TearDown() override {
     allocator_ = nullptr;
     MemoryReclaimer::Instance()->ResetForTesting();
-    base::PartitionAllocGlobalUninitForTesting();
+    PartitionAllocGlobalUninitForTesting();
   }
 
   void Reclaim() { MemoryReclaimer::Instance()->ReclaimNormal(); }
@@ -102,20 +104,20 @@ TEST_F(MemoryReclaimerTest, Reclaim) {
   }
 }
 
-#if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && \
+#if BUILDFLAG(ENABLE_PARTITION_ALLOC_AS_MALLOC_SUPPORT) && \
     defined(PA_THREAD_CACHE_SUPPORTED)
 
 namespace {
 // malloc() / free() pairs can be removed by the compiler, this is enough (for
 // now) to prevent that.
-NOINLINE void FreeForTest(void* data) {
+PA_NOINLINE void FreeForTest(void* data) {
   free(data);
 }
 }  // namespace
 
 TEST_F(MemoryReclaimerTest, DoNotAlwaysPurgeThreadCache) {
   // Make sure the thread cache is enabled in the main partition.
-  base::internal::PartitionAllocMalloc::Allocator()
+  allocator_shim::internal::PartitionAllocMalloc::Allocator()
       ->EnableThreadCacheIfSupported();
 
   for (size_t i = 0; i < ThreadCache::kDefaultSizeThreshold; i++) {
@@ -143,7 +145,7 @@ TEST_F(MemoryReclaimerTest, DoNotAlwaysPurgeThreadCache) {
   EXPECT_LT(tcache->CachedMemory(), cached_size / 2);
 }
 
-#endif  // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && \
+#endif  // BUILDFLAG(ENABLE_PARTITION_ALLOC_AS_MALLOC_SUPPORT) && \
         // defined(PA_THREAD_CACHE_SUPPORTED)
 
 }  // namespace partition_alloc

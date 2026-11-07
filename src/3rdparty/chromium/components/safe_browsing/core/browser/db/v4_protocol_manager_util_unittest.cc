@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,10 @@
 #include "base/base64.h"
 #include "base/containers/contains.h"
 #include "base/logging.h"
+#include "base/strings/escape.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "components/safe_browsing/core/browser/db/v4_test_util.h"
-#include "net/base/escape.h"
 #include "net/http/http_request_headers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 

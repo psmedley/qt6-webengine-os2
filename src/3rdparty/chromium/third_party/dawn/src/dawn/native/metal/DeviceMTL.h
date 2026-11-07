@@ -15,6 +15,10 @@
 #ifndef SRC_DAWN_NATIVE_METAL_DEVICEMTL_H_
 #define SRC_DAWN_NATIVE_METAL_DEVICEMTL_H_
 
+#include <atomic>
+#include <memory>
+#include <mutex>
+
 #include "dawn/native/dawn_platform.h"
 
 #include "dawn/native/Commands.h"
@@ -26,127 +30,135 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
 
-#include <atomic>
-#include <memory>
-#include <mutex>
-
 namespace dawn::native::metal {
 
-    namespace {
-        struct KalmanInfo;
-    }
+struct KalmanInfo;
 
-    class Device final : public DeviceBase {
-      public:
-        static ResultOrError<Ref<Device>> Create(AdapterBase* adapter,
-                                                 NSPRef<id<MTLDevice>> mtlDevice,
-                                                 const DeviceDescriptor* descriptor);
-        ~Device() override;
+class Device final : public DeviceBase {
+  public:
+    static ResultOrError<Ref<Device>> Create(AdapterBase* adapter,
+                                             NSPRef<id<MTLDevice>> mtlDevice,
+                                             const DeviceDescriptor* descriptor,
+                                             const TripleStateTogglesSet& userProvidedToggles);
+    ~Device() override;
 
-        MaybeError Initialize(const DeviceDescriptor* descriptor);
+    MaybeError Initialize(const DeviceDescriptor* descriptor);
 
-        MaybeError TickImpl() override;
+    MaybeError TickImpl() override;
 
-        id<MTLDevice> GetMTLDevice();
-        id<MTLCommandQueue> GetMTLQueue();
+    id<MTLDevice> GetMTLDevice();
+    id<MTLCommandQueue> GetMTLQueue();
 
-        CommandRecordingContext* GetPendingCommandContext();
-        MaybeError SubmitPendingCommandBuffer();
+    CommandRecordingContext* GetPendingCommandContext();
+    MaybeError SubmitPendingCommandBuffer();
 
-        Ref<Texture> CreateTextureWrappingIOSurface(const ExternalImageDescriptor* descriptor,
-                                                    IOSurfaceRef ioSurface);
-        void WaitForCommandsToBeScheduled();
+    Ref<Texture> CreateTextureWrappingIOSurface(const ExternalImageDescriptor* descriptor,
+                                                IOSurfaceRef ioSurface);
+    void WaitForCommandsToBeScheduled();
 
-        ResultOrError<std::unique_ptr<StagingBufferBase>> CreateStagingBuffer(size_t size) override;
-        MaybeError CopyFromStagingToBuffer(StagingBufferBase* source,
-                                           uint64_t sourceOffset,
-                                           BufferBase* destination,
-                                           uint64_t destinationOffset,
-                                           uint64_t size) override;
-        MaybeError CopyFromStagingToTexture(const StagingBufferBase* source,
-                                            const TextureDataLayout& dataLayout,
-                                            TextureCopy* dst,
-                                            const Extent3D& copySizePixels) override;
+    ResultOrError<std::unique_ptr<StagingBufferBase>> CreateStagingBuffer(size_t size) override;
+    MaybeError CopyFromStagingToBuffer(StagingBufferBase* source,
+                                       uint64_t sourceOffset,
+                                       BufferBase* destination,
+                                       uint64_t destinationOffset,
+                                       uint64_t size) override;
+    MaybeError CopyFromStagingToTexture(const StagingBufferBase* source,
+                                        const TextureDataLayout& dataLayout,
+                                        TextureCopy* dst,
+                                        const Extent3D& copySizePixels) override;
 
-        uint32_t GetOptimalBytesPerRowAlignment() const override;
-        uint64_t GetOptimalBufferToTextureCopyOffsetAlignment() const override;
+    uint32_t GetOptimalBytesPerRowAlignment() const override;
+    uint64_t GetOptimalBufferToTextureCopyOffsetAlignment() const override;
 
-        float GetTimestampPeriodInNS() const override;
+    float GetTimestampPeriodInNS() const override;
 
-      private:
-        Device(AdapterBase* adapter,
-               NSPRef<id<MTLDevice>> mtlDevice,
-               const DeviceDescriptor* descriptor);
+    bool UseCounterSamplingAtCommandBoundary() const;
+    bool UseCounterSamplingAtStageBoundary() const;
 
-        ResultOrError<Ref<BindGroupBase>> CreateBindGroupImpl(
-            const BindGroupDescriptor* descriptor) override;
-        ResultOrError<Ref<BindGroupLayoutBase>> CreateBindGroupLayoutImpl(
-            const BindGroupLayoutDescriptor* descriptor,
-            PipelineCompatibilityToken pipelineCompatibilityToken) override;
-        ResultOrError<Ref<BufferBase>> CreateBufferImpl(
-            const BufferDescriptor* descriptor) override;
-        ResultOrError<Ref<CommandBufferBase>> CreateCommandBuffer(
-            CommandEncoder* encoder,
-            const CommandBufferDescriptor* descriptor) override;
-        ResultOrError<Ref<PipelineLayoutBase>> CreatePipelineLayoutImpl(
-            const PipelineLayoutDescriptor* descriptor) override;
-        ResultOrError<Ref<QuerySetBase>> CreateQuerySetImpl(
-            const QuerySetDescriptor* descriptor) override;
-        ResultOrError<Ref<SamplerBase>> CreateSamplerImpl(
-            const SamplerDescriptor* descriptor) override;
-        ResultOrError<Ref<ShaderModuleBase>> CreateShaderModuleImpl(
-            const ShaderModuleDescriptor* descriptor,
-            ShaderModuleParseResult* parseResult) override;
-        ResultOrError<Ref<SwapChainBase>> CreateSwapChainImpl(
-            const SwapChainDescriptor* descriptor) override;
-        ResultOrError<Ref<NewSwapChainBase>> CreateSwapChainImpl(
-            Surface* surface,
-            NewSwapChainBase* previousSwapChain,
-            const SwapChainDescriptor* descriptor) override;
-        ResultOrError<Ref<TextureBase>> CreateTextureImpl(
-            const TextureDescriptor* descriptor) override;
-        ResultOrError<Ref<TextureViewBase>> CreateTextureViewImpl(
-            TextureBase* texture,
-            const TextureViewDescriptor* descriptor) override;
-        Ref<ComputePipelineBase> CreateUninitializedComputePipelineImpl(
-            const ComputePipelineDescriptor* descriptor) override;
-        Ref<RenderPipelineBase> CreateUninitializedRenderPipelineImpl(
-            const RenderPipelineDescriptor* descriptor) override;
-        void InitializeComputePipelineAsyncImpl(Ref<ComputePipelineBase> computePipeline,
-                                                WGPUCreateComputePipelineAsyncCallback callback,
-                                                void* userdata) override;
-        void InitializeRenderPipelineAsyncImpl(Ref<RenderPipelineBase> renderPipeline,
-                                               WGPUCreateRenderPipelineAsyncCallback callback,
-                                               void* userdata) override;
+    // Get a MTLBuffer that can be used as a dummy in a no-op blit encoder based on filling this
+    // single-byte buffer
+    id<MTLBuffer> GetDummyBlitMtlBuffer();
 
-        void InitTogglesFromDriver();
-        void DestroyImpl() override;
-        MaybeError WaitForIdleForDestruction() override;
-        ResultOrError<ExecutionSerial> CheckAndUpdateCompletedSerials() override;
+  private:
+    Device(AdapterBase* adapter,
+           NSPRef<id<MTLDevice>> mtlDevice,
+           const DeviceDescriptor* descriptor,
+           const TripleStateTogglesSet& userProvidedToggles);
 
-        NSPRef<id<MTLDevice>> mMtlDevice;
-        NSPRef<id<MTLCommandQueue>> mCommandQueue;
+    ResultOrError<Ref<BindGroupBase>> CreateBindGroupImpl(
+        const BindGroupDescriptor* descriptor) override;
+    ResultOrError<Ref<BindGroupLayoutBase>> CreateBindGroupLayoutImpl(
+        const BindGroupLayoutDescriptor* descriptor,
+        PipelineCompatibilityToken pipelineCompatibilityToken) override;
+    ResultOrError<Ref<BufferBase>> CreateBufferImpl(const BufferDescriptor* descriptor) override;
+    ResultOrError<Ref<CommandBufferBase>> CreateCommandBuffer(
+        CommandEncoder* encoder,
+        const CommandBufferDescriptor* descriptor) override;
+    ResultOrError<Ref<PipelineLayoutBase>> CreatePipelineLayoutImpl(
+        const PipelineLayoutDescriptor* descriptor) override;
+    ResultOrError<Ref<QuerySetBase>> CreateQuerySetImpl(
+        const QuerySetDescriptor* descriptor) override;
+    ResultOrError<Ref<SamplerBase>> CreateSamplerImpl(const SamplerDescriptor* descriptor) override;
+    ResultOrError<Ref<ShaderModuleBase>> CreateShaderModuleImpl(
+        const ShaderModuleDescriptor* descriptor,
+        ShaderModuleParseResult* parseResult,
+        OwnedCompilationMessages* compilationMessages) override;
+    ResultOrError<Ref<SwapChainBase>> CreateSwapChainImpl(
+        const SwapChainDescriptor* descriptor) override;
+    ResultOrError<Ref<NewSwapChainBase>> CreateSwapChainImpl(
+        Surface* surface,
+        NewSwapChainBase* previousSwapChain,
+        const SwapChainDescriptor* descriptor) override;
+    ResultOrError<Ref<TextureBase>> CreateTextureImpl(const TextureDescriptor* descriptor) override;
+    ResultOrError<Ref<TextureViewBase>> CreateTextureViewImpl(
+        TextureBase* texture,
+        const TextureViewDescriptor* descriptor) override;
+    Ref<ComputePipelineBase> CreateUninitializedComputePipelineImpl(
+        const ComputePipelineDescriptor* descriptor) override;
+    Ref<RenderPipelineBase> CreateUninitializedRenderPipelineImpl(
+        const RenderPipelineDescriptor* descriptor) override;
+    void InitializeComputePipelineAsyncImpl(Ref<ComputePipelineBase> computePipeline,
+                                            WGPUCreateComputePipelineAsyncCallback callback,
+                                            void* userdata) override;
+    void InitializeRenderPipelineAsyncImpl(Ref<RenderPipelineBase> renderPipeline,
+                                           WGPUCreateRenderPipelineAsyncCallback callback,
+                                           void* userdata) override;
 
-        CommandRecordingContext mCommandContext;
+    void InitTogglesFromDriver();
+    void DestroyImpl() override;
+    MaybeError WaitForIdleForDestruction() override;
+    ResultOrError<ExecutionSerial> CheckAndUpdateCompletedSerials() override;
 
-        // The completed serial is updated in a Metal completion handler that can be fired on a
-        // different thread, so it needs to be atomic.
-        std::atomic<uint64_t> mCompletedSerial;
+    NSPRef<id<MTLDevice>> mMtlDevice;
+    NSPRef<id<MTLCommandQueue>> mCommandQueue;
 
-        // mLastSubmittedCommands will be accessed in a Metal schedule handler that can be fired on
-        // a different thread so we guard access to it with a mutex.
-        std::mutex mLastSubmittedCommandsMutex;
-        NSPRef<id<MTLCommandBuffer>> mLastSubmittedCommands;
+    CommandRecordingContext mCommandContext;
 
-        // The current estimation of timestamp period
-        float mTimestampPeriod = 1.0f;
-        // The base of CPU timestamp and GPU timestamp to measure the linear regression between GPU
-        // and CPU timestamps.
-        MTLTimestamp mCpuTimestamp API_AVAILABLE(macos(10.15), ios(14.0)) = 0;
-        MTLTimestamp mGpuTimestamp API_AVAILABLE(macos(10.15), ios(14.0)) = 0;
-        // The parameters for kalman filter
-        std::unique_ptr<KalmanInfo> mKalmanInfo;
-    };
+    // The completed serial is updated in a Metal completion handler that can be fired on a
+    // different thread, so it needs to be atomic.
+    std::atomic<uint64_t> mCompletedSerial;
+
+    // mLastSubmittedCommands will be accessed in a Metal schedule handler that can be fired on
+    // a different thread so we guard access to it with a mutex.
+    std::mutex mLastSubmittedCommandsMutex;
+    NSPRef<id<MTLCommandBuffer>> mLastSubmittedCommands;
+
+    // The current estimation of timestamp period
+    float mTimestampPeriod = 1.0f;
+    // The base of CPU timestamp and GPU timestamp to measure the linear regression between GPU
+    // and CPU timestamps.
+    MTLTimestamp mCpuTimestamp API_AVAILABLE(macos(10.15), ios(14.0)) = 0;
+    MTLTimestamp mGpuTimestamp API_AVAILABLE(macos(10.15), ios(14.0)) = 0;
+    // The parameters for kalman filter
+    std::unique_ptr<KalmanInfo> mKalmanInfo;
+
+    // Support counter sampling between blit commands, dispatches and draw calls
+    bool mCounterSamplingAtCommandBoundary;
+    // Support counter sampling at the begin and end of blit pass, compute pass and render pass's
+    // vertex/fragement stage
+    bool mCounterSamplingAtStageBoundary;
+    NSPRef<id<MTLBuffer>> mDummyBlitMtlBuffer;
+};
 
 }  // namespace dawn::native::metal
 

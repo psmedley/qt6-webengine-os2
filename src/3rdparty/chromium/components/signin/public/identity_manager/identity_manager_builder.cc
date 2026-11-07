@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -112,12 +112,15 @@ IdentityManager::InitParameters BuildIdentityManagerInitParameters(
       BuildProfileOAuth2TokenService(
           params->pref_service, account_tracker_service.get(),
           params->network_connection_tracker, params->account_consistency,
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
           params->account_manager_facade, params->is_regular_profile,
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(ENABLE_DICE_SUPPORT) || BUILDFLAG(IS_CHROMEOS_LACROS)
+          params->delete_signin_cookies_on_exit,
+#endif  // BUILDFLAG(ENABLE_DICE_SUPPORT) ||  BUILDFLAG(IS_CHROMEOS_LACROS)
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
-          params->delete_signin_cookies_on_exit, params->token_web_data,
-#endif
+          params->token_web_data,
+#endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 #if BUILDFLAG(IS_IOS)
           std::move(params->device_accounts_provider),
 #endif
@@ -127,7 +130,8 @@ IdentityManager::InitParameters BuildIdentityManagerInitParameters(
           params->signin_client);
 
   auto gaia_cookie_manager_service = std::make_unique<GaiaCookieManagerService>(
-      token_service.get(), params->signin_client);
+      account_tracker_service.get(), token_service.get(),
+      params->signin_client);
 
   std::unique_ptr<PrimaryAccountManager> primary_account_manager =
       BuildPrimaryAccountManager(params->signin_client,
@@ -165,10 +169,12 @@ IdentityManager::InitParameters BuildIdentityManagerInitParameters(
           token_service.get(), params->signin_client);
 #endif  // BULIDFLAG(IS_ANDROID)
 
+#if !defined(TOOLKIT_QT)
   init_params.account_fetcher_service = BuildAccountFetcherService(
       params->signin_client, token_service.get(), account_tracker_service.get(),
       std::move(params->image_decoder),
       std::move(account_capabilities_fetcher_factory));
+#endif
 
 #if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
   init_params.device_accounts_synchronizer =
@@ -185,7 +191,7 @@ IdentityManager::InitParameters BuildIdentityManagerInitParameters(
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
   init_params.signin_client = params->signin_client;
 #endif
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   init_params.account_manager_facade = params->account_manager_facade;
 #endif
 

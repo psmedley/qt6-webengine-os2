@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@ type ViewportChangedCallback =
     (pageX: number, pageY: number, pageWidth: number, viewportWidth: number,
      viewportHeight: number) => void;
 
-export interface PDFPlugin extends HTMLIFrameElement {
+export interface PdfPlugin extends HTMLIFrameElement {
   darkModeChanged(darkMode: boolean): void;
   hideToolbar(): void;
   loadPreviewPage(url: string, index: number): void;
@@ -19,21 +19,21 @@ export interface PDFPlugin extends HTMLIFrameElement {
   setViewportChangedCallback(callback: ViewportChangedCallback): void;
 }
 
-export type SerializedKeyEvent = {
-  keyCode: number,
-  code: string,
-  key: string,
-  shiftKey: boolean,
-  ctrlKey: boolean,
-  altKey: boolean,
-  metaKey: boolean,
-};
+export interface SerializedKeyEvent {
+  keyCode: number;
+  code: string;
+  key: string;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
+}
 
 /**
  * Turn a dictionary received from postMessage into a key event.
  * @param dict A dictionary representing the key event.
  */
-export function DeserializeKeyEvent(dict: SerializedKeyEvent): KeyboardEvent {
+export function deserializeKeyEvent(dict: SerializedKeyEvent): KeyboardEvent {
   const e = new KeyboardEvent('keydown', {
     bubbles: true,
     cancelable: true,
@@ -52,7 +52,7 @@ export function DeserializeKeyEvent(dict: SerializedKeyEvent): KeyboardEvent {
  * Turn a key event into a dictionary which can be sent over postMessage.
  * @return A dictionary representing the key event.
  */
-export function SerializeKeyEvent(event: KeyboardEvent): SerializedKeyEvent {
+export function serializeKeyEvent(event: KeyboardEvent): SerializedKeyEvent {
   return {
     keyCode: event.keyCode,
     code: event.code,
@@ -60,7 +60,7 @@ export function SerializeKeyEvent(event: KeyboardEvent): SerializedKeyEvent {
     shiftKey: event.shiftKey,
     ctrlKey: event.ctrlKey,
     altKey: event.altKey,
-    metaKey: event.metaKey
+    metaKey: event.metaKey,
   };
 }
 
@@ -76,7 +76,7 @@ export enum LoadState {
 
 // Provides a scripting interface to the PDF viewer so that it can be customized
 // by things like print preview.
-export class PDFScriptingAPI {
+export class PdfScriptingApi {
   private loadState_: LoadState = LoadState.LOADING;
   private pendingScriptingMessages_: Array<{type: string}> = [];
 
@@ -129,7 +129,7 @@ export class PDFScriptingAPI {
         }
         case 'sendKeyEvent':
           if (this.keyEventCallback_) {
-            this.keyEventCallback_(DeserializeKeyEvent(event.data.keyEvent));
+            this.keyEventCallback_(deserializeKeyEvent(event.data.keyEvent));
           }
           break;
       }
@@ -151,7 +151,7 @@ export class PDFScriptingAPI {
 
   /**
    * Sets the plugin element containing the PDF viewer. The element will usually
-   * be passed into the PDFScriptingAPI constructor but may also be set later.
+   * be passed into the PdfScriptingApi constructor but may also be set later.
    * @param plugin the plugin element containing the PDF viewer.
    */
   setPlugin(plugin: Window|null) {
@@ -209,7 +209,7 @@ export class PDFScriptingAPI {
       url: url,
       grayscale: grayscale,
       pageNumbers: pageNumbers,
-      modifiable: modifiable
+      modifiable: modifiable,
     });
   }
 
@@ -267,7 +267,7 @@ export class PDFScriptingAPI {
    */
   sendKeyEvent(keyEvent: KeyboardEvent) {
     this.sendMessage_(
-        {type: 'sendKeyEvent', keyEvent: SerializeKeyEvent(keyEvent)});
+        {type: 'sendKeyEvent', keyEvent: serializeKeyEvent(keyEvent)});
   }
 
   /**
@@ -288,10 +288,10 @@ export class PDFScriptingAPI {
  * @param baseUrl the base URL of the PDF viewer
  * @return The iframe element containing the PDF viewer.
  */
-export function PDFCreateOutOfProcessPlugin(
-    src: string, baseUrl: string): PDFPlugin {
-  const client = new PDFScriptingAPI(window, null);
-  const iframe = window.document.createElement('iframe') as PDFPlugin;
+export function pdfCreateOutOfProcessPlugin(
+    src: string, baseUrl: string): PdfPlugin {
+  const client = new PdfScriptingApi(window, null);
+  const iframe = window.document.createElement('iframe') as PdfPlugin;
   iframe.setAttribute('src', baseUrl + '/index.html?' + src);
 
   iframe.onload = function() {

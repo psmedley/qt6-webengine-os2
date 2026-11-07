@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -295,7 +295,7 @@ TEST_F(TCPClientSocketTest, DnsAliasesPersistForReuse) {
 
 class TestSocketPerformanceWatcher : public SocketPerformanceWatcher {
  public:
-  TestSocketPerformanceWatcher() : connection_changed_count_(0u) {}
+  TestSocketPerformanceWatcher() = default;
 
   TestSocketPerformanceWatcher(const TestSocketPerformanceWatcher&) = delete;
   TestSocketPerformanceWatcher& operator=(const TestSocketPerformanceWatcher&) =
@@ -312,7 +312,7 @@ class TestSocketPerformanceWatcher : public SocketPerformanceWatcher {
   size_t connection_changed_count() const { return connection_changed_count_; }
 
  private:
-  size_t connection_changed_count_;
+  size_t connection_changed_count_ = 0u;
 };
 
 // TestSocketPerformanceWatcher requires kernel support for tcp_info struct, and
@@ -330,8 +330,7 @@ TEST_F(TCPClientSocketTest, MAYBE_TestSocketPerformanceWatcher) {
   for (size_t i = 0; i < kNumIPs; ++i)
     ip_list.push_back(IPAddress(72, 14, 213, i));
 
-  std::unique_ptr<TestSocketPerformanceWatcher> watcher(
-      new TestSocketPerformanceWatcher());
+  auto watcher = std::make_unique<TestSocketPerformanceWatcher>();
   TestSocketPerformanceWatcher* watcher_ptr = watcher.get();
 
   std::vector<std::string> aliases({"example.com"});

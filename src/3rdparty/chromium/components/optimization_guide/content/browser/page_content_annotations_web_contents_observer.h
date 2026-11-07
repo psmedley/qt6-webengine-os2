@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,20 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "components/optimization_guide/content/browser/page_text_dump_result.h"
-#include "components/optimization_guide/content/browser/page_text_observer.h"
+#include "components/optimization_guide/content/browser/salient_image_retriever.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
+class OptimizationGuideLogger;
 class TemplateURLService;
 
 namespace content {
 class NavigationHandle;
 }  // namespace content
+
+namespace prerender {
+class NoStatePrefetchManager;
+}  // namespace prerender
 
 namespace optimization_guide {
 
@@ -30,8 +35,7 @@ class PageContentAnnotationsService;
 class PageContentAnnotationsWebContentsObserver
     : public content::WebContentsObserver,
       public content::WebContentsUserData<
-          PageContentAnnotationsWebContentsObserver>,
-      public PageTextObserver::Consumer {
+          PageContentAnnotationsWebContentsObserver> {
  public:
   ~PageContentAnnotationsWebContentsObserver() override;
 
@@ -45,7 +49,8 @@ class PageContentAnnotationsWebContentsObserver
       content::WebContents* web_contents,
       PageContentAnnotationsService* page_content_annotations_service,
       TemplateURLService* template_url_service,
-      OptimizationGuideDecider* optimization_guide_decider);
+      OptimizationGuideDecider* optimization_guide_decider,
+      prerender::NoStatePrefetchManager* no_state_prefetch_manager);
 
  private:
   friend class content::WebContentsUserData<
@@ -55,32 +60,34 @@ class PageContentAnnotationsWebContentsObserver
   // content::WebContentsObserver:
   void DidFinishNavigation(content::NavigationHandle* handle) override;
   void TitleWasSet(content::NavigationEntry* navigation_entry) override;
+  void DocumentOnLoadCompletedInPrimaryMainFrame() override;
 
-  // PageTextObserver::Consumer:
-  std::unique_ptr<PageTextObserver::ConsumerTextDumpRequest>
-  MaybeRequestFrameTextDump(
-      content::NavigationHandle* navigation_handle) override;
-
-  // Callback invoked when a text dump has been received for the |visit|.
-  void OnTextDumpReceived(HistoryVisit visit, const PageTextDumpResult& result);
-
-  // Callback invoked when the page entities have been received from
+  // Callback invoked when the page metadata has been received from
   // |optimization_guide_decider_| for |visit|.
-  void OnRemotePageEntitiesReceived(const HistoryVisit& visit,
+  void OnRemotePageMetadataReceived(const HistoryVisit& visit,
                                     OptimizationGuideDecision decision,
                                     const OptimizationMetadata& metadata);
+
+  void DidStopLoading() override;
 
   // Not owned. Guaranteed to outlive |this|.
   raw_ptr<PageContentAnnotationsService> page_content_annotations_service_;
 
+  SalientImageRetriever salient_image_retriever_;
+
+  // The logger that plumbs the debug logs to the optimization guide
+  // internals page. Not owned. Guaranteed to outlive |this|, since the logger
+  // and |this| are owned by the optimization guide keyed service.
+  raw_ptr<OptimizationGuideLogger> optimization_guide_logger_;
+
   // Not owned. Guaranteed to outlive |this|.
-  raw_ptr<const TemplateURLService> template_url_service_;
+  raw_ptr<TemplateURLService> template_url_service_;
 
   // Not owned. Guaranteed to outlive |this|.
   raw_ptr<OptimizationGuideDecider> optimization_guide_decider_;
 
-  // The max size to request for text dump.
-  const uint64_t max_size_for_text_dump_;
+  // Not owned. Guaranteed to outlive |this|.
+  raw_ptr<prerender::NoStatePrefetchManager> no_state_prefetch_manager_;
 
   base::WeakPtrFactory<PageContentAnnotationsWebContentsObserver>
       weak_ptr_factory_{this};

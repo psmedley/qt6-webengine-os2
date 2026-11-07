@@ -1,8 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/platform/graphics/paint/raster_invalidation_tracking.h"
+
+#include <algorithm>
 
 #include "base/logging.h"
 #include "cc/layers/layer.h"
@@ -80,7 +82,7 @@ static bool CompareRasterInvalidationInfo(const RasterInvalidationInfo& a,
 }
 
 void RasterInvalidationTracking::AsJSON(JSONObject* json, bool detailed) const {
-  if (!invalidations_.IsEmpty()) {
+  if (!invalidations_.empty()) {
     // Sort to make the output more readable and easier to see the differences
     // by a human.
     auto sorted = invalidations_;
@@ -106,18 +108,19 @@ void RasterInvalidationTracking::AsJSON(JSONObject* json, bool detailed) const {
     json->SetArray("invalidations", std::move(invalidations_json));
   }
 
-  if (!under_invalidations_.IsEmpty()) {
+  if (!under_invalidations_.empty()) {
     auto under_invalidations_json = std::make_unique<JSONArray>();
     for (auto& under_invalidation : under_invalidations_) {
       auto under_invalidation_json = std::make_unique<JSONObject>();
       under_invalidation_json->SetDouble("x", under_invalidation.x);
       under_invalidation_json->SetDouble("y", under_invalidation.y);
+      // TODO(https://crbug.com/1351544): This should use SkColor4f.
       under_invalidation_json->SetString(
-          "oldPixel",
-          Color(under_invalidation.old_pixel).NameForLayoutTreeAsText());
+          "oldPixel", Color::FromSkColor(under_invalidation.old_pixel)
+                          .NameForLayoutTreeAsText());
       under_invalidation_json->SetString(
-          "newPixel",
-          Color(under_invalidation.new_pixel).NameForLayoutTreeAsText());
+          "newPixel", Color::FromSkColor(under_invalidation.new_pixel)
+                          .NameForLayoutTreeAsText());
       under_invalidations_json->PushObject(std::move(under_invalidation_json));
     }
     json->SetArray("underInvalidations", std::move(under_invalidations_json));
@@ -179,7 +182,7 @@ void RasterInvalidationTracking::CheckUnderInvalidations(
     return;
   {
     SkiaPaintCanvas canvas(old_bitmap);
-    canvas.clear(SK_ColorTRANSPARENT);
+    canvas.clear(SkColors::kTransparent);
     canvas.translate(-rect.x(), -rect.y());
     canvas.drawPicture(std::move(old_record));
   }
@@ -190,7 +193,7 @@ void RasterInvalidationTracking::CheckUnderInvalidations(
     return;
   {
     SkiaPaintCanvas canvas(new_bitmap);
-    canvas.clear(SK_ColorTRANSPARENT);
+    canvas.clear(SkColors::kTransparent);
     canvas.translate(-rect.x(), -rect.y());
     canvas.drawPicture(std::move(new_record));
   }

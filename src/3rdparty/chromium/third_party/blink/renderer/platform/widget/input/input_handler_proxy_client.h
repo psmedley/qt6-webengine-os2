@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,6 +48,8 @@ class InputHandlerProxyClient {
       cc::TouchAction touch_action,
       uint32_t unique_touch_event_id,
       InputHandlerProxy::EventDisposition event_disposition) = 0;
+
+  virtual bool AllowsScrollResampling() = 0;
 
  protected:
   virtual ~InputHandlerProxyClient() {}

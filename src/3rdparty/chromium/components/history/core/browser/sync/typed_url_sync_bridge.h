@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,10 +56,8 @@ class TypedURLSyncBridge : public syncer::ModelTypeSyncBridge,
 
   // HistoryBackendObserver:
   void OnURLVisited(HistoryBackend* history_backend,
-                    ui::PageTransition transition,
                     const URLRow& row,
-                    const RedirectList& redirects,
-                    base::Time visit_time) override;
+                    const VisitRow& visit_row) override;
   void OnURLsModified(HistoryBackend* history_backend,
                       const std::vector<URLRow>& changed_urls,
                       bool is_from_expiration) override;
@@ -68,6 +66,8 @@ class TypedURLSyncBridge : public syncer::ModelTypeSyncBridge,
                      bool expired,
                      const std::vector<URLRow>& deleted_rows,
                      const std::set<GURL>& favicon_urls) override;
+  void OnVisitUpdated(const VisitRow& visit) override;
+  void OnVisitDeleted(const VisitRow& visit) override;
 
   // Must be called after creation and before any operations.
   void Init();
@@ -249,7 +249,7 @@ class TypedURLSyncBridge : public syncer::ModelTypeSyncBridge,
 
   // Since HistoryBackend use SequencedTaskRunner, so should use SequenceChecker
   // here.
-  base::SequenceChecker sequence_checker_;
+  SEQUENCE_CHECKER(sequence_checker_);
 
   // Tracks observed history backend, for receiving updates from history
   // backend.

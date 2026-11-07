@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
@@ -59,7 +60,6 @@
 #include "ui/views/controls/views_text_services_context_menu.h"
 #include "ui/views/drag_utils.h"
 #include "ui/views/layout/layout_provider.h"
-#include "ui/views/native_cursor.h"
 #include "ui/views/painter.h"
 #include "ui/views/style/platform_style.h"
 #include "ui/views/views_delegate.h"
@@ -71,11 +71,9 @@
 #include "base/win/win_util.h"
 #endif
 
-// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
-// of lacros-chrome is complete.
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_LINUX)
 #include "ui/base/ime/linux/text_edit_command_auralinux.h"
-#include "ui/base/ime/linux/text_edit_key_bindings_delegate_auralinux.h"
+#include "ui/linux/linux_ui.h"
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -271,15 +269,6 @@ Textfield::~Textfield() {
 void Textfield::SetAssociatedLabel(View* labelling_view) {
   DCHECK(labelling_view);
   GetViewAccessibility().OverrideLabelledBy(labelling_view);
-  ui::AXNodeData node_data;
-  labelling_view->GetAccessibleNodeData(&node_data);
-  // Labelled-by relations are not common practice in native UI, so we also
-  // set the accessible name for ATs which don't support that.
-  // TODO(aleventhal) automatically handle setting the name from the related
-  // label in ViewAccessibility and have it update the name if the text of the
-  // associated label changes.
-  SetAccessibleName(
-      node_data.GetString16Attribute(ax::mojom::StringAttribute::kName));
 }
 
 void Textfield::SetController(TextfieldController* controller) {
@@ -640,13 +629,13 @@ void Textfield::SetBorder(std::unique_ptr<Border> b) {
   View::SetBorder(std::move(b));
 }
 
-gfx::NativeCursor Textfield::GetCursor(const ui::MouseEvent& event) {
+ui::Cursor Textfield::GetCursor(const ui::MouseEvent& event) {
   bool platform_arrow = PlatformStyle::kTextfieldUsesDragCursorWhenDraggable;
   bool in_selection = GetRenderText()->IsPointInSelection(event.location());
   bool drag_event = event.type() == ui::ET_MOUSE_DRAGGED;
   bool text_cursor =
       !initiating_drag_ && (drag_event || !in_selection || !platform_arrow);
-  return text_cursor ? GetNativeIBeamCursor() : gfx::kNullCursor;
+  return text_cursor ? ui::mojom::CursorType::kIBeam : ui::Cursor();
 }
 
 bool Textfield::OnMousePressed(const ui::MouseEvent& event) {
@@ -718,13 +707,11 @@ bool Textfield::OnKeyPressed(const ui::KeyEvent& event) {
   if (!textfield)
     return handled;
 
-// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
-// of lacros-chrome is complete.
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
-  ui::TextEditKeyBindingsDelegateAuraLinux* delegate =
-      ui::GetTextEditKeyBindingsDelegate();
+#if BUILDFLAG(IS_LINUX)
+  auto* linux_ui = ui::LinuxUi::instance();
   std::vector<ui::TextEditCommandAuraLinux> commands;
-  if (!handled && delegate && delegate->MatchEvent(event, &commands)) {
+  if (!handled && linux_ui &&
+      linux_ui->GetTextEditCommandsForEvent(event, &commands)) {
     for (const auto& command : commands) {
       if (IsTextEditCommandEnabled(command.command())) {
         ExecuteTextEditCommand(command.command());
@@ -864,18 +851,15 @@ void Textfield::AboutToRequestFocusFromTabTraversal(bool reverse) {
 }
 
 bool Textfield::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
-// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
-// of lacros-chrome is complete.
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_LINUX)
   // Skip any accelerator handling that conflicts with custom keybindings.
-  ui::TextEditKeyBindingsDelegateAuraLinux* delegate =
-      ui::GetTextEditKeyBindingsDelegate();
+  auto* linux_ui = ui::LinuxUi::instance();
   std::vector<ui::TextEditCommandAuraLinux> commands;
-  if (delegate && delegate->MatchEvent(event, &commands)) {
+  if (linux_ui && linux_ui->GetTextEditCommandsForEvent(event, &commands)) {
     const auto is_enabled = [this](const auto& command) {
       return IsTextEditCommandEnabled(command.command());
     };
-    if (std::any_of(commands.cbegin(), commands.cend(), is_enabled))
+    if (base::ranges::any_of(commands, is_enabled))
       return true;
   }
 #endif
@@ -965,7 +949,7 @@ void Textfield::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->role = ax::mojom::Role::kTextField;
 
   node_data->SetName(accessible_name_);
-  node_data->SetNameFrom(ax::mojom::NameFrom::kContents);
+  node_data->SetNameFrom(ax::mojom::NameFrom::kAttribute);
 
   // Editable state indicates support of editable interface, and is always set
   // for a textfield, even if disabled or readonly.
@@ -988,14 +972,16 @@ void Textfield::GetAccessibleNodeData(ui::AXNodeData* node_data) {
 
   const gfx::Range range = GetSelectedRange();
   node_data->AddIntAttribute(ax::mojom::IntAttribute::kTextSelStart,
-                             range.start());
-  node_data->AddIntAttribute(ax::mojom::IntAttribute::kTextSelEnd, range.end());
+                             base::checked_cast<int32_t>(range.start()));
+  node_data->AddIntAttribute(ax::mojom::IntAttribute::kTextSelEnd,
+                             base::checked_cast<int32_t>(range.end()));
 }
 
 bool Textfield::HandleAccessibleAction(const ui::AXActionData& action_data) {
   if (action_data.action == ax::mojom::Action::kSetSelection) {
     DCHECK_EQ(action_data.anchor_node_id, action_data.focus_node_id);
-    const gfx::Range range(action_data.anchor_offset, action_data.focus_offset);
+    const gfx::Range range(static_cast<size_t>(action_data.anchor_offset),
+                           static_cast<size_t>(action_data.focus_offset));
     return SetEditableSelectionRange(range);
   }
 
@@ -1359,7 +1345,7 @@ void Textfield::SetCompositionText(const ui::CompositionText& composition) {
   OnAfterUserAction();
 }
 
-uint32_t Textfield::ConfirmCompositionText(bool keep_selection) {
+size_t Textfield::ConfirmCompositionText(bool keep_selection) {
   // TODO(b/134473433) Modify this function so that when keep_selection is
   // true, the selection is not changed when text committed
   if (keep_selection) {
@@ -1369,7 +1355,7 @@ uint32_t Textfield::ConfirmCompositionText(bool keep_selection) {
     return 0;
   OnBeforeUserAction();
   skip_input_method_cancel_composition_ = true;
-  const uint32_t confirmed_text_length = model_->ConfirmCompositionText();
+  const size_t confirmed_text_length = model_->ConfirmCompositionText();
   skip_input_method_cancel_composition_ = false;
   UpdateAfterChange(TextChangeType::kUserTriggered, true);
   OnAfterUserAction();
@@ -1427,7 +1413,7 @@ void Textfield::InsertChar(const ui::KeyEvent& event) {
   DoInsertChar(ch);
 
   if (text_input_type_ == ui::TEXT_INPUT_TYPE_PASSWORD) {
-    password_char_reveal_index_ = -1;
+    password_char_reveal_index_ = absl::nullopt;
     base::TimeDelta duration = GetPasswordRevealDuration(event);
     if (!duration.is_zero()) {
       const size_t change_offset = model_->GetCursorPosition();
@@ -1474,7 +1460,7 @@ gfx::Rect Textfield::GetSelectionBoundingBox() const {
   return gfx::Rect();
 }
 
-bool Textfield::GetCompositionCharacterBounds(uint32_t index,
+bool Textfield::GetCompositionCharacterBounds(size_t index,
                                               gfx::Rect* rect) const {
   DCHECK(rect);
   if (!HasCompositionText())
@@ -1594,7 +1580,14 @@ bool Textfield::ChangeTextDirectionAndLayoutAlignment(
 
 void Textfield::ExtendSelectionAndDelete(size_t before, size_t after) {
   gfx::Range range = GetRenderText()->selection();
-  DCHECK_GE(range.start(), before);
+  // Discard out-of-bound operations.
+  // TODO(crbug.com/1344096): this is a temporary fix to prevent the
+  // checked_cast failure in gfx::Range. There does not seem to be any
+  // observable bad behaviors before checked_cast was added. However, range
+  // clipping or dropping should be the last resort because a checkfail
+  // indicates that we run into bad states somewhere earlier on the stack.
+  if (range.start() < before)
+    return;
 
   range.set_start(range.start() - before);
   range.set_end(range.end() + after);
@@ -1744,7 +1737,7 @@ bool Textfield::SetCompositionFromExistingText(
 }
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 gfx::Range Textfield::GetAutocorrectRange() const {
   return model_->autocorrect_range();
 }
@@ -2061,7 +2054,7 @@ Textfield::EditCommandResult Textfield::DoExecuteTextEditCommand(
   return {changed, cursor_changed};
 }
 
-void Textfield::OffsetDoubleClickWord(int offset) {
+void Textfield::OffsetDoubleClickWord(size_t offset) {
   selection_controller_.OffsetDoubleClickWord(offset);
 }
 
@@ -2563,17 +2556,18 @@ bool Textfield::ImeEditingAllowed() const {
   return (t != ui::TEXT_INPUT_TYPE_NONE && t != ui::TEXT_INPUT_TYPE_PASSWORD);
 }
 
-void Textfield::RevealPasswordChar(int index, base::TimeDelta duration) {
+void Textfield::RevealPasswordChar(absl::optional<size_t> index,
+                                   base::TimeDelta duration) {
   GetRenderText()->SetObscuredRevealIndex(index);
   SchedulePaint();
   password_char_reveal_index_ = index;
   UpdateCursorViewPosition();
 
-  if (index != -1) {
-    password_reveal_timer_.Start(
-        FROM_HERE, duration,
-        base::BindOnce(&Textfield::RevealPasswordChar,
-                       weak_ptr_factory_.GetWeakPtr(), -1, duration));
+  if (index.has_value()) {
+    password_reveal_timer_.Start(FROM_HERE, duration,
+                                 base::BindOnce(&Textfield::RevealPasswordChar,
+                                                weak_ptr_factory_.GetWeakPtr(),
+                                                absl::nullopt, duration));
   }
 }
 

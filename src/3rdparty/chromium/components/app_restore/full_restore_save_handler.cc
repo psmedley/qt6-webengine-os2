@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -326,18 +326,6 @@ void FullRestoreSaveHandler::SaveWindowInfo(
   ModifyWindowInfo(window_id, window_info);
 }
 
-void FullRestoreSaveHandler::OnLacrosBrowserWindowAdded(
-    aura::Window* const window,
-    uint32_t browser_session_id,
-    uint32_t restored_browser_session_id,
-    bool is_browser_app) {
-  if (lacros_save_handler_) {
-    lacros_save_handler_->OnBrowserWindowAdded(window, browser_session_id,
-                                               restored_browser_session_id,
-                                               is_browser_app);
-  }
-}
-
 void FullRestoreSaveHandler::OnLacrosChromeAppWindowAdded(
     const std::string& app_id,
     const std::string& window_id) {
@@ -536,6 +524,12 @@ std::string FullRestoreSaveHandler::GetAppId(aura::Window* window) {
     return iter != window_id_to_app_restore_info_.end() ? iter->second.second
                                                         : std::string();
   }
+}
+
+int FullRestoreSaveHandler::GetLacrosChromeAppWindowId(
+    aura::Window* window) const {
+  DCHECK(lacros_save_handler_);
+  return lacros_save_handler_->GetLacrosChromeAppWindowId(window);
 }
 
 std::unique_ptr<app_restore::AppLaunchInfo>

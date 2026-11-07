@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -124,7 +124,7 @@ class NET_EXPORT DirectoryLister  {
     // Set to 1 on cancellation. Used both to abort listing files early on the
     // worker pool thread for performance reasons and to ensure |lister_| isn't
     // called after cancellation on the origin thread.
-    base::subtle::Atomic32 cancelled_;
+    base::subtle::Atomic32 cancelled_ = 0;
   };
 
   // Call into the corresponding DirectoryListerDelegate. Must not be called

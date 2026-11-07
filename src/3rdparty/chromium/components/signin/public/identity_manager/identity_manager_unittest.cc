@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,7 +65,7 @@
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "ash/components/account_manager/account_manager_factory.h"
+#include "chromeos/ash/components/account_manager/account_manager_factory.h"
 #include "components/account_manager_core/account.h"
 #include "components/account_manager_core/account_manager_facade_impl.h"
 #include "components/account_manager_core/chromeos/account_manager.h"
@@ -391,8 +391,9 @@ class IdentityManagerTest : public testing::Test {
 #endif
 
     auto gaia_cookie_manager_service =
-        std::make_unique<GaiaCookieManagerService>(token_service.get(),
-                                                   &signin_client_);
+        std::make_unique<GaiaCookieManagerService>(
+            account_tracker_service.get(), token_service.get(),
+            &signin_client_);
 
     auto account_fetcher_service = std::make_unique<AccountFetcherService>();
     account_fetcher_service->Initialize(
@@ -1725,7 +1726,7 @@ TEST_F(IdentityManagerTest, IdentityManagerGetsTokensLoadedEvent) {
   // we fake the credentials loaded state and force another load in
   // order to be able to capture the TokensLoaded event.
   token_service()->set_all_credentials_loaded_for_testing(false);
-  token_service()->LoadCredentials(CoreAccountId());
+  token_service()->LoadCredentials(CoreAccountId(), /*is_syncing=*/false);
   run_loop.Run();
 }
 
@@ -2118,8 +2119,8 @@ TEST_F(IdentityManagerTest, CallbackSentOnAccountsCookieDeletedByUserAction) {
       run_loop.QuitClosure());
   auto cookie = net::CanonicalCookie::CreateUnsafeCookieForTesting(
       "SAPISID", std::string(), ".google.com", "/", base::Time(), base::Time(),
-      base::Time(), /*secure=*/true, false, net::CookieSameSite::NO_RESTRICTION,
-      net::COOKIE_PRIORITY_DEFAULT, false);
+      base::Time(), base::Time(), /*secure=*/true, false,
+      net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_DEFAULT, false);
   SimulateCookieDeletedByUser(identity_manager()->GetGaiaCookieManagerService(),
                               *cookie);
   run_loop.Run();
@@ -2150,8 +2151,8 @@ TEST_F(IdentityManagerTest, OnNetworkInitialized) {
   // through any mojo pipe.
   auto cookie = net::CanonicalCookie::CreateUnsafeCookieForTesting(
       "SAPISID", std::string(), ".google.com", "/", base::Time(), base::Time(),
-      base::Time(), /*secure=*/true, false, net::CookieSameSite::NO_RESTRICTION,
-      net::COOKIE_PRIORITY_DEFAULT, false);
+      base::Time(), base::Time(), /*secure=*/true, false,
+      net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_DEFAULT, false);
   test_cookie_manager_ptr->DispatchCookieChange(net::CookieChangeInfo(
       *cookie, net::CookieAccessResult(), net::CookieChangeCause::EXPLICIT));
   run_loop.Run();
@@ -2352,7 +2353,7 @@ TEST_F(IdentityManagerTest, AreRefreshTokensLoaded) {
   // order to test AreRefreshTokensLoaded.
   token_service()->set_all_credentials_loaded_for_testing(false);
   EXPECT_FALSE(identity_manager()->AreRefreshTokensLoaded());
-  token_service()->LoadCredentials(CoreAccountId());
+  token_service()->LoadCredentials(CoreAccountId(), /*is_syncing=*/false);
   run_loop.Run();
   EXPECT_TRUE(identity_manager()->AreRefreshTokensLoaded());
 }
@@ -2369,14 +2370,12 @@ TEST_F(IdentityManagerTest, SetPrimaryAccount) {
   RecreateIdentityManager(AccountConsistencyMethod::kDisabled,
                           PrimaryAccountManagerSetup::kNoAuthenticatedAccount);
 
-  // We should have a Primary Account set up automatically.
-  ConsentLevel consent_level =
-      base::FeatureList::IsEnabled(switches::kLacrosNonSyncingProfiles)
-          ? ConsentLevel::kSignin
-          : ConsentLevel::kSync;
-  ASSERT_TRUE(identity_manager()->HasPrimaryAccount(consent_level));
-  EXPECT_EQ(kTestGaiaId,
-            identity_manager()->GetPrimaryAccountInfo(consent_level).gaia);
+  // We should have a non-syncing Primary Account set up automatically.
+  ASSERT_TRUE(identity_manager()->HasPrimaryAccount(ConsentLevel::kSignin));
+  ASSERT_FALSE(identity_manager()->HasPrimaryAccount(ConsentLevel::kSync));
+  EXPECT_EQ(
+      kTestGaiaId,
+      identity_manager()->GetPrimaryAccountInfo(ConsentLevel::kSignin).gaia);
 }
 
 // TODO(https://crbug.com/1223364): Remove this when all the users are migrated.
@@ -2394,21 +2393,20 @@ TEST_F(IdentityManagerTest, SetPrimaryAccountClearsExistingPrimaryAccount) {
   // provided by the SigninClient.
   RecreateIdentityManager(AccountConsistencyMethod::kDisabled,
                           PrimaryAccountManagerSetup::kWithAuthenticatedAccout);
-
-  ConsentLevel consent_level =
-      base::FeatureList::IsEnabled(switches::kLacrosNonSyncingProfiles)
-          ? ConsentLevel::kSignin
-          : ConsentLevel::kSync;
-  ASSERT_TRUE(identity_manager()->HasPrimaryAccount(consent_level));
-  EXPECT_EQ(kTestGaiaId2,
-            identity_manager()->GetPrimaryAccountInfo(consent_level).gaia);
+  ASSERT_TRUE(identity_manager()->HasPrimaryAccount(ConsentLevel::kSignin));
+  ASSERT_FALSE(identity_manager()->HasPrimaryAccount(ConsentLevel::kSync));
+  EXPECT_EQ(
+      kTestGaiaId2,
+      identity_manager()->GetPrimaryAccountInfo(ConsentLevel::kSignin).gaia);
 }
 #endif
 
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 TEST_F(IdentityManagerTest, AccountIdMigration_DoneOnInitialization) {
   EXPECT_EQ(IdentityManager::AccountIdMigrationState::MIGRATION_DONE,
             identity_manager()->GetAccountIdMigrationState());
 }
+#endif
 
 // Checks that IdentityManager::Observer gets OnAccountUpdated when account info
 // is updated.
@@ -2455,6 +2453,7 @@ TEST_F(IdentityManagerTest, TestOnAccountRemovedWithInfoCallback) {
 TEST_F(IdentityManagerTest, TestPickAccountIdForAccount) {
   const CoreAccountId account_id =
       identity_manager()->PickAccountIdForAccount(kTestGaiaId, kTestEmail);
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   const bool account_id_migration_done =
       identity_manager()->GetAccountIdMigrationState() ==
       IdentityManager::AccountIdMigrationState::MIGRATION_DONE;
@@ -2463,6 +2462,9 @@ TEST_F(IdentityManagerTest, TestPickAccountIdForAccount) {
   } else {
     EXPECT_TRUE(gaia::AreEmailsSame(kTestEmail, account_id.ToString()));
   }
+#else
+  EXPECT_TRUE(gaia::AreEmailsSame(kTestGaiaId, account_id.ToString()));
+#endif
 }
 
 #if BUILDFLAG(IS_ANDROID)

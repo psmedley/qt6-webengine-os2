@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,6 @@ using OfflineContentProvider = offline_items_collection::OfflineContentProvider;
 using OfflineContentAggregator =
     offline_items_collection::OfflineContentAggregator;
 using OfflineItem = offline_items_collection::OfflineItem;
-using OfflineItemSchedule = offline_items_collection::OfflineItemSchedule;
 using OfflineItemShareInfo = offline_items_collection::OfflineItemShareInfo;
 using UpdateDelta = offline_items_collection::UpdateDelta;
 
@@ -108,8 +107,6 @@ class DownloadUIAdapter : public OfflineContentProvider,
   void RenameItem(const ContentId& id,
                   const std::string& name,
                   RenameCallback callback) override;
-  void ChangeSchedule(const ContentId& id,
-                      absl::optional<OfflineItemSchedule> schedule) override;
 
   // OfflinePageModel::Observer
   void OfflinePageModelLoaded(OfflinePageModel* model) override;

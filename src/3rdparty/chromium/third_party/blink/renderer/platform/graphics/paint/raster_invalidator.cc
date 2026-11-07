@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -150,10 +150,7 @@ PaintInvalidationReason RasterInvalidator::ChunkPropertiesChanged(
 
 static bool ShouldSkipForRasterInvalidation(
     const PaintChunkIterator& chunk_it) {
-  // Skip the chunk if it contains only one non-drawing display item. We could
-  // also skip chunks containing all non-drawing display items, but single
-  // non-drawing item is more common, e.g. scroll hit test.
-  if (chunk_it->size() == 1 && !chunk_it.DisplayItems().begin()->DrawsContent())
+  if (!chunk_it->DrawsContent())
     return true;
 
   // Foreign layers take care of raster invalidation by themselves.
@@ -177,6 +174,7 @@ void RasterInvalidator::GenerateRasterInvalidations(
     RasterInvalidationFunction function,
     const PaintChunkSubset& new_chunks,
     bool layer_offset_or_state_changed,
+    bool layer_effect_changed,
     Vector<PaintChunkInfo>& new_chunks_info) {
   ChunkToLayerMapper mapper(layer_state_, layer_offset_);
   Vector<bool> old_chunks_matched;
@@ -227,8 +225,14 @@ void RasterInvalidator::GenerateRasterInvalidations(
       auto& new_chunk_info = new_chunks_info.emplace_back(*this, mapper, it);
 
       if (reason == PaintInvalidationReason::kNone) {
-        reason = ChunkPropertiesChanged(new_chunk, old_chunk, new_chunk_info,
-                                        old_chunk_info, layer_state_);
+        if (layer_effect_changed) {
+          // Because of DecompositeEffect, the layer's effect may have changed
+          // even if the chunk's didn't.
+          reason = PaintInvalidationReason::kPaintProperty;
+        } else {
+          reason = ChunkPropertiesChanged(new_chunk, old_chunk, new_chunk_info,
+                                          old_chunk_info, layer_state_);
+        }
       }
 
       if (IsFullPaintInvalidationReason(reason)) {
@@ -331,6 +335,7 @@ void RasterInvalidator::Generate(
 
   bool layer_offset_or_state_changed =
       layer_offset_ != layer_offset || layer_state_ != layer_state;
+  bool layer_effect_changed = &layer_state_.Effect() != &layer_state.Effect();
   bool layer_bounds_was_empty = layer_bounds_.IsEmpty();
   layer_offset_ = layer_offset;
   layer_bounds_ = layer_bounds;
@@ -338,7 +343,7 @@ void RasterInvalidator::Generate(
   current_paint_artifact_ = &new_chunks.GetPaintArtifact();
 
   Vector<PaintChunkInfo> new_chunks_info;
-  new_chunks_info.ReserveCapacity(new_chunks.size());
+  new_chunks_info.reserve(new_chunks.size());
 
   if (layer_bounds_was_empty || layer_bounds_.IsEmpty()) {
     // Fast path if either the old bounds or the new bounds is empty. We still
@@ -359,7 +364,8 @@ void RasterInvalidator::Generate(
     }
   } else {
     GenerateRasterInvalidations(raster_invalidation_function, new_chunks,
-                                layer_offset_or_state_changed, new_chunks_info);
+                                layer_offset_or_state_changed,
+                                layer_effect_changed, new_chunks_info);
   }
 
   old_paint_chunks_info_ = std::move(new_chunks_info);

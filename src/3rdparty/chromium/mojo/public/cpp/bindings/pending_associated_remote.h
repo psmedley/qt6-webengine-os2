@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <type_traits>
 #include <utility>
 
 #include "base/compiler_specific.h"
@@ -44,9 +45,9 @@ class PendingAssociatedRemote {
   template <typename T,
             std::enable_if_t<std::is_same<
                 PendingAssociatedRemote<Interface>,
-                absl::result_of_t<decltype (&PendingAssociatedRemoteConverter<
-                                           T>::template To<Interface>)(T&&)>>::
-                                 value>* = nullptr>
+                std::invoke_result_t<decltype(&PendingAssociatedRemoteConverter<
+                                              T>::template To<Interface>),
+                                     T&&>>::value>* = nullptr>
   PendingAssociatedRemote(T&& other)
       : PendingAssociatedRemote(
             PendingAssociatedRemoteConverter<T>::template To<Interface>(

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,10 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/grid/layout_ng_grid.h"
+#include "third_party/blink/renderer/core/layout/ng/grid/ng_grid_item.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_block_node.h"
 
 namespace blink {
-
-struct GridItems;
 
 // Grid specific extensions to NGBlockNode.
 class CORE_EXPORT NGGridNode final : public NGBlockNode {
@@ -22,11 +21,21 @@ class CORE_EXPORT NGGridNode final : public NGBlockNode {
 
   const NGGridPlacementData& CachedPlacementData() const;
 
-  GridItems GridItemsIncludingSubgridded(
-      NGGridPlacementData* placement_data) const;
+  // Aggregate any OOF children to `oof_children`, unless nullptr.
+  GridItems ConstructGridItems(const NGGridPlacementData& placement_data,
+                               HeapVector<Member<LayoutBox>>* oof_children,
+                               bool* has_nested_subgrid) const;
+
+  void AppendSubgriddedItems(GridItems* grid_items) const;
 
  private:
-  GridItems ConstructGridItems(NGGridPlacementData* placement_data) const;
+  GridItems ConstructGridItems(
+      const NGGridPlacementData& placement_data,
+      const ComputedStyle& root_grid_style,
+      bool must_consider_grid_items_for_column_sizing,
+      bool must_consider_grid_items_for_row_sizing,
+      HeapVector<Member<LayoutBox>>* oof_children = nullptr,
+      bool* has_nested_subgrid = nullptr) const;
 };
 
 template <>

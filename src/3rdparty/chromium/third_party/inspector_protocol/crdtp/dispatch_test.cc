@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,13 @@ TEST(DispatchResponseTest, ServerError) {
   EXPECT_FALSE(error.IsSuccess());
   EXPECT_EQ(DispatchCode::SERVER_ERROR, error.Code());
   EXPECT_EQ("Oops!", error.Message());
+}
+
+TEST(DispatchResponseTest, SessionNotFound) {
+  DispatchResponse error = DispatchResponse::SessionNotFound("OMG!");
+  EXPECT_FALSE(error.IsSuccess());
+  EXPECT_EQ(DispatchCode::SESSION_NOT_FOUND, error.Code());
+  EXPECT_EQ("OMG!", error.Message());
 }
 
 TEST(DispatchResponseTest, InternalError) {
@@ -260,8 +267,8 @@ TEST(DispatchableTest, FaultyCBORTrailingJunk) {
   Dispatchable dispatchable(SpanFrom(cbor));
   EXPECT_FALSE(dispatchable.ok());
   EXPECT_EQ(DispatchCode::PARSE_ERROR, dispatchable.DispatchError().Code());
-  EXPECT_EQ(56u, trailing_junk_pos);
-  EXPECT_EQ("CBOR: trailing junk at position 56",
+  EXPECT_EQ(57u, trailing_junk_pos);
+  EXPECT_EQ("CBOR: trailing junk at position 57",
             dispatchable.DispatchError().Message());
 }
 

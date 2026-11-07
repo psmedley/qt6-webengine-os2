@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,8 @@ class PerformanceLongTaskTiming final : public PerformanceEntry {
                             const AtomicString& culprit_type,
                             const AtomicString& culprit_src,
                             const AtomicString& culprit_id,
-                            const AtomicString& culprit_name);
+                            const AtomicString& culprit_name,
+                            const uint32_t navigation_id);
   ~PerformanceLongTaskTiming() override;
 
   AtomicString entryType() const override;

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/threading/sequence_bound.h"
+#include "components/user_notes/interfaces/user_note_metadata_snapshot.h"
 #include "components/user_notes/interfaces/user_note_storage.h"
 #include "components/user_notes/model/user_note.h"
 #include "components/user_notes/storage/user_note_database.h"
@@ -27,26 +28,25 @@ class UserNoteStorageImpl : public UserNoteStorage {
   UserNoteStorageImpl(const UserNoteStorageImpl& other) = delete;
   UserNoteStorageImpl& operator=(const UserNoteStorageImpl& other) = delete;
 
+  using Observer = UserNoteStorage::Observer;
+
   // Implement UserNoteStorage
+  void AddObserver(Observer* observer) override;
+
+  void RemoveObserver(Observer* observer) override;
+
   void GetNoteMetadataForUrls(
-      std::vector<GURL> urls,
-      base::OnceCallback<void(UserNoteStorage::UrlNoteMetadataIDMap)> callback)
-      override;
+      const UserNoteStorage::UrlSet& urls,
+      base::OnceCallback<void(UserNoteMetadataSnapshot)> callback) override;
 
   void GetNotesById(
-      std::vector<base::UnguessableToken> ids,
+      const UserNoteStorage::IdSet& ids,
       base::OnceCallback<void(std::vector<std::unique_ptr<UserNote>>)> callback)
       override;
 
-  void CreateNote(base::UnguessableToken id,
-                  std::string note_body_text,
-                  UserNoteTarget::TargetType target_type,
-                  std::string original_text,
-                  GURL target_page,
-                  std::string selector) override;
-
-  void UpdateNote(base::UnguessableToken id,
-                  std::string note_body_text) override;
+  void UpdateNote(const UserNote* model,
+                  std::u16string note_body_text,
+                  bool is_creation = false) override;
 
   void DeleteNote(const base::UnguessableToken& id) override;
 
@@ -57,9 +57,14 @@ class UserNoteStorageImpl : public UserNoteStorage {
   void DeleteAllNotes() override;
 
  private:
+  void OnNotesChanged(bool notes_changed);
+  base::ObserverList<Observer>::Unchecked observers_;
+
   // Owns and manages access to the UserNotesDatabase living on a different
   // sequence.
   base::SequenceBound<UserNoteDatabase> database_;
+
+  base::WeakPtrFactory<UserNoteStorageImpl> weak_factory_{this};
 };
 }  // namespace user_notes
 

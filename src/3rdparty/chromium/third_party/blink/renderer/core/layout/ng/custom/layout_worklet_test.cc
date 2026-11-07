@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,7 +56,8 @@ class LayoutWorkletTest : public PageTestBase, public ModuleTestBase {
   ScriptEvaluationResult EvaluateScriptModule(const String& source_code) {
     ScriptState* script_state = GetScriptState();
     v8::MicrotasksScope microtasks_scope(
-        script_state->GetIsolate(), v8::MicrotasksScope::kDoNotRunMicrotasks);
+        script_state->GetIsolate(), ToMicrotaskQueue(script_state),
+        v8::MicrotasksScope::kDoNotRunMicrotasks);
     EXPECT_TRUE(script_state);
 
     KURL js_url("https://example.com/worklet.js");
@@ -70,7 +71,7 @@ class LayoutWorkletTest : public PageTestBase, public ModuleTestBase {
 
     return JSModuleScript::CreateForTest(Modulator::From(script_state), module,
                                          js_url)
-        ->RunScriptAndReturnValue();
+        ->RunScriptOnScriptStateAndReturnValue(script_state);
   }
 
  private:
@@ -88,7 +89,7 @@ TEST_F(LayoutWorkletTest, ParseProperties) {
       async layout() { }
     });
   )JS");
-  EXPECT_FALSE(GetResult(GetScriptState(), result).IsEmpty());
+  EXPECT_FALSE(GetResult(GetScriptState(), std::move(result)).IsEmpty());
 
   LayoutWorkletGlobalScope* global_scope = GetGlobalScope();
   CSSLayoutDefinition* definition = global_scope->FindDefinition("foo");
@@ -123,7 +124,7 @@ TEST_F(LayoutWorkletTest, RegisterLayout) {
     });
   )JS");
 
-  EXPECT_FALSE(GetResult(GetScriptState(), result).IsEmpty());
+  EXPECT_FALSE(GetResult(GetScriptState(), std::move(result)).IsEmpty());
 
   result = EvaluateScriptModule(R"JS(
     registerLayout('bar', class {
@@ -134,7 +135,7 @@ TEST_F(LayoutWorkletTest, RegisterLayout) {
     });
   )JS");
 
-  EXPECT_FALSE(GetResult(GetScriptState(), result).IsEmpty());
+  EXPECT_FALSE(GetResult(GetScriptState(), std::move(result)).IsEmpty());
 }
 
 TEST_F(LayoutWorkletTest, RegisterLayout_EmptyName) {
@@ -145,7 +146,7 @@ TEST_F(LayoutWorkletTest, RegisterLayout_EmptyName) {
   )JS");
 
   // "The empty string is not a valid name."
-  EXPECT_FALSE(GetException(GetScriptState(), result).IsEmpty());
+  EXPECT_FALSE(GetException(GetScriptState(), std::move(result)).IsEmpty());
 }
 
 TEST_F(LayoutWorkletTest, RegisterLayout_Duplicate) {
@@ -162,7 +163,7 @@ TEST_F(LayoutWorkletTest, RegisterLayout_Duplicate) {
   )JS");
 
   // "A class with name:'foo' is already registered."
-  EXPECT_FALSE(GetException(GetScriptState(), result).IsEmpty());
+  EXPECT_FALSE(GetException(GetScriptState(), std::move(result)).IsEmpty());
 }
 
 TEST_F(LayoutWorkletTest, RegisterLayout_NoIntrinsicSizes) {
@@ -173,7 +174,7 @@ TEST_F(LayoutWorkletTest, RegisterLayout_NoIntrinsicSizes) {
   )JS");
 
   // "The 'intrinsicSizes' property on the prototype does not exist."
-  EXPECT_FALSE(GetException(GetScriptState(), result).IsEmpty());
+  EXPECT_FALSE(GetException(GetScriptState(), std::move(result)).IsEmpty());
 }
 
 TEST_F(LayoutWorkletTest, RegisterLayout_ThrowingPropertyGetter) {
@@ -185,7 +186,7 @@ TEST_F(LayoutWorkletTest, RegisterLayout_ThrowingPropertyGetter) {
   )JS");
 
   // "Uncaught Error"
-  EXPECT_FALSE(GetException(GetScriptState(), result).IsEmpty());
+  EXPECT_FALSE(GetException(GetScriptState(), std::move(result)).IsEmpty());
 }
 
 TEST_F(LayoutWorkletTest, RegisterLayout_BadPropertyGetter) {
@@ -197,7 +198,7 @@ TEST_F(LayoutWorkletTest, RegisterLayout_BadPropertyGetter) {
   )JS");
 
   // "The provided value cannot be converted to a sequence."
-  EXPECT_FALSE(GetException(GetScriptState(), result).IsEmpty());
+  EXPECT_FALSE(GetException(GetScriptState(), std::move(result)).IsEmpty());
 }
 
 TEST_F(LayoutWorkletTest, RegisterLayout_NoPrototype) {
@@ -209,7 +210,7 @@ TEST_F(LayoutWorkletTest, RegisterLayout_NoPrototype) {
   )JS");
 
   // "The 'prototype' object on the class does not exist."
-  EXPECT_FALSE(GetException(GetScriptState(), result).IsEmpty());
+  EXPECT_FALSE(GetException(GetScriptState(), std::move(result)).IsEmpty());
 }
 
 TEST_F(LayoutWorkletTest, RegisterLayout_BadPrototype) {
@@ -221,7 +222,7 @@ TEST_F(LayoutWorkletTest, RegisterLayout_BadPrototype) {
   )JS");
 
   // "The 'prototype' property on the class is not an object."
-  EXPECT_FALSE(GetException(GetScriptState(), result).IsEmpty());
+  EXPECT_FALSE(GetException(GetScriptState(), std::move(result)).IsEmpty());
 }
 
 TEST_F(LayoutWorkletTest, RegisterLayout_BadIntrinsicSizes) {
@@ -233,7 +234,7 @@ TEST_F(LayoutWorkletTest, RegisterLayout_BadIntrinsicSizes) {
   )JS");
 
   // "The 'intrinsicSizes' property on the prototype is not a function."
-  EXPECT_FALSE(GetException(GetScriptState(), result).IsEmpty());
+  EXPECT_FALSE(GetException(GetScriptState(), std::move(result)).IsEmpty());
 }
 
 TEST_F(LayoutWorkletTest, RegisterLayout_NoLayout) {
@@ -245,7 +246,7 @@ TEST_F(LayoutWorkletTest, RegisterLayout_NoLayout) {
   )JS");
 
   // "The 'layout' property on the prototype does not exist."
-  EXPECT_FALSE(GetException(GetScriptState(), result).IsEmpty());
+  EXPECT_FALSE(GetException(GetScriptState(), std::move(result)).IsEmpty());
 }
 
 TEST_F(LayoutWorkletTest, RegisterLayout_BadLayout) {
@@ -258,7 +259,7 @@ TEST_F(LayoutWorkletTest, RegisterLayout_BadLayout) {
   )JS");
 
   // "The 'layout' property on the prototype is not a function."
-  EXPECT_FALSE(GetException(GetScriptState(), result).IsEmpty());
+  EXPECT_FALSE(GetException(GetScriptState(), std::move(result)).IsEmpty());
 }
 
 }  // namespace blink

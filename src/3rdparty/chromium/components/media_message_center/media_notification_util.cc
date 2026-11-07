@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/containers/contains.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
+#include "components/url_formatter/elide_url.h"
 #include "ui/views/controls/button/button.h"
 
 namespace media_message_center {
@@ -54,6 +55,19 @@ std::u16string GetAccessibleNameFromMetadata(
 
   std::u16string accessible_name = base::JoinString(text, u" - ");
   return accessible_name;
+}
+
+bool IsOriginGoodForDisplay(const url::Origin& origin) {
+  return !origin.opaque() ||
+         origin.GetTupleOrPrecursorTupleIfOpaque().IsValid();
+}
+
+std::u16string GetOriginNameForDisplay(const url::Origin& origin) {
+  const auto url = origin.opaque()
+                       ? origin.GetTupleOrPrecursorTupleIfOpaque().GetURL()
+                       : origin.GetURL();
+  return url_formatter::FormatUrlForSecurityDisplay(
+      url, url_formatter::SchemeDisplay::OMIT_HTTP_AND_HTTPS);
 }
 
 base::flat_set<MediaSessionAction> GetTopVisibleActions(

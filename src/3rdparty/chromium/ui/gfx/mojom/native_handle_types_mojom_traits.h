@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,6 +56,13 @@ struct COMPONENT_EXPORT(GFX_NATIVE_HANDLE_TYPES_SHARED_MOJOM_TRAITS)
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   static uint64_t modifier(const gfx::NativePixmapHandle& pixmap_handle) {
     return pixmap_handle.modifier;
+  }
+#endif
+
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+  static bool supports_zero_copy_webgpu_import(
+      const gfx::NativePixmapHandle& pixmap_handle) {
+    return pixmap_handle.supports_zero_copy_webgpu_import;
   }
 #endif
 

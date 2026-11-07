@@ -38,11 +38,8 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_image_bitmap_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
-#ifndef __OS2__
-#include "third_party/blink/renderer/bindings/modules/v8/v8_union_blob_htmlcanvaselement_htmlimageelement_htmlvideoelement_imagebitmap_imagedata_offscreencanvas_svgimageelement_videoframe.h"
-#else
-#include "third_party/blink/renderer/bindings/modules/v8/v8_union_blob_htmlcanvaselement_htmlimageelement_htmlvideoelement_imagebitm.h"
-#endif
+#include "third_party/blink/renderer/modules/shorter_includes.h"
+#include SHORT_INCLUDE_FILE(third_party/blink/renderer/bindings/modules/v8/v8_union,blob_htmlcanvaselement_htmlimageelement_htmlvideoelement_imagebitmap_imagedata_offscreencanvas_svgimageelement_videoframe)
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
@@ -57,6 +54,7 @@
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_frame.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -64,6 +62,7 @@
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/worker_pool.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_skia.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "v8/include/v8.h"
@@ -153,7 +152,9 @@ ScriptPromise ImageBitmapFactories::CreateImageBitmapFromBlob(
     ImageBitmapSource* bitmap_source,
     absl::optional<gfx::Rect> crop_rect,
     const ImageBitmapOptions* options) {
-  DCHECK(script_state->ContextIsValid());
+  if (!script_state->ContextIsValid()) {
+    return ScriptPromise();
+  }
   ImageBitmapFactories& factory = From(*ExecutionContext::From(script_state));
   ImageBitmapLoader* loader = ImageBitmapFactories::ImageBitmapLoader::Create(
       factory, crop_rect, options, script_state);
@@ -360,7 +361,7 @@ void ImageBitmapFactories::ImageBitmapLoader::ScheduleAsyncImageBitmapDecoding(
     ArrayBufferContents contents) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-      Thread::Current()->GetTaskRunner();
+      GetExecutionContext()->GetTaskRunner(TaskType::kNetworking);
   ImageDecoder::AlphaOption alpha_option =
       options_->premultiplyAlpha() != "none"
           ? ImageDecoder::AlphaOption::kAlphaPremultiplied

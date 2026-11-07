@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,11 @@
 #include <numeric>
 #include <utility>
 
+#include "base/auto_reset.h"
 #include "base/containers/adapters.h"
 #include "base/containers/contains.h"
 #include "base/i18n/case_conversion.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -97,9 +99,6 @@ class VerticalSeparator : public Separator {
   VerticalSeparator(const VerticalSeparator&) = delete;
   VerticalSeparator& operator=(const VerticalSeparator&) = delete;
   ~VerticalSeparator() override = default;
-
-  // Separator:
-  void OnThemeChanged() override;
 };
 
 VerticalSeparator::VerticalSeparator() {
@@ -109,15 +108,11 @@ VerticalSeparator::VerticalSeparator() {
       gfx::Size(config.actionable_submenu_vertical_separator_width,
                 config.actionable_submenu_vertical_separator_height));
   SetCanProcessEventsWithinSubtree(false);
-}
-
-void VerticalSeparator::OnThemeChanged() {
-  Separator::OnThemeChanged();
   ui::ColorId id = ui::kColorMenuSeparator;
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   id = ui::kColorAshSystemUIMenuSeparator;
 #endif
-  SetColor(GetColorProvider()->GetColor(id));
+  SetColorId(id);
 }
 
 BEGIN_METADATA(VerticalSeparator, Separator)
@@ -171,8 +166,10 @@ void MenuItemView::ViewHierarchyChanged(
     const ViewHierarchyChangedDetails& details) {
   // Whether the selection is painted may change based on the number of
   // children.
-  if (details.parent == this)
+  if (details.parent == this &&
+      update_selection_based_state_in_view_herarchy_changed_) {
     UpdateSelectionBasedStateIfChanged(PaintMode::kNormal);
+  }
 }
 
 std::u16string MenuItemView::GetTooltipText(const gfx::Point& p) const {
@@ -356,7 +353,7 @@ void MenuItemView::Cancel() {
 }
 
 MenuItemView* MenuItemView::AddMenuItemAt(
-    int index,
+    size_t index,
     int item_id,
     const std::u16string& label,
     const std::u16string& secondary_label,
@@ -366,10 +363,9 @@ MenuItemView* MenuItemView::AddMenuItemAt(
     Type type,
     ui::MenuSeparatorType separator_style) {
   DCHECK_NE(type, Type::kEmpty);
-  DCHECK_GE(index, 0);
   if (!submenu_)
     CreateSubmenu();
-  DCHECK_LE(static_cast<size_t>(index), submenu_->children().size());
+  DCHECK_LE(index, submenu_->children().size());
   if (type == Type::kSeparator) {
     submenu_->AddChildViewAt(std::make_unique<MenuSeparator>(separator_style),
                              index);
@@ -429,7 +425,7 @@ void MenuItemView::AppendSeparator() {
   AppendMenuItemImpl(0, std::u16string(), ui::ImageModel(), Type::kSeparator);
 }
 
-void MenuItemView::AddSeparatorAt(int index) {
+void MenuItemView::AddSeparatorAt(size_t index) {
   AddMenuItemAt(index, /*item_id=*/0, /*label=*/std::u16string(),
                 /*secondary_label=*/std::u16string(),
                 /*minor_text=*/std::u16string(),
@@ -443,8 +439,7 @@ MenuItemView* MenuItemView::AppendMenuItemImpl(int item_id,
                                                const std::u16string& label,
                                                const ui::ImageModel& icon,
                                                Type type) {
-  const int index =
-      submenu_ ? static_cast<int>(submenu_->children().size()) : 0;
+  const size_t index = submenu_ ? submenu_->children().size() : size_t{0};
   return AddMenuItemAt(index, item_id, label, std::u16string(),
                        std::u16string(), ui::ImageModel(), icon, type,
                        ui::NORMAL_SEPARATOR);
@@ -559,19 +554,28 @@ void MenuItemView::SetIcon(const ui::ImageModel& icon) {
 }
 
 void MenuItemView::SetIconView(std::unique_ptr<ImageView> icon_view) {
-  if (icon_view_) {
-    RemoveChildViewT(icon_view_.get());
-    icon_view_ = nullptr;
+  {
+    // See comment in `update_selection_based_state_in_view_herarchy_changed_`
+    // as to why setting the field and explicitly calling
+    // UpdateSelectionBasedStateIfChanged() is necessary.
+    base::AutoReset setter(
+        &update_selection_based_state_in_view_herarchy_changed_, false);
+    if (icon_view_) {
+      RemoveChildViewT(icon_view_.get());
+      icon_view_ = nullptr;
+    }
+
+    if (icon_view)
+      icon_view_ = AddChildView(std::move(icon_view));
   }
 
-  if (icon_view)
-    icon_view_ = AddChildView(std::move(icon_view));
+  UpdateSelectionBasedStateIfChanged(PaintMode::kNormal);
 
   InvalidateLayout();
   SchedulePaint();
 }
 
-void MenuItemView::OnDropStatusChanged() {
+void MenuItemView::OnDropOrSelectionStatusMayHaveChanged() {
   UpdateSelectionBasedStateIfChanged(PaintMode::kNormal);
 }
 
@@ -1433,6 +1437,11 @@ gfx::Insets MenuItemView::GetContainerMargins() const {
 }
 
 int MenuItemView::NonIconChildViewsCount() const {
+  // WARNING: if adding a new field that is checked here you may need to
+  // set `update_selection_based_state_in_view_herarchy_changed_` to false
+  // when setting the field and explicitly call
+  // UpdateSelectionBasedStateIfChanged(). See comment in header
+  // for details.
   return static_cast<int>(children().size()) - (icon_view_ ? 1 : 0) -
          (radio_check_image_view_ ? 1 : 0) -
          (submenu_arrow_image_view_ ? 1 : 0) - (vertical_separator_ ? 1 : 0);
@@ -1467,10 +1476,9 @@ bool MenuItemView::HasChecksOrRadioButtons() const {
     return true;
   if (!HasSubmenu())
     return false;
-  const auto menu_items = submenu_->GetMenuItems();
-  return std::any_of(
-      menu_items.cbegin(), menu_items.cend(),
-      [](const auto* item) { return item->HasChecksOrRadioButtons(); });
+  return base::ranges::any_of(submenu_->GetMenuItems(), [](const auto* item) {
+    return item->HasChecksOrRadioButtons();
+  });
 }
 
 void MenuItemView::UpdateSelectionBasedStateIfChanged(PaintMode mode) {

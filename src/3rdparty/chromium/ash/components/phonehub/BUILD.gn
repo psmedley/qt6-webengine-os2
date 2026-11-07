@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -37,6 +37,10 @@ static_library("phonehub") {
     "do_not_disturb_controller.h",
     "do_not_disturb_controller_impl.cc",
     "do_not_disturb_controller_impl.h",
+    "feature_setup_connection_operation.cc",
+    "feature_setup_connection_operation.h",
+    "feature_setup_response_processor.cc",
+    "feature_setup_response_processor.h",
     "feature_status.cc",
     "feature_status.h",
     "feature_status_provider.cc",
@@ -47,6 +51,10 @@ static_library("phonehub") {
     "find_my_device_controller.h",
     "find_my_device_controller_impl.cc",
     "find_my_device_controller_impl.h",
+    "icon_decoder.cc",
+    "icon_decoder.h",
+    "icon_decoder_impl.cc",
+    "icon_decoder_impl.h",
     "invalid_connection_disconnector.cc",
     "invalid_connection_disconnector.h",
     "message_receiver.cc",
@@ -86,6 +94,8 @@ static_library("phonehub") {
     "phone_hub_manager.h",
     "phone_hub_manager_impl.cc",
     "phone_hub_manager_impl.h",
+    "phone_hub_metrics_recorder.cc",
+    "phone_hub_metrics_recorder.h",
     "phone_model.cc",
     "phone_model.h",
     "phone_status_model.cc",
@@ -117,10 +127,9 @@ static_library("phonehub") {
   ]
 
   deps = [
-    "//ash/components/multidevice",
-    "//ash/components/multidevice/logging",
     "//ash/components/phonehub/proto",
     "//ash/constants",
+    "//ash/resources/vector_icons",
     "//ash/services/device_sync/public/cpp",
     "//ash/services/multidevice_setup/public/cpp",
     "//ash/services/multidevice_setup/public/cpp:prefs",
@@ -128,9 +137,12 @@ static_library("phonehub") {
     "//ash/services/secure_channel/public/mojom",
     "//ash/webui/eche_app_ui:eche_app_ui_pref",
     "//base",
+    "//chromeos/ash/components/multidevice",
+    "//chromeos/ash/components/multidevice/logging",
     "//chromeos/dbus/power",
     "//chromeos/services/network_config",
     "//chromeos/services/network_config:in_process_instance",
+    "//chromeos/services/network_config/public/cpp",
     "//components/keyed_service/core",
     "//components/prefs",
     "//components/session_manager/core",
@@ -181,11 +193,11 @@ static_library("debug") {
   public_deps = [ ":phonehub" ]
 
   deps = [
-    "//ash/components/multidevice/logging",
     "//ash/components/phonehub/proto",
     "//ash/constants",
     "//ash/services/multidevice_setup/public/mojom",
     "//base",
+    "//chromeos/ash/components/multidevice/logging",
   ]
 }
 
@@ -231,8 +243,10 @@ source_set("unit_tests") {
     "connection_scheduler_impl_unittest.cc",
     "cros_state_sender_unittest.cc",
     "do_not_disturb_controller_impl_unittest.cc",
+    "feature_setup_response_processor_unittest.cc",
     "feature_status_provider_impl_unittest.cc",
     "find_my_device_controller_impl_unittest.cc",
+    "icon_decoder_impl_unittest.cc",
     "invalid_connection_disconnector_unittest.cc",
     "message_receiver_unittest.cc",
     "message_sender_unittest.cc",
@@ -255,8 +269,6 @@ source_set("unit_tests") {
     ":debug",
     ":phonehub",
     ":test_support",
-    "//ash/components/multidevice",
-    "//ash/components/multidevice:test_support",
     "//ash/components/phonehub/proto",
     "//ash/constants",
     "//ash/services/device_sync/public/cpp",
@@ -269,9 +281,11 @@ source_set("unit_tests") {
     "//ash/webui/eche_app_ui:eche_app_ui_pref",
     "//base",
     "//base/test:test_support",
+    "//chromeos/ash/components/multidevice",
+    "//chromeos/ash/components/multidevice:test_support",
+    "//chromeos/ash/components/network",
+    "//chromeos/ash/components/network:test_support",
     "//chromeos/dbus/power",
-    "//chromeos/network:network",
-    "//chromeos/network:test_support",
     "//chromeos/services/network_config:in_process_instance",
     "//chromeos/services/network_config/public/cpp:test_support",
     "//components/prefs:test_support",

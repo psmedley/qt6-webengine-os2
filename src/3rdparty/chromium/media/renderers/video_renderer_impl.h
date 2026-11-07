@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,7 +61,8 @@ class MEDIA_EXPORT VideoRendererImpl
       const CreateVideoDecodersCB& create_video_decoders_cb,
       bool drop_frames,
       MediaLog* media_log,
-      std::unique_ptr<GpuMemoryBufferVideoFramePool> gmb_pool);
+      std::unique_ptr<GpuMemoryBufferVideoFramePool> gmb_pool,
+      MediaPlayerLoggingID media_player_id);
 
   VideoRendererImpl(const VideoRendererImpl&) = delete;
   VideoRendererImpl& operator=(const VideoRendererImpl&) = delete;
@@ -114,6 +115,10 @@ class MEDIA_EXPORT VideoRendererImpl
   // Called by the VideoDecoderStream when a config change occurs. Will notify
   // RenderClient of the new config.
   void OnConfigChange(const VideoDecoderConfig& config);
+
+  // Called when the decoder stream and selector have a fallback after failed
+  // decode.
+  void OnFallback(PipelineStatus status);
 
   // Callback for |video_decoder_stream_| to deliver decoded video frames and
   // report video decoding status.
@@ -237,6 +242,8 @@ class MEDIA_EXPORT VideoRendererImpl
   raw_ptr<DemuxerStream> demuxer_stream_;
 
   raw_ptr<MediaLog> media_log_;
+
+  MediaPlayerLoggingID player_id_;
 
   // Flag indicating low-delay mode.
   bool low_delay_;

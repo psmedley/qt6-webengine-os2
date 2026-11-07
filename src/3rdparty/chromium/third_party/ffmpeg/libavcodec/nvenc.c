@@ -51,7 +51,11 @@ const enum AVPixelFormat ff_nvenc_pix_fmts[] = {
     AV_PIX_FMT_P016,      // Truncated to 10bits
     AV_PIX_FMT_YUV444P16, // Truncated to 10bits
     AV_PIX_FMT_0RGB32,
+    AV_PIX_FMT_RGB32,
     AV_PIX_FMT_0BGR32,
+    AV_PIX_FMT_BGR32,
+    AV_PIX_FMT_X2RGB10,
+    AV_PIX_FMT_X2BGR10,
     AV_PIX_FMT_GBRP,
     AV_PIX_FMT_GBRP16,    // Truncated to 10bits
     AV_PIX_FMT_CUDA,
@@ -1092,11 +1096,20 @@ static av_cold int nvenc_setup_h264_config(AVCodecContext *avctx)
     NV_ENC_CONFIG_H264 *h264               = &cc->encodeCodecConfig.h264Config;
     NV_ENC_CONFIG_H264_VUI_PARAMETERS *vui = &h264->h264VUIParameters;
 
-    vui->colourMatrix = IS_GBRP(ctx->data_pix_fmt) ? AVCOL_SPC_RGB : avctx->colorspace;
-    vui->colourPrimaries = avctx->color_primaries;
-    vui->transferCharacteristics = avctx->color_trc;
-    vui->videoFullRangeFlag = (avctx->color_range == AVCOL_RANGE_JPEG
-        || ctx->data_pix_fmt == AV_PIX_FMT_YUVJ420P || ctx->data_pix_fmt == AV_PIX_FMT_YUVJ422P || ctx->data_pix_fmt == AV_PIX_FMT_YUVJ444P);
+    const AVPixFmtDescriptor *pixdesc = av_pix_fmt_desc_get(ctx->data_pix_fmt);
+
+    if ((pixdesc->flags & AV_PIX_FMT_FLAG_RGB) && !IS_GBRP(ctx->data_pix_fmt)) {
+        vui->colourMatrix = AVCOL_SPC_BT470BG;
+        vui->colourPrimaries = avctx->color_primaries;
+        vui->transferCharacteristics = avctx->color_trc;
+        vui->videoFullRangeFlag = 0;
+    } else {
+        vui->colourMatrix = IS_GBRP(ctx->data_pix_fmt) ? AVCOL_SPC_RGB : avctx->colorspace;
+        vui->colourPrimaries = avctx->color_primaries;
+        vui->transferCharacteristics = avctx->color_trc;
+        vui->videoFullRangeFlag = (avctx->color_range == AVCOL_RANGE_JPEG
+            || ctx->data_pix_fmt == AV_PIX_FMT_YUVJ420P || ctx->data_pix_fmt == AV_PIX_FMT_YUVJ422P || ctx->data_pix_fmt == AV_PIX_FMT_YUVJ444P);
+    }
 
     vui->colourDescriptionPresentFlag =
         (vui->colourMatrix != 2 || vui->colourPrimaries != 2 || vui->transferCharacteristics != 2);
@@ -1204,11 +1217,20 @@ static av_cold int nvenc_setup_hevc_config(AVCodecContext *avctx)
     NV_ENC_CONFIG_HEVC *hevc               = &cc->encodeCodecConfig.hevcConfig;
     NV_ENC_CONFIG_HEVC_VUI_PARAMETERS *vui = &hevc->hevcVUIParameters;
 
-    vui->colourMatrix = IS_GBRP(ctx->data_pix_fmt) ? AVCOL_SPC_RGB : avctx->colorspace;
-    vui->colourPrimaries = avctx->color_primaries;
-    vui->transferCharacteristics = avctx->color_trc;
-    vui->videoFullRangeFlag = (avctx->color_range == AVCOL_RANGE_JPEG
-        || ctx->data_pix_fmt == AV_PIX_FMT_YUVJ420P || ctx->data_pix_fmt == AV_PIX_FMT_YUVJ422P || ctx->data_pix_fmt == AV_PIX_FMT_YUVJ444P);
+    const AVPixFmtDescriptor *pixdesc = av_pix_fmt_desc_get(ctx->data_pix_fmt);
+
+    if ((pixdesc->flags & AV_PIX_FMT_FLAG_RGB) && !IS_GBRP(ctx->data_pix_fmt)) {
+        vui->colourMatrix = AVCOL_SPC_BT470BG;
+        vui->colourPrimaries = avctx->color_primaries;
+        vui->transferCharacteristics = avctx->color_trc;
+        vui->videoFullRangeFlag = 0;
+    } else {
+        vui->colourMatrix = IS_GBRP(ctx->data_pix_fmt) ? AVCOL_SPC_RGB : avctx->colorspace;
+        vui->colourPrimaries = avctx->color_primaries;
+        vui->transferCharacteristics = avctx->color_trc;
+        vui->videoFullRangeFlag = (avctx->color_range == AVCOL_RANGE_JPEG
+            || ctx->data_pix_fmt == AV_PIX_FMT_YUVJ420P || ctx->data_pix_fmt == AV_PIX_FMT_YUVJ422P || ctx->data_pix_fmt == AV_PIX_FMT_YUVJ444P);
+    }
 
     vui->colourDescriptionPresentFlag =
         (vui->colourMatrix != 2 || vui->colourPrimaries != 2 || vui->transferCharacteristics != 2);
@@ -1510,9 +1532,15 @@ static NV_ENC_BUFFER_FORMAT nvenc_map_buffer_format(enum AVPixelFormat pix_fmt)
     case AV_PIX_FMT_YUV444P16:
         return NV_ENC_BUFFER_FORMAT_YUV444_10BIT;
     case AV_PIX_FMT_0RGB32:
+    case AV_PIX_FMT_RGB32:
         return NV_ENC_BUFFER_FORMAT_ARGB;
     case AV_PIX_FMT_0BGR32:
+    case AV_PIX_FMT_BGR32:
         return NV_ENC_BUFFER_FORMAT_ABGR;
+    case AV_PIX_FMT_X2RGB10:
+        return NV_ENC_BUFFER_FORMAT_ARGB10;
+    case AV_PIX_FMT_X2BGR10:
+        return NV_ENC_BUFFER_FORMAT_ABGR10;
     default:
         return NV_ENC_BUFFER_FORMAT_UNDEFINED;
     }

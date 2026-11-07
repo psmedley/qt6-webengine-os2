@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/values.h"
 #include "components/policy/core/common/external_data_fetcher.h"
+#include "components/policy/core/common/policy_details.h"
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/policy_export.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -286,7 +287,7 @@ class POLICY_EXPORT PolicyMap {
   // Loads the values in |policies| into this PolicyMap. All policies loaded
   // will have |level|, |scope| and |source| in their entries. Existing entries
   // are replaced.
-  void LoadFrom(const base::DictionaryValue* policies,
+  void LoadFrom(const base::Value::Dict& policies,
                 PolicyLevel level,
                 PolicyScope scope,
                 PolicySource source);
@@ -322,6 +323,11 @@ class POLICY_EXPORT PolicyMap {
   // Returns the set containing device affiliation ID strings.
   const base::flat_set<std::string>& GetDeviceAffiliationIds() const;
 
+  // Sets the ChromePolicyDetailsCallback, which is used in IsPolicyExternal(),
+  // in test environments
+  void set_chrome_policy_details_callback_for_test(
+      const GetChromePolicyDetailsCallback& details_callback);
+
   bool Equals(const PolicyMap& other) const;
   bool empty() const;
   size_t size() const;
@@ -351,13 +357,20 @@ class POLICY_EXPORT PolicyMap {
       const base::RepeatingCallback<bool(const const_iterator)>& filter,
       bool deletion_value);
 
+#if !BUILDFLAG(IS_CHROMEOS)
   // Updates the stored state of computed metapolicies.
   void UpdateStoredComputedMetapolicies();
+#endif
 
   // Updates the stored state of user affiliation.
   void UpdateStoredUserAffiliation();
 
+  // Returns True if the passed policy has a max_external_data_size > 0
+  bool IsPolicyExternal(const std::string& policy);
+
   PolicyMapType map_;
+
+  GetChromePolicyDetailsCallback details_callback_;
 
   // Affiliation
   bool is_user_affiliated_ = false;

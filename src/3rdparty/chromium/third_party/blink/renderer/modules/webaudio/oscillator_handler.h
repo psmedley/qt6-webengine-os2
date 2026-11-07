@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/modules/webaudio/audio_param.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_scheduled_source_node.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
+#include "third_party/blink/renderer/platform/heap/cross_thread_persistent.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
 
 namespace blink {
@@ -32,10 +33,10 @@ class OscillatorHandler final : public AudioScheduledSourceHandler {
     CUSTOM = 4
   };
 
-  // Breakpoints where we deicde to do linear interoplation, 3-point
+  // Breakpoints where we decide to do linear interpolation, 3-point
   // interpolation or 5-point interpolation.  See DoInterpolation().
-  static constexpr float kInterpolate2Point = 0.3;
-  static constexpr float kInterpolate3Point = 0.16;
+  static constexpr float kInterpolate2Point = 0.3f;
+  static constexpr float kInterpolate3Point = 0.16f;
 
   static scoped_refptr<OscillatorHandler> Create(AudioNode&,
                                                  float sample_rate,
@@ -162,12 +163,12 @@ class OscillatorHandler final : public AudioScheduledSourceHandler {
   // Detune value (deviating from the frequency) in Cents.
   scoped_refptr<AudioParamHandler> detune_;
 
-  bool first_render_;
+  bool first_render_ = true;
 
   // m_virtualReadIndex is a sample-frame index into our buffer representing the
   // current playback position.  Since it's floating-point, it has sub-sample
   // accuracy.
-  double virtual_read_index_;
+  double virtual_read_index_ = 0;
 
   // Stores sample-accurate values calculated according to frequency and detune.
   AudioFloatArray phase_increments_;

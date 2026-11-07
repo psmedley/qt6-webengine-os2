@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -127,7 +127,8 @@ class BlobURLTest : public testing::Test {
     base::RunLoop run_loop;
     file_system_context_->OpenFileSystem(
         blink::StorageKey::CreateFromStringForTesting(kFileSystemURLOrigin),
-        kFileSystemType, storage::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
+        /*bucket=*/absl::nullopt, kFileSystemType,
+        storage::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
         base::BindOnce(&BlobURLTest::OnValidateFileSystem,
                        base::Unretained(this), run_loop.QuitClosure()));
     run_loop.Run();
@@ -147,7 +148,7 @@ class BlobURLTest : public testing::Test {
   }
 
   GURL GetFileSystemURL(const std::string& filename) {
-    return GURL(file_system_root_url_.spec() + filename);
+    return GURL(file_system_root_url_.ToGURL().spec() + filename);
   }
 
   void WriteFileSystemFile(const std::string& filename,
@@ -172,7 +173,7 @@ class BlobURLTest : public testing::Test {
   }
 
   void OnValidateFileSystem(base::OnceClosure quit_closure,
-                            const GURL& root,
+                            const storage::FileSystemURL& root,
                             const std::string& name,
                             base::File::Error result) {
     ASSERT_EQ(base::File::FILE_OK, result);
@@ -194,19 +195,21 @@ class BlobURLTest : public testing::Test {
     expected_error_code_ = expected_error_code;
     expected_response_ = "";
     TestRequest("GET", net::HttpRequestHeaders());
-    EXPECT_TRUE(response_metadata_.empty());
+    EXPECT_FALSE(response_metadata_.has_value());
   }
 
   void TestRequest(const std::string& method,
                    const net::HttpRequestHeaders& extra_headers) {
     auto origin = url::Origin::Create(GURL("https://example.com"));
+    auto storage_key = blink::StorageKey(origin);
     auto url = GURL("blob:" + origin.Serialize() + "/id1");
     network::ResourceRequest request;
     request.url = url;
     request.method = method;
     request.headers = extra_headers;
 
-    storage::BlobURLStoreImpl url_store(origin, blob_url_registry_.AsWeakPtr());
+    storage::BlobURLStoreImpl url_store(storage_key,
+                                        blob_url_registry_.AsWeakPtr());
 
     mojo::PendingRemote<blink::mojom::Blob> blob_remote;
     storage::BlobImpl::Create(
@@ -329,7 +332,7 @@ class BlobURLTest : public testing::Test {
   base::FilePath temp_file2_;
   base::Time temp_file_modification_time1_;
   base::Time temp_file_modification_time2_;
-  GURL file_system_root_url_;
+  storage::FileSystemURL file_system_root_url_;
   GURL temp_file_system_file1_;
   GURL temp_file_system_file2_;
   base::Time temp_file_system_file_modification_time1_;
@@ -348,7 +351,7 @@ class BlobURLTest : public testing::Test {
   std::string response_;
   int response_error_code_;
   scoped_refptr<net::HttpResponseHeaders> response_headers_;
-  std::string response_metadata_;
+  absl::optional<std::string> response_metadata_;
 
   int expected_error_code_;
   int expected_status_code_;
@@ -494,7 +497,7 @@ TEST_F(BlobURLTest, TestGetRangeRequest1) {
   TestRequest("GET", extra_headers);
 
   EXPECT_EQ(6, response_headers_->GetContentLength());
-  EXPECT_TRUE(response_metadata_.empty());
+  EXPECT_FALSE(response_metadata_.has_value());
 
   int64_t first = 0, last = 0, length = 0;
   EXPECT_TRUE(response_headers_->GetContentRangeFor206(&first, &last, &length));
@@ -515,7 +518,7 @@ TEST_F(BlobURLTest, TestGetRangeRequest2) {
   TestRequest("GET", extra_headers);
 
   EXPECT_EQ(10, response_headers_->GetContentLength());
-  EXPECT_TRUE(response_metadata_.empty());
+  EXPECT_FALSE(response_metadata_.has_value());
 
   int64_t total = GetTotalBlobLength();
   int64_t first = 0, last = 0, length = 0;
@@ -537,7 +540,7 @@ TEST_F(BlobURLTest, TestGetRangeRequest3) {
   TestRequest("GET", extra_headers);
 
   EXPECT_EQ(3, response_headers_->GetContentLength());
-  EXPECT_TRUE(response_metadata_.empty());
+  EXPECT_FALSE(response_metadata_.has_value());
 
   int64_t first = 0, last = 0, length = 0;
   EXPECT_TRUE(response_headers_->GetContentRangeFor206(&first, &last, &length));
@@ -557,7 +560,7 @@ TEST_F(BlobURLTest, TestExtraHeaders) {
   std::string content_type;
   EXPECT_TRUE(response_headers_->GetMimeType(&content_type));
   EXPECT_EQ(kTestContentType, content_type);
-  EXPECT_TRUE(response_metadata_.empty());
+  EXPECT_FALSE(response_metadata_.has_value());
   size_t iter = 0;
   std::string content_disposition;
   EXPECT_TRUE(response_headers_->EnumerateHeader(&iter, "Content-Disposition",
@@ -575,7 +578,7 @@ TEST_F(BlobURLTest, TestSideData) {
   EXPECT_EQ(static_cast<int>(std::size(kTestDataHandleData2) - 1),
             response_headers_->GetContentLength());
 
-  EXPECT_EQ(std::string(kTestDiskCacheSideData), response_metadata_);
+  EXPECT_EQ(std::string(kTestDiskCacheSideData), *response_metadata_);
 }
 
 TEST_F(BlobURLTest, TestZeroSizeSideData) {
@@ -588,7 +591,7 @@ TEST_F(BlobURLTest, TestZeroSizeSideData) {
   EXPECT_EQ(static_cast<int>(std::size(kTestDataHandleData2) - 1),
             response_headers_->GetContentLength());
 
-  EXPECT_TRUE(response_metadata_.empty());
+  EXPECT_FALSE(response_metadata_.has_value());
 }
 
 TEST_F(BlobURLTest, BrokenBlob) {

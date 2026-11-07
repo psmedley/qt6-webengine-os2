@@ -1,11 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/loader/resource_load_observer_for_frame.h"
 
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
+#include "base/types/optional_util.h"
 #include "components/power_scheduler/power_mode_arbiter.h"
 #include "services/network/public/cpp/cors/cors_error_status.h"
 #include "services/network/public/mojom/cors.mojom-forward.h"
@@ -106,12 +106,12 @@ ResourceLoadObserverForFrame::ResourceLoadObserverForFrame(
     DocumentLoader& loader,
     Document& document,
     const ResourceFetcherProperties& fetcher_properties)
-    : document_loader_(loader),
-      document_(document),
-      fetcher_properties_(fetcher_properties),
-      power_mode_voter_(
+    : power_mode_voter_(
           power_scheduler::PowerModeArbiter::GetInstance()->NewVoter(
-              "PowerModeVoter.ResourceLoads")) {}
+              "PowerModeVoter.ResourceLoads")),
+      document_loader_(loader),
+      document_(document),
+      fetcher_properties_(fetcher_properties) {}
 ResourceLoadObserverForFrame::~ResourceLoadObserverForFrame() = default;
 
 void ResourceLoadObserverForFrame::DidStartRequest(
@@ -144,7 +144,8 @@ void ResourceLoadObserverForFrame::WillSendRequest(
     const ResourceResponse& redirect_response,
     ResourceType resource_type,
     const ResourceLoaderOptions& options,
-    RenderBlockingBehavior render_blocking_behavior) {
+    RenderBlockingBehavior render_blocking_behavior,
+    const Resource* resource) {
   LocalFrame* frame = document_->GetFrame();
   DCHECK(frame);
   if (redirect_response.IsNull()) {
@@ -154,8 +155,14 @@ void ResourceLoadObserverForFrame::WillSendRequest(
                                                 request.Priority());
   }
 
-  frame->GetAttributionSrcLoader()->MaybeRegisterTrigger(request,
-                                                         redirect_response);
+  if (!redirect_response.IsNull() &&
+      !redirect_response.HttpHeaderField(http_names::kExpectCT).empty()) {
+    Deprecation::CountDeprecation(frame->DomWindow(),
+                                  mojom::blink::WebFeature::kExpectCTHeader);
+  }
+
+  frame->GetAttributionSrcLoader()->MaybeRegisterAttributionHeaders(
+      request, redirect_response, resource);
 
   probe::WillSendRequest(
       GetProbe(), document_loader_,
@@ -261,6 +268,14 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
 
   RecordAddressSpaceFeature(frame, response);
 
+  if (!response.HttpHeaderField(http_names::kExpectCT).empty()) {
+    Deprecation::CountDeprecation(frame->DomWindow(),
+                                  mojom::blink::WebFeature::kExpectCTHeader);
+  }
+
+  document_->Loader()->MaybeRecordServiceWorkerFallbackMainResource(
+      response.WasFetchedViaServiceWorker());
+
   std::unique_ptr<AlternateSignedExchangeResourceInfo> alternate_resource_info;
 
   // See if this is a prefetch for a SXG.
@@ -268,9 +283,7 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
       resource->GetType() == ResourceType::kLinkPrefetch) {
     CountUsage(WebFeature::kLinkRelPrefetchForSignedExchanges);
 
-    if (RuntimeEnabledFeatures::SignedExchangeSubresourcePrefetchEnabled(
-            document_->GetExecutionContext()) &&
-        resource->RedirectChainSize() > 0) {
+    if (resource->RedirectChainSize() > 0) {
       // See if the outer response (which must be the last response in
       // the redirect chain) had provided alternate links for the prefetch.
       alternate_resource_info =
@@ -292,7 +305,7 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
       response.HttpHeaderField(http_names::kLink), response.CurrentRequestUrl(),
       *frame, document_, resource_loading_policy, PreloadHelper::kLoadAll,
       nullptr /* viewport_description */, std::move(alternate_resource_info),
-      base::OptionalOrNullptr(response.RecursivePrefetchToken()));
+      base::OptionalToPtr(response.RecursivePrefetchToken()));
 
   if (response.HasMajorCertificateErrors()) {
     MixedContentChecker::HandleCertificateError(
@@ -307,7 +320,8 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
         resource->GetResourceRequest().IsAdResource());
   }
 
-  frame->GetAttributionSrcLoader()->MaybeRegisterTrigger(request, response);
+  frame->GetAttributionSrcLoader()->MaybeRegisterAttributionHeaders(
+      request, response, resource);
 
   frame->Loader().Progress().IncrementProgress(identifier, response);
   probe::DidReceiveResourceResponse(GetProbe(), identifier, document_loader_,
@@ -315,6 +329,8 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
   // It is essential that inspector gets resource response BEFORE console.
   frame->Console().ReportResourceResponseReceived(document_loader_, identifier,
                                                   response);
+
+  document_->CheckPartitionedCookiesOriginTrial(response);
 }
 
 void ResourceLoadObserverForFrame::DidReceiveData(

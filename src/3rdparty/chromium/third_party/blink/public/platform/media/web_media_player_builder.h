@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "cc/layers/surface_layer.h"
+#include "media/base/media_player_logging_id.h"
 #include "media/base/routing_token_callback.h"
 #include "media/mojo/mojom/media_metrics_provider.mojom-forward.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -74,6 +75,7 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerBuilder {
       UrlIndex* url_index,
       std::unique_ptr<VideoFrameCompositor> compositor,
       std::unique_ptr<media::MediaLog> media_log,
+      media::MediaPlayerLoggingID player_id,
       DeferLoadCB defer_load_cb,
       scoped_refptr<media::SwitchableAudioRendererSink> audio_renderer_sink,
       scoped_refptr<base::SingleThreadTaskRunner> media_task_runner,
@@ -90,7 +92,7 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerBuilder {
       mojo::PendingRemote<media::mojom::MediaMetricsProvider> metrics_provider,
       CreateSurfaceLayerBridgeCB create_bridge_callback,
       scoped_refptr<viz::RasterContextProvider> raster_context_provider,
-      WebMediaPlayer::SurfaceLayerMode use_surface_layer_for_video,
+      bool use_surface_layer_for_video,
       bool is_background_suspend_enabled,
       bool is_background_video_playback_enabled,
       bool is_background_video_track_optimization_supported,

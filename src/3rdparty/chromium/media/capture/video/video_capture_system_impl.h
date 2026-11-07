@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,8 @@ class CAPTURE_EXPORT VideoCaptureSystemImpl : public VideoCaptureSystem {
 
   void GetDeviceInfosAsync(DeviceInfoCallback result_callback) override;
   VideoCaptureErrorOrDevice CreateDevice(const std::string& device_id) override;
+
+  VideoCaptureDeviceFactory* GetFactory() override;
 
  private:
   using DeviceEnumQueue = std::list<DeviceInfoCallback>;

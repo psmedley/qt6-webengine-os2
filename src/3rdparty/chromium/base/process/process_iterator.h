@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -117,8 +117,14 @@ class BASE_EXPORT ProcessIterator {
 #elif BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_BSD)
   std::vector<kinfo_proc> kinfo_procs_;
   size_t index_of_kinfo_proc_;
-#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
-  raw_ptr<DIR> procfs_dir_;
+#elif BUILDFLAG(IS_POSIX)
+  struct DIRClose {
+    inline void operator()(DIR* x) const {
+      if (x)
+        closedir(x);
+    }
+  };
+  std::unique_ptr<DIR, DIRClose> procfs_dir_;
 #endif
   ProcessEntry entry_;
   raw_ptr<const ProcessFilter> filter_;

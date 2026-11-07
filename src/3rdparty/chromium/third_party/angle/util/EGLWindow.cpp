@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "common/system_utils.h"
+#include "platform/Feature.h"
 #include "platform/PlatformMethods.h"
 #include "util/OSWindow.h"
 
@@ -36,6 +37,7 @@ ConfigParameters::ConfigParameters()
       bindGeneratesResource(true),
       clientArraysEnabled(true),
       robustAccess(false),
+      mutableRenderBuffer(false),
       samples(-1),
       resetStrategy(EGL_NO_RESET_NOTIFICATION_EXT),
       colorSpace(EGL_COLORSPACE_LINEAR),
@@ -50,22 +52,33 @@ void ConfigParameters::reset()
 }
 
 // GLWindowBase implementation.
-GLWindowBase::GLWindowBase(EGLint glesMajorVersion, EGLint glesMinorVersion)
-    : mClientMajorVersion(glesMajorVersion), mClientMinorVersion(glesMinorVersion)
+GLWindowBase::GLWindowBase(EGLenum clientType,
+                           GLint glesMajorVersion,
+                           EGLint glesMinorVersion,
+                           EGLint profileMask)
+    : mClientType(clientType),
+      mClientMajorVersion(glesMajorVersion),
+      mClientMinorVersion(glesMinorVersion),
+      mProfileMask(profileMask)
 {}
 
 GLWindowBase::~GLWindowBase() = default;
 
 // EGLWindow implementation.
-EGLWindow::EGLWindow(EGLint glesMajorVersion, EGLint glesMinorVersion)
-    : GLWindowBase(glesMajorVersion, glesMinorVersion),
+EGLWindow::EGLWindow(EGLenum clientType,
+                     EGLint glesMajorVersion,
+                     EGLint glesMinorVersion,
+                     EGLint profileMask)
+    : GLWindowBase(clientType, glesMajorVersion, glesMinorVersion, profileMask),
       mConfig(0),
       mDisplay(EGL_NO_DISPLAY),
       mSurface(EGL_NO_SURFACE),
       mContext(EGL_NO_CONTEXT),
       mEGLMajorVersion(0),
       mEGLMinorVersion(0)
-{}
+{
+    std::fill(mFeatures.begin(), mFeatures.end(), ANGLEFeatureStatus::Unknown);
+}
 
 EGLWindow::~EGLWindow()
 {
@@ -149,7 +162,7 @@ bool EGLWindow::initializeDisplay(OSWindow *osWindow,
     }
 
     // Likely we will need to use a fallback to Library::getAs on non-ANGLE platforms.
-    angle::LoadEGL(getProcAddress);
+    LoadUtilEGL(getProcAddress);
 #endif  // defined(ANGLE_USE_UTIL_LOADER)
 
     const char *extensionString =
@@ -274,6 +287,8 @@ bool EGLWindow::initializeDisplay(OSWindow *osWindow,
         return false;
     }
 
+    queryFeatures();
+
     mPlatform = params;
     return true;
 }
@@ -285,9 +300,18 @@ GLWindowResult EGLWindow::initializeSurface(OSWindow *osWindow,
     mConfigParams                 = params;
     const char *displayExtensions = eglQueryString(mDisplay, EGL_EXTENSIONS);
 
+    bool hasMutableRenderBuffer =
+        strstr(displayExtensions, "EGL_KHR_mutable_render_buffer") != nullptr;
+    if (mConfigParams.mutableRenderBuffer && !hasMutableRenderBuffer)
+    {
+        fprintf(stderr, "Mising EGL_KHR_mutable_render_buffer.\n");
+        destroyGL();
+        return GLWindowResult::NoMutableRenderBufferSupport;
+    }
+
     std::vector<EGLint> configAttributes = {
         EGL_SURFACE_TYPE,
-        EGL_WINDOW_BIT,
+        EGL_WINDOW_BIT | (params.mutableRenderBuffer ? EGL_MUTABLE_RENDER_BUFFER_BIT_KHR : 0),
         EGL_RED_SIZE,
         (mConfigParams.redBits >= 0) ? mConfigParams.redBits : EGL_DONT_CARE,
         EGL_GREEN_SIZE,
@@ -389,7 +413,7 @@ GLWindowResult EGLWindow::initializeSurface(OSWindow *osWindow,
     }
 
 #if defined(ANGLE_USE_UTIL_LOADER)
-    angle::LoadGLES(eglGetProcAddress);
+    LoadUtilGLES(eglGetProcAddress);
 #endif  // defined(ANGLE_USE_UTIL_LOADER)
 
     return GLWindowResult::NoError;
@@ -485,7 +509,7 @@ EGLContext EGLWindow::createContext(EGLContext share, EGLint *extraAttributes)
         return EGL_NO_CONTEXT;
     }
 
-    eglBindAPI(EGL_OPENGL_ES_API);
+    eglBindAPI(mClientType);
     if (eglGetError() != EGL_SUCCESS)
     {
         fprintf(stderr, "Error on eglBindAPI.\n");
@@ -507,6 +531,12 @@ EGLContext EGLWindow::createContext(EGLContext share, EGLint *extraAttributes)
 
         contextAttributes.push_back(EGL_CONTEXT_MINOR_VERSION_KHR);
         contextAttributes.push_back(mClientMinorVersion);
+
+        if (mProfileMask != 0)
+        {
+            contextAttributes.push_back(EGL_CONTEXT_OPENGL_PROFILE_MASK);
+            contextAttributes.push_back(mProfileMask);
+        }
 
         // Note that the Android loader currently doesn't handle this flag despite reporting 1.5.
         // Work around this by only using the debug bit when we request a debug context.
@@ -707,19 +737,87 @@ bool EGLWindow::makeCurrent()
     return makeCurrent(mContext);
 }
 
-bool EGLWindow::makeCurrent(EGLContext context)
+EGLWindow::Image EGLWindow::createImage(GLWindowContext context,
+                                        Enum target,
+                                        ClientBuffer buffer,
+                                        const Attrib *attrib_list)
 {
+    return eglCreateImage(getDisplay(), context, target, buffer, attrib_list);
+}
+
+EGLWindow::Image EGLWindow::createImageKHR(GLWindowContext context,
+                                           Enum target,
+                                           ClientBuffer buffer,
+                                           const AttribKHR *attrib_list)
+{
+    return eglCreateImageKHR(getDisplay(), context, target, buffer, attrib_list);
+}
+
+EGLBoolean EGLWindow::destroyImage(Image image)
+{
+    return eglDestroyImage(getDisplay(), image);
+}
+
+EGLBoolean EGLWindow::destroyImageKHR(Image image)
+{
+    return eglDestroyImageKHR(getDisplay(), image);
+}
+
+GLWindowBase::Surface EGLWindow::createPbufferSurface(const EGLint *attrib_list)
+{
+    return eglCreatePbufferSurface(getDisplay(), getConfig(), attrib_list);
+}
+
+EGLBoolean EGLWindow::destroySurface(Surface surface)
+{
+    return eglDestroySurface(getDisplay(), surface);
+}
+
+EGLBoolean EGLWindow::bindTexImage(EGLSurface surface, EGLint buffer)
+{
+    return eglBindTexImage(getDisplay(), surface, buffer);
+}
+
+EGLBoolean EGLWindow::releaseTexImage(EGLSurface surface, EGLint buffer)
+{
+    return eglReleaseTexImage(getDisplay(), surface, buffer);
+}
+
+bool EGLWindow::makeCurrent(EGLSurface draw, EGLSurface read, EGLContext context)
+{
+    if ((draw && !read) || (!draw && read))
+    {
+        fprintf(stderr, "eglMakeCurrent: setting only one of draw and read buffer is illegal\n");
+        return false;
+    }
+
+    // if the draw buffer is a nullptr and a context is given, then we use mSurface,
+    // because we didn't add this the gSurfaceMap, and it is the most likely
+    // case that we actually wanted the default surface here.
+    // TODO: This will need additional work when we want to support capture/replay
+    // with a sourfaceless context.
+    //
+    // If no context is given then we also don't assign a surface
+    if (!draw)
+    {
+        draw = read = context != EGL_NO_CONTEXT ? mSurface : EGL_NO_SURFACE;
+    }
+
     if (isGLInitialized())
     {
-        if (eglMakeCurrent(mDisplay, mSurface, mSurface, context) == EGL_FALSE ||
+        if (eglMakeCurrent(mDisplay, draw, read, context) == EGL_FALSE ||
             eglGetError() != EGL_SUCCESS)
         {
             fprintf(stderr, "Error during eglMakeCurrent.\n");
             return false;
         }
     }
-
     return true;
+}
+
+bool EGLWindow::makeCurrent(EGLContext context)
+{
+    return makeCurrent(mSurface, mSurface, context);
 }
 
 bool EGLWindow::setSwapInterval(EGLint swapInterval)
@@ -751,9 +849,12 @@ void GLWindowBase::Delete(GLWindowBase **window)
 }
 
 // static
-EGLWindow *EGLWindow::New(EGLint glesMajorVersion, EGLint glesMinorVersion)
+EGLWindow *EGLWindow::New(EGLenum clientType,
+                          EGLint glesMajorVersion,
+                          EGLint glesMinorVersion,
+                          EGLint profileMask)
 {
-    return new EGLWindow(glesMajorVersion, glesMinorVersion);
+    return new EGLWindow(clientType, glesMajorVersion, glesMinorVersion, profileMask);
 }
 
 // static
@@ -761,4 +862,47 @@ void EGLWindow::Delete(EGLWindow **window)
 {
     delete *window;
     *window = nullptr;
+}
+
+void EGLWindow::queryFeatures()
+{
+    const char *extensionString =
+        static_cast<const char *>(eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS));
+    const bool hasFeatureControlANGLE =
+        strstr(extensionString, "EGL_ANGLE_feature_control") != nullptr;
+
+    if (!hasFeatureControlANGLE)
+    {
+        return;
+    }
+
+    angle::HashMap<std::string, angle::Feature> featureFromName;
+    for (angle::Feature feature : angle::AllEnums<angle::Feature>())
+    {
+        featureFromName[angle::GetFeatureName(feature)] = feature;
+    }
+
+    EGLAttrib featureCount = -1;
+    eglQueryDisplayAttribANGLE(mDisplay, EGL_FEATURE_COUNT_ANGLE, &featureCount);
+
+    for (int index = 0; index < featureCount; index++)
+    {
+        const char *featureName   = eglQueryStringiANGLE(mDisplay, EGL_FEATURE_NAME_ANGLE, index);
+        const char *featureStatus = eglQueryStringiANGLE(mDisplay, EGL_FEATURE_STATUS_ANGLE, index);
+        ASSERT(featureName != nullptr);
+        ASSERT(featureStatus != nullptr);
+
+        const angle::Feature feature = featureFromName[featureName];
+
+        const bool isEnabled  = strcmp(featureStatus, angle::kFeatureStatusEnabled) == 0;
+        const bool isDisabled = strcmp(featureStatus, angle::kFeatureStatusDisabled) == 0;
+        ASSERT(isEnabled || isDisabled);
+
+        mFeatures[feature] = isEnabled ? ANGLEFeatureStatus::Enabled : ANGLEFeatureStatus::Disabled;
+    }
+}
+
+bool EGLWindow::isFeatureEnabled(angle::Feature feature)
+{
+    return mFeatures[feature] == ANGLEFeatureStatus::Enabled;
 }

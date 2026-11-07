@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,10 @@
 #include "base/memory/weak_ptr.h"
 #include "components/autofill_assistant/browser/public/runtime_observer.h"
 #include "components/autofill_assistant/browser/public/ui_state.h"
-#include "content/public/browser/web_contents.h"
+
+namespace content {
+class WebContents;
+}  // namespace content
 
 namespace autofill_assistant {
 // Notifies subscribed observers when the UI state changes.

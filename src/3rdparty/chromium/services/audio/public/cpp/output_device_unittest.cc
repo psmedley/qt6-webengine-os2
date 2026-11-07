@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,7 @@
 #include "services/audio/sync_reader.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/utility/utility.h"
 
 using testing::_;
 using testing::Invoke;
@@ -58,7 +59,7 @@ class MockRenderCallback : public media::AudioRendererSink::RenderCallback {
                    base::TimeTicks timestamp,
                    int prior_frames_skipped,
                    media::AudioBus* dest));
-  void OnRenderError() {}
+  void OnRenderError() override {}
 };
 
 class MockStream : public media::mojom::AudioOutputStream {
@@ -224,7 +225,7 @@ TEST_F(AudioServiceOutputDeviceTest, MAYBE_VerifyDataFlow) {
   task_env_.RunUntilIdle();
 
   std::move(stream_factory_->created_callback_)
-      .Run({base::in_place, env.reader->TakeSharedMemoryRegion(),
+      .Run({absl::in_place, env.reader->TakeSharedMemoryRegion(),
             mojo::PlatformHandle(env.client_socket.Take())});
   task_env_.RunUntilIdle();
 
@@ -244,7 +245,7 @@ TEST_F(AudioServiceOutputDeviceTest, MAYBE_VerifyDataFlow) {
           return client_bus->frames();
         })));
     env.reader->RequestMoreData(kDelay, env.time_stamp, kFramesSkipped);
-    env.reader->Read(test_bus.get());
+    env.reader->Read(test_bus.get(), false);
 
     Mock::VerifyAndClear(&env.render_callback);
     for (int frame = 0; frame < kFrames; ++frame) {
@@ -257,7 +258,7 @@ TEST_F(AudioServiceOutputDeviceTest, MAYBE_VerifyDataFlow) {
 TEST_F(AudioServiceOutputDeviceTest, CreateBitStreamStream) {
   const int kAudioParameterFrames = 4321;
   media::AudioParameters params(media::AudioParameters::AUDIO_BITSTREAM_EAC3,
-                                media::CHANNEL_LAYOUT_STEREO, 48000,
+                                media::ChannelLayoutConfig::Stereo(), 48000,
                                 kAudioParameterFrames);
 
   DataFlowTestEnvironment env(params);
@@ -303,7 +304,7 @@ TEST_F(AudioServiceOutputDeviceTest, CreateBitStreamStream) {
           return renderer_bus->frames();
         })));
     env.reader->RequestMoreData(kDelay, env.time_stamp, kFramesSkipped);
-    env.reader->Read(test_bus.get());
+    env.reader->Read(test_bus.get(), false);
 
     Mock::VerifyAndClear(&env.render_callback);
     EXPECT_TRUE(test_bus->is_bitstream_format());

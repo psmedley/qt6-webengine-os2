@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -149,7 +149,7 @@ class MediaRouterAndroid : public MediaRouterBase {
   void OnRouteRequestError(
       const std::string& error_text,
       int route_request_id,
-      base::OnceCallback<void(RouteRequestResult::ResultCode,
+      base::OnceCallback<void(mojom::RouteRequestResultCode,
                               absl::optional<mojom::MediaRouteProviderId>)>
           callback);
 

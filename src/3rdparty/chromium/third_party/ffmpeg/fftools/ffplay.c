@@ -1011,15 +1011,17 @@ static void video_image_display(VideoState *is)
     }
 
     calculate_display_rect(&rect, is->xleft, is->ytop, is->width, is->height, vp->width, vp->height, vp->sar);
+    set_sdl_yuv_conversion_mode(vp->frame);
 
     if (!vp->uploaded) {
-        if (upload_texture(&is->vid_texture, vp->frame, &is->img_convert_ctx) < 0)
+        if (upload_texture(&is->vid_texture, vp->frame, &is->img_convert_ctx) < 0) {
+            set_sdl_yuv_conversion_mode(NULL);
             return;
+        }
         vp->uploaded = 1;
         vp->flip_v = vp->frame->linesize[0] < 0;
     }
 
-    set_sdl_yuv_conversion_mode(vp->frame);
     SDL_RenderCopyEx(renderer, is->vid_texture, NULL, &rect, 0, NULL, vp->flip_v ? SDL_FLIP_VERTICAL : 0);
     set_sdl_yuv_conversion_mode(NULL);
     if (sp) {
@@ -1913,8 +1915,14 @@ static int configure_video_filters(AVFilterGraph *graph, VideoState *is, const c
 } while (0)
 
     if (autorotate) {
-        int32_t *displaymatrix = (int32_t *)av_stream_get_side_data(is->video_st, AV_PKT_DATA_DISPLAYMATRIX, NULL);
-        double theta = get_rotation(displaymatrix);
+        double theta = 0.0;
+        int32_t *displaymatrix = NULL;
+        AVFrameSideData *sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DISPLAYMATRIX);
+        if (sd)
+            displaymatrix = (int32_t *)sd->data;
+        if (!displaymatrix)
+            displaymatrix = (int32_t *)av_stream_get_side_data(is->video_st, AV_PKT_DATA_DISPLAYMATRIX, NULL);
+        theta = get_rotation(displaymatrix);
 
         if (fabs(theta - 90) < 1.0) {
             INSERT_FILT("transpose", "clock");

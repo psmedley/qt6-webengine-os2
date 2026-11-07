@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,20 +8,21 @@
  *    imported.
  *  - edit the trust level of an already existing certificate authority.
  */
-import '../../cr_elements/cr_button/cr_button.m.js';
-import '../../cr_elements/cr_checkbox/cr_checkbox.m.js';
-import '../../cr_elements/cr_dialog/cr_dialog.m.js';
+import '../../cr_elements/cr_button/cr_button.js';
+import '../../cr_elements/cr_checkbox/cr_checkbox.js';
+import '../../cr_elements/cr_dialog/cr_dialog.js';
 import 'chrome://resources/polymer/v3_0/paper-spinner/paper-spinner-lite.js';
-import './certificate_shared_css.js';
+import './certificate_shared.css.js';
 
 import {PaperSpinnerLiteElement} from 'chrome://resources/polymer/v3_0/paper-spinner/paper-spinner-lite.js';
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {CrCheckboxElement} from '../../cr_elements/cr_checkbox/cr_checkbox.m.js';
-import {CrDialogElement} from '../../cr_elements/cr_dialog/cr_dialog.m.js';
-import {I18nMixin} from '../../js/i18n_mixin.js';
+import {CrCheckboxElement} from '../../cr_elements/cr_checkbox/cr_checkbox.js';
+import {CrDialogElement} from '../../cr_elements/cr_dialog/cr_dialog.js';
+import {I18nMixin} from '../../cr_elements/i18n_mixin.js';
 import {loadTimeData} from '../../js/load_time_data.m.js';
 
+import {getTemplate} from './ca_trust_edit_dialog.html.js';
 import {CaTrustInfo, CertificatesBrowserProxy, CertificatesBrowserProxyImpl, CertificateSubnode, NewCertificateSubNode} from './certificates_browser_proxy.js';
 
 export interface CaTrustEditDialogElement {
@@ -43,7 +44,7 @@ export class CaTrustEditDialogElement extends CaTrustEditDialogElementBase {
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   static get properties() {

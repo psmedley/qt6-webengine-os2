@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,12 +54,6 @@ bool FormatSupportChecker::Initialize() {
 
   if (!SUCCEEDED(enumerator_->CheckVideoProcessorFormat(example, &unneeded)))
     return false;
-
-  D3D11_VIDEO_PROCESSOR_CAPS caps = {0};
-  if (SUCCEEDED(enumerator_->GetVideoProcessorCaps(&caps))) {
-    supports_tone_mapping_ =
-        caps.FeatureCaps & D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_METADATA_HDR10;
-  }
 
   initialized_ = true;
   return true;

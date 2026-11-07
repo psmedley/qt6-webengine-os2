@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -126,8 +126,6 @@ class WebRequestAction : public base::RefCounted<WebRequestAction> {
   // Sets |error| and returns NULL in case of a semantic error that cannot
   // be caught by schema validation. Sets |bad_message| and returns NULL
   // in case the input is syntactically unexpected.
-  // TODO(crbug.com/1315843): Migrate const base::Value& to const
-  // base::Value::Dict&
   static scoped_refptr<const WebRequestAction> Create(
       content::BrowserContext* browser_context,
       const Extension* extension,

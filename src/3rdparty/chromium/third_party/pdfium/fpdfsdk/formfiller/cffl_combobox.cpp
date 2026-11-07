@@ -21,9 +21,6 @@ CFFL_ComboBox::CFFL_ComboBox(CFFL_InteractiveFormFiller* pFormFiller,
     : CFFL_TextObject(pFormFiller, pWidget) {}
 
 CFFL_ComboBox::~CFFL_ComboBox() {
-  for (const auto& it : m_Maps)
-    it.second->InvalidateFocusHandler(this);
-
   // See comment in cffl_formfiller.h.
   // The font map should be stored somewhere more appropriate so it will live
   // until the PWL_Edit is done with it. pdfium:566
@@ -36,17 +33,15 @@ CPWL_Wnd::CreateParams CFFL_ComboBox::GetCreateParam() {
     cp.dwFlags |= PCBS_ALLOWCUSTOMTEXT;
 
   cp.pFontMap = GetOrCreateFontMap();
-  cp.pFocusHandler = this;
   return cp;
 }
 
 std::unique_ptr<CPWL_Wnd> CFFL_ComboBox::NewPWLWindow(
     const CPWL_Wnd::CreateParams& cp,
-    std::unique_ptr<IPWL_SystemHandler::PerWindowData> pAttachedData) {
+    std::unique_ptr<IPWL_FillerNotify::PerWindowData> pAttachedData) {
   static_cast<CFFL_PerWindowData*>(pAttachedData.get())->SetFormField(this);
   auto pWnd = std::make_unique<CPWL_ComboBox>(cp, std::move(pAttachedData));
   pWnd->Realize();
-  pWnd->SetFillerNotify(m_pFormFiller.Get());
 
   int32_t nCurSel = m_pWidget->GetSelectedIndex(0);
   WideString swText;
@@ -95,22 +90,25 @@ void CFFL_ComboBox::SaveData(const CPDFSDK_PageView* pPageView) {
   if (m_pWidget->GetFieldFlags() & pdfium::form_flags::kChoiceEdit)
     bSetValue = (nCurSel < 0) || (swText != m_pWidget->GetOptionLabel(nCurSel));
 
+  ObservedPtr<CPDFSDK_Widget> observed_widget(m_pWidget.Get());
   if (bSetValue) {
     m_pWidget->SetValue(swText);
   } else {
     m_pWidget->GetSelectedIndex(0);
     m_pWidget->SetOptionSelection(nCurSel);
   }
-  ObservedPtr<CPDFSDK_Widget> observed_widget(m_pWidget.Get());
+  if (!observed_widget) {
+    return;
+  }
   ObservedPtr<CFFL_ComboBox> observed_this(this);
   m_pWidget->ResetFieldAppearance();
-  if (!observed_widget)
+  if (!observed_widget) {
     return;
-
+  }
   m_pWidget->UpdateField();
-  if (!observed_widget || !observed_this)
+  if (!observed_widget || !observed_this) {
     return;
-
+  }
   SetChangeMark();
 }
 
@@ -237,7 +235,7 @@ bool CFFL_ComboBox::IsFieldFull(const CPDFSDK_PageView* pPageView) {
 }
 #endif  // PDF_ENABLE_XFA
 
-void CFFL_ComboBox::OnSetFocus(CPWL_Edit* pEdit) {
+void CFFL_ComboBox::OnSetFocusForEdit(CPWL_Edit* pEdit) {
   pEdit->SetCharSet(FX_Charset::kChineseSimplified);
   pEdit->SetReadyToInput();
   m_pFormFiller->GetCallbackIface()->OnSetFieldInputFocus(pEdit->GetText());

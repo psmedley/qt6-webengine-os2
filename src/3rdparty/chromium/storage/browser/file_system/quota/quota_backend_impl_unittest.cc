@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 #include "base/bind.h"
 #include "base/check.h"
+#include "base/files/file_error_or.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
@@ -116,7 +117,7 @@ class QuotaBackendImplTest : public testing::Test,
     in_memory_env_ = leveldb_chrome::NewMemEnv("quota");
     file_util_ = ObfuscatedFileUtil::CreateForTesting(
         /*special_storage_policy=*/nullptr, data_dir_.GetPath(),
-        data_dir_.GetPath(), in_memory_env_.get(), is_incognito());
+        in_memory_env_.get(), is_incognito());
     backend_ = std::make_unique<QuotaBackendImpl>(
         file_task_runner(), file_util_.get(), &file_system_usage_cache_,
         quota_manager_proxy_.get());
@@ -137,12 +138,10 @@ class QuotaBackendImplTest : public testing::Test,
     ASSERT_TRUE(file_util_->InitOriginDatabase(origin, true /* create */));
     ASSERT_TRUE(file_util_->origin_database_ != nullptr);
 
-    std::string type_string =
-        SandboxFileSystemBackendDelegate::GetTypeString(type);
-    base::File::Error error = base::File::FILE_ERROR_FAILED;
-    base::FilePath path = file_util_->GetDirectoryForStorageKeyAndType(
-        blink::StorageKey(origin), type_string, true /* create */, &error);
-    ASSERT_EQ(base::File::FILE_OK, error);
+    base::FileErrorOr<base::FilePath> path =
+        file_util_->GetDirectoryForStorageKeyAndType(blink::StorageKey(origin),
+                                                     type, true /* create */);
+    ASSERT_TRUE(path.has_value());
 
     ASSERT_TRUE(file_system_usage_cache_.UpdateUsage(
         GetUsageCachePath(origin, type), 0));
@@ -154,11 +153,11 @@ class QuotaBackendImplTest : public testing::Test,
 
   base::FilePath GetUsageCachePath(const url::Origin& origin,
                                    FileSystemType type) {
-    base::FilePath path;
-    base::File::Error error = backend_->GetUsageCachePath(origin, type, &path);
-    EXPECT_EQ(base::File::FILE_OK, error);
-    EXPECT_FALSE(path.empty());
-    return path;
+    base::FileErrorOr<base::FilePath> path =
+        backend_->GetUsageCachePath(origin, type);
+    EXPECT_TRUE(path.has_value());
+    EXPECT_FALSE(path->empty());
+    return path.value();
   }
 
   base::test::SingleThreadTaskEnvironment task_environment_;

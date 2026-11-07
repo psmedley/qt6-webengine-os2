@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,7 +64,6 @@ class ChromeSigninClient
   std::unique_ptr<GaiaAuthFetcher> CreateGaiaAuthFetcher(
       GaiaAuthConsumer* consumer,
       gaia::GaiaSource source) override;
-  bool IsNonEnterpriseUser(const std::string& username) override;
 
 #if !BUILDFLAG(IS_CHROMEOS_ASH)
   // network::NetworkConnectionTracker::NetworkConnectionObserver
@@ -75,6 +74,7 @@ class ChromeSigninClient
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
   absl::optional<account_manager::Account> GetInitialPrimaryAccount() override;
   absl::optional<bool> IsInitialPrimaryAccountChild() const override;
+  void RemoveAccount(const account_manager::AccountKey& account_key) override;
   void RemoveAllAccounts() override;
 #endif
 

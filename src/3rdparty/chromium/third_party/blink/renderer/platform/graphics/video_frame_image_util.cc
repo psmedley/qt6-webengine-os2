@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,11 +19,13 @@
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 #include "third_party/skia/include/gpu/GrDriverBugWorkarounds.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 
 namespace blink {
 
@@ -150,7 +152,7 @@ scoped_refptr<StaticBitmapImage> CreateImageFromVideoFrame(
         kN32_SkColorType, kUnpremul_SkAlphaType, std::move(sk_color_space));
 
     // Hold a ref by storing it in the release callback.
-    auto release_callback = WTF::Bind(
+    auto release_callback = WTF::BindOnce(
         [](scoped_refptr<media::VideoFrame> frame,
            base::WeakPtr<WebGraphicsContext3DProviderWrapper> context_provider,
            const gpu::SyncToken& sync_token, bool is_lost) {
@@ -176,7 +178,8 @@ scoped_refptr<StaticBitmapImage> CreateImageFromVideoFrame(
         // |is_cross_thread|.
         base::PlatformThreadRef(),
         // The task runner is only used for |release_callback|.
-        Thread::Current()->GetTaskRunner(), std::move(release_callback),
+        Thread::Current()->GetDeprecatedTaskRunner(),
+        std::move(release_callback),
         /*supports_display_compositing=*/true,
         // TODO(junov): Figure out how to determine whether frame is an
         // overlay candidate. StorageType info seems insufficient.
@@ -206,11 +209,15 @@ scoped_refptr<StaticBitmapImage> CreateImageFromVideoFrame(
   }
 
   auto raster_context_provider = GetRasterContextProvider();
-  const auto resource_provider_size = final_dest_rect.size();
+  // TODO(https://crbug.com/1341235): The choice of color type, alpha type,
+  // and color space is inappropriate in many circumstances.
+  const auto resource_provider_info =
+      SkImageInfo::Make(gfx::SizeToSkISize(final_dest_rect.size()),
+                        kN32_SkColorType, kPremul_SkAlphaType, nullptr);
   std::unique_ptr<CanvasResourceProvider> local_resource_provider;
   if (!resource_provider) {
     local_resource_provider = CreateResourceProviderForVideoFrame(
-        resource_provider_size, raster_context_provider.get());
+        resource_provider_info, raster_context_provider.get());
     if (!local_resource_provider) {
       DLOG(ERROR) << "Failed to create CanvasResourceProvider.";
       return nullptr;
@@ -326,22 +333,19 @@ scoped_refptr<viz::RasterContextProvider> GetRasterContextProvider() {
 }
 
 std::unique_ptr<CanvasResourceProvider> CreateResourceProviderForVideoFrame(
-    gfx::Size size,
+    const SkImageInfo& info,
     viz::RasterContextProvider* raster_context_provider) {
   if (!ShouldCreateAcceleratedImages(raster_context_provider)) {
     return CanvasResourceProvider::CreateBitmapProvider(
-        SkImageInfo::MakeN32Premul(size.width(), size.height()),
-        cc::PaintFlags::FilterQuality::kLow,
+        info, cc::PaintFlags::FilterQuality::kLow,
         CanvasResourceProvider::ShouldInitialize::kNo);
   }
-
   return CanvasResourceProvider::CreateSharedImageProvider(
-      SkImageInfo::MakeN32Premul(size.width(), size.height()),
-      cc::PaintFlags::FilterQuality::kLow,
+      info, cc::PaintFlags::FilterQuality::kLow,
       CanvasResourceProvider::ShouldInitialize::kNo,
       SharedGpuContext::ContextProviderWrapper(), RasterMode::kGPU,
       false,  // Origin of GL texture is bottom left on screen
-      gpu::SHARED_IMAGE_USAGE_DISPLAY);
+      gpu::SHARED_IMAGE_USAGE_DISPLAY_READ);
 }
 
 }  // namespace blink

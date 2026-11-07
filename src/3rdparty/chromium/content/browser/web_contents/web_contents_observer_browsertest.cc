@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,7 +55,8 @@ class WebContentsObserverBrowserTest : public ContentBrowserTest {
   }
 
   RenderFrameHostImpl* top_frame_host() {
-    return static_cast<RenderFrameHostImpl*>(web_contents()->GetMainFrame());
+    return static_cast<RenderFrameHostImpl*>(
+        web_contents()->GetPrimaryMainFrame());
   }
 
   base::test::ScopedFeatureList feature_list_;

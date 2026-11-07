@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
@@ -70,7 +71,7 @@ class TestLockRequest : public blink::mojom::LockRequest {
   bool AbortCalled() const { return aborted_; }
 
  private:
-  mojo::PendingAssociatedRemote<blink::mojom::LockHandle>* remote_;
+  raw_ptr<mojo::PendingAssociatedRemote<blink::mojom::LockHandle>> remote_;
   mojo::AssociatedReceiver<blink::mojom::LockRequest> receiver_;
   base::RunLoop run_loop_;
   bool failed_ = false;

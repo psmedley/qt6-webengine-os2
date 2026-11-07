@@ -23,7 +23,7 @@
 #include "libavutil/log.h"
 #include "avcodec.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 
 
 #define SIN_BITS 14
@@ -413,11 +413,10 @@ static void wavesynth_enter_intervals(struct wavesynth_context *ws, int64_t ts)
     *last = -1;
 }
 
-static int wavesynth_decode(AVCodecContext *avc, void *rframe, int *rgot_frame,
-                            AVPacket *packet)
+static int wavesynth_decode(AVCodecContext *avc, AVFrame *frame,
+                            int *rgot_frame, AVPacket *packet)
 {
     struct wavesynth_context *ws = avc->priv_data;
-    AVFrame *frame = rframe;
     int64_t ts;
     int duration;
     int s, c, r;
@@ -462,13 +461,13 @@ static av_cold int wavesynth_close(AVCodecContext *avc)
 
 const FFCodec ff_ffwavesynth_decoder = {
     .p.name         = "wavesynth",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Wave synthesis pseudo-codec"),
+    CODEC_LONG_NAME("Wave synthesis pseudo-codec"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_FFWAVESYNTH,
     .priv_data_size = sizeof(struct wavesynth_context),
     .init           = wavesynth_init,
     .close          = wavesynth_close,
-    .decode         = wavesynth_decode,
+    FF_CODEC_DECODE_CB(wavesynth_decode),
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

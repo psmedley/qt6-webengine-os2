@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,9 @@
 
 #include "net/base/net_export.h"
 #include "net/der/input.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
-namespace net {
-
-namespace der {
+namespace net::der {
 
 // Reads a DER-encoded ASN.1 BOOLEAN value from |in| and puts the resulting
 // value in |out|. Returns whether the encoded value could successfully be
@@ -52,7 +51,7 @@ namespace der {
 // * There may be at most 7 unused bits.
 class NET_EXPORT BitString {
  public:
-  BitString() : unused_bits_(0) {}
+  BitString() = default;
 
   // |unused_bits| represents the number of bits in the last octet of |bytes|,
   // starting from the least significant bit, that are unused. It MUST be < 8.
@@ -72,18 +71,17 @@ class NET_EXPORT BitString {
 
  private:
   Input bytes_;
-  uint8_t unused_bits_;
+  uint8_t unused_bits_ = 0;
 
   // Default assignment and copy constructor are OK.
 };
 
-// Reads a DER-encoded ASN.1 BIT STRING value from |in| and puts the resulting
-// octet string and number of unused bits into |bit_string|
+// Reads a DER-encoded ASN.1 BIT STRING value from |in| and returns the
+// resulting octet string and number of unused bits.
 //
-// Returns true on success, otherwise returns false and does not modify the
-// out-parameters.
-[[nodiscard]] NET_EXPORT bool ParseBitString(const Input& in,
-                                             BitString* bit_string);
+// On failure, returns absl::nullopt.
+[[nodiscard]] NET_EXPORT absl::optional<BitString> ParseBitString(
+    const Input& in);
 
 struct NET_EXPORT GeneralizedTime {
   uint16_t year;
@@ -110,13 +108,6 @@ NET_EXPORT_PRIVATE bool operator>=(const GeneralizedTime& lhs,
 // value in |out|, returning true if the UTCTime could be parsed successfully.
 [[nodiscard]] NET_EXPORT bool ParseUTCTime(const Input& in,
                                            GeneralizedTime* out);
-
-// Like ParseUTCTime, but it is more lenient in what is accepted. DER requires
-// a UTCTime to be in the format YYMMDDhhmmssZ; this function will accept both
-// that and YYMMDDhhmmZ, which is a valid BER encoding of a UTCTime which
-// sometimes incorrectly appears in X.509 certificates.
-[[nodiscard]] NET_EXPORT bool ParseUTCTimeRelaxed(const Input& in,
-                                                  GeneralizedTime* out);
 
 // Reads a DER-encoded ASN.1 GeneralizedTime value from |in| and puts the
 // resulting value in |out|, returning true if the GeneralizedTime could
@@ -155,8 +146,6 @@ NET_EXPORT_PRIVATE bool operator>=(const GeneralizedTime& lhs,
 // result in |out| as UTF-8, returning true if successful.
 [[nodiscard]] NET_EXPORT bool ParseBmpString(Input in, std::string* out);
 
-}  // namespace der
-
-}  // namespace net
+}  // namespace net::der
 
 #endif  // NET_DER_PARSE_VALUES_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/ranges/algorithm.h"
 #include "base/token.h"
 #include "build/build_config.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
@@ -24,11 +25,11 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "media/base/video_frame.h"
+#include "media/base/video_types.h"
 #include "media/capture/mojom/video_capture_types.mojom.h"
 #include "media/capture/video/video_capture_buffer_pool.h"
 #include "media/capture/video/video_capture_buffer_tracker_factory_impl.h"
 #include "media/capture/video/video_capture_device_client.h"
-#include "mojo/public/cpp/system/platform_handle.h"
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "content/browser/compositor/image_transport_factory.h"
@@ -78,9 +79,17 @@ void LogVideoFrameDrop(media::VideoCaptureFrameDropReason reason,
           "Media.VideoCapture.FrameDrop.DisplayCaptureCurrentTab", reason,
           kEnumCount);
       break;
-    default:
-      // Do nothing
-      return;
+    case blink::mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE_SET:
+      UMA_HISTOGRAM_ENUMERATION(
+          "Media.VideoCapture.FrameDrop.DisplayCaptureSet", reason, kEnumCount);
+      break;
+    case blink::mojom::MediaStreamType::NO_SERVICE:
+    case blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE:
+    case blink::mojom::MediaStreamType::GUM_TAB_AUDIO_CAPTURE:
+    case blink::mojom::MediaStreamType::GUM_DESKTOP_AUDIO_CAPTURE:
+    case blink::mojom::MediaStreamType::DISPLAY_AUDIO_CAPTURE:
+    case blink::mojom::MediaStreamType::NUM_MEDIA_TYPES:
+      break;
   }
 }
 
@@ -117,9 +126,18 @@ void LogMaxConsecutiveVideoFrameDropCountExceeded(
           "Media.VideoCapture.MaxFrameDropExceeded.DisplayCaptureCurrentTab",
           reason, kEnumCount);
       break;
-    default:
-      // Do nothing
-      return;
+    case blink::mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE_SET:
+      UMA_HISTOGRAM_ENUMERATION(
+          "Media.VideoCapture.MaxFrameDropExceeded.DisplayCaptureSet", reason,
+          kEnumCount);
+      break;
+    case blink::mojom::MediaStreamType::NO_SERVICE:
+    case blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE:
+    case blink::mojom::MediaStreamType::GUM_TAB_AUDIO_CAPTURE:
+    case blink::mojom::MediaStreamType::GUM_DESKTOP_AUDIO_CAPTURE:
+    case blink::mojom::MediaStreamType::DISPLAY_AUDIO_CAPTURE:
+    case blink::mojom::MediaStreamType::NUM_MEDIA_TYPES:
+      break;
   }
 }
 
@@ -230,11 +248,7 @@ void VideoCaptureController::BufferContext::DecreaseConsumerCount() {
 
 media::mojom::VideoBufferHandlePtr
 VideoCaptureController::BufferContext::CloneBufferHandle() {
-  // Unable to use buffer_handle_->Clone(), because shared_buffer does not
-  // support the copy constructor.
-  media::mojom::VideoBufferHandlePtr result =
-      media::mojom::VideoBufferHandle::New();
-  if (buffer_handle_->is_shared_buffer_handle()) {
+  if (buffer_handle_->is_unsafe_shmem_region()) {
     // Buffer handles are always writable as they come from
     // VideoCaptureBufferPool which, among other use cases, provides decoder
     // output buffers.
@@ -242,23 +256,21 @@ VideoCaptureController::BufferContext::CloneBufferHandle() {
     // TODO(crbug.com/793446): BroadcastingReceiver::BufferContext also defines
     // CloneBufferHandle and independently decides on handle permissions. The
     // permissions should be coordinated between these two classes.
-    result->set_shared_buffer_handle(
-        buffer_handle_->get_shared_buffer_handle()->Clone(
-            mojo::SharedBufferHandle::AccessMode::READ_WRITE));
-    DCHECK(result->get_shared_buffer_handle()->is_valid());
+    return media::mojom::VideoBufferHandle::NewUnsafeShmemRegion(
+        buffer_handle_->get_unsafe_shmem_region().Duplicate());
   } else if (buffer_handle_->is_read_only_shmem_region()) {
-    result->set_read_only_shmem_region(
+    return media::mojom::VideoBufferHandle::NewReadOnlyShmemRegion(
         buffer_handle_->get_read_only_shmem_region().Duplicate());
-    DCHECK(result->get_read_only_shmem_region().IsValid());
   } else if (buffer_handle_->is_mailbox_handles()) {
-    result->set_mailbox_handles(buffer_handle_->get_mailbox_handles()->Clone());
+    return media::mojom::VideoBufferHandle::NewMailboxHandles(
+        buffer_handle_->get_mailbox_handles()->Clone());
   } else if (buffer_handle_->is_gpu_memory_buffer_handle()) {
-    result->set_gpu_memory_buffer_handle(
+    return media::mojom::VideoBufferHandle::NewGpuMemoryBufferHandle(
         buffer_handle_->get_gpu_memory_buffer_handle().Clone());
   } else {
     NOTREACHED() << "Unexpected video buffer handle type";
+    return media::mojom::VideoBufferHandlePtr();
   }
-  return result;
 }
 
 VideoCaptureController::FrameDropLogState::FrameDropLogState(
@@ -311,7 +323,8 @@ void VideoCaptureController::AddClient(
       !(params.requested_format.pixel_format == media::PIXEL_FORMAT_I420 ||
         params.requested_format.pixel_format == media::PIXEL_FORMAT_Y16 ||
         params.requested_format.pixel_format == media::PIXEL_FORMAT_ARGB ||
-        params.requested_format.pixel_format == media::PIXEL_FORMAT_NV12)) {
+        params.requested_format.pixel_format == media::PIXEL_FORMAT_NV12 ||
+        params.requested_format.pixel_format == media::PIXEL_FORMAT_UNKNOWN)) {
     // Crash in debug builds since the renderer should not have asked for
     // invalid or unsupported parameters.
     LOG(DFATAL) << "Invalid or unsupported video capture parameters requested: "
@@ -470,8 +483,7 @@ void VideoCaptureController::ReturnBuffer(
     return;
   }
   auto buffers_in_use_entry_iter =
-      std::find(std::begin(client->buffers_in_use),
-                std::end(client->buffers_in_use), buffer_id);
+      base::ranges::find(client->buffers_in_use, buffer_id);
   if (buffers_in_use_entry_iter == std::end(client->buffers_in_use)) {
     NOTREACHED();
     return;
@@ -660,6 +672,18 @@ void VideoCaptureController::OnFrameDropped(
   LogVideoFrameDrop(reason, stream_type_);
 }
 
+void VideoCaptureController::OnNewCropVersion(uint32_t crop_version) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  EmitLogMessage(base::StringPrintf("%s(%u)", __func__, crop_version), 3);
+  for (const auto& client : controller_clients_) {
+    if (client->session_closed) {
+      continue;
+    }
+    client->event_handler->OnNewCropVersion(client->controller_id,
+                                            crop_version);
+  }
+}
+
 void VideoCaptureController::OnFrameWithEmptyRegionCapture() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   EmitLogMessage(__func__, 3);
@@ -830,7 +854,16 @@ void VideoCaptureController::Crop(
     base::OnceCallback<void(media::mojom::CropRequestResult)> callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(launched_device_);
+
   EmitLogMessage(__func__, 3);
+
+  was_crop_ever_called_ = true;
+
+  if (controller_clients_.size() != 1) {
+    std::move(callback).Run(media::mojom::CropRequestResult::kNotImplemented);
+    return;
+  }
+
   launched_device_->Crop(crop_id, crop_version, std::move(callback));
 }
 
@@ -873,19 +906,16 @@ VideoCaptureController::ControllerClient* VideoCaptureController::FindClient(
 std::vector<VideoCaptureController::BufferContext>::iterator
 VideoCaptureController::FindBufferContextFromBufferContextId(
     int buffer_context_id) {
-  return std::find_if(buffer_contexts_.begin(), buffer_contexts_.end(),
-                      [buffer_context_id](const BufferContext& entry) {
-                        return entry.buffer_context_id() == buffer_context_id;
-                      });
+  return base::ranges::find(buffer_contexts_, buffer_context_id,
+                            &BufferContext::buffer_context_id);
 }
 
 std::vector<VideoCaptureController::BufferContext>::iterator
 VideoCaptureController::FindUnretiredBufferContextFromBufferId(int buffer_id) {
-  return std::find_if(buffer_contexts_.begin(), buffer_contexts_.end(),
-                      [buffer_id](const BufferContext& entry) {
-                        return (entry.buffer_id() == buffer_id) &&
-                               (entry.is_retired() == false);
-                      });
+  return base::ranges::find_if(
+      buffer_contexts_, [buffer_id](const BufferContext& entry) {
+        return (entry.buffer_id() == buffer_id) && !entry.is_retired();
+      });
 }
 
 void VideoCaptureController::OnClientFinishedConsumingBuffer(
@@ -909,9 +939,9 @@ void VideoCaptureController::ReleaseBufferContext(
   for (const auto& client : controller_clients_) {
     if (client->session_closed)
       continue;
-    auto entry_iter = std::find(std::begin(client->known_buffer_context_ids),
-                                std::end(client->known_buffer_context_ids),
-                                buffer_context_iter->buffer_context_id());
+    auto entry_iter =
+        base::ranges::find(client->known_buffer_context_ids,
+                           buffer_context_iter->buffer_context_id());
     if (entry_iter != std::end(client->known_buffer_context_ids)) {
       client->known_buffer_context_ids.erase(entry_iter);
       client->event_handler->OnBufferDestroyed(

@@ -31,13 +31,17 @@
 import * as Platform from '../../core/platform/platform.js';
 import * as Root from '../../core/root/root.js';
 import * as Acorn from '../../third_party/acorn/acorn.js';
-import type * as CodeMirrorModule from '../../third_party/codemirror/codemirror-legacy.js'; // eslint-disable-line @typescript-eslint/no-unused-vars
+
+// This file is required to bring some types into scope, even though it
+// is not used.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import type * as CodeMirrorModule from '../../third_party/codemirror/codemirror-legacy.js';
 
 import {AcornTokenizer, ECMA_VERSION} from './AcornTokenizer.js';
 import {CSSFormatter} from './CSSFormatter.js';
 import {ESTreeWalker} from './ESTreeWalker.js';
 import {FormattedContentBuilder} from './FormattedContentBuilder.js';
-import type {FormatResult} from './FormatterActions.js';
+import {type FormatResult} from './FormatterActions.js';
 import {HTMLFormatter} from './HTMLFormatter.js';
 import {IdentityFormatter} from './IdentityFormatter.js';
 import {JavaScriptFormatter} from './JavaScriptFormatter.js';

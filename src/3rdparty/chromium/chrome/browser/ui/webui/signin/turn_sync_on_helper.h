@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "base/callback_forward.h"
-#include "base/callback_helpers.h"
+#include "base/callback_list.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "build/chromeos_buildflags.h"
@@ -17,8 +16,6 @@
 #include "chrome/browser/sync/sync_startup_tracker.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
-#include "components/keyed_service/core/keyed_service_shutdown_notifier.h"
-#include "components/policy/core/common/policy_service.h"
 #include "components/signin/public/base/signin_buildflags.h"
 #include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/identity_manager/account_info.h"
@@ -29,6 +26,8 @@
 
 class Browser;
 class SigninUIError;
+class TurnSyncOnHelperPolicyFetchTracker;
+class AccountSelectionInProgressHandle;
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
 class DiceSignedInProfileCreator;
@@ -49,8 +48,7 @@ class SyncSetupInProgressHandle;
 
 // Handles details of setting the primary account with IdentityManager and
 // turning on sync for an account for which there is already a refresh token.
-class TurnSyncOnHelper : public SyncStartupTracker::Observer,
-                         public policy::PolicyService::ProviderUpdateObserver {
+class TurnSyncOnHelper {
  public:
   // Behavior when the signin is aborted (by an error or cancelled by the user).
   // The mode has no effect on the sync-is-disabled flow where cancelling always
@@ -98,6 +96,14 @@ class TurnSyncOnHelper : public SyncStartupTracker::Observer,
     virtual void ShowSyncConfirmation(
         base::OnceCallback<void(LoginUIService::SyncConfirmationUIClosedResult)>
             callback) = 0;
+
+    // Whether the delegate wants to silently abort the turn sync on process
+    // when the sync is disabled for the user before showing the sync disabled
+    // UI.
+    // This can be used in cases when the turn sync on is triggered not by the
+    // user action but a promo process.
+    // Defaults to false.
+    virtual bool ShouldAbortBeforeShowSyncDisabledConfirmation();
 
     // Shows a screen informing that sync is disabled for the user.
     // |is_managed_account| is true if the account (where sync is being set up)
@@ -148,10 +154,6 @@ class TurnSyncOnHelper : public SyncStartupTracker::Observer,
   TurnSyncOnHelper(const TurnSyncOnHelper&) = delete;
   TurnSyncOnHelper& operator=(const TurnSyncOnHelper&) = delete;
 
-  // SyncStartupTracker::Observer:
-  void SyncStartupCompleted() override;
-  void SyncStartupFailed() override;
-
   // Fakes that sync enabled for testing, but does not create a sync service.
   static void SetShowSyncEnabledUiForTesting(
       bool show_sync_enabled_ui_for_testing);
@@ -159,9 +161,11 @@ class TurnSyncOnHelper : public SyncStartupTracker::Observer,
   // Returns true if a `TurnSyncOnHelper` is currently active for `profile`.
   static bool HasCurrentTurnSyncOnHelperForTesting(Profile* profile);
 
- private:
-  friend class base::DeleteHelper<TurnSyncOnHelper>;
+  // Used as callback for `SyncStartupTracker`.
+  // Public for testing.
+  void OnSyncStartupStateChanged(SyncStartupTracker::ServiceStartupState state);
 
+ private:
   enum class ProfileMode {
     // Attempts to sign the user in |profile_|. Note that if the account to be
     // signed in is a managed account, then a profile confirmation dialog is
@@ -174,7 +178,10 @@ class TurnSyncOnHelper : public SyncStartupTracker::Observer,
   };
 
   // TurnSyncOnHelper deletes itself.
-  ~TurnSyncOnHelper() override;
+  ~TurnSyncOnHelper();
+
+  // Triggers the start of the flow.
+  void TurnSyncOnInternal();
 
   // Handles can offer sign-in errors.  It returns true if there is an error,
   // and false otherwise.
@@ -189,10 +196,8 @@ class TurnSyncOnHelper : public SyncStartupTracker::Observer,
   // Turns sync on with the current profile or a new profile.
   void TurnSyncOnWithProfileMode(ProfileMode profile_mode);
 
-  // Callback invoked once policy registration is complete. If registration
-  // fails, |dm_token| and |client_id| will be empty.
-  void OnRegisteredForPolicy(const std::string& dm_token,
-                             const std::string& client_id);
+  // Callback invoked once policy registration is complete.
+  void OnRegisteredForPolicy(bool is_account_managed);
 
   // Helper function that loads policy with the cached |dm_token_| and
   // |client_id|, then completes the signin process.
@@ -201,10 +206,6 @@ class TurnSyncOnHelper : public SyncStartupTracker::Observer,
   // Callback invoked when a policy fetch request has completed. |success| is
   // true if policy was successfully fetched.
   void OnPolicyFetchComplete(bool success);
-
-  // policy::PolicyService::ProviderUpdateObserver
-  void OnProviderUpdatePropagated(
-      policy::ConfigurationPolicyProvider* provider) override;
 
   // Called to create a new profile, which is then signed in with the
   // in-progress auth credentials currently stored in this object.
@@ -256,15 +257,15 @@ class TurnSyncOnHelper : public SyncStartupTracker::Observer,
   // Prevents Sync from running until configuration is complete.
   std::unique_ptr<syncer::SyncSetupInProgressHandle> sync_blocker_;
 
-  // Policy credentials we keep while determining whether to create
-  // a new profile for an enterprise user or not.
-  std::string dm_token_;
-  std::string client_id_;
+  // Prevents `SigninManager` from changing the unconsented primary account
+  // until the flow is complete.
+  std::unique_ptr<AccountSelectionInProgressHandle> account_change_blocker_;
 
   // Called when this object is deleted.
   base::ScopedClosureRunner scoped_callback_runner_;
 
   std::unique_ptr<SyncStartupTracker> sync_startup_tracker_;
+  std::unique_ptr<TurnSyncOnHelperPolicyFetchTracker> policy_fetch_tracker_;
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
   std::unique_ptr<DiceSignedInProfileCreator> dice_signed_in_profile_creator_;
 #endif

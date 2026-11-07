@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <lib/ui/scenic/cpp/commands.h>
 
+#include "base/fuchsia/fuchsia_logging.h"
 #include "content/browser/accessibility/browser_accessibility_manager_fuchsia.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/platform/fuchsia/accessibility_bridge_fuchsia_registry.h"
@@ -71,7 +72,8 @@ void BrowserAccessibilityFuchsia::OnDataChanged() {
 
   // Declare this node as the fuchsia tree root if it's the root of the main
   // frame's tree.
-  if (manager()->IsRootTree() && manager()->GetRoot() == this) {
+  if (manager()->IsRootFrameManager() &&
+      manager()->GetBrowserAccessibilityRoot() == this) {
     ui::AccessibilityBridgeFuchsia* accessibility_bridge =
         GetAccessibilityBridge();
     if (accessibility_bridge)
@@ -369,16 +371,9 @@ fuchsia::ui::gfx::mat4 BrowserAccessibilityFuchsia::GetFuchsiaTransform()
   if (GetData().relative_bounds.transform)
     transform = *GetData().relative_bounds.transform;
 
-  // If this node is the root of its AXTree, apply the inverse device scale
-  // factor.
-  if (manager()->GetRoot() == this) {
-    transform.PostScale(1 / manager()->device_scale_factor(),
-                        1 / manager()->device_scale_factor());
-  }
-
   // Convert to fuchsia's transform type.
   std::array<float, 16> mat = {};
-  transform.matrix().getColMajor(mat.data());
+  transform.GetColMajorF(mat.data());
   fuchsia::ui::gfx::Matrix4Value fuchsia_transform =
       scenic::NewMatrix4Value(mat);
   return fuchsia_transform.value;
@@ -388,12 +383,20 @@ uint32_t BrowserAccessibilityFuchsia::GetOffsetContainerOrRootNodeID() const {
   int offset_container_id = GetData().relative_bounds.offset_container_id;
 
   BrowserAccessibility* offset_container =
-      offset_container_id == -1 ? manager()->GetRoot()
+      offset_container_id == -1 ? manager()->GetBrowserAccessibilityRoot()
                                 : manager()->GetFromID(offset_container_id);
 
   BrowserAccessibilityFuchsia* fuchsia_container =
       ToBrowserAccessibilityFuchsia(offset_container);
-  DCHECK(fuchsia_container);
+
+  // TODO(https://crbug.com/1321935): Remove this check once we understand why
+  // we're getting non-existent offset container IDs from blink.
+  if (!fuchsia_container) {
+    ZX_LOG(ERROR, ZX_OK) << "Node " << GetId()
+                         << " references non-existent offset container ID "
+                         << offset_container_id;
+    return 0;
+  }
 
   return fuchsia_container->GetFuchsiaNodeID();
 }
@@ -423,7 +426,8 @@ bool BrowserAccessibilityFuchsia::IsListElement() const {
 bool BrowserAccessibilityFuchsia::AccessibilityPerformAction(
     const ui::AXActionData& action_data) {
   if (action_data.action == ax::mojom::Action::kHitTest) {
-    BrowserAccessibilityManager* root_manager = manager()->GetRootManager();
+    BrowserAccessibilityManager* root_manager =
+        manager()->GetManagerForRootFrame();
     DCHECK(root_manager);
 
     ui::AccessibilityBridgeFuchsia* accessibility_bridge =

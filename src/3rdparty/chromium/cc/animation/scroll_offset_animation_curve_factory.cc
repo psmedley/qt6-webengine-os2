@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,7 @@ ScrollOffsetAnimationCurveFactory::CreateAnimation(
   if (scroll_type == ScrollType::kAutoScroll)
     return CreateLinearAnimation(target_value);
 
-  if (base::FeatureList::IsEnabled(features::kImpulseScrollAnimations))
+  if (features::IsImpulseScrollAnimationEnabled())
     return CreateImpulseAnimation(target_value);
 
   return CreateEaseInOutAnimation(

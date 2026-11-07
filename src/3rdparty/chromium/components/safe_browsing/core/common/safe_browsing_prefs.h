@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -17,6 +17,10 @@
 class PrefRegistrySimple;
 class PrefService;
 class GURL;
+
+namespace base {
+class Time;
+}
 
 namespace prefs {
 // A list of times at which CSD pings were sent.
@@ -122,6 +126,10 @@ extern const char kAccountTailoredSecurityShownNotification[];
 // A boolean indicating if Enhanced Protection was enabled in sync with
 // account tailored security.
 extern const char kEnhancedProtectionEnabledViaTailoredSecurity[];
+
+// The last time the Extension Telemetry Service successfully
+// uploaded its data.
+extern const char kExtensionTelemetryLastUploadTime[];
 
 }  // namespace prefs
 
@@ -251,6 +259,14 @@ void SetExtendedReportingPrefAndMetric(PrefService* prefs,
 // This variant is used to simplify test code by omitting the location.
 void SetExtendedReportingPrefForTests(PrefService* prefs, bool value);
 
+// Sets the last time the Extension Telemetry Service successfully uploaded
+// its data.
+void SetLastUploadTimeForExtensionTelemetry(PrefService& prefs,
+                                            const base::Time& time);
+
+// Returns the `kExtensionTelemetryLastUploadTime` user preference.
+base::Time GetLastUploadTimeForExtensionTelemetry(PrefService& prefs);
+
 // Sets the currently active Safe Browsing Enhanced Protection to the specified
 // value.
 void SetEnhancedProtectionPrefForTests(PrefService* prefs, bool value);
@@ -277,12 +293,12 @@ void UpdatePrefsBeforeSecurityInterstitial(PrefService* prefs);
 // Returns a list of preferences to be shown in chrome://safe-browsing. The
 // preferences are passed as an alternating sequence of preference names and
 // values represented as strings.
-base::ListValue GetSafeBrowsingPreferencesList(PrefService* prefs);
+base::Value::List GetSafeBrowsingPreferencesList(PrefService* prefs);
 
 // Returns a list of policies to be shown in chrome://safe-browsing. The
 // policies are passed as an alternating sequence of policy names and
 // values represented as strings.
-base::ListValue GetSafeBrowsingPoliciesList(PrefService* prefs);
+base::Value::List GetSafeBrowsingPoliciesList(PrefService* prefs);
 
 // Returns a list of valid domains that Safe Browsing service trusts.
 void GetSafeBrowsingAllowlistDomainsPref(
@@ -291,7 +307,7 @@ void GetSafeBrowsingAllowlistDomainsPref(
 
 // Helper function to validate and canonicalize a list of domain strings.
 void CanonicalizeDomainList(
-    const base::Value& raw_domain_list,
+    const base::Value::List& raw_domain_list,
     std::vector<std::string>* out_canonicalized_domain_list);
 
 // Helper function to determine if |url| matches Safe Browsing allowlist domains

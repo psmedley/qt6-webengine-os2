@@ -9,23 +9,22 @@
 
 #include "proxy_config_service_qt.h"
 
-#include "base/bind.h"
 #include "components/proxy_config/pref_proxy_config_tracker_impl.h"
-#include "content/public/browser/browser_thread.h"
-#include "net/proxy_resolution/configured_proxy_resolution_service.h"
+#include "net/base/proxy_server.h"
 
-using content::BrowserThread;
+#include <QNetworkProxy>
 
 net::ProxyServer ProxyConfigServiceQt::fromQNetworkProxy(const QNetworkProxy &qtProxy)
 {
-    net::HostPortPair hostPortPair(qtProxy.hostName().toStdString(), qtProxy.port());
+    std::string host = qtProxy.hostName().toStdString();
+    uint16_t port = qtProxy.port();
     switch (qtProxy.type()) {
     case QNetworkProxy::Socks5Proxy:
-        return net::ProxyServer(net::ProxyServer::SCHEME_SOCKS5, hostPortPair);
+        return net::ProxyServer::FromSchemeHostAndPort(net::ProxyServer::SCHEME_SOCKS5, host, port);
     case QNetworkProxy::HttpProxy:
     case QNetworkProxy::HttpCachingProxy:
     case QNetworkProxy::FtpCachingProxy:
-        return net::ProxyServer(net::ProxyServer::SCHEME_HTTP, hostPortPair);
+        return net::ProxyServer::FromSchemeHostAndPort(net::ProxyServer::SCHEME_HTTP, host, port);
     case QNetworkProxy::NoProxy:
     case QNetworkProxy::DefaultProxy:
         return net::ProxyServer(net::ProxyServer::SCHEME_DIRECT, net::HostPortPair());
@@ -36,7 +35,7 @@ net::ProxyServer ProxyConfigServiceQt::fromQNetworkProxy(const QNetworkProxy &qt
 
 ProxyConfigServiceQt::ProxyConfigServiceQt(PrefService *prefService,
                                            const scoped_refptr<base::SequencedTaskRunner> &taskRunner)
-    : m_baseService(net::ConfiguredProxyResolutionService::CreateSystemProxyConfigService(taskRunner))
+    : m_baseService(net::ProxyConfigService::CreateSystemProxyConfigService(taskRunner))
     , m_usesSystemConfiguration(false)
     , m_registeredObserver(false)
     , m_prefState(prefService

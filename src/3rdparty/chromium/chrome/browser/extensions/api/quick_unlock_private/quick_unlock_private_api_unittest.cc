@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,6 @@
 
 #include <memory>
 
-#include "ash/components/cryptohome/system_salt_getter.h"
-#include "ash/components/login/auth/fake_extended_authenticator.h"
 #include "ash/constants/ash_features.h"
 #include "ash/constants/ash_pref_names.h"
 #include "ash/services/device_sync/public/cpp/fake_device_sync_client.h"
@@ -43,8 +41,10 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "chromeos/dbus/userdataauth/fake_cryptohome_misc_client.h"
-#include "chromeos/dbus/userdataauth/fake_userdataauth_client.h"
+#include "chromeos/ash/components/cryptohome/system_salt_getter.h"
+#include "chromeos/ash/components/dbus/userdataauth/fake_cryptohome_misc_client.h"
+#include "chromeos/ash/components/dbus/userdataauth/fake_userdataauth_client.h"
+#include "chromeos/ash/components/login/auth/fake_extended_authenticator.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
@@ -170,16 +170,29 @@ class QuickUnlockPrivateUnitTest
 
  protected:
   void SetUp() override {
+    const auto param = GetParam();
+
+    std::vector<base::test::FeatureRef> enabled_features;
+    std::vector<base::test::FeatureRef> disabled_features;
+
+    // TODO(b/239681292): Add (integration) tests with UseAuthFactors
+    // enabled.
+    disabled_features.push_back(ash::features::kUseAuthFactors);
+
     // Enable/disable PIN auto submit
-    auto param = GetParam();
-    feature_list_.InitWithFeatureState(ash::features::kQuickUnlockPinAutosubmit,
-                                       std::get<1>(param));
+    if (std::get<1>(param)) {
+      enabled_features.push_back(ash::features::kQuickUnlockPinAutosubmit);
+    } else {
+      disabled_features.push_back(ash::features::kQuickUnlockPinAutosubmit);
+    }
+
+    feature_list_.InitWithFeatures(enabled_features, disabled_features);
 
     ash::CryptohomeMiscClient::InitializeFake();
     ash::UserDataAuthClient::InitializeFake();
     if (std::get<0>(param) == TestType::kCryptohome) {
       auto* fake_userdataauth_client_testapi =
-          chromeos::FakeUserDataAuthClient::TestApi::Get();
+          ash::FakeUserDataAuthClient::TestApi::Get();
       fake_userdataauth_client_testapi->set_supports_low_entropy_credentials(
           true);
       fake_userdataauth_client_testapi->set_enable_auth_check(true);
@@ -225,6 +238,7 @@ class QuickUnlockPrivateUnitTest
     fake_user_manager_->AddUser(test_account);
     fake_user_manager_->UserLoggedIn(test_account, kTestUserEmailHash, false,
                                      false);
+    fake_user_manager_->SimulateUserProfileLoad(test_account);
     ash::ProfileHelper::Get()->SetUserToProfileMappingForTesting(
         fake_user_manager_->GetPrimaryUser(), profile);
 
@@ -331,7 +345,7 @@ class QuickUnlockPrivateUnitTest
     QuickUnlockModeList modes;
 
     EXPECT_TRUE(result->is_list());
-    for (const base::Value& value : result->GetListDeprecated()) {
+    for (const base::Value& value : result->GetList()) {
       EXPECT_TRUE(value.is_string());
       modes.push_back(
           quick_unlock_private::ParseQuickUnlockMode(value.GetString()));
@@ -349,7 +363,7 @@ class QuickUnlockPrivateUnitTest
     QuickUnlockModeList modes;
 
     EXPECT_TRUE(result->is_list());
-    for (const base::Value& value : result->GetListDeprecated()) {
+    for (const base::Value& value : result->GetList()) {
       EXPECT_TRUE(value.is_string());
       modes.push_back(
           quick_unlock_private::ParseQuickUnlockMode(value.GetString()));
@@ -583,16 +597,22 @@ class QuickUnlockPrivateUnitTest
   bool TryAuthenticate(const std::string& password) {
     const AccountId account_id =
         AccountId::FromUserEmailGaiaId(kTestUserEmail, kTestUserGaiaId);
+    auto user_context = std::make_unique<ash::UserContext>(
+        user_manager::USER_TYPE_REGULAR, account_id);
+    user_context->SetIsUsingPin(true);
     bool called = false;
     bool success = false;
     base::RunLoop loop;
     ash::quick_unlock::PinBackend::GetInstance()->TryAuthenticate(
-        account_id, ash::Key(password), ash::quick_unlock::Purpose::kAny,
-        base::BindLambdaForTesting([&](bool auth_success) {
-          called = true;
-          success = auth_success;
-          loop.Quit();
-        }));
+        std::move(user_context), ash::Key(password),
+        ash::quick_unlock::Purpose::kAny,
+        base::BindLambdaForTesting(
+            [&](std::unique_ptr<ash::UserContext>,
+                absl::optional<ash::AuthenticationError> error) {
+              called = true;
+              success = !error.has_value();
+              loop.Quit();
+            }));
     loop.Run();
     return success;
   }
@@ -648,7 +668,7 @@ class QuickUnlockPrivateUnitTest
     auto dispatcher = std::make_unique<ExtensionFunctionDispatcher>(profile());
     api_test_utils::RunFunction(func.get(), std::move(params),
                                 std::move(dispatcher), api_test_utils::NONE);
-    EXPECT_TRUE(func->GetResultList()->GetListDeprecated().empty());
+    EXPECT_TRUE(func->GetResultList()->empty());
     base::RunLoop().RunUntilIdle();
     return func->GetError();
   }
@@ -681,7 +701,7 @@ TEST_P(QuickUnlockPrivateUnitTest, GetAuthTokenValid) {
   EXPECT_EQ(token_info->token,
             quick_unlock_storage->GetAuthToken()->Identifier());
   EXPECT_EQ(token_info->lifetime_seconds,
-            ash::quick_unlock::AuthToken::kTokenExpirationSeconds);
+            ash::quick_unlock::AuthToken::kTokenExpiration.InSeconds());
 }
 
 // Verifies that GetAuthTokenValid fails when an invalid password is provided.

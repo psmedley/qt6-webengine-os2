@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,21 +8,23 @@
 
 #include <algorithm>
 #include <ostream>
-#include <vector>
+#include <string>
+#include <tuple>
+#include <utility>
 
 #include "base/base64.h"
+#include "base/check.h"
 #include "base/check_op.h"
 #include "base/containers/contains.h"
 #include "base/containers/span.h"
+#include "base/debug/crash_logging.h"
 #include "base/pickle.h"
 #include "base/strings/strcat.h"
-#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
-#include "base/strings/string_util.h"
+#include "base/unguessable_token.h"
 #include "third_party/perfetto/include/perfetto/tracing/traced_value.h"
 #include "url/gurl.h"
-#include "url/url_canon.h"
-#include "url/url_canon_stdstring.h"
+#include "url/scheme_host_port.h"
 #include "url/url_constants.h"
 #include "url/url_util.h"
 #include "url/url_util_qt.h"
@@ -344,9 +346,8 @@ absl::optional<std::string> Origin::SerializeWithNonceImpl() const {
     pickle.WriteUInt64(0);
   }
 
-  base::span<const uint8_t> data(
-      static_cast<const uint8_t*>(pickle.data()),
-      static_cast<const uint8_t*>(pickle.data()) + pickle.size());
+  base::span<const uint8_t> data(static_cast<const uint8_t*>(pickle.data()),
+                                 pickle.size());
   // Base64 encode the data to make it nicer to play with.
   return base::Base64Encode(data);
 }

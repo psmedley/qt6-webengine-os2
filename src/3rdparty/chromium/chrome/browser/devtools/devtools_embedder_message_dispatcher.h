@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,13 @@
 #include <map>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "base/callback.h"
+#include "base/values.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
-namespace base {
-class Value;
-}
 struct RegisterOptions;
 
 /**
@@ -120,7 +117,7 @@ class DevToolsEmbedderMessageDispatcher {
   virtual ~DevToolsEmbedderMessageDispatcher() = default;
   virtual bool Dispatch(DispatchCallback callback,
                         const std::string& method,
-                        const std::vector<base::Value>& params) = 0;
+                        const base::Value::List& params) = 0;
 
   static std::unique_ptr<DevToolsEmbedderMessageDispatcher>
   CreateForDevToolsFrontend(Delegate* delegate);

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@ bool FilterOperation::operator==(const FilterOperation& other) const {
   if (type_ != other.type_)
     return false;
   if (type_ == COLOR_MATRIX)
-    return !memcmp(matrix_, other.matrix_, sizeof(matrix_));
+    return matrix_ == other.matrix_;
   if (type_ == BLUR)
     return amount_ == other.amount_ && blur_tile_mode_ == other.blur_tile_mode_;
   if (type_ == DROP_SHADOW) {
@@ -54,12 +54,12 @@ FilterOperation::FilterOperation(FilterType type, float amount)
       amount_(amount),
       outer_threshold_(0),
       drop_shadow_offset_(0, 0),
-      drop_shadow_color_(0),
+      drop_shadow_color_(SkColors::kTransparent),
       zoom_inset_(0) {
   DCHECK_NE(type_, DROP_SHADOW);
   DCHECK_NE(type_, COLOR_MATRIX);
   DCHECK_NE(type_, REFERENCE);
-  memset(matrix_, 0, sizeof(matrix_));
+  matrix_.fill(0.0f);
 }
 
 FilterOperation::FilterOperation(FilterType type,
@@ -69,17 +69,17 @@ FilterOperation::FilterOperation(FilterType type,
       amount_(amount),
       outer_threshold_(0),
       drop_shadow_offset_(0, 0),
-      drop_shadow_color_(0),
+      drop_shadow_color_(SkColors::kTransparent),
       zoom_inset_(0),
       blur_tile_mode_(tile_mode) {
   DCHECK_EQ(type_, BLUR);
-  memset(matrix_, 0, sizeof(matrix_));
+  matrix_.fill(0.0f);
 }
 
 FilterOperation::FilterOperation(FilterType type,
                                  const gfx::Point& offset,
                                  float stdDeviation,
-                                 SkColor color)
+                                 SkColor4f color)
     : type_(type),
       amount_(stdDeviation),
       outer_threshold_(0),
@@ -87,7 +87,7 @@ FilterOperation::FilterOperation(FilterType type,
       drop_shadow_color_(color),
       zoom_inset_(0) {
   DCHECK_EQ(type_, DROP_SHADOW);
-  memset(matrix_, 0, sizeof(matrix_));
+  matrix_.fill(0.0f);
 }
 
 FilterOperation::FilterOperation(FilterType type, const Matrix& matrix)
@@ -95,10 +95,10 @@ FilterOperation::FilterOperation(FilterType type, const Matrix& matrix)
       amount_(0),
       outer_threshold_(0),
       drop_shadow_offset_(0, 0),
-      drop_shadow_color_(0),
+      drop_shadow_color_(SkColors::kTransparent),
+      matrix_(matrix),
       zoom_inset_(0) {
   DCHECK_EQ(type_, COLOR_MATRIX);
-  memcpy(matrix_, matrix, sizeof(matrix_));
 }
 
 FilterOperation::FilterOperation(FilterType type, float amount, int inset)
@@ -106,10 +106,10 @@ FilterOperation::FilterOperation(FilterType type, float amount, int inset)
       amount_(amount),
       outer_threshold_(0),
       drop_shadow_offset_(0, 0),
-      drop_shadow_color_(0),
+      drop_shadow_color_(SkColors::kTransparent),
       zoom_inset_(inset) {
   DCHECK_EQ(type_, ZOOM);
-  memset(matrix_, 0, sizeof(matrix_));
+  matrix_.fill(0.0f);
 }
 
 FilterOperation::FilterOperation(FilterType type,
@@ -119,10 +119,10 @@ FilterOperation::FilterOperation(FilterType type,
       amount_(amount),
       outer_threshold_(outer_threshold),
       drop_shadow_offset_(0, 0),
-      drop_shadow_color_(0),
+      drop_shadow_color_(SkColors::kTransparent),
       zoom_inset_(0) {
   DCHECK_EQ(type_, STRETCH);
-  memset(matrix_, 0, sizeof(matrix_));
+  matrix_.fill(0.0f);
 }
 
 FilterOperation::FilterOperation(FilterType type,
@@ -131,11 +131,11 @@ FilterOperation::FilterOperation(FilterType type,
       amount_(0),
       outer_threshold_(0),
       drop_shadow_offset_(0, 0),
-      drop_shadow_color_(0),
+      drop_shadow_color_(SkColors::kTransparent),
       image_filter_(std::move(image_filter)),
       zoom_inset_(0) {
   DCHECK_EQ(type_, REFERENCE);
-  memset(matrix_, 0, sizeof(matrix_));
+  matrix_.fill(0.0f);
 }
 
 FilterOperation::FilterOperation(FilterType type,
@@ -146,26 +146,14 @@ FilterOperation::FilterOperation(FilterType type,
       amount_(inner_threshold),
       outer_threshold_(outer_threshold),
       drop_shadow_offset_(0, 0),
-      drop_shadow_color_(0),
+      drop_shadow_color_(SkColors::kTransparent),
       zoom_inset_(0),
       shape_(shape) {
   DCHECK_EQ(type_, ALPHA_THRESHOLD);
-  memset(matrix_, 0, sizeof(matrix_));
+  matrix_.fill(0.0f);
 }
 
-FilterOperation::FilterOperation(const FilterOperation& other)
-    : type_(other.type_),
-      amount_(other.amount_),
-      outer_threshold_(other.outer_threshold_),
-      drop_shadow_offset_(other.drop_shadow_offset_),
-      drop_shadow_color_(other.drop_shadow_color_),
-      image_filter_(other.image_filter_),
-      zoom_inset_(other.zoom_inset_),
-      shape_(other.shape_),
-      blur_tile_mode_(other.blur_tile_mode_) {
-  memcpy(matrix_, other.matrix_, sizeof(matrix_));
-}
-
+FilterOperation::FilterOperation(const FilterOperation& other) = default;
 FilterOperation::~FilterOperation() = default;
 
 static FilterOperation CreateNoOpFilter(FilterOperation::FilterType type) {
@@ -190,7 +178,7 @@ static FilterOperation CreateNoOpFilter(FilterOperation::FilterType type) {
       return FilterOperation::CreateBlurFilter(0.f);
     case FilterOperation::DROP_SHADOW:
       return FilterOperation::CreateDropShadowFilter(gfx::Point(0, 0), 0.f,
-                                                     SK_ColorTRANSPARENT);
+                                                     SkColors::kTransparent);
     case FilterOperation::COLOR_MATRIX: {
       FilterOperation::Matrix matrix = {};
       matrix[0] = matrix[6] = matrix[12] = matrix[18] = 1.f;
@@ -318,7 +306,8 @@ void FilterOperation::AsValueInto(base::trace_event::TracedValue* value) const {
     case FilterOperation::DROP_SHADOW:
       value->SetDouble("std_deviation", amount_);
       MathUtil::AddToTracedValue("offset", drop_shadow_offset_, value);
-      value->SetInteger("color", drop_shadow_color_);
+      // TODO(crbug/1308932): Remove toSkColor and make all SkColor4f.
+      value->SetInteger("color", drop_shadow_color_.toSkColor());
       break;
     case FilterOperation::COLOR_MATRIX: {
       value->BeginArray("matrix");

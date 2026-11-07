@@ -53,6 +53,7 @@ class CORE_EXPORT StyleImage : public GarbageCollected<StyleImage> {
   virtual ~StyleImage() = default;
 
   bool operator==(const StyleImage& other) const { return IsEqual(other); }
+  bool operator!=(const StyleImage& other) const { return !(*this == other); }
 
   // Returns a CSSValue representing the origin <image> value. May not be the
   // actual CSSValue from which this StyleImage was originally created if the
@@ -151,6 +152,7 @@ class CORE_EXPORT StyleImage : public GarbageCollected<StyleImage> {
   ALWAYS_INLINE bool IsImageResource() const { return is_image_resource_; }
   ALWAYS_INLINE bool IsPendingImage() const { return is_pending_image_; }
   ALWAYS_INLINE bool IsGeneratedImage() const { return is_generated_image_; }
+  ALWAYS_INLINE bool IsContentful() const { return !is_generated_image_; }
   ALWAYS_INLINE bool IsImageResourceSet() const {
     return is_image_resource_set_;
   }

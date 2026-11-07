@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@
 #include "third_party/blink/renderer/core/inspector/protocol/protocol.h"
 #include "third_party/blink/renderer/core/inspector/v8_inspector_string.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
-#include "third_party/blink/renderer/platform/heap/persistent.h"
+#include "third_party/blink/renderer/platform/heap/cross_thread_persistent.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/web_test_support.h"
@@ -120,12 +120,14 @@ DevToolsSession::DevToolsSession(
     mojo::PendingReceiver<mojom::blink::DevToolsSession> io_receiver,
     mojom::blink::DevToolsSessionStatePtr reattach_session_state,
     bool client_expects_binary_responses,
+    bool client_is_trusted,
     const String& session_id,
     scoped_refptr<base::SequencedTaskRunner> mojo_task_runner)
     : agent_(agent),
       inspector_backend_dispatcher_(new protocol::UberDispatcher(this)),
       session_state_(std::move(reattach_session_state)),
       client_expects_binary_responses_(client_expects_binary_responses),
+      client_is_trusted_(client_is_trusted),
       v8_session_state_(kV8StateKey),
       v8_session_state_cbor_(&v8_session_state_, /*default_value=*/{}),
       session_id_(session_id) {
@@ -137,7 +139,7 @@ DevToolsSession::DevToolsSession(
 
   host_remote_.Bind(std::move(host_remote), mojo_task_runner);
   host_remote_.set_disconnect_handler(
-      WTF::Bind(&DevToolsSession::Detach, WrapWeakPersistent(this)));
+      WTF::BindOnce(&DevToolsSession::Detach, WrapWeakPersistent(this)));
 
   bool restore = !!session_state_.ReattachState();
   v8_session_state_.InitFrom(&session_state_);
@@ -156,9 +158,11 @@ DevToolsSession::~DevToolsSession() {
 void DevToolsSession::ConnectToV8(v8_inspector::V8Inspector* inspector,
                                   int context_group_id) {
   const auto& cbor = v8_session_state_cbor_.Get();
-  v8_session_ =
-      inspector->connect(context_group_id, this,
-                         v8_inspector::StringView(cbor.data(), cbor.size()));
+  v8_session_ = inspector->connect(
+      context_group_id, this,
+      v8_inspector::StringView(cbor.data(), cbor.size()),
+      client_is_trusted_ ? v8_inspector::V8Inspector::kFullyTrusted
+                         : v8_inspector::V8Inspector::kUntrusted);
 }
 
 bool DevToolsSession::IsDetached() {
@@ -314,7 +318,7 @@ void DevToolsSession::SendProtocolNotification(
     std::unique_ptr<protocol::Serializable> notification) {
   if (IsDetached())
     return;
-  notification_queue_.push_back(WTF::Bind(
+  notification_queue_.push_back(WTF::BindOnce(
       [](std::unique_ptr<protocol::Serializable> notification) {
         return notification->Serialize();
       },
@@ -325,7 +329,7 @@ void DevToolsSession::sendNotification(
     std::unique_ptr<v8_inspector::StringBuffer> notification) {
   if (IsDetached())
     return;
-  notification_queue_.push_back(WTF::Bind(
+  notification_queue_.push_back(WTF::BindOnce(
       [](std::unique_ptr<v8_inspector::StringBuffer> notification) {
         return Get8BitStringFrom(notification.get());
       },
@@ -363,7 +367,7 @@ void DevToolsSession::Trace(Visitor* visitor) const {
 blink::mojom::blink::DevToolsMessagePtr DevToolsSession::FinalizeMessage(
     std::vector<uint8_t> message) const {
   std::vector<uint8_t> message_to_send = std::move(message);
-  if (!session_id_.IsEmpty()) {
+  if (!session_id_.empty()) {
     crdtp::Status status = crdtp::cbor::AppendString8EntryToCBORMap(
         crdtp::SpanFrom(kSessionId), crdtp::SpanFrom(session_id_.Ascii()),
         &message_to_send);

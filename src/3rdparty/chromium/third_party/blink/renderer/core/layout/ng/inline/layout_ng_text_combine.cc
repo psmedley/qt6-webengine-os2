@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_node_data.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_ink_overflow.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
+#include "third_party/blink/renderer/core/paint/ng/ng_inline_paint_context.h"
 #include "third_party/blink/renderer/platform/fonts/font.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
 #include "third_party/blink/renderer/platform/transforms/affine_transform.h"
@@ -227,10 +228,14 @@ PhysicalRect LayoutNGTextCombine::RecalcContentsInkOverflow() const {
   const PhysicalRect text_rect = ComputeTextFrameRect(PhysicalOffset());
   LayoutRect ink_overflow = text_rect.ToLayoutRect();
 
-  if (!style.AppliedTextDecorations().IsEmpty()) {
+  if (!style.AppliedTextDecorations().empty()) {
+    // |LayoutNGTextCombine| does not support decorating box, as it is not
+    // supported in vertical flow and text-combine is only for vertical flow.
     const LayoutRect decoration_rect =
-        NGInkOverflow::ComputeTextDecorationOverflow(style, style.GetFont(),
-                                                     ink_overflow);
+        NGInkOverflow::ComputeTextDecorationOverflow(
+            style, style.GetFont(),
+            /* offset_in_container */ PhysicalOffset(), ink_overflow,
+            /* inline_context */ nullptr);
     ink_overflow.Unite(decoration_rect);
   }
 

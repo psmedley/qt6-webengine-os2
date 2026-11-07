@@ -23,36 +23,43 @@
 
 namespace dawn::native::vulkan {
 
-    class VulkanInstance;
+class VulkanInstance;
 
-    class Adapter : public AdapterBase {
-      public:
-        Adapter(InstanceBase* instance,
-                VulkanInstance* vulkanInstance,
-                VkPhysicalDevice physicalDevice);
-        ~Adapter() override = default;
+class Adapter : public AdapterBase {
+  public:
+    Adapter(InstanceBase* instance,
+            VulkanInstance* vulkanInstance,
+            VkPhysicalDevice physicalDevice);
+    ~Adapter() override;
 
-        // AdapterBase Implementation
-        bool SupportsExternalImages() const override;
+    // AdapterBase Implementation
+    bool SupportsExternalImages() const override;
 
-        const VulkanDeviceInfo& GetDeviceInfo() const;
-        VkPhysicalDevice GetPhysicalDevice() const;
-        VulkanInstance* GetVulkanInstance() const;
+    const VulkanDeviceInfo& GetDeviceInfo() const;
+    VkPhysicalDevice GetPhysicalDevice() const;
+    VulkanInstance* GetVulkanInstance() const;
 
-        bool IsDepthStencilFormatSupported(VkFormat format);
+    bool IsDepthStencilFormatSupported(VkFormat format);
 
-      private:
-        MaybeError InitializeImpl() override;
-        MaybeError InitializeSupportedFeaturesImpl() override;
-        MaybeError InitializeSupportedLimitsImpl(CombinedLimits* limits) override;
+    bool IsAndroidQualcomm();
 
-        ResultOrError<Ref<DeviceBase>> CreateDeviceImpl(
-            const DeviceDescriptor* descriptor) override;
+  private:
+    MaybeError InitializeImpl() override;
+    MaybeError InitializeSupportedFeaturesImpl() override;
+    MaybeError InitializeSupportedLimitsImpl(CombinedLimits* limits) override;
 
-        VkPhysicalDevice mPhysicalDevice;
-        Ref<VulkanInstance> mVulkanInstance;
-        VulkanDeviceInfo mDeviceInfo = {};
-    };
+    ResultOrError<Ref<DeviceBase>> CreateDeviceImpl(
+        const DeviceDescriptor* descriptor,
+        const TripleStateTogglesSet& userProvidedToggles) override;
+
+    MaybeError ValidateFeatureSupportedWithTogglesImpl(
+        wgpu::FeatureName feature,
+        const TripleStateTogglesSet& userProvidedToggles) override;
+
+    VkPhysicalDevice mPhysicalDevice;
+    Ref<VulkanInstance> mVulkanInstance;
+    VulkanDeviceInfo mDeviceInfo = {};
+};
 
 }  // namespace dawn::native::vulkan
 

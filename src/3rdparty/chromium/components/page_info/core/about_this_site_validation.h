@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,20 +30,24 @@ enum class AboutThisSiteStatus {
   kMissingDescriptionName = 12,
   kMissingDescriptionLang = 13,
   kMissingDescriptionSource = 14,
-  kMissingBannerInfo = 15,
+  // Deprecated: kMissingBannerInfo = 15,
+  kInvalidMoreAbout = 16,
+  kMissingMoreAbout = 17,
 
-  kMaxValue = kMissingBannerInfo,
+  kMaxValue = kMissingMoreAbout,
 };
 
 AboutThisSiteStatus ValidateMetadata(
-    const absl::optional<proto::AboutThisSiteMetadata>& metadata);
+    const absl::optional<proto::AboutThisSiteMetadata>& metadata,
+    bool allow_missing_description);
 
 AboutThisSiteStatus ValidateSource(const proto::Hyperlink& link);
 AboutThisSiteStatus ValidateDescription(
     const proto::SiteDescription& description);
 AboutThisSiteStatus ValidateFirstSeen(const proto::SiteFirstSeen& first_seen);
-AboutThisSiteStatus ValidateSiteInfo(const proto::SiteInfo& site_info);
-AboutThisSiteStatus ValidateBannerInfo(const proto::BannerInfo& banner_info);
+AboutThisSiteStatus ValidateMoreAbout(const proto::MoreAbout& more_about);
+AboutThisSiteStatus ValidateSiteInfo(const proto::SiteInfo& site_info,
+                                     bool allow_missing_description);
 
 }  // namespace about_this_site_validation
 }  // namespace page_info

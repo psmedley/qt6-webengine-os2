@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,8 @@ void PrintManager::DidPrintDocument(mojom::DidPrintDocumentParamsPtr params,
 
 void PrintManager::ShowInvalidPrinterSettingsError() {}
 
-void PrintManager::PrintingFailed(int32_t cookie) {
+void PrintManager::PrintingFailed(int32_t cookie,
+                                  mojom::PrintFailureReason reason) {
   // Note: Not redundant with cookie checks in the same method in other parts of
   // the class hierarchy.
   if (!IsValidCookie(cookie))

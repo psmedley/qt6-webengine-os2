@@ -32,7 +32,9 @@
 #include <assert.h>
 
 #include <algorithm>
+#include <map>
 #include <string>
+#include <utility>
 
 #include "common/scoped_ptr.h"
 #include "common/stdio_wrapper.h"
@@ -199,6 +201,28 @@ ProcessResult MinidumpProcessor::Process(
   // Reset frame_symbolizer_ at the beginning of stackwalk for each minidump.
   frame_symbolizer_->Reset();
 
+
+  MinidumpThreadNameList* thread_names = dump->GetThreadNameList();
+  std::map<uint32_t, string> thread_id_to_name;
+  if (thread_names) {
+    const unsigned int thread_name_count = thread_names->thread_name_count();
+    for (unsigned int thread_name_index = 0;
+         thread_name_index < thread_name_count;
+         ++thread_name_index) {
+      MinidumpThreadName* thread_name = thread_names->GetThreadNameAtIndex(thread_name_index);
+      if (!thread_name) {
+        BPLOG(ERROR) << "Could not get thread name for thread at index " << thread_name_index;
+        return PROCESS_ERROR_GETTING_THREAD_NAME;
+      }
+      uint32_t thread_id;
+      if (!thread_name->GetThreadID(&thread_id)) {
+        BPLOG(ERROR) << "Could not get thread ID for thread at index " << thread_name_index;
+        return PROCESS_ERROR_GETTING_THREAD_NAME;
+      }
+      thread_id_to_name.insert(std::make_pair(thread_id, thread_name->GetThreadName()));
+    }
+  }
+
   for (unsigned int thread_index = 0;
        thread_index < thread_count;
        ++thread_index) {
@@ -220,6 +244,14 @@ ProcessResult MinidumpProcessor::Process(
     }
 
     thread_string += " id " + HexString(thread_id);
+    auto thread_name_iter = thread_id_to_name.find(thread_id);
+    string thread_name;
+    if (thread_name_iter != thread_id_to_name.end()) {
+      thread_name = thread_name_iter->second;
+    }
+    if (!thread_name.empty()) {
+      thread_string += " name [" + thread_name + "]";
+    }
     BPLOG(INFO) << "Looking at thread " << thread_string;
 
     // If this thread is the thread that produced the minidump, don't process
@@ -311,6 +343,7 @@ ProcessResult MinidumpProcessor::Process(
     stack->set_tid(thread_id);
     process_state->threads_.push_back(stack.release());
     process_state->thread_memory_regions_.push_back(thread_memory);
+    process_state->thread_names_.push_back(thread_name);
   }
 
   if (interrupted) {
@@ -1297,7 +1330,220 @@ string MinidumpProcessor::GetCrashReason(Minidump* dump, uint64_t* address) {
           reason = "EXCEPTION_POSSIBLE_DEADLOCK";
           break;
         case MD_EXCEPTION_CODE_WIN_STACK_BUFFER_OVERRUN:
-          reason = "EXCEPTION_STACK_BUFFER_OVERRUN";
+          if (raw_exception->exception_record.number_parameters >= 1) {
+            MDFastFailSubcodeTypeWin subcode =
+                static_cast<MDFastFailSubcodeTypeWin>(
+                    raw_exception->exception_record.exception_information[0]);
+            switch (subcode) {
+              // Note - we skip the '0'/GS case as it exists for legacy reasons.
+              case MD_FAST_FAIL_VTGUARD_CHECK_FAILURE:
+                reason = "FAST_FAIL_VTGUARD_CHECK_FAILURE";
+                break;
+              case MD_FAST_FAIL_STACK_COOKIE_CHECK_FAILURE:
+                reason = "FAST_FAIL_STACK_COOKIE_CHECK_FAILURE";
+                break;
+              case MD_FAST_FAIL_CORRUPT_LIST_ENTRY:
+                reason = "FAST_FAIL_CORRUPT_LIST_ENTRY";
+                break;
+              case MD_FAST_FAIL_INCORRECT_STACK:
+                reason = "FAST_FAIL_INCORRECT_STACK";
+                break;
+              case MD_FAST_FAIL_INVALID_ARG:
+                reason = "FAST_FAIL_INVALID_ARG";
+                break;
+              case MD_FAST_FAIL_GS_COOKIE_INIT:
+                reason = "FAST_FAIL_GS_COOKIE_INIT";
+                break;
+              case MD_FAST_FAIL_FATAL_APP_EXIT:
+                reason = "FAST_FAIL_FATAL_APP_EXIT";
+                break;
+              case MD_FAST_FAIL_RANGE_CHECK_FAILURE:
+                reason = "FAST_FAIL_RANGE_CHECK_FAILURE";
+                break;
+              case MD_FAST_FAIL_UNSAFE_REGISTRY_ACCESS:
+                reason = "FAST_FAIL_UNSAFE_REGISTRY_ACCESS";
+                break;
+              case MD_FAST_FAIL_GUARD_ICALL_CHECK_FAILURE:
+                reason = "FAST_FAIL_GUARD_ICALL_CHECK_FAILURE";
+                break;
+              case MD_FAST_FAIL_GUARD_WRITE_CHECK_FAILURE:
+                reason = "FAST_FAIL_GUARD_WRITE_CHECK_FAILURE";
+                break;
+              case MD_FAST_FAIL_INVALID_FIBER_SWITCH:
+                reason = "FAST_FAIL_INVALID_FIBER_SWITCH";
+                break;
+              case MD_FAST_FAIL_INVALID_SET_OF_CONTEXT:
+                reason = "FAST_FAIL_INVALID_SET_OF_CONTEXT";
+                break;
+              case MD_FAST_FAIL_INVALID_REFERENCE_COUNT:
+                reason = "FAST_FAIL_INVALID_REFERENCE_COUNT";
+                break;
+              case MD_FAST_FAIL_INVALID_JUMP_BUFFER:
+                reason = "FAST_FAIL_INVALID_JUMP_BUFFER";
+                break;
+              case MD_FAST_FAIL_MRDATA_MODIFIED:
+                reason = "FAST_FAIL_MRDATA_MODIFIED";
+                break;
+              case MD_FAST_FAIL_CERTIFICATION_FAILURE:
+                reason = "FAST_FAIL_CERTIFICATION_FAILURE";
+                break;
+              case MD_FAST_FAIL_INVALID_EXCEPTION_CHAIN:
+                reason = "FAST_FAIL_INVALID_EXCEPTION_CHAIN";
+                break;
+              case MD_FAST_FAIL_CRYPTO_LIBRARY:
+                reason = "FAST_FAIL_CRYPTO_LIBRARY";
+                break;
+              case MD_FAST_FAIL_INVALID_CALL_IN_DLL_CALLOUT:
+                reason = "FAST_FAIL_INVALID_CALL_IN_DLL_CALLOUT";
+                break;
+              case MD_FAST_FAIL_INVALID_IMAGE_BASE:
+                reason = "FAST_FAIL_INVALID_IMAGE_BASE";
+                break;
+              case MD_FAST_FAIL_DLOAD_PROTECTION_FAILURE:
+                reason = "FAST_FAIL_DLOAD_PROTECTION_FAILURE";
+                break;
+              case MD_FAST_FAIL_UNSAFE_EXTENSION_CALL:
+                reason = "FAST_FAIL_UNSAFE_EXTENSION_CALL";
+                break;
+              case MD_FAST_FAIL_DEPRECATED_SERVICE_INVOKED:
+                reason = "FAST_FAIL_DEPRECATED_SERVICE_INVOKED";
+                break;
+              case MD_FAST_FAIL_INVALID_BUFFER_ACCESS:
+                reason = "FAST_FAIL_INVALID_BUFFER_ACCESS";
+                break;
+              case MD_FAST_FAIL_INVALID_BALANCED_TREE:
+                reason = "FAST_FAIL_INVALID_BALANCED_TREE";
+                break;
+              case MD_FAST_FAIL_INVALID_NEXT_THREAD:
+                reason = "FAST_FAIL_INVALID_NEXT_THREAD";
+                break;
+              case MD_FAST_FAIL_GUARD_ICALL_CHECK_SUPPRESSED:
+                reason = "FAST_FAIL_GUARD_ICALL_CHECK_SUPPRESSED";
+                break;
+              case MD_FAST_FAIL_APCS_DISABLED:
+                reason = "FAST_FAIL_APCS_DISABLED";
+                break;
+              case MD_FAST_FAIL_INVALID_IDLE_STATE:
+                reason = "FAST_FAIL_INVALID_IDLE_STATE";
+                break;
+              case MD_FAST_FAIL_MRDATA_PROTECTION_FAILURE:
+                reason = "FAST_FAIL_MRDATA_PROTECTION_FAILURE";
+                break;
+              case MD_FAST_FAIL_UNEXPECTED_HEAP_EXCEPTION:
+                reason = "FAST_FAIL_UNEXPECTED_HEAP_EXCEPTION";
+                break;
+              case MD_FAST_FAIL_INVALID_LOCK_STATE:
+                reason = "FAST_FAIL_INVALID_LOCK_STATE";
+                break;
+              case MD_FAST_FAIL_GUARD_JUMPTABLE:
+                reason = "FAST_FAIL_GUARD_JUMPTABLE";
+                break;
+              case MD_FAST_FAIL_INVALID_LONGJUMP_TARGET:
+                reason = "FAST_FAIL_INVALID_LONGJUMP_TARGET";
+                break;
+              case MD_FAST_FAIL_INVALID_DISPATCH_CONTEXT:
+                reason = "FAST_FAIL_INVALID_DISPATCH_CONTEXT";
+                break;
+              case MD_FAST_FAIL_INVALID_THREAD:
+                reason = "FAST_FAIL_INVALID_THREAD";
+                break;
+              case MD_FAST_FAIL_INVALID_SYSCALL_NUMBER:
+                reason = "FAST_FAIL_INVALID_SYSCALL_NUMBER";
+                break;
+              case MD_FAST_FAIL_INVALID_FILE_OPERATION:
+                reason = "FAST_FAIL_INVALID_FILE_OPERATION";
+                break;
+              case MD_FAST_FAIL_LPAC_ACCESS_DENIED:
+                reason = "FAST_FAIL_LPAC_ACCESS_DENIED";
+                break;
+              case MD_FAST_FAIL_GUARD_SS_FAILURE:
+                reason = "FAST_FAIL_GUARD_SS_FAILURE";
+                break;
+              case MD_FAST_FAIL_LOADER_CONTINUITY_FAILURE:
+                reason = "FAST_FAIL_LOADER_CONTINUITY_FAILURE";
+                break;
+              case MD_FAST_FAIL_GUARD_EXPORT_SUPPRESSION_FAILURE:
+                reason = "FAST_FAIL_GUARD_EXPORT_SUPPRESSION_FAILURE";
+                break;
+              case MD_FAST_FAIL_INVALID_CONTROL_STACK:
+                reason = "FAST_FAIL_INVALID_CONTROL_STACK";
+                break;
+              case MD_FAST_FAIL_SET_CONTEXT_DENIED:
+                reason = "FAST_FAIL_SET_CONTEXT_DENIED";
+                break;
+              case MD_FAST_FAIL_INVALID_IAT:
+                reason = "FAST_FAIL_INVALID_IAT";
+                break;
+              case MD_FAST_FAIL_HEAP_METADATA_CORRUPTION:
+                reason = "FAST_FAIL_HEAP_METADATA_CORRUPTION";
+                break;
+              case MD_FAST_FAIL_PAYLOAD_RESTRICTION_VIOLATION:
+                reason = "FAST_FAIL_PAYLOAD_RESTRICTION_VIOLATION";
+                break;
+              case MD_FAST_FAIL_LOW_LABEL_ACCESS_DENIED:
+                reason = "FAST_FAIL_LOW_LABEL_ACCESS_DENIED";
+                break;
+              case MD_FAST_FAIL_ENCLAVE_CALL_FAILURE:
+                reason = "FAST_FAIL_ENCLAVE_CALL_FAILURE";
+                break;
+              case MD_FAST_FAIL_UNHANDLED_LSS_EXCEPTON:
+                reason = "FAST_FAIL_UNHANDLED_LSS_EXCEPTON";
+                break;
+              case MD_FAST_FAIL_ADMINLESS_ACCESS_DENIED:
+                reason = "FAST_FAIL_ADMINLESS_ACCESS_DENIED";
+                break;
+              case MD_FAST_FAIL_UNEXPECTED_CALL:
+                reason = "FAST_FAIL_UNEXPECTED_CALL";
+                break;
+              case MD_FAST_FAIL_CONTROL_INVALID_RETURN_ADDRESS:
+                reason = "FAST_FAIL_CONTROL_INVALID_RETURN_ADDRESS";
+                break;
+              case MD_FAST_FAIL_UNEXPECTED_HOST_BEHAVIOR:
+                reason = "FAST_FAIL_UNEXPECTED_HOST_BEHAVIOR";
+                break;
+              case MD_FAST_FAIL_FLAGS_CORRUPTION:
+                reason = "FAST_FAIL_FLAGS_CORRUPTION";
+                break;
+              case MD_FAST_FAIL_VEH_CORRUPTION:
+                reason = "FAST_FAIL_VEH_CORRUPTION";
+                break;
+              case MD_FAST_FAIL_ETW_CORRUPTION:
+                reason = "FAST_FAIL_ETW_CORRUPTION";
+                break;
+              case MD_FAST_FAIL_RIO_ABORT:
+                reason = "FAST_FAIL_RIO_ABORT";
+                break;
+              case MD_FAST_FAIL_INVALID_PFN:
+                reason = "FAST_FAIL_INVALID_PFN";
+                break;
+              case MD_FAST_FAIL_GUARD_ICALL_CHECK_FAILURE_XFG:
+                reason = "FAST_FAIL_GUARD_ICALL_CHECK_FAILURE_XFG";
+                break;
+              case MD_FAST_FAIL_CAST_GUARD:
+                reason = "FAST_FAIL_CAST_GUARD";
+                break;
+              case MD_FAST_FAIL_HOST_VISIBILITY_CHANGE:
+                reason = "FAST_FAIL_HOST_VISIBILITY_CHANGE";
+                break;
+              case MD_FAST_FAIL_KERNEL_CET_SHADOW_STACK_ASSIST:
+                reason = "FAST_FAIL_KERNEL_CET_SHADOW_STACK_ASSIST";
+                break;
+              case MD_FAST_FAIL_PATCH_CALLBACK_FAILED:
+                reason = "FAST_FAIL_PATCH_CALLBACK_FAILED";
+                break;
+              case MD_FAST_FAIL_NTDLL_PATCH_FAILED:
+                reason = "FAST_FAIL_NTDLL_PATCH_FAILED";
+                break;
+              case MD_FAST_FAIL_INVALID_FLS_DATA:
+                reason = "FAST_FAIL_INVALID_FLS_DATA";
+                break;
+              default:
+                reason = "EXCEPTION_STACK_BUFFER_OVERRUN";
+                break;
+            }
+          } else {
+            reason = "EXCEPTION_STACK_BUFFER_OVERRUN";
+          }
           break;
         case MD_EXCEPTION_CODE_WIN_HEAP_CORRUPTION:
           reason = "EXCEPTION_HEAP_CORRUPTION";

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,6 +34,12 @@ class InitializationSubTask : public DatabaseTask {
   // Holds data used by all SubTasks.
   struct SubTaskInit {
     SubTaskInit() = delete;
+    SubTaskInit(int64_t service_worker_registration_id,
+                std::string unique_id,
+                BackgroundFetchInitializationData* initialization_data)
+        : service_worker_registration_id(service_worker_registration_id),
+          unique_id(std::move(unique_id)),
+          initialization_data(initialization_data) {}
     ~SubTaskInit() = default;
 
     // Service Worker Database metadata.

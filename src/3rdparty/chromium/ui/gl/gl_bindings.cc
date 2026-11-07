@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,17 +15,18 @@
 #include "ui/gfx/x/glx.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "ui/gl/gl_surface_wgl.h"
 #endif
 
 #if defined(USE_EGL)
+#include "ui/gl/gl_display.h"
 #include "ui/gl/gl_surface_egl.h"
 #endif
 
 namespace gl {
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 std::string DriverWGL::GetPlatformExtensions() {
   const char* str = nullptr;
   str = wglGetExtensionsStringARB(GLSurfaceWGL::GetDisplayDC());
@@ -36,17 +37,8 @@ std::string DriverWGL::GetPlatformExtensions() {
 #endif
 
 #if defined(USE_EGL)
-#if !defined(TOOLKIT_QT)
-std::string DriverEGL::GetPlatformExtensions() {
-  EGLDisplay display = GLSurfaceEGL::GetHardwareDisplay();
-  if (display == EGL_NO_DISPLAY)
-    return "";
-  const char* str = eglQueryString(display, EGL_EXTENSIONS);
-  return str ? std::string(str) : "";
-}
-#endif
-
-void DriverEGL::UpdateConditionalExtensionBindings() {
+void DisplayExtensionsEGL::UpdateConditionalExtensionSettings(
+    EGLDisplay display) {
   // For the moment, only two extensions can be conditionally disabled
   // through GPU driver bug workarounds mechanism:
   //   EGL_KHR_fence_sync
@@ -55,20 +47,27 @@ void DriverEGL::UpdateConditionalExtensionBindings() {
   // In theory it's OK to allow disabling other EGL extensions, as far as they
   // are not the ones used in GLSurfaceEGL::InitializeOneOff().
 
-  std::string extensions(GetPlatformExtensions());
+  std::string extensions(GetPlatformExtensions(display));
   extensions += " ";
 
-  ext.b_EGL_KHR_fence_sync =
+  b_EGL_KHR_fence_sync =
       extensions.find("EGL_KHR_fence_sync ") != std::string::npos;
-  ext.b_EGL_KHR_wait_sync =
+  b_EGL_KHR_wait_sync =
       extensions.find("EGL_KHR_wait_sync ") != std::string::npos;
-  if (!ext.b_EGL_KHR_wait_sync) {
-    fn.eglWaitSyncKHRFn = nullptr;
-  }
 }
 
 // static
-std::string DriverEGL::GetClientExtensions() {
+#if !defined(TOOLKIT_QT) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+std::string DisplayExtensionsEGL::GetPlatformExtensions(EGLDisplay display) {
+  if (display == EGL_NO_DISPLAY)
+    return "";
+  const char* str = eglQueryString(display, EGL_EXTENSIONS);
+  return str ? std::string(str) : "";
+}
+#endif
+
+// static
+std::string ClientExtensionsEGL::GetClientExtensions() {
   const char* str = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
   return str ? std::string(str) : "";
 }

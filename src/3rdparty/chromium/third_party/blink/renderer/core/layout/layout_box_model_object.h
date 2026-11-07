@@ -124,7 +124,7 @@ enum LineDirectionMode { kHorizontalLine, kVerticalLine };
 //   "LogicalLeft" and "LogicalRight".
 //
 // For more information, see the following doc about coordinate spaces:
-// https://chromium.googlesource.com/chromium/src.git/+/master/third_party/blink/renderer/core/layout/README.md#coordinate-spaces
+// https://chromium.googlesource.com/chromium/src.git/+/main/third_party/blink/renderer/core/layout/README.md#coordinate-spaces
 class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
  public:
   LayoutBoxModelObject(ContainerNode*);
@@ -143,13 +143,22 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
                                                 : offset.TransposedSize();
   }
 
-  // Populates StickyPositionConstraints, setting the sticky box rect,
-  // containing block rect and updating the constraint offsets according to the
-  // available space.
-  PhysicalRect ComputeStickyConstrainingRect() const;
-  void UpdateStickyPositionConstraints() const;
+  // If needed, populates StickyPositionConstraints, setting the sticky box
+  // rect, containing block rect and updating the constraint offsets according
+  // to the available space, and returns true. Otherwise returns false.
+  bool UpdateStickyPositionConstraints();
+
   PhysicalOffset StickyPositionOffset() const;
   virtual LayoutBlock* StickyContainer() const;
+
+  StickyPositionScrollingConstraints* StickyConstraints() const {
+    NOT_DESTROYED();
+    return FirstFragment().StickyConstraints();
+  }
+  void SetStickyConstraints(StickyPositionScrollingConstraints* constraints) {
+    NOT_DESTROYED();
+    GetMutableForPainting().FirstFragment().SetStickyConstraints(constraints);
+  }
 
   PhysicalOffset OffsetForInFlowPosition() const;
 
@@ -588,6 +597,7 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
   virtual void LocalQuadsForSelf(Vector<gfx::QuadF>& quads) const;
 
   void WillBeDestroyed() override;
+  void InsertedIntoTree() override;
 
   PhysicalOffset AdjustedPositionRelativeTo(const PhysicalOffset&,
                                             const Element*) const;
@@ -625,8 +635,6 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
   void StyleWillChange(StyleDifference,
                        const ComputedStyle& new_style) override;
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
-
-  void InvalidateStickyConstraints();
 
  public:
   // These functions are only used internally to manipulate the layout tree
@@ -718,6 +726,7 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
         &LayoutBoxModelObject::BorderTop, &LayoutBoxModelObject::BorderRight,
         &LayoutBoxModelObject::BorderBottom, &LayoutBoxModelObject::BorderLeft);
   }
+  void DisallowDeferredShapingIfNegativePositioned() const;
 };
 
 template <>

@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,9 @@
 #include "base/time/time.h"
 #include "chrome/browser/cart/chrome_cart.mojom.h"
 #include "chrome/browser/new_tab_page/modules/drive/drive.mojom.h"
+#include "chrome/browser/new_tab_page/modules/feed/feed.mojom.h"
 #include "chrome/browser/new_tab_page/modules/photos/photos.mojom.h"
-#include "chrome/browser/new_tab_page/modules/task_module/task_module.mojom.h"
+#include "chrome/browser/new_tab_page/modules/recipes/recipes.mojom.h"
 #include "ui/webui/resources/js/browser_command/browser_command.mojom.h"
 #if !defined(OFFICIAL_BUILD)
 #include "chrome/browser/ui/webui/new_tab_page/foo/foo.mojom.h"  // nogncheck crbug.com/1125897
@@ -32,6 +33,7 @@
 #include "ui/native_theme/native_theme.h"
 #include "ui/native_theme/native_theme_observer.h"
 #include "ui/webui/mojo_web_ui_controller.h"
+#include "ui/webui/resources/cr_components/color_change_listener/color_change_listener.mojom.h"
 #include "ui/webui/resources/cr_components/customize_themes/customize_themes.mojom.h"
 #include "ui/webui/resources/cr_components/most_visited/most_visited.mojom.h"
 
@@ -45,6 +47,10 @@ class WebContents;
 class WebUI;
 }  // namespace content
 
+namespace ui {
+class ColorChangeHandler;
+}  // namespace ui
+
 class ChromeCustomizeThemesHandler;
 #if !defined(OFFICIAL_BUILD)
 class FooHandler;
@@ -57,11 +63,13 @@ class PrefService;
 class Profile;
 class BrowserCommandHandler;
 class RealboxHandler;
-class TaskModuleHandler;
+class RecipesHandler;
 class CartHandler;
 class DriveHandler;
 class PhotosHandler;
-
+namespace ntp {
+class FeedHandler;
+}
 class NewTabPageUI
     : public ui::MojoWebUIController,
       public new_tab_page::mojom::PageHandlerFactory,
@@ -83,12 +91,18 @@ class NewTabPageUI
   static bool IsNewTabPageOrigin(const GURL& url);
   static void RegisterProfilePrefs(PrefRegistrySimple* registry);
   static void ResetProfilePrefs(PrefService* prefs);
-  static bool IsDriveModuleEnabled(Profile* profile);
+  static bool IsDriveModuleEnabledForProfile(Profile* profile);
 
   // Instantiates the implementor of the mojom::PageHandlerFactory mojo
   // interface passing the pending receiver that will be internally bound.
   void BindInterface(
       mojo::PendingReceiver<new_tab_page::mojom::PageHandlerFactory>
+          pending_receiver);
+
+  // Instantiates the implementor of the mojom::PageHandler mojo interface
+  // passing the pending receiver that will be internally bound.
+  void BindInterface(
+      mojo::PendingReceiver<color_change_listener::mojom::PageHandler>
           pending_receiver);
 
   // Instantiates the implementor of the realbox::mojom::PageHandler mojo
@@ -121,8 +135,7 @@ class NewTabPageUI
   // recipe_tasks::mojom::RecipeTasksHandler mojo interface passing the
   // pending receiver that will be internally bound.
   void BindInterface(
-      mojo::PendingReceiver<task_module::mojom::TaskModuleHandler>
-          pending_receiver);
+      mojo::PendingReceiver<recipes::mojom::RecipesHandler> pending_receiver);
 
   // Instantiates the implementor of drive::mojom::DriveHandler mojo interface
   // passing the pending receiver that will be internally bound.
@@ -133,6 +146,11 @@ class NewTabPageUI
   // passing the pending receiver that will be internally bound.
   void BindInterface(
       mojo::PendingReceiver<photos::mojom::PhotosHandler> pending_receiver);
+
+  // Instantiates the implementor of ntp::feed::mojom::FeedHandler mojo
+  // interface passing the pending receiver that will be internally bound.
+  void BindInterface(
+      mojo::PendingReceiver<ntp::feed::mojom::FeedHandler> pending_receiver);
 
 #if !defined(OFFICIAL_BUILD)
   // Instantiates the implementor of the foo::mojom::FooHandler mojo interface
@@ -203,6 +221,7 @@ class NewTabPageUI
   mojo::Receiver<new_tab_page::mojom::PageHandlerFactory>
       page_factory_receiver_;
   std::unique_ptr<ChromeCustomizeThemesHandler> customize_themes_handler_;
+  std::unique_ptr<ui::ColorChangeHandler> color_provider_handler_;
   mojo::Receiver<customize_themes::mojom::CustomizeThemesHandlerFactory>
       customize_themes_factory_receiver_;
   std::unique_ptr<MostVisitedHandler> most_visited_page_handler_;
@@ -232,9 +251,10 @@ class NewTabPageUI
   base::Time navigation_start_time_;
 
   // Mojo implementations for modules:
-  std::unique_ptr<TaskModuleHandler> task_module_handler_;
+  std::unique_ptr<RecipesHandler> recipes_handler_;
   std::unique_ptr<DriveHandler> drive_handler_;
   std::unique_ptr<PhotosHandler> photos_handler_;
+  std::unique_ptr<ntp::FeedHandler> feed_handler_;
 
   PrefChangeRegistrar pref_change_registrar_;
 

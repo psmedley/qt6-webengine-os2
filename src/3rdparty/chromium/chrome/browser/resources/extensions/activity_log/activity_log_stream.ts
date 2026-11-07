@@ -1,18 +1,18 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
+import 'chrome://resources/cr_elements/cr_button/cr_button.js';
 import 'chrome://resources/cr_elements/cr_search_field/cr_search_field.js';
 import 'chrome://resources/polymer/v3_0/iron-list/iron-list.js';
-import '../shared_style.js';
+import '../shared_style.css.js';
 import './activity_log_stream_item.js';
 
 import {ChromeEvent} from '/tools/typescript/definitions/chrome_event.js';
 import {assert} from 'chrome://resources/js/assert_ts.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {getTemplate} from './activity_log_stream.html.js';
 
+import {getTemplate} from './activity_log_stream.html.js';
 import {StreamItem} from './activity_log_stream_item.js';
 
 export interface ActivityLogEventDelegate {
@@ -25,7 +25,7 @@ export interface ActivityLogEventDelegate {
  * the activity for every script invoked.
  */
 function processActivityForStream(
-    activity: chrome.activityLogPrivate.ExtensionActivity): Array<StreamItem> {
+    activity: chrome.activityLogPrivate.ExtensionActivity): StreamItem[] {
   const activityType = activity.activityType;
   const timestamp = activity.time!;
   const isContentScript = activityType ===
@@ -97,8 +97,8 @@ export class ActivityLogStreamElement extends PolymerElement {
   extensionId: string;
   delegate: ActivityLogEventDelegate;
   private isStreamOn_: boolean;
-  private activityStream_: Array<StreamItem>;
-  private filteredActivityStream_: Array<StreamItem>;
+  private activityStream_: StreamItem[];
+  private filteredActivityStream_: StreamItem[];
   private lastSearch_: string;
   private listenerInstance_:
       (type: chrome.activityLogPrivate.ExtensionActivity) => void;
@@ -194,7 +194,7 @@ export class ActivityLogStreamElement extends PolymerElement {
     this.lastSearch_ = searchTerm;
   }
 
-  private computeFilteredActivityStream_(): Array<StreamItem> {
+  private computeFilteredActivityStream_(): StreamItem[] {
     if (!this.lastSearch_) {
       return this.activityStream_.slice();
     }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/threading/platform_thread.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/webrtc/webrtc_content_browsertest_base.h"
 #include "content/public/common/content_switches.h"
@@ -86,8 +87,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
 
 // These tests will make a complete PeerConnection-based call and verify that
 // video is playing for the call.
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
-                       CanSetupDefaultVideoCall) {
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, CanSetupDefaultVideoCall) {
   MakeTypicalPeerConnectionCall(
       "callAndExpectResolution({video: true}, 640, 480);");
 }
@@ -268,11 +268,12 @@ IN_PROC_BROWSER_TEST_F(
       "testEstablishVideoOnlyCallAndVerifyGetSynchronizationSourcesWorks();");
 }
 
+// Flaky on Android: https://crbug.com/1366910.
 #if BUILDFLAG(IS_ANDROID) && BUILDFLAG(USE_PROPRIETARY_CODECS)
 // This test is to make sure HW H264 work normally on supported devices, since
 // there is no SW H264 fallback available on Android.
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
-                       CanSetupH264VideoCallOnSupportedDevice) {
+                       DISABLED_CanSetupH264VideoCallOnSupportedDevice) {
   MakeTypicalPeerConnectionCall("CanSetupH264VideoCallOnSupportedDevice();");
 }
 #endif

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 
 namespace password_manager {
 
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused." before the enum and update enums.xml
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.password_manager
 enum class AndroidBackendErrorType {
   kUncategorized = 0,
@@ -26,7 +28,11 @@ enum class AndroidBackendErrorType {
   kGMSVersionNotSupported = 6,
   // API was successfully called, but returned an error.
   kExternalError = 7,
-  kMaxValue = kExternalError,
+  // Task was cleaned-up without a proper response.
+  kCleanedUpWithoutResponse = 8,
+  // Backend downstream implementation is not available.
+  kBackendNotAvailable = 9,
+  kMaxValue = kBackendNotAvailable,
 };
 
 struct AndroidBackendError {
@@ -43,6 +49,10 @@ struct AndroidBackendError {
   // Numeric error code returned by the GMS Core API, only available if 'type'
   // is kExternalError.
   absl::optional<int> api_error_code;
+
+  // Numeric connection result status code returned by the GMS Core API, only
+  // available if ConnectionResult was set on the returned exception.
+  absl::optional<int> connection_result_code;
 };
 
 }  // namespace password_manager

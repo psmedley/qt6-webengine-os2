@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,6 +40,11 @@ const base::FilePath::CharType kFileSystemDirectory[] =
 // The path where IndexedDB data is persisted on disk for partitioned storage.
 const base::FilePath::CharType kIndexedDbDirectory[] =
     FILE_PATH_LITERAL("IndexedDB");
+
+// The path where BackgroundFetch data is persisted on disk for partitioned
+// storage.
+const base::FilePath::CharType kBackgroundFetchDirectory[] =
+    FILE_PATH_LITERAL("BackgroundFetch");
 
 // The path where CacheStorage data is persisted on disk for partitioned
 // storage.

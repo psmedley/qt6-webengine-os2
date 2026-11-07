@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,22 +12,7 @@ namespace certificate_transparency {
 namespace features {
 
 COMPONENT_EXPORT(CERTIFICATE_TRANSPARENCY)
-extern const base::Feature kCertificateTransparencyComponentUpdater;
-
-// If enabled, the 2022 CT policy which removes the one Google log
-// requirement, introduces log operator diversity requirements, and increases
-// the number of embedded SCTs required for certificates with a lifetime over
-// 180 days (from 2 to 3) will be used for any certificate issued after February
-// 1, 2022.
-COMPONENT_EXPORT(CERTIFICATE_TRANSPARENCY)
-extern const base::Feature kCertificateTransparency2022Policy;
-
-// If enabled, the 2022 CT policy which removes the one Google log
-// requirement, introduces log operator diversity requirements, and increases
-// the number of embedded SCTs required for certificates with a lifetime over
-// 180 days (from 2 to 3) will be used for all certificates.
-COMPONENT_EXPORT(CERTIFICATE_TRANSPARENCY)
-extern const base::Feature kCertificateTransparency2022PolicyAllCerts;
+BASE_DECLARE_FEATURE(kCertificateTransparencyComponentUpdater);
 
 }  // namespace features
 }  // namespace certificate_transparency

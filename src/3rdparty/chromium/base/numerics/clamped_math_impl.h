@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,8 +57,9 @@ constexpr T SaturatedAbsWrapper(T value) {
   // special case of numeric_limits<T>::min(), by evaluating the bit pattern as
   // a signed integer value. If it is the overflow case, we end up subtracting
   // one from the unsigned result, thus saturating to numeric_limits<T>::max().
-  return static_cast<T>(SafeUnsignedAbs(value) -
-                        IsValueNegative<T>(SafeUnsignedAbs(value)));
+  return static_cast<T>(
+      SafeUnsignedAbs(value) -
+      IsValueNegative<T>(static_cast<T>(SafeUnsignedAbs(value))));
 }
 
 template <

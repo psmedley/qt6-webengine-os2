@@ -30,6 +30,7 @@
 #include <algorithm>
 
 #include "base/numerics/checked_math.h"
+#include "base/numerics/safe_conversions.h"
 #include "third_party/blink/renderer/platform/weborigin/known_ports.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
@@ -107,7 +108,7 @@ class KURLCharsetConverter final : public url::CharsetConverter {
     std::string encoded =
         encoding_->Encode(String(input, static_cast<unsigned>(input_length)),
                           WTF::kURLEncodedEntitiesForUnencodables);
-    output->Append(encoded.c_str(), static_cast<int>(encoded.length()));
+    output->Append(encoded.c_str(), encoded.length());
   }
 
  private:
@@ -118,7 +119,7 @@ class KURLCharsetConverter final : public url::CharsetConverter {
 
 bool IsValidProtocol(const String& protocol) {
   // RFC3986: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
-  if (protocol.IsEmpty())
+  if (protocol.empty())
     return false;
   if (!IsSchemeFirstChar(protocol[0]))
     return false;
@@ -247,12 +248,6 @@ KURL::KURL(const GURL& gurl) {
        nullptr /* query_encoding */);
 }
 
-KURL KURL::CreateIsolated(const String& url) {
-  // FIXME: We should be able to skip this extra copy and created an
-  // isolated KURL more efficiently.
-  return KURL(url).Copy();
-}
-
 // Constructs a new URL given a base URL and a possibly relative input URL.
 // This assumes UTF-8 encoding.
 KURL::KURL(const KURL& base, const String& relative) {
@@ -285,7 +280,7 @@ KURL::KURL(const KURL& other)
       parsed_(other.parsed_),
       string_(other.string_) {
   if (other.inner_url_.get())
-    inner_url_ = std::make_unique<KURL>(other.inner_url_->Copy());
+    inner_url_ = std::make_unique<KURL>(*other.inner_url_);
 }
 
 KURL::~KURL() = default;
@@ -297,22 +292,10 @@ KURL& KURL::operator=(const KURL& other) {
   parsed_ = other.parsed_;
   string_ = other.string_;
   if (other.inner_url_)
-    inner_url_ = std::make_unique<KURL>(other.inner_url_->Copy());
+    inner_url_ = std::make_unique<KURL>(*other.inner_url_);
   else
     inner_url_.reset();
   return *this;
-}
-
-KURL KURL::Copy() const {
-  KURL result;
-  result.is_valid_ = is_valid_;
-  result.protocol_is_in_http_family_ = protocol_is_in_http_family_;
-  result.protocol_ = protocol_.IsolatedCopy();
-  result.parsed_ = parsed_;
-  result.string_ = string_.IsolatedCopy();
-  if (inner_url_)
-    result.inner_url_ = std::make_unique<KURL>(inner_url_->Copy());
-  return result;
 }
 
 bool KURL::IsNull() const {
@@ -320,7 +303,7 @@ bool KURL::IsNull() const {
 }
 
 bool KURL::IsEmpty() const {
-  return string_.IsEmpty();
+  return string_.empty();
 }
 
 bool KURL::IsValid() const {
@@ -624,7 +607,7 @@ void KURL::SetHostAndPort(const String& input) {
   }
 
   // Replace port next.
-  if (is_valid_ && !port.IsEmpty()) {
+  if (is_valid_ && !port.empty()) {
     url::Replacements<char> replacements;
     StringUTF8Adaptor port_utf8(port);
     replacements.SetPort(CharactersOrEmpty(port_utf8),
@@ -644,7 +627,7 @@ void KURL::RemovePort() {
 void KURL::SetPort(const String& input) {
   String port = RemoveURLWhitespace(input);
   String parsed_port = ParsePortFromStringPosition(port, 0);
-  if (!parsed_port.IsEmpty())
+  if (!parsed_port.empty())
     SetPort(parsed_port.ToUInt());
 }
 
@@ -666,7 +649,7 @@ void KURL::SetPort(uint16_t port) {
 void KURL::SetUser(const String& user) {
   // This function is commonly called to clear the username, which we
   // normally don't have, so we optimize this case.
-  if (user.IsEmpty() && !parsed_.username.is_valid())
+  if (user.empty() && !parsed_.username.is_valid())
     return;
 
   // The canonicalizer will clear any usernames that are empty, so we
@@ -684,7 +667,7 @@ void KURL::SetUser(const String& user) {
 void KURL::SetPass(const String& pass) {
   // This function is commonly called to clear the password, which we
   // normally don't have, so we optimize this case.
-  if (pass.IsEmpty() && !parsed_.password.is_valid())
+  if (pass.empty() && !parsed_.password.is_valid())
     return;
 
   // The canonicalizer will clear any passwords that are empty, so we
@@ -766,7 +749,8 @@ String DecodeURLEscapeSequences(const String& string, DecodeURLMode mode) {
   url::DecodeURLEscapeSequences(string_utf8.data(), string_utf8.size(), mode,
                                 &unescaped);
   return StringImpl::Create8BitIfPossible(
-      reinterpret_cast<UChar*>(unescaped.data()), unescaped.length());
+      reinterpret_cast<UChar*>(unescaped.data()),
+      base::checked_cast<wtf_size_t>(unescaped.length()));
 }
 
 String EncodeWithURLEscapeSequences(const String& not_encoded_string) {
@@ -774,11 +758,12 @@ String EncodeWithURLEscapeSequences(const String& not_encoded_string) {
       UTF8Encoding().Encode(not_encoded_string, WTF::kNoUnencodables);
 
   url::RawCanonOutputT<char> buffer;
-  int input_length = base::checked_cast<int>(utf8.length());
+  size_t input_length = utf8.length();
   if (buffer.capacity() < input_length * 3)
     buffer.Resize(input_length * 3);
 
-  url::EncodeURIComponent(utf8.c_str(), input_length, &buffer);
+  url::EncodeURIComponent(utf8.c_str(), static_cast<wtf_size_t>(input_length),
+                          &buffer);
   String escaped(buffer.data(), static_cast<unsigned>(buffer.length()));
   // Unescape '/'; it's safe and much prettier.
   escaped.Replace("%2F", "/");
@@ -900,7 +885,7 @@ void KURL::Init(const KURL& base,
   // This makes it safe to call FromUTF8() below and still keep using parsed_
   // which stores byte offsets: Since it's all ASCII, UTF-8 byte offsets
   // map 1-to-1 to UTF-16 codepoint offsets.
-  for (int i = 0; i < output.length(); ++i) {
+  for (size_t i = 0; i < output.length(); ++i) {
     DCHECK(WTF::IsASCII(output.data()[i]));
   }
 

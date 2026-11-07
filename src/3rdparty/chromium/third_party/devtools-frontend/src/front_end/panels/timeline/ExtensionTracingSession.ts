@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import type * as Platform from '../../core/platform/platform.js';
 import type * as SDK from '../../core/sdk/sdk.js';
 import type * as Extensions from '../../models/extensions/extensions.js';
 
-import type {PerformanceModel} from './PerformanceModel.js';
-import type {Client} from './TimelineLoader.js';
-import {TimelineLoader} from './TimelineLoader.js';
+import {type PerformanceModel} from './PerformanceModel.js';
+
+import {TimelineLoader, type Client} from './TimelineLoader.js';
 
 export class ExtensionTracingSession implements Extensions.ExtensionTraceProvider.TracingSession, Client {
   private readonly provider: Extensions.ExtensionTraceProvider.ExtensionTraceProvider;
@@ -42,7 +43,7 @@ export class ExtensionTracingSession implements Extensions.ExtensionTraceProvide
     this.completionCallback();
   }
 
-  complete(url: string, timeOffsetMicroseconds: number): void {
+  complete(url: Platform.DevToolsPath.UrlString, timeOffsetMicroseconds: number): void {
     if (!url) {
       this.completionCallback();
       return;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -73,7 +73,8 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   ~BackendImpl() override;
 
   // Performs general initialization for this current instance of the cache.
-  net::Error Init(CompletionOnceCallback callback);
+  // `callback` is always invoked asynchronously.
+  void Init(CompletionOnceCallback callback);
 
   // Performs the actual initialization and final cleanup on destruction.
   int SyncInit();
@@ -271,6 +272,9 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   // Ensures that the private cache thread completes work.
   static void FlushForTesting();
 
+  // Ensures that the private cache thread completes work.
+  static void FlushAsynchronouslyForTesting(base::OnceClosure callback);
+
   // Backend implementation.
   int32_t GetEntryCount() const override;
   EntryResult OpenOrCreateEntry(const std::string& key,
@@ -371,8 +375,12 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   // Send UMA stats.
   void ReportStats();
 
-  // Upgrades the index file to version 2.1.
+  // Upgrades the index file to version 2.1 (from 2.0)
   void UpgradeTo2_1();
+
+  // Upgrades the index file to version 3.0
+  // (from 2.1/2.0 depending on eviction algorithm)
+  void UpgradeTo3_0();
 
   // Performs basic checks on the index file. Returns false on failure.
   bool CheckIndex();

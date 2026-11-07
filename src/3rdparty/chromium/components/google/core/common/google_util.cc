@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -73,7 +73,7 @@ bool IsValidHostName(base::StringPiece host,
   if (allowed_tlds->find(std::string(tld)) == allowed_tlds->end())
     return false;
 
-  if (base::LowerCaseEqualsASCII(host_minus_tld, domain_in_lower_case))
+  if (base::EqualsCaseInsensitiveASCII(host_minus_tld, domain_in_lower_case))
     return true;
 
   if (subdomain_permission == ALLOW_SUBDOMAIN) {
@@ -83,7 +83,7 @@ bool IsValidHostName(base::StringPiece host,
   }
 
   std::string www_domain = base::StrCat({"www.", domain_in_lower_case});
-  return base::LowerCaseEqualsASCII(host_minus_tld, www_domain);
+  return base::EqualsCaseInsensitiveASCII(host_minus_tld, www_domain);
 }
 
 // True if |url| is a valid URL with HTTP or HTTPS scheme. If |port_permission|
@@ -116,8 +116,6 @@ bool IsCanonicalHostYoutubeHostname(base::StringPiece canonical_host,
       std::move(std::set<std::string>{YOUTUBE_TLD_LIST}));
 
   return IsValidHostName(canonical_host, "youtube", subdomain_permission,
-                         youtube_tlds) ||
-         IsValidHostName(canonical_host, "youtubekids", subdomain_permission,
                          youtube_tlds);
 }
 
@@ -221,18 +219,18 @@ bool StartsWithCommandLineGoogleBaseURL(const GURL& url) {
                           base::CompareCase::SENSITIVE);
 }
 
-bool IsGoogleHostname(base::StringPiece host,
-                      SubdomainPermission subdomain_permission) {
-  url::CanonHostInfo host_info;
-  return IsCanonicalHostGoogleHostname(net::CanonicalizeHost(host, &host_info),
-                                       subdomain_permission);
-}
-
 bool IsGoogleDomainUrl(const GURL& url,
                        SubdomainPermission subdomain_permission,
                        PortPermission port_permission) {
   return IsValidURL(url, port_permission) &&
          IsCanonicalHostGoogleHostname(url.host_piece(), subdomain_permission);
+}
+
+bool IsGoogleHostname(base::StringPiece host,
+                      SubdomainPermission subdomain_permission) {
+  url::CanonHostInfo host_info;
+  return IsCanonicalHostGoogleHostname(net::CanonicalizeHost(host, &host_info),
+                                       subdomain_permission);
 }
 
 bool IsGoogleHomePageUrl(const GURL& url) {
@@ -297,6 +295,7 @@ bool IsGoogleAssociatedDomainUrl(const GURL& url) {
       ".googlevideo.com",
       ".gstatic.com",
       ".litepages.googlezip.net",
+      ".youtubekids.com",
       ".ytimg.com",
   };
   const std::string host = url.host();
@@ -312,7 +311,7 @@ bool IsGoogleAssociatedDomainUrl(const GURL& url) {
       "googleweblight.com",
   };
   for (size_t i = 0; i < std::size(kHostsToSetHeadersFor); ++i) {
-    if (base::LowerCaseEqualsASCII(host, kHostsToSetHeadersFor[i]))
+    if (base::EqualsCaseInsensitiveASCII(host, kHostsToSetHeadersFor[i]))
       return true;
   }
 

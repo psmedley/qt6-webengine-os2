@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -72,8 +72,17 @@ void MimeSniffingURLLoader::Start(
   source_url_loader_.Bind(std::move(source_url_loader_remote));
   source_url_client_receiver_.Bind(std::move(source_url_client_receiver),
                                    task_runner_);
-  if (body)
-    OnStartLoadingResponseBody(std::move(body));
+  if (!body)
+    return;
+
+  state_ = State::kSniffing;
+  body_consumer_handle_ = std::move(body);
+  body_consumer_watcher_.Watch(
+      body_consumer_handle_.get(),
+      MOJO_HANDLE_SIGNAL_READABLE | MOJO_HANDLE_SIGNAL_PEER_CLOSED,
+      base::BindRepeating(&MimeSniffingURLLoader::OnBodyReadable,
+                          base::Unretained(this)));
+  body_consumer_watcher_.ArmOrNotify();
 }
 
 void MimeSniffingURLLoader::OnReceiveEarlyHints(
@@ -85,7 +94,8 @@ void MimeSniffingURLLoader::OnReceiveEarlyHints(
 
 void MimeSniffingURLLoader::OnReceiveResponse(
     network::mojom::URLResponseHeadPtr response_head,
-    mojo::ScopedDataPipeConsumerHandle body) {
+    mojo::ScopedDataPipeConsumerHandle body,
+    absl::optional<mojo_base::BigBuffer> cached_metadata) {
   // OnReceiveResponse() shouldn't be called because MimeSniffingURLLoader is
   // created by MimeSniffingThrottle::WillProcessResponse(), which is equivalent
   // to OnReceiveResponse().
@@ -109,24 +119,8 @@ void MimeSniffingURLLoader::OnUploadProgress(
                                                    std::move(ack_callback));
 }
 
-void MimeSniffingURLLoader::OnReceiveCachedMetadata(mojo_base::BigBuffer data) {
-  destination_url_loader_client_->OnReceiveCachedMetadata(std::move(data));
-}
-
 void MimeSniffingURLLoader::OnTransferSizeUpdated(int32_t transfer_size_diff) {
   destination_url_loader_client_->OnTransferSizeUpdated(transfer_size_diff);
-}
-
-void MimeSniffingURLLoader::OnStartLoadingResponseBody(
-    mojo::ScopedDataPipeConsumerHandle body) {
-  state_ = State::kSniffing;
-  body_consumer_handle_ = std::move(body);
-  body_consumer_watcher_.Watch(
-      body_consumer_handle_.get(),
-      MOJO_HANDLE_SIGNAL_READABLE | MOJO_HANDLE_SIGNAL_PEER_CLOSED,
-      base::BindRepeating(&MimeSniffingURLLoader::OnBodyReadable,
-                          base::Unretained(this)));
-  body_consumer_watcher_.ArmOrNotify();
 }
 
 void MimeSniffingURLLoader::OnComplete(
@@ -142,7 +136,8 @@ void MimeSniffingURLLoader::OnComplete(
         Abort();
         return;
       }
-      throttle_->ResumeWithNewResponseHead(std::move(response_head_));
+      throttle_->ResumeWithNewResponseHead(
+          std::move(response_head_), mojo::ScopedDataPipeConsumerHandle());
       destination_url_loader_client_->OnComplete(status);
       return;
     case State::kSniffing:
@@ -214,6 +209,7 @@ void MimeSniffingURLLoader::OnBodyReadable(MojoResult) {
       CompleteSniffing();
       return;
     case MOJO_RESULT_SHOULD_WAIT:
+      buffered_body_.resize(start_size);
       body_consumer_watcher_.ArmOrNotify();
       return;
     default:
@@ -260,7 +256,6 @@ void MimeSniffingURLLoader::CompleteSniffing() {
     Abort();
     return;
   }
-  throttle_->ResumeWithNewResponseHead(std::move(response_head_));
   mojo::ScopedDataPipeConsumerHandle body_to_send;
   MojoResult result =
       mojo::CreateDataPipe(nullptr, body_producer_handle_, body_to_send);
@@ -268,16 +263,14 @@ void MimeSniffingURLLoader::CompleteSniffing() {
     Abort();
     return;
   }
+  throttle_->ResumeWithNewResponseHead(std::move(response_head_),
+                                       std::move(body_to_send));
   // Set up the watcher for the producer handle.
   body_producer_watcher_.Watch(
       body_producer_handle_.get(),
       MOJO_HANDLE_SIGNAL_WRITABLE | MOJO_HANDLE_SIGNAL_PEER_CLOSED,
       base::BindRepeating(&MimeSniffingURLLoader::OnBodyWritable,
                           base::Unretained(this)));
-
-  // Send deferred message.
-  destination_url_loader_client_->OnStartLoadingResponseBody(
-      std::move(body_to_send));
 
   if (bytes_remaining_in_buffer_) {
     SendReceivedBodyToClient();

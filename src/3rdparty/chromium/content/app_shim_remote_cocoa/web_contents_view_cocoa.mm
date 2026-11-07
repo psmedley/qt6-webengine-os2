@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,9 @@
 #import "content/app_shim_remote_cocoa/web_contents_occlusion_checker_mac.h"
 #import "content/app_shim_remote_cocoa/web_drag_source_mac.h"
 #import "content/browser/web_contents/web_drag_dest_mac.h"
+#include "content/public/browser/content_browser_client.h"
+#include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #include "ui/base/clipboard/clipboard_constants.h"
 #include "ui/base/clipboard/custom_data_helper.h"
@@ -21,9 +24,10 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 
+using content::DropData;
+using features::kMacWebContentsOcclusion;
 using remote_cocoa::mojom::DraggingInfo;
 using remote_cocoa::mojom::SelectionDirection;
-using content::DropData;
 
 namespace {
 // Time to delay clearing the pasteboard for after a drag ends. This is
@@ -104,11 +108,18 @@ STATIC_ASSERT_ENUM(NSDragOperationMove, ui::DragDropTypes::DRAG_MOVE);
 ////////////////////////////////////////////////////////////////////////////////
 // WebContentsViewCocoa
 
-@implementation WebContentsViewCocoa
+@implementation WebContentsViewCocoa {
+  // TODO(https://crbug.com/883031): Remove this when kMacWebContentsOcclusion
+  // is enabled by default.
+  BOOL _inFullScreenTransition;
+  BOOL _willSetWebContentsOccludedAfterDelay;
+}
 
 + (void)initialize {
-  // Create the WebContentsOcclusionCheckerMac shared instance.
-  [WebContentsOcclusionCheckerMac sharedInstance];
+  if (base::FeatureList::IsEnabled(kMacWebContentsOcclusion)) {
+    // Create the WebContentsOcclusionCheckerMac shared instance.
+    [WebContentsOcclusionCheckerMac sharedInstance];
+  }
 }
 
 - (instancetype)initWithViewsHostableView:(ui::ViewsHostableView*)v {
@@ -131,6 +142,7 @@ STATIC_ASSERT_ENUM(NSDragOperationMove, ui::DragDropTypes::DRAG_MOVE);
   [self unregisterDraggedTypes];
 
   [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [self cancelDelayedSetWebContentsOccluded];
 
   [super dealloc];
 }
@@ -187,8 +199,8 @@ STATIC_ASSERT_ENUM(NSDragOperationMove, ui::DragDropTypes::DRAG_MOVE);
 - (void)mouseEvent:(NSEvent*)theEvent {
   if (!_host)
     return;
-  _host->OnMouseEvent([theEvent type] == NSMouseMoved,
-                      [theEvent type] == NSMouseExited);
+  _host->OnMouseEvent([theEvent type] == NSEventTypeMouseMoved,
+                      [theEvent type] == NSEventTypeMouseExited);
 }
 
 - (void)setMouseDownCanMoveWindow:(BOOL)canMove {
@@ -212,7 +224,8 @@ STATIC_ASSERT_ENUM(NSDragOperationMove, ui::DragDropTypes::DRAG_MOVE);
   if (!_host)
     return;
 
-  NSPasteboard* pasteboard = [NSPasteboard pasteboardWithName:NSDragPboard];
+  NSPasteboard* pasteboard =
+      [NSPasteboard pasteboardWithName:NSPasteboardNameDrag];
   [pasteboard clearContents];
 
   _dragSource.reset([[WebDragSource alloc] initWithHost:_host
@@ -365,10 +378,95 @@ STATIC_ASSERT_ENUM(NSDragOperationMove, ui::DragDropTypes::DRAG_MOVE);
   _host->OnBecameFirstResponder(direction);
 }
 
+- (void)setWebContentsVisibility:(remote_cocoa::mojom::Visibility)visibility {
+  if (_host && !content::GetContentClient()->browser()->IsShuttingDown())
+    _host->OnWindowVisibilityChanged(visibility);
+}
+
+- (void)performDelayedSetWebContentsOccluded {
+  _willSetWebContentsOccludedAfterDelay = NO;
+  [self setWebContentsVisibility:remote_cocoa::mojom::Visibility::kOccluded];
+}
+
+- (void)cancelDelayedSetWebContentsOccluded {
+  if (!_willSetWebContentsOccludedAfterDelay)
+    return;
+
+  [NSObject
+      cancelPreviousPerformRequestsWithTarget:self
+                                     selector:@selector
+                                     (performDelayedSetWebContentsOccluded)
+                                       object:nil];
+  _willSetWebContentsOccludedAfterDelay = NO;
+}
+
+- (BOOL)willSetWebContentsOccludedAfterDelayForTesting {
+  return _willSetWebContentsOccludedAfterDelay;
+}
+
 - (void)updateWebContentsVisibility:
     (remote_cocoa::mojom::Visibility)visibility {
-  if (_host)
+  using remote_cocoa::mojom::Visibility;
+
+  DCHECK(base::FeatureList::IsEnabled(kMacWebContentsOcclusion));
+  if (!_host)
+    return;
+
+  // When a web contents is marked something other than occluded, we want
+  // to act on that right away. For the occluded state, the urgency is
+  // lower and the cost of prematurely switching to the occluded state is
+  // potentially significant. For example, if during browser startup our
+  // window is initially obscured but will become main, our visibility
+  // might be set to occluded and then quickly change to visible. Toggling
+  // between these states would cause our web contents to throw away
+  // resources it needs to display its content and then scramble to reacquire
+  // those resources. There's no need to mark a web contents occluded right
+  // away. Instead, we wait a bit and abort setting the web contents to
+  // occluded if our window switches back to visible or hidden in the meantime.
+  if (visibility != Visibility::kOccluded) {
+    [self cancelDelayedSetWebContentsOccluded];
     _host->OnWindowVisibilityChanged(visibility);
+    return;
+  }
+
+  if (_willSetWebContentsOccludedAfterDelay)
+    return;
+
+  // Coalesce one second's worth of occlusion updates.
+  const NSTimeInterval kOcclusionUpdateDelayInSeconds = 1.0;
+  [self performSelector:@selector(performDelayedSetWebContentsOccluded)
+             withObject:nil
+             afterDelay:kOcclusionUpdateDelayInSeconds];
+  _willSetWebContentsOccludedAfterDelay = YES;
+}
+
+- (void)updateWebContentsVisibility {
+  using remote_cocoa::mojom::Visibility;
+  if (!_host)
+    return;
+
+  Visibility visibility = Visibility::kVisible;
+  if ([self isHiddenOrHasHiddenAncestor] || ![self window])
+    visibility = Visibility::kHidden;
+  else if ([[self window] isOccluded])
+    visibility = Visibility::kOccluded;
+
+  [self updateWebContentsVisibility:visibility];
+}
+
+- (void)legacyUpdateWebContentsVisibility {
+  using remote_cocoa::mojom::Visibility;
+  DCHECK(!base::FeatureList::IsEnabled(kMacWebContentsOcclusion));
+  if (!_host || _inFullScreenTransition)
+    return;
+  Visibility visibility = Visibility::kVisible;
+  if ([self isHiddenOrHasHiddenAncestor] || ![self window])
+    visibility = Visibility::kHidden;
+  else if ([[self window] occlusionState] & NSWindowOcclusionStateVisible)
+    visibility = Visibility::kVisible;
+  else
+    visibility = Visibility::kOccluded;
+  _host->OnWindowVisibilityChanged(visibility);
 }
 
 - (void)resizeSubviewsWithOldSize:(NSSize)oldBoundsSize {
@@ -387,22 +485,120 @@ STATIC_ASSERT_ENUM(NSDragOperationMove, ui::DragDropTypes::DRAG_MOVE);
     [subview setFrame:[self bounds]];
 }
 
-- (void)viewDidMoveToWindow {
-  if ([self window] == nil) {
-    [self updateWebContentsVisibility:remote_cocoa::mojom::Visibility::kHidden];
-  } else {
-    [[WebContentsOcclusionCheckerMac sharedInstance]
-        updateWebContentsVisibility:self];
+- (void)viewWillMoveToWindow:(NSWindow*)newWindow {
+  NSNotificationCenter* notificationCenter =
+      [NSNotificationCenter defaultCenter];
+
+  NSWindow* oldWindow = [self window];
+
+  if (base::FeatureList::IsEnabled(kMacWebContentsOcclusion)) {
+    if (oldWindow) {
+      [notificationCenter
+          removeObserver:self
+                    name:NSWindowDidChangeOcclusionStateNotification
+                  object:oldWindow];
+    }
+
+    if (newWindow) {
+      [notificationCenter
+          addObserver:self
+             selector:@selector(windowChangedOcclusionState:)
+                 name:NSWindowDidChangeOcclusionStateNotification
+               object:newWindow];
+    }
+
+    return;
+  }
+
+  _inFullScreenTransition = NO;
+  if (oldWindow) {
+    NSArray* notificationsToRemove = @[
+      NSWindowDidChangeOcclusionStateNotification,
+      NSWindowWillEnterFullScreenNotification,
+      NSWindowDidEnterFullScreenNotification,
+      NSWindowWillExitFullScreenNotification,
+      NSWindowDidExitFullScreenNotification
+    ];
+    for (NSString* notificationName in notificationsToRemove) {
+      [notificationCenter removeObserver:self
+                                    name:notificationName
+                                  object:oldWindow];
+    }
+  }
+  if (newWindow) {
+    [notificationCenter addObserver:self
+                           selector:@selector(windowChangedOcclusionState:)
+                               name:NSWindowDidChangeOcclusionStateNotification
+                             object:newWindow];
+    // The fullscreen transition causes spurious occlusion notifications.
+    // See https://crbug.com/1081229
+    [notificationCenter addObserver:self
+                           selector:@selector(fullscreenTransitionStarted:)
+                               name:NSWindowWillEnterFullScreenNotification
+                             object:newWindow];
+    [notificationCenter addObserver:self
+                           selector:@selector(fullscreenTransitionComplete:)
+                               name:NSWindowDidEnterFullScreenNotification
+                             object:newWindow];
+    [notificationCenter addObserver:self
+                           selector:@selector(fullscreenTransitionStarted:)
+                               name:NSWindowWillExitFullScreenNotification
+                             object:newWindow];
+    [notificationCenter addObserver:self
+                           selector:@selector(fullscreenTransitionComplete:)
+                               name:NSWindowDidExitFullScreenNotification
+                             object:newWindow];
   }
 }
 
+- (void)windowChangedOcclusionState:(NSNotification*)aNotification {
+  if (!base::FeatureList::IsEnabled(kMacWebContentsOcclusion)) {
+    [self legacyUpdateWebContentsVisibility];
+    return;
+  }
+
+  // Only respond to occlusion notifications sent by the occlusion checker.
+  NSDictionary* userInfo = [aNotification userInfo];
+  NSString* occlusionCheckerKey = [WebContentsOcclusionCheckerMac className];
+  if (userInfo[occlusionCheckerKey] != nil)
+    [self updateWebContentsVisibility];
+}
+
+- (void)fullscreenTransitionStarted:(NSNotification*)notification {
+  DCHECK(!base::FeatureList::IsEnabled(kMacWebContentsOcclusion));
+  _inFullScreenTransition = YES;
+}
+
+- (void)fullscreenTransitionComplete:(NSNotification*)notification {
+  DCHECK(!base::FeatureList::IsEnabled(kMacWebContentsOcclusion));
+  _inFullScreenTransition = NO;
+}
+
+- (void)viewDidMoveToWindow {
+  if (!base::FeatureList::IsEnabled(kMacWebContentsOcclusion)) {
+    [self legacyUpdateWebContentsVisibility];
+    return;
+  }
+
+  [self updateWebContentsVisibility];
+}
+
 - (void)viewDidHide {
-  [self updateWebContentsVisibility:remote_cocoa::mojom::Visibility::kHidden];
+  if (!base::FeatureList::IsEnabled(kMacWebContentsOcclusion)) {
+    [self legacyUpdateWebContentsVisibility];
+    return;
+  }
+
+  [self updateWebContentsVisibility];
 }
 
 - (void)viewDidUnhide {
-  [[WebContentsOcclusionCheckerMac sharedInstance]
-      updateWebContentsVisibility:self];
+  if (!base::FeatureList::IsEnabled(kMacWebContentsOcclusion)) {
+    [self legacyUpdateWebContentsVisibility];
+    return;
+  }
+
+  [self updateWebContentsVisibility];
 }
 
 // ViewsHostable protocol implementation.
@@ -419,12 +615,18 @@ STATIC_ASSERT_ENUM(NSDragOperationMove, ui::DragDropTypes::DRAG_MOVE);
 - (void)_addWebContentsViewCocoasFromView:(NSView*)view
                                   toArray:
                                       (NSMutableArray<WebContentsViewCocoa*>*)
-                                          webContents {
+                                          webContents
+                           haltAfterFirst:(BOOL)haltAfterFirst {
   for (NSView* subview in [view subviews]) {
     if ([subview isKindOfClass:[WebContentsViewCocoa class]]) {
       [webContents addObject:(WebContentsViewCocoa*)subview];
+      if (haltAfterFirst) {
+        return;
+      }
     } else {
-      [self _addWebContentsViewCocoasFromView:subview toArray:webContents];
+      [self _addWebContentsViewCocoasFromView:subview
+                                      toArray:webContents
+                               haltAfterFirst:haltAfterFirst];
     }
   }
 }
@@ -433,9 +635,20 @@ STATIC_ASSERT_ENUM(NSDragOperationMove, ui::DragDropTypes::DRAG_MOVE);
   NSMutableArray<WebContentsViewCocoa*>* webContents = [NSMutableArray array];
 
   [self _addWebContentsViewCocoasFromView:[self contentView]
-                                  toArray:webContents];
+                                  toArray:webContents
+                           haltAfterFirst:NO];
 
   return webContents;
+}
+
+- (BOOL)containsWebContentsViewCocoa {
+  NSMutableArray<WebContentsViewCocoa*>* webContents = [NSMutableArray array];
+
+  [self _addWebContentsViewCocoasFromView:[self contentView]
+                                  toArray:webContents
+                           haltAfterFirst:YES];
+
+  return webContents.count > 0;
 }
 
 @end

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,10 +26,9 @@ namespace em = enterprise_management;
 
 namespace policy {
 
-RequestHandlerForPolicy::RequestHandlerForPolicy(ClientStorage* client_storage,
-                                                 PolicyStorage* policy_storage)
-    : EmbeddedPolicyTestServer::RequestHandler(client_storage, policy_storage) {
-}
+RequestHandlerForPolicy::RequestHandlerForPolicy(
+    EmbeddedPolicyTestServer* parent)
+    : EmbeddedPolicyTestServer::RequestHandler(parent) {}
 
 RequestHandlerForPolicy::~RequestHandlerForPolicy() = default;
 
@@ -44,6 +43,7 @@ std::unique_ptr<HttpResponse> RequestHandlerForPolicy::HandleRequest(
       dm_protocol::kChromeExtensionPolicyType,
       dm_protocol::kChromeMachineLevelUserCloudPolicyType,
       dm_protocol::kChromeMachineLevelUserCloudPolicyAndroidType,
+      dm_protocol::kChromeMachineLevelUserCloudPolicyIOSType,
       dm_protocol::kChromeMachineLevelExtensionCloudPolicyType,
       dm_protocol::kChromePublicAccountPolicyType,
       dm_protocol::kChromeSigninExtensionPolicyType,
@@ -59,11 +59,16 @@ std::unique_ptr<HttpResponse> RequestHandlerForPolicy::HandleRequest(
   if (!GetDeviceTokenFromRequest(request, &request_device_token))
     return CreateHttpResponse(net::HTTP_UNAUTHORIZED, "Invalid device token.");
 
+  em::DeviceManagementResponse device_management_response;
   const ClientStorage::ClientInfo* client_info =
       client_storage()->GetClientOrNull(
           KeyValueFromUrl(request.GetURL(), dm_protocol::kParamDeviceID));
-  if (!client_info || client_info->device_token != request_device_token)
-    return CreateHttpResponse(net::HTTP_GONE, "Invalid device token.");
+  if (!client_info || client_info->device_token != request_device_token) {
+    device_management_response.add_error_detail(
+        policy_storage()->error_detail());
+    return CreateHttpResponse(net::HTTP_GONE,
+                              device_management_response.SerializeAsString());
+  }
 
   em::DeviceManagementRequest device_management_request;
   device_management_request.ParseFromString(request.content);
@@ -82,7 +87,6 @@ std::unique_ptr<HttpResponse> RequestHandlerForPolicy::HandleRequest(
     }
   }
 
-  em::DeviceManagementResponse device_management_response;
   for (const auto& fetch_request :
        device_management_request.policy_request().requests()) {
     const std::string& policy_type = fetch_request.policy_type();
@@ -170,15 +174,42 @@ bool RequestHandlerForPolicy::ProcessCloudPolicy(
           ? "policy-testserver-service-account-identity@gmail.com"
           : policy_storage()->service_account_identity());
   policy_data.set_device_id(client_info.device_id);
-  policy_data.set_username(
+  std::string username =
       client_info.username.value_or(policy_storage()->policy_user().empty()
-                                        ? "username@example.com"
-                                        : policy_storage()->policy_user()));
+                                        ? kDefaultUsername
+                                        : policy_storage()->policy_user());
+  policy_data.set_username(username);
+  policy_data.set_managed_by(
+      gaia::ExtractDomainName(gaia::SanitizeEmail(username)));
   policy_data.set_policy_invalidation_topic(
       policy_storage()->policy_invalidation_topic());
 
   if (fetch_request.signature_type() != em::PolicyFetchRequest::NONE)
     policy_data.set_public_key_version(signing_key_version);
+
+  if (policy_type == dm_protocol::kChromeUserPolicyType ||
+      policy_type == dm_protocol::kChromePublicAccountPolicyType) {
+    std::vector<std::string> user_affiliation_ids =
+        policy_storage()->user_affiliation_ids();
+    if (!user_affiliation_ids.empty()) {
+      for (const std::string& user_affiliation_id : user_affiliation_ids) {
+        policy_data.add_user_affiliation_ids(user_affiliation_id);
+      }
+    }
+  } else if (policy_type == dm_protocol::kChromeDevicePolicyType) {
+    std::vector<std::string> device_affiliation_ids =
+        policy_storage()->device_affiliation_ids();
+    if (!device_affiliation_ids.empty()) {
+      for (const std::string& device_affiliation_id : device_affiliation_ids) {
+        policy_data.add_device_affiliation_ids(device_affiliation_id);
+      }
+    }
+  }
+
+  std::string directory_api_id = policy_storage()->directory_api_id();
+  if (!directory_api_id.empty()) {
+    policy_data.set_directory_api_id(directory_api_id);
+  }
 
   policy_data.SerializeToString(fetch_response->mutable_policy_data());
 

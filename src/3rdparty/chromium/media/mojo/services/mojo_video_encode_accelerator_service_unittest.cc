@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,11 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/unsafe_shared_memory_region.h"
 #include "base/run_loop.h"
 #include "base/test/task_environment.h"
 #include "gpu/config/gpu_driver_bug_workarounds.h"
+#include "gpu/config/gpu_info.h"
 #include "gpu/config/gpu_preferences.h"
 #include "media/mojo/clients/mojo_media_log_service.h"
 #include "media/mojo/mojom/video_encode_accelerator.mojom.h"
@@ -39,6 +41,7 @@ std::unique_ptr<VideoEncodeAccelerator> CreateAndInitializeFakeVEA(
     VideoEncodeAccelerator::Client* client,
     const gpu::GpuPreferences& gpu_preferences,
     const gpu::GpuDriverBugWorkarounds& gpu_workarounds,
+    const gpu::GPUInfo::GPUDevice& gpu_device,
     std::unique_ptr<MediaLog> media_log) {
   // Use FakeVEA as scoped_ptr to guarantee proper destruction via Destroy().
   auto vea = std::make_unique<FakeVideoEncodeAccelerator>(
@@ -99,7 +102,8 @@ class MojoVideoEncodeAcceleratorServiceTest : public ::testing::Test {
     mojo_vea_service_ = std::make_unique<MojoVideoEncodeAcceleratorService>(
         base::BindRepeating(&CreateAndInitializeFakeVEA,
                             will_fake_vea_initialization_succeed),
-        gpu::GpuPreferences(), gpu::GpuDriverBugWorkarounds());
+        gpu::GpuPreferences(), gpu::GpuDriverBugWorkarounds(),
+        gpu::GPUInfo::GPUDevice());
   }
 
   void BindAndInitialize() {
@@ -174,10 +178,10 @@ TEST_F(MojoVideoEncodeAcceleratorServiceTest, EncodeOneFrame) {
   const int32_t kBitstreamBufferId = 17;
   {
     const uint64_t kShMemSize = fake_vea()->minimum_output_buffer_size();
-    auto handle = mojo::SharedBufferHandle::Create(kShMemSize);
+    auto region = base::UnsafeSharedMemoryRegion::Create(kShMemSize);
 
     mojo_vea_service()->UseOutputBitstreamBuffer(kBitstreamBufferId,
-                                                 std::move(handle));
+                                                 std::move(region));
     base::RunLoop().RunUntilIdle();
   }
 
@@ -303,13 +307,13 @@ TEST_F(MojoVideoEncodeAcceleratorServiceTest,
 
   const int32_t kBitstreamBufferId = 17;
   const uint64_t wrong_size = fake_vea()->minimum_output_buffer_size() / 2;
-  auto handle = mojo::SharedBufferHandle::Create(wrong_size);
+  auto region = base::UnsafeSharedMemoryRegion::Create(wrong_size);
 
   EXPECT_CALL(*mock_mojo_vea_client(),
               NotifyError(VideoEncodeAccelerator::kInvalidArgumentError));
 
   mojo_vea_service()->UseOutputBitstreamBuffer(kBitstreamBufferId,
-                                               std::move(handle));
+                                               std::move(region));
   base::RunLoop().RunUntilIdle();
 }
 
@@ -347,9 +351,9 @@ TEST_F(MojoVideoEncodeAcceleratorServiceTest, CallsBeforeInitializeAreIgnored) {
   {
     const int32_t kBitstreamBufferId = 17;
     const uint64_t kShMemSize = 10;
-    auto handle = mojo::SharedBufferHandle::Create(kShMemSize);
+    auto region = base::UnsafeSharedMemoryRegion::Create(kShMemSize);
     mojo_vea_service()->UseOutputBitstreamBuffer(kBitstreamBufferId,
-                                                 std::move(handle));
+                                                 std::move(region));
     base::RunLoop().RunUntilIdle();
   }
   {

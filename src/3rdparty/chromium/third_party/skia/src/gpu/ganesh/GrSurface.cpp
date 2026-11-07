@@ -7,6 +7,7 @@
 
 #include "src/core/SkCompressedDataUtils.h"
 #include "src/gpu/ganesh/GrBackendUtils.h"
+#include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "src/gpu/ganesh/GrRenderTarget.h"
 #include "src/gpu/ganesh/GrResourceProvider.h"
 #include "src/gpu/ganesh/GrSurface.h"
@@ -18,7 +19,7 @@
 size_t GrSurface::ComputeSize(const GrBackendFormat& format,
                               SkISize dimensions,
                               int colorSamplesPerPixel,
-                              GrMipmapped mipMapped,
+                              GrMipmapped mipmapped,
                               bool binSize) {
     // For external formats we do not actually know the real size of the resource so we just return
     // 0 here to indicate this.
@@ -35,7 +36,7 @@ size_t GrSurface::ComputeSize(const GrBackendFormat& format,
     SkImage::CompressionType compressionType = GrBackendFormatToCompressionType(format);
     if (compressionType != SkImage::CompressionType::kNone) {
         colorSize = SkCompressedFormatDataSize(compressionType, dimensions,
-                                               mipMapped == GrMipmapped::kYes);
+                                               mipmapped == GrMipmapped::kYes);
     } else {
         colorSize = (size_t)dimensions.width() * dimensions.height() *
                     GrBackendFormatBytesPerPixel(format);
@@ -44,7 +45,7 @@ size_t GrSurface::ComputeSize(const GrBackendFormat& format,
 
     size_t finalSize = colorSamplesPerPixel * colorSize;
 
-    if (GrMipmapped::kYes == mipMapped) {
+    if (GrMipmapped::kYes == mipmapped) {
         // We don't have to worry about the mipmaps being a different dimensions than
         // we'd expect because we never change fDesc.fWidth/fHeight.
         finalSize += colorSize/3;
@@ -53,6 +54,27 @@ size_t GrSurface::ComputeSize(const GrBackendFormat& format,
 }
 
 //////////////////////////////////////////////////////////////////////////////
+
+void GrSurface::setRelease(sk_sp<skgpu::RefCntedCallback> releaseHelper) {
+    SkASSERT(this->getContext());
+    fReleaseHelper.reset(new RefCntedReleaseProc(std::move(releaseHelper),
+                                                 sk_ref_sp(this->getContext())));
+    this->onSetRelease(fReleaseHelper);
+}
+
+
+GrSurface::RefCntedReleaseProc::RefCntedReleaseProc(sk_sp<skgpu::RefCntedCallback> callback,
+                                                    sk_sp<GrDirectContext> directContext)
+            : fCallback(std::move(callback))
+            , fDirectContext(std::move(directContext)) {
+        SkASSERT(fCallback && fDirectContext);
+    }
+
+GrSurface::RefCntedReleaseProc::~RefCntedReleaseProc() {
+    fDirectContext->priv().setInsideReleaseProc(true);
+    fCallback.reset();
+    fDirectContext->priv().setInsideReleaseProc(false);
+}
 
 void GrSurface::onRelease() {
     this->invokeReleaseProc();

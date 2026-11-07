@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -101,17 +101,6 @@ ScrollableArea* AssociatedScrollableArea(const PaintLayer* layer) {
   return nullptr;
 }
 
-ContainerNode* ParentForClickEventInteractiveElementSensitive(
-    const Node& node) {
-  // IE doesn't dispatch click events for mousedown/mouseup events across form
-  // controls.
-  auto* html_element = DynamicTo<HTMLElement>(node);
-  if (html_element && html_element->IsInteractiveContent())
-    return nullptr;
-
-  return FlatTreeTraversal::Parent(node);
-}
-
 ContainerNode* ParentForClickEvent(const Node& node) {
   return FlatTreeTraversal::Parent(node);
 }
@@ -143,12 +132,13 @@ bool ShouldDiscardEventTargetingFrame(const WebInputEvent& event,
                                       const LocalFrame& frame) {
   // There are two different mechanisms for tracking whether an iframe has moved
   // recently, for OOPIF and in-process iframes. For OOPIF's, frame movement is
-  // tracked in the browser process using hit test data, and it's propagated
-  // in event.GetModifiers(). For in-process iframes, frame movement is tracked
+  // tracked in the browser process using hit test data, and it's propagated in
+  // event.GetModifiers(). For in-process iframes, frame movement is tracked
   // during lifecycle updates, in FrameView::UpdateViewportIntersection, and
   // propagated via FrameView::RectInParentIsStable.
   bool should_discard = false;
-  if (frame.NeedsOcclusionTracking() && frame.IsCrossOriginToMainFrame()) {
+  if (frame.NeedsOcclusionTracking() &&
+      frame.IsCrossOriginToOutermostMainFrame()) {
     should_discard =
         (event.GetModifiers() & WebInputEvent::kTargetFrameMovedRecently) ||
         !frame.View()->RectInParentIsStable(event.TimeStamp());

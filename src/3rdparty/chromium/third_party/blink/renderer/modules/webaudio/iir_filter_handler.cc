@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,12 @@
 
 namespace blink {
 
+namespace {
+
+constexpr uint32_t kNumberOfChannelsIFH = 1;
+
+}  // namespace
+
 IIRFilterHandler::IIRFilterHandler(AudioNode& node,
                                    float sample_rate,
                                    const Vector<double>& feedforward_coef,
@@ -27,7 +33,7 @@ IIRFilterHandler::IIRFilterHandler(AudioNode& node,
           sample_rate,
           std::make_unique<IIRProcessor>(
               sample_rate,
-              1,
+              kNumberOfChannelsIFH,
               node.context()->GetDeferredTaskHandler().RenderQuantumFrames(),
               feedforward_coef,
               feedback_coef,

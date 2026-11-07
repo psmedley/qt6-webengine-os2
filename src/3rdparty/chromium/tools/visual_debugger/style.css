@@ -1,4 +1,4 @@
-/* Copyright 2022 The Chromium Authors. All rights reserved.
+/* Copyright 2022 The Chromium Authors
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
@@ -79,4 +79,21 @@ button#connect {
 button#disconnect {
   --mdc-theme-primary:darkred;
   --mdc-theme-on-primary: white;
+}
+
+.default-orientation {
+  background: white;
+  color: black;
+}
+
+.selected-orientation {
+  background: rgba(255, 0, 0, 0.2);;
+  color: black;
+}
+
+button#live {
+  outline-color: black;
+  --mdc-theme-primary:#FF0000;
+  --mdc-theme-on-primary:black;
+  opacity: 0.8;
 }

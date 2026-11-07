@@ -7,12 +7,15 @@ package(
 
 android_library(
     name = "base-task-api",
-    srcs = glob(["**/*.java"]),
-    javacopts = ["-source 7 -target 7"],
+    srcs = glob(["**/*.java"]) + [
+        "//tensorflow_lite_support/java/src/java/org/tensorflow/lite/task/processor:task_processor_src",
+    ],
+    proguard_specs = ["proguard.flags"],
     visibility = ["//visibility:public"],
     # LINT.IfChange(dep)
     deps = [
         "@com_google_auto_value",
+        "@maven//:androidx_annotation_annotation",
     ],
     # LINT.ThenChange(<INTERNAL>/release/build_task_base_pom.sh:dep)
 )

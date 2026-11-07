@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <type_traits>
 
-#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/layout_block.h"
 
 namespace blink {
@@ -36,7 +35,7 @@ class LayoutNGMixin : public Base {
   bool NodeAtPoint(HitTestResult&,
                    const HitTestLocation&,
                    const PhysicalOffset& accumulated_offset,
-                   HitTestAction) override;
+                   HitTestPhase) override;
   RecalcLayoutOverflowResult RecalcLayoutOverflow() override;
   RecalcLayoutOverflowResult RecalcChildLayoutOverflow() override;
   void RecalcVisualOverflow() override;

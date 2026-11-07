@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,23 +45,57 @@ function timeToMojo(mark: bigint): TimeDelta {
  *       metricsReporter.umaReportTime(
  *         metricsReporter.measure('StartMark'));
  *     }
+ *
+ * Caveats:
+ *   1. measure() will assert if the mark is not available. You can use
+ *      catch() to prevent execution from being interrupted, e.g.
+ *
+ *      metricsReporter.measure('StartMark').then(duration =>
+ *         metricsReporter.umaReportTime('Your.Histogram', duration))
+ *      .catch(() => {})
+ *
+ *   2. measure() will record inaccurate time if a mark is reused for
+ *      overlapping measurements. To prevent this, you can:
+ *
+ *      a. check if a mark exists using hasLocalMark() before calling mark().
+ *      b. check if a mark exists using hasMark() before calling measure().
+ *      c. erase a mark using clearMark() after calling measure().
+ *
+ *      Alternative to b., you can use an empty catch() to ignore
+ *      missing marks (due to the mark deletion by c.).
  */
-export class MetricsReporter {
+
+export interface MetricsReporter {
+  mark(name: string): void;
+  measure(startMark: string, endMark?: string): Promise<bigint>;
+  hasMark(name: string): Promise<boolean>;
+  hasLocalMark(name: string): boolean;
+  clearMark(name: string): void;
+  umaReportTime(histogram: string, time: bigint): void;
+}
+
+export class MetricsReporterImpl implements MetricsReporter {
   private marks_: Map<string, bigint> = new Map();
   private browserProxy_: BrowserProxy = BrowserProxyImpl.getInstance();
 
   constructor() {
     const callbackRouter = this.browserProxy_.getCallbackRouter();
-    callbackRouter.onGetMark.addListener((name: string) => {
-      return this.marks_.has(name) ? timeToMojo(this.marks_.get(name)!) : null;
-    });
+    callbackRouter.onGetMark.addListener(
+        (name: string) => ({
+          markedTime:
+              this.marks_.has(name) ? timeToMojo(this.marks_.get(name)!) : null,
+        }));
 
     callbackRouter.onClearMark.addListener(
         (name: string) => this.marks_.delete(name));
   }
 
   static getInstance(): MetricsReporter {
-    return instance || (instance = new MetricsReporter());
+    return instance || (instance = new MetricsReporterImpl());
+  }
+
+  static setInstanceForTest(newInstance: MetricsReporter) {
+    instance = newInstance;
   }
 
   mark(name: string) {
@@ -100,8 +134,12 @@ export class MetricsReporter {
     return remoteMark !== null && remoteMark.markedTime !== null;
   }
 
+  hasLocalMark(name: string): boolean {
+    return this.marks_.has(name);
+  }
+
   clearMark(name: string) {
-    assert(this.marks_.delete(name));
+    this.marks_.delete(name);
     this.browserProxy_.clearMark(name);
   }
 

@@ -103,6 +103,7 @@ class IMAGE_STATE : public BINDABLE {
     const uint64_t ahb_format;           // External Android format, if provided
     const VkImageSubresourceRange full_range;  // The normalized ISR for all levels, layers, and aspects
     const VkSwapchainKHR create_from_swapchain;
+    const bool owned_by_swapchain;
     std::shared_ptr<SWAPCHAIN_NODE> bind_swapchain;
     uint32_t swapchain_image_index;
     const VkFormatFeatureFlags2KHR format_features;
@@ -111,12 +112,18 @@ class IMAGE_STATE : public BINDABLE {
     static constexpr int MAX_PLANES = 3;
     using MemoryReqs = std::array<VkMemoryRequirements, MAX_PLANES>;
     const MemoryReqs requirements;
+    const VkMemoryRequirements *const memory_requirements_pointer = &requirements[0];
     std::array<bool, MAX_PLANES> memory_requirements_checked;
     using SparseReqs = std::vector<VkSparseImageMemoryRequirements>;
     const SparseReqs sparse_requirements;
     const bool sparse_metadata_required;  // Track if sparse metadata aspect is required for this image
     bool get_sparse_reqs_called;          // Track if GetImageSparseMemoryRequirements() has been called for this image
     bool sparse_metadata_bound;           // Track if sparse metadata aspect is bound to this image
+    VkImageFormatProperties image_format_properties = {};
+#ifdef VK_USE_PLATFORM_METAL_EXT
+    const bool metal_image_export;
+    const bool metal_io_surface_export;
+#endif // VK_USE_PLATFORM_METAL
 
     const image_layout_map::Encoder subresource_encoder;                             // Subresource resolution encoder
     std::unique_ptr<const subresource_adapter::ImageRangeEncoder> fragment_encoder;  // Fragment resolution encoder
@@ -192,6 +199,7 @@ class IMAGE_STATE : public BINDABLE {
 
     void Destroy() override;
 
+    VkExtent3D GetSubresourceExtent(VkImageAspectFlags aspect_mask, uint32_t mip_level) const;
     VkExtent3D GetSubresourceExtent(const VkImageSubresourceLayers &subresource) const;
 
     VkImageSubresourceRange NormalizeSubresourceRange(const VkImageSubresourceRange &range) const {
@@ -203,6 +211,13 @@ class IMAGE_STATE : public BINDABLE {
   protected:
     void NotifyInvalidate(const BASE_NODE::NodeList &invalid_nodes, bool unlink) override;
 };
+
+using IMAGE_STATE_NO_BINDING = MEMORY_TRACKED_RESOURCE_STATE<IMAGE_STATE, BindableNoMemoryTracker>;
+using IMAGE_STATE_LINEAR = MEMORY_TRACKED_RESOURCE_STATE<IMAGE_STATE, BindableLinearMemoryTracker>;
+template <bool IS_RESIDENT>
+using IMAGE_STATE_SPARSE = MEMORY_TRACKED_RESOURCE_STATE<IMAGE_STATE, BindableSparseMemoryTracker<IS_RESIDENT>>;
+template <unsigned PLANE_COUNT>
+using IMAGE_STATE_MULTIPLANAR = MEMORY_TRACKED_RESOURCE_STATE<IMAGE_STATE, BindableMultiplanarMemoryTracker<PLANE_COUNT>>;
 
 // State for VkImageView objects.
 // Parent -> child relationships in the object usage tree:
@@ -220,6 +235,9 @@ class IMAGE_VIEW_STATE : public BASE_NODE {
     const float min_lod;
     const VkFormatFeatureFlags2KHR format_features;
     const VkImageUsageFlags inherited_usage;  // from spec #resources-image-inherited-usage
+#ifdef VK_USE_PLATFORM_METAL_EXT
+    const bool metal_imageview_export;
+#endif // VK_USE_PLATFORM_METAL_EXT
     std::shared_ptr<IMAGE_STATE> image_state;
 
     IMAGE_VIEW_STATE(const std::shared_ptr<IMAGE_STATE> &image_state, VkImageView iv, const VkImageViewCreateInfo *ci,
@@ -285,7 +303,7 @@ class SWAPCHAIN_NODE : public BASE_NODE {
 
     VkSwapchainKHR swapchain() const { return handle_.Cast<VkSwapchainKHR>(); }
 
-    void PresentImage(uint32_t image_index);
+    void PresentImage(uint32_t image_index, uint64_t present_id);
 
     void AcquireImage(uint32_t image_index);
 

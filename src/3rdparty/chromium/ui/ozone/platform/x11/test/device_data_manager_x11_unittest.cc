@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/devices/device_hotplug_event_observer.h"
 #include "ui/events/devices/input_device.h"
@@ -41,7 +42,7 @@ class TestInputDeviceObserver : public InputDeviceEventObserver {
   void Reset() { change_notified_ = false; }
 
  private:
-  DeviceDataManager* manager_;
+  raw_ptr<DeviceDataManager> manager_;
   bool change_notified_;
 };
 

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,11 +24,9 @@ template <class P>
 struct ParamTraits;
 }  // namespace IPC
 
-namespace network {
-namespace mojom {
+namespace network::mojom {
 class SchemefulSiteDataView;
-}  // namespace mojom
-}  // namespace network
+}  // namespace network::mojom
 
 namespace mojo {
 template <typename DataViewType, typename T>
@@ -152,10 +150,17 @@ class NET_EXPORT SchemefulSite {
   // use opaque origins.
   friend class NetworkIsolationKey;
 
+  // Needed to serialize opaque and non-transient NetworkAnonymizationKeys,
+  // which use opaque origins.
+  friend class NetworkAnonymizationKey;
+
   // Needed to create a bogus origin from a site.
   // TODO(https://crbug.com/1148927): Give IsolationInfos empty origins instead,
   // in this case, and unfriend IsolationInfo.
   friend class IsolationInfo;
+
+  // Needed to create a bogus origin from a site.
+  friend class URLRequest;
 
   // Needed because cookies do not account for scheme.
   friend class CookieMonster;

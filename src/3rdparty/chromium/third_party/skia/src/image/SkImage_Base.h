@@ -63,10 +63,25 @@ public:
     }
 
     /**
+     * Default implementation calls onAsyncRescaleAndReadPixels with default rescale params
+     */
+    virtual void onAsyncReadPixels(const SkImageInfo& info,
+                                   SkIRect srcRect,
+                                   ReadPixelsCallback callback,
+                                   ReadPixelsContext context) const {
+        this->onAsyncRescaleAndReadPixels(info,
+                                          srcRect,
+                                          RescaleGamma::kSrc,
+                                          RescaleMode::kNearest,
+                                          callback,
+                                          context);
+    }
+
+    /**
      * Default implementation does a rescale/read and then calls the callback.
      */
     virtual void onAsyncRescaleAndReadPixels(const SkImageInfo&,
-                                             const SkIRect& srcRect,
+                                             SkIRect srcRect,
                                              RescaleGamma,
                                              RescaleMode,
                                              ReadPixelsCallback,
@@ -76,8 +91,8 @@ public:
      */
     virtual void onAsyncRescaleAndReadPixelsYUV420(SkYUVColorSpace,
                                                    sk_sp<SkColorSpace> dstColorSpace,
-                                                   const SkIRect& srcRect,
-                                                   const SkISize& dstSize,
+                                                   SkIRect srcRect,
+                                                   SkISize dstSize,
                                                    RescaleGamma,
                                                    RescaleMode,
                                                    ReadPixelsCallback,
@@ -133,8 +148,7 @@ public:
     // the data in a texture.
     std::tuple<skgpu::graphite::TextureProxyView, SkColorType> asView(
             skgpu::graphite::Recorder*,
-            skgpu::graphite::Mipmapped mipmapped,
-            SkBudgeted) const;
+            skgpu::graphite::Mipmapped) const;
 #endif
 
     virtual bool onPinAsTexture(GrRecordingContext*) const { return false; }
@@ -182,6 +196,11 @@ public:
         return nullptr;
     }
 
+#ifdef SK_GRAPHITE_ENABLED
+    virtual sk_sp<SkImage> onMakeTextureImage(skgpu::graphite::Recorder*,
+                                              RequiredImageProperties) const = 0;
+#endif
+
 protected:
     SkImage_Base(const SkImageInfo& info, uint32_t uniqueID);
 
@@ -190,7 +209,8 @@ protected:
     static GrSurfaceProxyView CopyView(GrRecordingContext*,
                                        GrSurfaceProxyView src,
                                        GrMipmapped,
-                                       GrImageTexGenPolicy);
+                                       GrImageTexGenPolicy,
+                                       std::string_view label);
 
     static std::unique_ptr<GrFragmentProcessor> MakeFragmentProcessorFromView(GrRecordingContext*,
                                                                               GrSurfaceProxyView,
@@ -228,14 +248,7 @@ private:
             const SkRect* subset,
             const SkRect* domain) const = 0;
 #endif
-#ifdef SK_GRAPHITE_ENABLED
-    virtual std::tuple<skgpu::graphite::TextureProxyView, SkColorType> onAsView(
-            skgpu::graphite::Recorder*,
-            skgpu::graphite::Mipmapped mipmapped,
-            SkBudgeted) const {
-        return {}; // TODO: once incompatible derived classes are removed make this pure virtual
-    }
-#endif
+
     // Set true by caches when they cache content that's derived from the current pixels.
     mutable std::atomic<bool> fAddedToRasterCache;
 
@@ -258,7 +271,8 @@ static inline const SkImage_Base* as_IB(const SkImage* image) {
 inline GrSurfaceProxyView SkImage_Base::CopyView(GrRecordingContext* context,
                                                  GrSurfaceProxyView src,
                                                  GrMipmapped mipmapped,
-                                                 GrImageTexGenPolicy policy) {
+                                                 GrImageTexGenPolicy policy,
+                                                 std::string_view label) {
     SkBudgeted budgeted = policy == GrImageTexGenPolicy::kNew_Uncached_Budgeted
                           ? SkBudgeted::kYes
                           : SkBudgeted::kNo;
@@ -266,7 +280,8 @@ inline GrSurfaceProxyView SkImage_Base::CopyView(GrRecordingContext* context,
                                     std::move(src),
                                     mipmapped,
                                     SkBackingFit::kExact,
-                                    budgeted);
+                                    budgeted,
+                                    /*label=*/label);
 }
 #endif
 

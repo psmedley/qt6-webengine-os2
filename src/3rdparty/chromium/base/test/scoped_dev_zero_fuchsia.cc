@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,8 +61,8 @@ ScopedDevZero::Server::Server(
 
   if (status == ZX_OK) {
     status = dev_dir_.AddEntry(
-        "zero", std::make_unique<vfs::VmoFile>(std::move(vmo), /*offset=*/0,
-                                               /*length=*/UINT32_MAX));
+        "zero",
+        std::make_unique<vfs::VmoFile>(std::move(vmo), /*length=*/UINT32_MAX));
     ZX_LOG_IF(ERROR, status != ZX_OK, status);
   }
 

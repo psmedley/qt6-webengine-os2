@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -100,8 +100,6 @@ void PluginResponseWriter::Start(base::OnceClosure done_callback) {
   response->headers =
       base::MakeRefCounted<net::HttpResponseHeaders>("HTTP/1.1 200 OK");
   response->mime_type = "text/html";
-  client_->OnReceiveResponse(std::move(response),
-                             mojo::ScopedDataPipeConsumerHandle());
 
   mojo::ScopedDataPipeProducerHandle producer;
   mojo::ScopedDataPipeConsumerHandle consumer;
@@ -112,7 +110,8 @@ void PluginResponseWriter::Start(base::OnceClosure done_callback) {
     return;
   }
 
-  client_->OnStartLoadingResponseBody(std::move(consumer));
+  client_->OnReceiveResponse(std::move(response), std::move(consumer),
+                             absl::nullopt);
 
   producer_ = std::make_unique<mojo::DataPipeProducer>(std::move(producer));
 

@@ -29,7 +29,7 @@
 #include "bytestream.h"
 #include "cga_data.h"
 #include "codec_internal.h"
-#include "internal.h"
+#include "decode.h"
 
 typedef struct PicContext {
     int width, height;
@@ -119,12 +119,10 @@ static const uint8_t cga_mode45_index[6][4] = {
     [5] = { 0, 11, 12, 15 }, // mode5, high intensity
 };
 
-static int decode_frame(AVCodecContext *avctx,
-                        void *data, int *got_frame,
-                        AVPacket *avpkt)
+static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
+                        int *got_frame, AVPacket *avpkt)
 {
     PicContext *s = avctx->priv_data;
-    AVFrame *frame = data;
     uint32_t *palette;
     int bits_per_plane, bpp, etype, esize, npal, pos_after_pal;
     int i, x, y, plane, tmp, ret, val;
@@ -283,10 +281,10 @@ finish:
 
 const FFCodec ff_pictor_decoder = {
     .p.name         = "pictor",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Pictor/PC Paint"),
+    CODEC_LONG_NAME("Pictor/PC Paint"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_PICTOR,
     .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(PicContext),
-    .decode         = decode_frame,
+    FF_CODEC_DECODE_CB(decode_frame),
 };

@@ -39,6 +39,7 @@
 #include "third_party/blink/renderer/core/css/css_value.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
@@ -156,6 +157,19 @@ void CSSStyleDeclaration::Trace(Visitor* visitor) const {
   ScriptWrappable::Trace(visitor);
 }
 
+CSSStyleDeclaration::CSSStyleDeclaration(ExecutionContext* context)
+    : ExecutionContextClient(context) {}
+
+CSSStyleDeclaration::~CSSStyleDeclaration() = default;
+
+void CSSStyleDeclaration::setCSSFloat(const ExecutionContext* execution_context,
+                                      const String& value,
+                                      ExceptionState& exception_state) {
+  SetPropertyInternal(CSSPropertyID::kFloat, String(), value, false,
+                      execution_context->GetSecureContextMode(),
+                      exception_state);
+}
+
 String CSSStyleDeclaration::AnonymousNamedGetter(const AtomicString& name) {
   // Search the style declaration.
   CSSPropertyID unresolved_property =
@@ -218,7 +232,7 @@ void CSSStyleDeclaration::NamedPropertyEnumerator(Vector<String>& names,
 
   const ExecutionContext* execution_context = GetExecutionContext();
 
-  if (property_names.IsEmpty()) {
+  if (property_names.empty()) {
     for (CSSPropertyID property_id : CSSPropertyIDList()) {
       const CSSProperty& property_class =
           CSSProperty::Get(ResolveCSSPropertyID(property_id));

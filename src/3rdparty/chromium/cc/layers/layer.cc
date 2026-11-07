@@ -1,4 +1,4 @@
-// Copyright 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <algorithm>
 #include <unordered_set>
 #include <utility>
@@ -16,6 +17,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/notreached.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
@@ -52,10 +54,10 @@ struct SameSizeAsLayer : public base::RefCounted<SameSizeAsLayer>,
     LayerList children;
     gfx::Size bounds;
     unsigned bitfields;
-    SkColor background_color;
+    SkColor4f background_color;
     TouchActionRegion touch_action_region;
     ElementId element_id;
-    void* rare_inputs;
+    raw_ptr<void> rare_inputs;
   } inputs;
   raw_ptr<void> layer_tree_inputs;
   gfx::Rect update_rect;
@@ -83,7 +85,7 @@ Layer::Inputs::Inputs()
       contents_opaque_for_text(false),
       is_drawable(false),
       double_sided(true),
-      background_color(0) {}
+      background_color(SkColors::kTransparent) {}
 
 Layer::Inputs::~Inputs() = default;
 
@@ -378,11 +380,8 @@ void Layer::ReplaceChild(Layer* reference, scoped_refptr<Layer> new_layer) {
 
   // Find the index of |reference| in |children_|.
   auto& inputs = inputs_.Write(*this);
-  auto reference_it =
-      std::find_if(inputs.children.begin(), inputs.children.end(),
-                   [reference](const scoped_refptr<Layer>& layer) {
-                     return layer.get() == reference;
-                   });
+  auto reference_it = base::ranges::find(inputs.children, reference,
+                                         &scoped_refptr<Layer>::get);
   DCHECK(reference_it != inputs.children.end());
   size_t reference_index = reference_it - inputs.children.begin();
   reference->RemoveFromParent();
@@ -510,8 +509,8 @@ void Layer::RequestCopyOfOutput(
   auto& inputs = EnsureLayerTreeInputs();
   if (request->has_source()) {
     const base::UnguessableToken& source = request->source();
-    auto it = std::find_if(
-        inputs.copy_requests.begin(), inputs.copy_requests.end(),
+    auto it = base::ranges::find_if(
+        inputs.copy_requests,
         [&source](const std::unique_ptr<viz::CopyOutputRequest>& x) {
           return x->has_source() && x->source() == source;
         });
@@ -526,7 +525,7 @@ void Layer::RequestCopyOfOutput(
     layer_tree_host()->SetHasCopyRequest(true);
 }
 
-void Layer::SetBackgroundColor(SkColor background_color) {
+void Layer::SetBackgroundColor(SkColor4f background_color) {
   DCHECK(IsPropertyChangeAllowed());
   auto& inputs = inputs_.Write(*this);
   if (inputs.background_color == background_color)
@@ -536,9 +535,9 @@ void Layer::SetBackgroundColor(SkColor background_color) {
   SetNeedsCommit();
 }
 
-void Layer::SetSafeOpaqueBackgroundColor(SkColor background_color) {
+void Layer::SetSafeOpaqueBackgroundColor(SkColor4f background_color) {
   DCHECK(IsPropertyChangeAllowed());
-  SkColor opaque_color = SkColorSetA(background_color, SK_AlphaOPAQUE);
+  SkColor4f opaque_color = background_color.makeOpaque();
   auto& inputs = EnsureLayerTreeInputs();
   if (inputs.safe_opaque_background_color == opaque_color)
     return;
@@ -546,40 +545,28 @@ void Layer::SetSafeOpaqueBackgroundColor(SkColor background_color) {
   SetNeedsPushProperties();
 }
 
-SkColor Layer::SafeOpaqueBackgroundColor(SkColor host_background_color) const {
+SkColor4f Layer::SafeOpaqueBackgroundColor() const {
   if (contents_opaque()) {
-    if (!IsAttached() || !IsUsingLayerLists()) {
+    if (!IsUsingLayerLists()) {
       // In layer tree mode, PropertyTreeBuilder should have calculated the safe
       // opaque background color and called SetSafeOpaqueBackgroundColor().
       DCHECK(layer_tree_inputs());
-      DCHECK_EQ(SkColorGetA(layer_tree_inputs()->safe_opaque_background_color),
-                SK_AlphaOPAQUE);
+      DCHECK(layer_tree_inputs()->safe_opaque_background_color.isOpaque());
       return layer_tree_inputs()->safe_opaque_background_color;
     }
     // In layer list mode, the PropertyTreeBuilder algorithm doesn't apply
     // because it depends on the layer tree hierarchy. Instead we use
-    // background_color() if it's not transparent, or layer_tree_host_'s
-    // background_color(), with the alpha channel forced to be opaque.
-    SkColor color = background_color() == SK_ColorTRANSPARENT
-                        ? host_background_color
-                        : background_color();
-    return SkColorSetA(color, SK_AlphaOPAQUE);
+    // background_color() made opaque.
+    return background_color().makeOpaque();
   }
-  if (SkColorGetA(background_color()) == SK_AlphaOPAQUE) {
+  if (background_color().isOpaque()) {
     // The layer is not opaque while the background color is, meaning that the
-    // background color doesn't cover the whole layer. Use SK_ColorTRANSPARENT
-    // to avoid intrusive checkerboard where the layer is not covered by the
-    // background color.
-    return SK_ColorTRANSPARENT;
+    // background color doesn't cover the whole layer. Use
+    // SkColors::kTransparent to avoid intrusive checkerboard where the layer is
+    // not covered by the background color.
+    return SkColors::kTransparent;
   }
   return background_color();
-}
-
-SkColor Layer::SafeOpaqueBackgroundColor() const {
-  SkColor host_background_color =
-      IsAttached() ? layer_tree_host()->pending_commit_state()->background_color
-                   : layer_tree_inputs()->safe_opaque_background_color;
-  return SafeOpaqueBackgroundColor(host_background_color);
 }
 
 void Layer::SetMasksToBounds(bool masks_to_bounds) {
@@ -1201,6 +1188,7 @@ void Layer::SetCaptureBounds(viz::RegionCaptureBounds bounds) {
   EnsureRareInputs().capture_bounds = std::move(bounds);
   SetPropertyTreesNeedRebuild();
   SetNeedsCommit();
+  SetSubtreePropertyChanged();
 }
 
 void Layer::SetWheelEventRegion(Region wheel_event_region) {
@@ -1465,8 +1453,7 @@ void Layer::PushPropertiesTo(LayerImpl* layer,
   layer->SetElementId(inputs.element_id);
   layer->SetHasTransformNode(has_transform_node());
   layer->SetBackgroundColor(inputs.background_color);
-  layer->SetSafeOpaqueBackgroundColor(
-      SafeOpaqueBackgroundColor(commit_state.background_color));
+  layer->SetSafeOpaqueBackgroundColor(SafeOpaqueBackgroundColor());
   layer->SetBounds(inputs.bounds);
   layer->SetTransformTreeIndex(transform_tree_index(property_trees));
   layer->SetEffectTreeIndex(effect_tree_index(property_trees));

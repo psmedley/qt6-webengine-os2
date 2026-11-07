@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -241,6 +241,15 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
   void SetConnectionInfo(ClientId id,
                          net::HttpResponseInfo::ConnectionInfo connection_info);
 
+  // Start accumulating delayable fetches as part of a batch operation. If
+  // multiple batch operations are nested, they will be ref-counted and only
+  // released once all of the batches have ended.
+  void StartBatch();
+
+  // End the collection of delayable fetches as part of a batch operation. This
+  // function may initiate new resources loading.
+  void EndBatch();
+
   // Sets the HTTP RTT for testing.
   void SetHttpRttForTesting(base::TimeDelta http_rtt) {
     http_rtt_for_testing_ = http_rtt;
@@ -391,6 +400,9 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
 
   absl::optional<base::TimeDelta> http_rtt_ = absl::nullopt;
   absl::optional<base::TimeDelta> http_rtt_for_testing_ = absl::nullopt;
+
+  // The ref count of batch operations to accumulate fetches.
+  uint32_t pending_batch_operations_ = 0u;
 };
 
 }  // namespace blink

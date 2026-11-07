@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -94,11 +94,11 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
 
   // Returns the number of children of this object, or 0 if PlatformIsLeaf()
   // returns true.
-  virtual uint32_t PlatformChildCount() const;
+  virtual size_t PlatformChildCount() const;
 
   // Return a pointer to the child at the given index, or NULL for an
   // invalid index. Returns nullptr if PlatformIsLeaf() returns true.
-  virtual BrowserAccessibility* PlatformGetChild(uint32_t child_index) const;
+  virtual BrowserAccessibility* PlatformGetChild(size_t child_index) const;
 
   BrowserAccessibility* PlatformGetParent() const;
 
@@ -125,15 +125,13 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
                           BrowserAccessibility* child);
     PlatformChildIterator(const PlatformChildIterator& it);
     ~PlatformChildIterator() override;
-    bool operator==(const ChildIterator& rhs) const override;
-    bool operator!=(const ChildIterator& rhs) const override;
     PlatformChildIterator& operator++() override;
     PlatformChildIterator& operator++(int) override;
     PlatformChildIterator& operator--() override;
     PlatformChildIterator& operator--(int) override;
     gfx::NativeViewAccessible GetNativeViewAccessible() const override;
     BrowserAccessibility* get() const;
-    int GetIndexInParent() const override;
+    absl::optional<size_t> GetIndexInParent() const override;
     BrowserAccessibility& operator*() const override;
     BrowserAccessibility* operator->() const override;
 
@@ -166,7 +164,7 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
     }
 
    private:
-    const BrowserAccessibility* const parent_;
+    const raw_ptr<const BrowserAccessibility> parent_;
   };
 
   // Returns a range for platform children which can be used in range-based for
@@ -193,9 +191,6 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   // or multiple selection, returns the node that represents the container.
   BrowserAccessibility* PlatformGetSelectionContainer() const;
 
-  bool IsPreviousSiblingOnSameLine() const;
-  bool IsNextSiblingOnSameLine() const;
-
   // Returns nullptr if there are no children.
   BrowserAccessibility* PlatformDeepestFirstChild() const;
   // Returns nullptr if there are no children.
@@ -214,9 +209,14 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
           child_tree_root_(parent->PlatformGetRootOfChildTree()) {}
     AllChildrenRange(const AllChildrenRange&) = default;
 
-    class Iterator final
-        : public std::iterator<std::input_iterator_tag, BrowserAccessibility*> {
+    class Iterator final {
      public:
+      using iterator_category = std::input_iterator_tag;
+      using value_type = BrowserAccessibility*;
+      using difference_type = std::ptrdiff_t;
+      using pointer = BrowserAccessibility**;
+      using reference = BrowserAccessibility*&;
+
       Iterator(const BrowserAccessibility* parent,
                const BrowserAccessibility* child_tree_root,
                unsigned int index = 0U)
@@ -253,8 +253,9 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
     }
 
    private:
-    const BrowserAccessibility* const parent_;
-    const BrowserAccessibility* const child_tree_root_;
+    const raw_ptr<const BrowserAccessibility, DanglingUntriaged> parent_;
+    const raw_ptr<const BrowserAccessibility, DanglingUntriaged>
+        child_tree_root_;
   };
 
   // Returns a range for all children including ignored children, which can be
@@ -320,15 +321,13 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   //
 
   BrowserAccessibilityManager* manager() const { return manager_; }
-  ui::AXNode* node() const { return node_; }
-  void SetNode(ui::AXNode& node);  // Strictly not a trivial setter.
 
   // These access the internal unignored accessibility tree, which doesn't
   // necessarily reflect the accessibility tree that should be exposed on each
   // platform. Use PlatformChildCount and PlatformGetChild to implement platform
   // accessibility APIs.
-  uint32_t InternalChildCount() const;
-  BrowserAccessibility* InternalGetChild(uint32_t child_index) const;
+  size_t InternalChildCount() const;
+  BrowserAccessibility* InternalGetChild(size_t child_index) const;
   BrowserAccessibility* InternalGetParent() const;
   BrowserAccessibility* InternalGetFirstChild() const;
   BrowserAccessibility* InternalGetLastChild() const;
@@ -343,10 +342,10 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   InternalChildIterator InternalChildrenBegin() const;
   InternalChildIterator InternalChildrenEnd() const;
 
-  ui::AXNodeID GetId() const;
   gfx::RectF GetLocation() const;
 
-  bool IsWebAreaForPresentationalIframe() const override;
+  // See `AXNode::IsRootWebAreaForPresentationalIframe()`.
+  bool IsRootWebAreaForPresentationalIframe() const override;
 
   // See AXNodeData::IsClickable().
   virtual bool IsClickable() const;
@@ -365,12 +364,6 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
 
   // Returns true if the accessible name was explicitly set to "" by the author
   bool HasExplicitlyEmptyName() const;
-
-  // Get text to announce for a live region change, for ATs that do not
-  // implement this functionality.
-  //
-  // TODO(nektar): Replace with `AXNode::GetTextContentUTF16()`.
-  std::string GetLiveRegionText() const;
 
   // |offset| could only be a character offset. Depending on the platform, the
   // character offset could be either in the object's text content (Android and
@@ -443,7 +436,8 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   bool HasAction(ax::mojom::Action action) const override;
   bool HasTextStyle(ax::mojom::TextStyle text_style) const override;
   ax::mojom::NameFrom GetNameFrom() const override;
-  const ui::AXTree::Selection GetUnignoredSelection() const override;
+  ax::mojom::DescriptionFrom GetDescriptionFrom() const override;
+  const ui::AXSelection GetUnignoredSelection() const override;
   AXPosition CreatePositionAt(
       int offset,
       ax::mojom::TextAffinity affinity =
@@ -455,8 +449,8 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   gfx::NativeViewAccessible GetNSWindow() override;
   gfx::NativeViewAccessible GetNativeViewAccessible() override;
   gfx::NativeViewAccessible GetParent() const override;
-  int GetChildCount() const override;
-  gfx::NativeViewAccessible ChildAtIndex(int index) override;
+  size_t GetChildCount() const override;
+  gfx::NativeViewAccessible ChildAtIndex(size_t index) override;
   bool HasModalDialog() const override;
   gfx::NativeViewAccessible GetFirstChild() override;
   gfx::NativeViewAccessible GetLastChild() override;
@@ -464,6 +458,7 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   gfx::NativeViewAccessible GetPreviousSibling() override;
   bool IsChildOfLeaf() const override;
   bool IsDescendantOfAtomicTextField() const override;
+  bool IsPlatformDocument() const override;
   bool IsLeaf() const override;
   bool IsFocused() const override;
   bool IsIgnored() const override;
@@ -478,6 +473,7 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   std::unique_ptr<ChildIterator> ChildrenEnd() override;
 
   const std::string& GetName() const override;
+  const std::string& GetDescription() const override;
   std::u16string GetHypertext() const override;
   const std::map<int, int>& GetHypertextOffsetToHyperlinkChildIndex()
       const override;
@@ -506,7 +502,7 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   ui::AXPlatformNode* GetFromNodeID(int32_t id) override;
   ui::AXPlatformNode* GetFromTreeIDAndNodeID(const ui::AXTreeID& ax_tree_id,
                                              int32_t id) override;
-  int GetIndexInParent() override;
+  absl::optional<size_t> GetIndexInParent() override;
   gfx::AcceleratedWidget GetTargetForNativeAccessibilityEvent() override;
 
   const std::vector<gfx::NativeViewAccessible> GetUIADirectChildrenInRange(
@@ -559,6 +555,8 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   bool IsMinimized() const override;
   bool IsText() const override;
   bool IsWebContent() const override;
+  bool IsReadOnlySupported() const override;
+  bool IsReadOnlyOrDisabled() const override;
   bool HasVisibleCaretOrSelection() const override;
   ui::AXPlatformNode* GetTargetNodeForRelation(
       ax::mojom::IntAttribute attr) override;
@@ -579,14 +577,10 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
   // of a list marker node. Returns false otherwise.
   bool IsInListMarker() const;
 
-  // Returns true if this node is a collapsed popup button that is parent to a
-  // menu list popup.
-  bool IsCollapsedMenuListPopUpButton() const;
-
   // Returns the popup button ancestor of this current node if any. The popup
   // button needs to be the parent of a menu list popup and needs to be
   // collapsed.
-  BrowserAccessibility* GetCollapsedMenuListPopUpButtonAncestor() const;
+  BrowserAccessibility* GetCollapsedMenuListSelectAncestor() const;
 
   // Returns true if:
   // 1. This node is a list, AND
@@ -603,11 +597,6 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
 
   // The manager of this tree of accessibility objects. Weak, owns us.
   const raw_ptr<BrowserAccessibilityManager> manager_;
-
-  // The underlying node. This could change during the lifetime of this object
-  // if this object has been reparented, i.e. moved to another part of the tree.
-  // Weak, `AXTree` owns this.
-  raw_ptr<ui::AXNode> node_;
 
   // Protected so that it can't be called directly on a BrowserAccessibility
   // where it could be confused with an id that comes from the node data,
@@ -649,11 +638,9 @@ class CONTENT_EXPORT BrowserAccessibility : public ui::AXPlatformNodeDelegate {
       const ui::AXClippingBehavior clipping_behavior,
       ui::AXOffscreenResult* offscreen_result = nullptr) const;
 
-  // Return the bounds of inline text in this node's coordinate system (which
-  // is relative to its container node specified in AXRelativeBounds).
-  gfx::RectF GetInlineTextRect(const int start_offset,
-                               const int end_offset,
-                               const int max_length) const;
+  // See `AXNode::GetTextContentRangeBoundsUTF16`.
+  gfx::RectF GetTextContentRangeBoundsUTF16(int start_offset,
+                                            int end_offset) const;
 
   // Recursive helper function for GetInnerTextRangeBounds.
   gfx::Rect GetInnerTextRangeBoundsRectInSubtree(

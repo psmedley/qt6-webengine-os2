@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,32 +51,30 @@ ChromeMessagingDelegate::IsNativeMessagingHostAllowed(
   // All native messaging hosts are allowed if there is no blocklist.
   if (!pref_service->IsManagedPreference(pref_names::kNativeMessagingBlocklist))
     return allow_result;
-  const base::Value* blocklist =
+  const base::Value::List& blocklist =
       pref_service->GetList(pref_names::kNativeMessagingBlocklist);
-  if (!blocklist)
-    return allow_result;
 
   // Check if the name or the wildcard is in the blocklist.
   base::Value name_value(native_host_name);
   base::Value wildcard_value("*");
-  if (!base::Contains(blocklist->GetListDeprecated(), name_value) &&
-      !base::Contains(blocklist->GetListDeprecated(), wildcard_value)) {
+  if (!base::Contains(blocklist, name_value) &&
+      !base::Contains(blocklist, wildcard_value)) {
     return allow_result;
   }
 
   // The native messaging host is blocklisted. Check the allowlist.
   if (pref_service->IsManagedPreference(
           pref_names::kNativeMessagingAllowlist)) {
-    const base::Value* allowlist =
+    const base::Value::List& allowlist =
         pref_service->GetList(pref_names::kNativeMessagingAllowlist);
-    if (allowlist && base::Contains(allowlist->GetListDeprecated(), name_value))
+    if (base::Contains(allowlist, name_value))
       return allow_result;
   }
 
   return PolicyPermission::DISALLOW;
 }
 
-std::unique_ptr<base::DictionaryValue> ChromeMessagingDelegate::MaybeGetTabInfo(
+absl::optional<base::Value::Dict> ChromeMessagingDelegate::MaybeGetTabInfo(
     content::WebContents* web_contents) {
   // Add info about the opener's tab (if it was a tab).
   if (web_contents && ExtensionTabUtil::GetTabId(web_contents) >= 0) {
@@ -94,9 +92,9 @@ std::unique_ptr<base::DictionaryValue> ChromeMessagingDelegate::MaybeGetTabInfo(
         ExtensionTabUtil::kDontScrubTab, ExtensionTabUtil::kDontScrubTab};
     return ExtensionTabUtil::CreateTabObject(web_contents, scrub_tab_behavior,
                                              nullptr)
-        ->ToValue();
+        .ToValue();
   }
-  return nullptr;
+  return absl::nullopt;
 }
 
 content::WebContents* ChromeMessagingDelegate::GetWebContentsByTabId(
@@ -124,7 +122,7 @@ std::unique_ptr<MessagePort> ChromeMessagingDelegate::CreateReceiverForTab(
   content::RenderFrameHost* receiver_rfh = nullptr;
   if (include_child_frames) {
     // The target is the active outermost main frame of the WebContents.
-    receiver_rfh = receiver_contents->GetMainFrame();
+    receiver_rfh = receiver_contents->GetPrimaryMainFrame();
   } else if (!receiver_document_id.empty()) {
     ExtensionApiFrameIdMap::DocumentId document_id =
         ExtensionApiFrameIdMap::DocumentIdFromString(receiver_document_id);

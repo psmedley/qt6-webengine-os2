@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,14 @@
 #include "components/autofill_assistant/browser/actions/action_delegate.h"
 #include "components/autofill_assistant/browser/client_status.h"
 #include "components/autofill_assistant/browser/metrics.h"
+#include "components/autofill_assistant/browser/public/password_change/website_login_manager.h"
 #include "components/autofill_assistant/browser/service.pb.h"
 #include "components/autofill_assistant/browser/user_data.h"
 #include "components/autofill_assistant/browser/user_model.h"
-#include "components/autofill_assistant/browser/web/element_finder.h"
-#include "components/autofill_assistant/browser/website_login_manager.h"
 
 namespace autofill_assistant {
+class ElementFinderResult;
+
 namespace user_data {
 
 // Validate the completeness of a contact.
@@ -178,6 +179,30 @@ int GetFieldBitArrayForCreditCard(const autofill::CreditCard* card);
 // Modifies |selector| in place.
 ClientStatus ResolveSelectorUserData(SelectorProto* selector,
                                      const UserData* user_data);
+
+// Update or insert a contact in the list.
+void UpsertContact(const autofill::AutofillProfile& profile,
+                   std::vector<std::unique_ptr<Contact>>& list);
+// Update or insert a phone number in the list.
+void UpsertPhoneNumber(const autofill::AutofillProfile& profile,
+                       std::vector<std::unique_ptr<PhoneNumber>>& list);
+
+// Returns true if the |profile| contains at least one required field.
+bool ContactHasAtLeastOneRequiredField(
+    const autofill::AutofillProfile& profile,
+    const CollectUserDataOptions& collect_user_data_options);
+
+// Deduplicats given profiles with respect to field_types passed.
+// If two profiles are equivalent in their field_types, the first one is picked.
+std::vector<autofill::AutofillProfile*> GetUniqueProfiles(
+    const std::vector<autofill::AutofillProfile*> sorted_profiles,
+    const std::string app_locale,
+    const base::flat_set<autofill::ServerFieldType>& field_types);
+
+void AddAutofillEntryToDataModel(autofill::ServerFieldType type,
+                                 const AutofillEntryProto& entry,
+                                 const std::string& locale,
+                                 autofill::AutofillDataModel* model);
 
 }  // namespace user_data
 }  // namespace autofill_assistant

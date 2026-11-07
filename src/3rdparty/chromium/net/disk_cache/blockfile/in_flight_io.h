@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,7 +61,10 @@ class BackgroundIO : public base::RefCountedThreadSafe<BackgroundIO> {
   // thread.
   void NotifyController();
 
-  int result_;  // Final operation result.
+  // Clears the controller before it might get destroyed.
+  void ClearController();
+
+  int result_ = -1;  // Final operation result.
 
  private:
   friend class base::RefCountedThreadSafe<BackgroundIO>;
@@ -137,7 +140,7 @@ class InFlightIO {
   IOList io_list_;  // List of pending, in-flight io operations.
   scoped_refptr<base::SequencedTaskRunner> callback_task_runner_;
 
-  bool running_;  // True after the first posted operation completes.
+  bool running_ = false;  // True after the first posted operation completes.
 #if DCHECK_IS_ON()
   bool single_thread_ = false;  // True if we only have one thread.
 #endif

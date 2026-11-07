@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -163,7 +163,7 @@ bool XDGPopupWrapperImpl::Initialize(const ShellPopupParams& params) {
       &XDGPopupWrapperImpl::Repositioned,
   };
 
-  auto positioner = CreatePositioner(wayland_window_->parent_window());
+  auto positioner = CreatePositioner();
   if (!positioner)
     return false;
 
@@ -172,6 +172,8 @@ bool XDGPopupWrapperImpl::Initialize(const ShellPopupParams& params) {
                                          positioner.get()));
   if (!xdg_popup_)
     return false;
+  connection_->wayland_window_manager()->NotifyWindowRoleAssigned(
+      wayland_window_);
 
   if (connection_->zaura_shell()) {
     uint32_t version =
@@ -183,6 +185,10 @@ bool XDGPopupWrapperImpl::Initialize(const ShellPopupParams& params) {
           version >=
               ZAURA_POPUP_SURFACE_SUBMISSION_IN_PIXEL_COORDINATES_SINCE_VERSION) {
         zaura_popup_surface_submission_in_pixel_coordinates(aura_popup_.get());
+      }
+      if (version >= ZAURA_POPUP_SET_MENU_SINCE_VERSION &&
+          wayland_window_->type() == PlatformWindowType::kMenu) {
+        zaura_popup_set_menu(aura_popup_.get());
       }
     }
   }
@@ -214,7 +220,7 @@ bool XDGPopupWrapperImpl::SetBounds(const gfx::Rect& new_bounds) {
   params_.bounds = new_bounds;
 
   // Create a new positioner with new bounds.
-  auto positioner = CreatePositioner(wayland_window_->parent_window());
+  auto positioner = CreatePositioner();
   if (!positioner)
     return false;
 
@@ -224,7 +230,7 @@ bool XDGPopupWrapperImpl::SetBounds(const gfx::Rect& new_bounds) {
   xdg_popup_reposition(xdg_popup_.get(), positioner.get(),
                        ++next_reposition_token_);
 
-  connection_->ScheduleFlush();
+  connection_->Flush();
   return true;
 }
 
@@ -238,8 +244,19 @@ void XDGPopupWrapperImpl::Grab(uint32_t serial) {
   xdg_popup_grab(xdg_popup_.get(), connection_->seat()->wl_object(), serial);
 }
 
-wl::Object<xdg_positioner> XDGPopupWrapperImpl::CreatePositioner(
-    WaylandWindow* parent_window) {
+bool XDGPopupWrapperImpl::SupportsDecoration() {
+  if (!aura_popup_)
+    return false;
+  uint32_t version = zaura_popup_get_version(aura_popup_.get());
+  return version >= ZAURA_POPUP_SET_DECORATION_SINCE_VERSION;
+}
+
+void XDGPopupWrapperImpl::Decorate() {
+  zaura_popup_set_decoration(aura_popup_.get(),
+                             ZAURA_POPUP_DECORATION_TYPE_SHADOW);
+}
+
+wl::Object<xdg_positioner> XDGPopupWrapperImpl::CreatePositioner() {
   wl::Object<xdg_positioner> positioner(
       xdg_wm_base_create_positioner(connection_->shell()));
   if (!positioner)

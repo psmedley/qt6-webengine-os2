@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,7 +46,7 @@ const int64_t kTicksResolutionMs = 1;  // Assume 1ms for non-windows platforms.
 #endif
 
 // Feature that enables network time service querying.
-extern const base::Feature kNetworkTimeServiceQuerying;
+BASE_DECLARE_FEATURE(kNetworkTimeServiceQuerying);
 
 // A class that receives network time updates and can provide the network time
 // for a corresponding local time. This class is not thread safe.
@@ -89,6 +89,14 @@ class NetworkTimeTracker {
     // Time queries will be issued both in the background as needed and also
     // on-demand.
     FETCHES_IN_BACKGROUND_AND_ON_DEMAND,
+  };
+
+  // Number of samples to be used for the computation of clock drift.
+  enum class ClockDriftSamples : uint8_t {
+    NO_SAMPLES = 0,
+    TWO_SAMPLES = 2,
+    FOUR_SAMPLES = 4,
+    SIX_SAMPLES = 6,
   };
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
@@ -163,8 +171,6 @@ class NetworkTimeTracker {
 
   void OverrideNonceForTesting(uint32_t nonce);
 
-  void OverrideUMANoiseFactorForTesting(double noise_factor);
-
   base::TimeDelta GetTimerDelayForTesting() const;
 
  private:
@@ -183,10 +189,19 @@ class NetworkTimeTracker {
   bool UpdateTimeFromResponse(CheckTimeType check_type,
                               std::unique_ptr<std::string> response_body);
 
+  // Processes the clock skew and clock drift histograms.
+  void ProcessClockHistograms(base::Time current_time, base::TimeDelta latency);
+
   // Records histograms related to clock skew. All of these histograms are
   // currently local-only. See https://crbug.com/1258624.
-  void RecordClockSkewHistograms(base::Time current_time,
+  void RecordClockSkewHistograms(base::TimeDelta system_clock_skew,
                                  base::TimeDelta fetch_latency);
+
+  // Triggers clock drift measurements if not already triggered and if enabled.
+  void MaybeTriggerClockDriftMeasurements();
+
+  // Records histograms related to clock drift.
+  void RecordClockDriftHistograms();
 
   // Called to process responses from the secure time service.
   void OnURLLoaderComplete(CheckTimeType check_type,
@@ -198,7 +213,16 @@ class NetworkTimeTracker {
   // Returns true if there's sufficient reason to suspect that
   // NetworkTimeTracker does not know what time it is.  This returns true
   // unconditionally every once in a long while, just to be on the safe side.
-  bool ShouldIssueTimeQuery();
+  bool ShouldIssueTimeQuery(CheckTimeType check_type);
+
+  // Computes clock drift value in seconds/second based on collected
+  // samples. This return value tells how many seconds the client's clock
+  // is drifting away from the roughtime clock in one second.
+  double ComputeClockDrift();
+
+  // Computes the variance of the latencies corresponding to the samples used
+  // for computing clock drift.
+  double ComputeClockDriftLatencyVariance();
 
   // State variables for internally-managed secure time service queries.
   GURL server_url_;
@@ -210,7 +234,6 @@ class NetworkTimeTracker {
   base::RepeatingTimer timer_;
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   std::unique_ptr<network::SimpleURLLoader> time_fetcher_;
-  base::TimeTicks fetch_started_;
   std::unique_ptr<client_update_protocol::Ecdsa> query_signer_;
 
   // The |Clock| and |TickClock| are used to sanity-check one another, allowing
@@ -253,10 +276,12 @@ class NetworkTimeTracker {
   // latencies.
   HistoricalLatenciesContainer historical_latencies_;
 
-  // Clock skews reported to UMA will have ±`uma_noise_factor_` noise (relative
-  // to the clock skew itself) for privacy reasons. For example, specifying 0.1
-  // here means ±10% noise.
-  double uma_noise_factor_ = 0.1;
+  // Flag keeping track of whether clock drift measurements were triggered.
+  bool clock_drift_measurement_triggered_ = false;
+
+  // Containers for recording clock drift metrics.
+  std::vector<base::TimeDelta> clock_drift_latencies_;
+  std::vector<base::TimeDelta> clock_drift_skews_;
 
   base::ThreadChecker thread_checker_;
 };

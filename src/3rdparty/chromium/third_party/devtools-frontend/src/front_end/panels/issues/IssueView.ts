@@ -14,7 +14,6 @@ import * as MarkdownView from '../../ui/components/markdown_view/markdown_view.j
 import * as UI from '../../ui/legacy/legacy.js';
 import * as Adorners from '../../ui/components/adorners/adorners.js';
 import * as NetworkForward from '../../panels/network/forward/forward.js';
-import * as Root from '../../core/root/root.js';
 import * as Components from './components/components.js';
 
 import {AffectedDirectivesView} from './AffectedDirectivesView.js';
@@ -32,8 +31,8 @@ import {CorsIssueDetailsView} from './CorsIssueDetailsView.js';
 import {GenericIssueDetailsView} from './GenericIssueDetailsView.js';
 import {AttributionReportingIssueDetailsView} from './AttributionReportingIssueDetailsView.js';
 
-import type {AggregatedIssue} from './IssueAggregator.js';
-import type {HiddenIssuesMenuData} from './components/HideIssuesMenu.js';
+import {type AggregatedIssue} from './IssueAggregator.js';
+import {type HiddenIssuesMenuData} from './components/HideIssuesMenu.js';
 
 const UIStrings = {
   /**
@@ -181,7 +180,7 @@ class AffectedMixedContentView extends AffectedResourcesView {
         },
       }));
     } else {
-      const filename = extractShortPath(mixedContent.insecureURL);
+      const filename = extractShortPath(mixedContent.insecureURL as Platform.DevToolsPath.UrlString);
       const cell = this.appendIssueDetailCell(element, filename, 'affected-resource-mixed-content-info');
       cell.title = mixedContent.insecureURL;
     }
@@ -254,9 +253,7 @@ export class IssueView extends UI.TreeOutline.TreeElement {
       new AttributionReportingIssueDetailsView(this, this.#issue),
       new AffectedRawCookieLinesView(this, this.#issue),
     ];
-    if (Root.Runtime.experiments.isEnabled('hideIssuesFeature')) {
-      this.#hiddenIssuesMenu = new Components.HideIssuesMenu.HideIssuesMenu();
-    }
+    this.#hiddenIssuesMenu = new Components.HideIssuesMenu.HideIssuesMenu();
     this.#aggregatedIssuesCount = null;
     this.#hasBeenExpandedBefore = false;
   }

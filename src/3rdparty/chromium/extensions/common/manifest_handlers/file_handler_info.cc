@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,22 +38,20 @@ bool IsSupportedVerb(const std::string& verb) {
 FileHandlerMatch::FileHandlerMatch() = default;
 FileHandlerMatch::~FileHandlerMatch() = default;
 
-FileHandlers::FileHandlers() {}
-FileHandlers::~FileHandlers() {}
+FileHandlers::FileHandlers() = default;
+FileHandlers::~FileHandlers() = default;
 
 // static
 const FileHandlersInfo* FileHandlers::GetFileHandlers(
     const Extension* extension) {
   FileHandlers* info = static_cast<FileHandlers*>(
       extension->GetManifestData(keys::kFileHandlers));
-  return info ? &info->file_handlers : NULL;
+  return info ? &info->file_handlers : nullptr;
 }
 
-FileHandlersParser::FileHandlersParser() {
-}
+FileHandlersParser::FileHandlersParser() = default;
 
-FileHandlersParser::~FileHandlersParser() {
-}
+FileHandlersParser::~FileHandlersParser() = default;
 
 bool LoadFileHandler(const std::string& handler_id,
                      const base::Value& handler_info,
@@ -106,8 +104,8 @@ bool LoadFileHandler(const std::string& handler_id,
     }
   }
 
-  if ((!mime_types || mime_types->GetListDeprecated().empty()) &&
-      (!file_extensions || file_extensions->GetListDeprecated().empty()) &&
+  if ((!mime_types || mime_types->GetList().empty()) &&
+      (!file_extensions || file_extensions->GetList().empty()) &&
       !handler.include_directories) {
     *error = ErrorUtils::FormatErrorMessageUTF16(
         errors::kInvalidFileHandlerNoTypeOrExtension,
@@ -116,29 +114,28 @@ bool LoadFileHandler(const std::string& handler_id,
   }
 
   if (mime_types) {
-    base::Value::ConstListView list_storage = mime_types->GetListDeprecated();
-    for (size_t i = 0; i < list_storage.size(); ++i) {
-      if (!list_storage[i].is_string()) {
+    const base::Value::List& list = mime_types->GetList();
+    for (size_t i = 0; i < list.size(); ++i) {
+      if (!list[i].is_string()) {
         *error = ErrorUtils::FormatErrorMessageUTF16(
             errors::kInvalidFileHandlerTypeElement, handler_id,
             base::NumberToString(i));
         return false;
       }
-      handler.types.insert(list_storage[i].GetString());
+      handler.types.insert(list[i].GetString());
     }
   }
 
   if (file_extensions) {
-    base::Value::ConstListView list_storage =
-        file_extensions->GetListDeprecated();
-    for (size_t i = 0; i < list_storage.size(); ++i) {
-      if (!list_storage[i].is_string()) {
+    const base::Value::List& list = file_extensions->GetList();
+    for (size_t i = 0; i < list.size(); ++i) {
+      if (!list[i].is_string()) {
         *error = ErrorUtils::FormatErrorMessageUTF16(
             errors::kInvalidFileHandlerExtensionElement, handler_id,
             base::NumberToString(i));
         return false;
       }
-      handler.extensions.insert(list_storage[i].GetString());
+      handler.extensions.insert(list[i].GetString());
     }
   }
 
@@ -181,12 +178,8 @@ bool FileHandlersParser::Parse(Extension* extension, std::u16string* error) {
   }
 
   int filter_count = 0;
-  for (FileHandlersInfo::const_iterator iter = info->file_handlers.begin();
-       iter != info->file_handlers.end();
-       iter++) {
-    filter_count += iter->types.size();
-    filter_count += iter->extensions.size();
-  }
+  for (const auto& iter : info->file_handlers)
+    filter_count += iter.types.size() + iter.extensions.size();
 
   if (filter_count > kMaxTypeAndExtensionHandlers) {
     *error = errors::kInvalidFileHandlersTooManyTypesAndExtensions;

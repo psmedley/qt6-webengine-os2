@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,7 +80,7 @@ IN_PROC_BROWSER_TEST_F(SameOriginObserverFencedFrameTest,
   // The same-origin state callback is not called by fenced frames.
   EXPECT_CALL(origin_state_callback_, Run).Times(0);
   ASSERT_TRUE(fenced_frame_test_helper().CreateFencedFrame(
-      web_contents()->GetMainFrame(),
+      web_contents()->GetPrimaryMainFrame(),
       embedded_test_server()->GetURL("b.com", "/fenced_frames/title1.html")));
   testing::Mock::VerifyAndClearExpectations(&origin_state_callback_);
 }

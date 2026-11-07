@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,9 +20,11 @@
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -32,7 +34,6 @@
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/media_switches.h"
 #include "media/base/scopedfd_helper.h"
-#include "media/base/unaligned_shared_memory.h"
 #include "media/base/video_types.h"
 #include "media/base/video_util.h"
 #include "media/gpu/chromeos/fourcc.h"
@@ -47,11 +48,13 @@
 #include "media/gpu/v4l2/v4l2_video_decoder_delegate_vp8.h"
 #include "media/gpu/v4l2/v4l2_video_decoder_delegate_vp8_legacy.h"
 #include "media/gpu/v4l2/v4l2_video_decoder_delegate_vp9.h"
-#include "media/gpu/v4l2/v4l2_video_decoder_delegate_vp9_chromium.h"
 #include "media/gpu/v4l2/v4l2_video_decoder_delegate_vp9_legacy.h"
 #include "ui/gfx/native_pixmap_handle.h"
+#include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
+#include "ui/gl/gl_display.h"
 #include "ui/gl/gl_image.h"
+#include "ui/gl/gl_surface_egl.h"
 #include "ui/gl/scoped_binders.h"
 
 #define NOTIFY_ERROR(x)                       \
@@ -245,7 +248,8 @@ bool V4L2SliceVideoDecodeAccelerator::Initialize(const Config& config,
       return false;
     }
 
-    if (!gl::g_driver_egl.ext.b_EGL_KHR_fence_sync) {
+    gl::GLDisplayEGL* display = gl::GLDisplayEGL::GetDisplayForCurrentContext();
+    if (!display || !display->ext->b_EGL_KHR_fence_sync) {
       VLOGF(1) << "context does not have EGL_KHR_fence_sync";
       return false;
     }
@@ -292,10 +296,15 @@ bool V4L2SliceVideoDecodeAccelerator::Initialize(const Config& config,
           std::make_unique<V4L2VideoDecoderDelegateH264>(this, device_.get()),
           video_profile_, config.container_color_space);
     } else {
+#if BUILDFLAG(IS_CHROMEOS)
       decoder_ = std::make_unique<H264Decoder>(
           std::make_unique<V4L2VideoDecoderDelegateH264Legacy>(this,
                                                                device_.get()),
           video_profile_, config.container_color_space);
+#else
+      NOTREACHED() << "Unsupported profile " << GetProfileName(video_profile_);
+      return false;
+#endif
     }
   } else if (video_profile_ >= VP8PROFILE_MIN &&
              video_profile_ <= VP8PROFILE_MAX) {
@@ -304,10 +313,15 @@ bool V4L2SliceVideoDecodeAccelerator::Initialize(const Config& config,
           std::make_unique<V4L2VideoDecoderDelegateVP8>(this, device_.get()),
           config.container_color_space);
     } else {
+#if BUILDFLAG(IS_CHROMEOS)
       decoder_ = std::make_unique<VP8Decoder>(
           std::make_unique<V4L2VideoDecoderDelegateVP8Legacy>(this,
                                                               device_.get()),
           config.container_color_space);
+#else
+      NOTREACHED() << "Unsupported profile " << GetProfileName(video_profile_);
+      return false;
+#endif
     }
   } else if (video_profile_ >= VP9PROFILE_MIN &&
              video_profile_ <= VP9PROFILE_MAX) {
@@ -319,22 +333,21 @@ bool V4L2SliceVideoDecodeAccelerator::Initialize(const Config& config,
 #endif
       const bool supports_stable_api =
           device_->IsCtrlExposed(V4L2_CID_STATELESS_VP9_FRAME);
+      CHECK(supports_stable_api);
+      decoder_ = std::make_unique<VP9Decoder>(
+          std::make_unique<V4L2VideoDecoderDelegateVP9>(this, device_.get()),
+          video_profile_, config.container_color_space);
 
-      if (supports_stable_api) {
-        decoder_ = std::make_unique<VP9Decoder>(
-            std::make_unique<V4L2VideoDecoderDelegateVP9>(this, device_.get()),
-            video_profile_, config.container_color_space);
-      } else {
-        decoder_ = std::make_unique<VP9Decoder>(
-            std::make_unique<V4L2VideoDecoderDelegateVP9Chromium>(
-                this, device_.get()),
-            video_profile_, config.container_color_space);
-      }
     } else {
+#if BUILDFLAG(IS_CHROMEOS)
       decoder_ = std::make_unique<VP9Decoder>(
           std::make_unique<V4L2VideoDecoderDelegateVP9Legacy>(this,
                                                               device_.get()),
           video_profile_, config.container_color_space);
+#else
+      NOTREACHED() << "Unsupported profile " << GetProfileName(video_profile_);
+      return false;
+#endif
     }
   } else {
     NOTREACHED() << "Unsupported profile " << GetProfileName(video_profile_);
@@ -644,8 +657,8 @@ bool V4L2SliceVideoDecodeAccelerator::CreateInputBuffers() {
   DCHECK(decoder_thread_task_runner_->BelongsToCurrentThread());
   DCHECK(!input_queue_->IsStreaming());
 
-  if (input_queue_->AllocateBuffers(kNumInputBuffers, V4L2_MEMORY_MMAP) <
-      kNumInputBuffers) {
+  if (input_queue_->AllocateBuffers(kNumInputBuffers, V4L2_MEMORY_MMAP,
+                                    /*incoherent=*/false) < kNumInputBuffers) {
     LOG(ERROR) << "Failed AllocateBuffers";
     NOTIFY_ERROR(PLATFORM_FAILURE);
     return false;
@@ -777,7 +790,8 @@ void V4L2SliceVideoDecodeAccelerator::DestroyInputBuffers() {
 
   DCHECK(!input_queue_->IsStreaming());
 
-  input_queue_->DeallocateBuffers();
+  if (!input_queue_->DeallocateBuffers())
+    VLOGF(1) << "Failed to deallocate V4L2 input buffers";
 }
 
 void V4L2SliceVideoDecodeAccelerator::DismissPictures(
@@ -1227,8 +1241,9 @@ bool V4L2SliceVideoDecodeAccelerator::DestroyOutputs(bool dismiss) {
   if (output_buffer_map_.empty())
     return true;
 
-  for (auto& output_record : output_buffer_map_) {
-    picture_buffers_to_dismiss.push_back(output_record.picture_id);
+  for (const auto& [output_frame, picture_id, client_texture_id, texture_id,
+                    cleared, num_times_sent_to_client] : output_buffer_map_) {
+    picture_buffers_to_dismiss.push_back(picture_id);
   }
 
   if (dismiss) {
@@ -1275,7 +1290,8 @@ bool V4L2SliceVideoDecodeAccelerator::DestroyOutputBuffers() {
 
   output_buffer_map_.clear();
 
-  output_queue_->DeallocateBuffers();
+  if (!output_queue_->DeallocateBuffers())
+    VLOGF(1) << "Failed to deallocate V4L2 output buffers";
 
   return true;
 }
@@ -1375,8 +1391,8 @@ void V4L2SliceVideoDecodeAccelerator::AssignPictureBuffersTask(
       (image_processor_device_ || output_mode_ == Config::OutputMode::ALLOCATE
            ? V4L2_MEMORY_MMAP
            : V4L2_MEMORY_DMABUF);
-  if (output_queue_->AllocateBuffers(buffers.size(), memory) !=
-      buffers.size()) {
+  if (output_queue_->AllocateBuffers(buffers.size(), memory,
+                                     /*incoherent=*/false) != buffers.size()) {
     LOG(ERROR) << "Could not allocate enough output buffers";
     NOTIFY_ERROR(PLATFORM_FAILURE);
     return;
@@ -1559,11 +1575,8 @@ void V4L2SliceVideoDecodeAccelerator::ImportBufferForPictureTask(
   if (surface_set_change_pending_)
     return;
 
-  const auto iter =
-      std::find_if(output_buffer_map_.begin(), output_buffer_map_.end(),
-                   [picture_buffer_id](const OutputRecord& output_record) {
-                     return output_record.picture_id == picture_buffer_id;
-                   });
+  const auto iter = base::ranges::find(output_buffer_map_, picture_buffer_id,
+                                       &OutputRecord::picture_id);
   if (iter == output_buffer_map_.end()) {
     // It's possible that we've already posted a DismissPictureBuffer for this
     // picture, but it has not yet executed when this ImportBufferForPicture was
@@ -2138,9 +2151,15 @@ V4L2SliceVideoDecodeAccelerator::CreateSurface() {
         std::move(*input_buffer), std::move(*output_buffer),
         output_record.output_frame, std::move(*request_ref));
   } else {
+// ConfigStore is ChromeOS-specific legacy stuff
+#if BUILDFLAG(IS_CHROMEOS)
     dec_surface = new V4L2ConfigStoreDecodeSurface(std::move(*input_buffer),
                                                    std::move(*output_buffer),
                                                    output_record.output_frame);
+#else
+    NOTREACHED() << "ConfigStore not supported.";
+    return nullptr;
+#endif
   }
 
   DVLOGF(4) << "Created surface " << input << " -> " << output;
@@ -2231,8 +2250,7 @@ bool V4L2SliceVideoDecodeAccelerator::IsSupportedProfile(
     for (const SupportedProfile& entry : profiles)
       supported_profiles_.push_back(entry.profile);
   }
-  return std::find(supported_profiles_.begin(), supported_profiles_.end(),
-                   profile) != supported_profiles_.end();
+  return base::Contains(supported_profiles_, profile);
 }
 
 size_t V4L2SliceVideoDecodeAccelerator::GetNumOfOutputRecordsAtDevice() const {

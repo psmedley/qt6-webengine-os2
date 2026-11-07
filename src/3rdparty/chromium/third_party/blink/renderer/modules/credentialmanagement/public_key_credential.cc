@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include "third_party/blink/public/mojom/webauthn/authenticator.mojom-shared.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
-#include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/modules/credentialmanagement/credential_manager_proxy.h"
 #include "third_party/blink/renderer/modules/credentialmanagement/scoped_promise_resolver.h"
@@ -49,13 +48,14 @@ PublicKeyCredential::PublicKeyCredential(
     mojom::blink::AuthenticatorAttachment authenticator_attachment,
     const AuthenticationExtensionsClientOutputs* extension_outputs,
     const String& type)
-    : Credential(id, type.IsEmpty() ? kPublicKeyCredentialType : type),
+    : Credential(id, type.empty() ? kPublicKeyCredentialType : type),
       raw_id_(raw_id),
       response_(response),
       authenticator_attachment_(
           AuthenticatorAttachmentToString(authenticator_attachment)),
       extension_outputs_(extension_outputs) {}
 
+// static
 ScriptPromise
 PublicKeyCredential::isUserVerifyingPlatformAuthenticatorAvailable(
     ScriptState* script_state) {
@@ -78,8 +78,8 @@ PublicKeyCredential::isUserVerifyingPlatformAuthenticatorAvailable(
   auto* authenticator =
       CredentialManagerProxy::From(script_state)->Authenticator();
   authenticator->IsUserVerifyingPlatformAuthenticatorAvailable(
-      WTF::Bind(&OnIsUserVerifyingComplete,
-                std::make_unique<ScopedPromiseResolver>(resolver)));
+      WTF::BindOnce(&OnIsUserVerifyingComplete,
+                    std::make_unique<ScopedPromiseResolver>(resolver)));
   return promise;
 }
 
@@ -87,6 +87,32 @@ AuthenticationExtensionsClientOutputs*
 PublicKeyCredential::getClientExtensionResults() const {
   return const_cast<AuthenticationExtensionsClientOutputs*>(
       extension_outputs_.Get());
+}
+
+// static
+ScriptPromise PublicKeyCredential::isConditionalMediationAvailable(
+    ScriptState* script_state) {
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  ScriptPromise promise = resolver->Promise();
+
+  // Ignore calls if the current realm execution context is no longer valid,
+  // e.g., because the responsible document was detached.
+  DCHECK(resolver->GetExecutionContext());
+  if (resolver->GetExecutionContext()->IsContextDestroyed()) {
+    resolver->Reject();
+    return promise;
+  }
+  UseCounter::Count(
+      resolver->GetExecutionContext(),
+      WebFeature::kCredentialManagerIsConditionalMediationAvailable);
+  auto* authenticator =
+      CredentialManagerProxy::From(script_state)->Authenticator();
+  authenticator->IsConditionalMediationAvailable(WTF::BindOnce(
+      [](std::unique_ptr<ScopedPromiseResolver> resolver, bool available) {
+        resolver->Release()->Resolve(available);
+      },
+      std::make_unique<ScopedPromiseResolver>(resolver)));
+  return promise;
 }
 
 void PublicKeyCredential::Trace(Visitor* visitor) const {

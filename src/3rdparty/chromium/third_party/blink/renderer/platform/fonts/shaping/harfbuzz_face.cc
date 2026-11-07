@@ -32,17 +32,19 @@
 
 // clang-format off
 #include <hb.h>
+#include <hb-cplusplus.hh>
 #include <hb-ot.h>
 // clang-format on
 
 #include <memory>
 
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
 #include "third_party/blink/renderer/platform/fonts/font_global_context.h"
 #include "third_party/blink/renderer/platform/fonts/font_platform_data.h"
-#include "third_party/blink/renderer/platform/fonts/shaping/harfbuzz_font_cache.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/harfbuzz_face_from_typeface.h"
+#include "third_party/blink/renderer/platform/fonts/shaping/harfbuzz_font_cache.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/harfbuzz_font_data.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/harfbuzz_shaper.h"
 #include "third_party/blink/renderer/platform/fonts/simple_font_data.h"
@@ -51,7 +53,6 @@
 #include "third_party/blink/renderer/platform/resolution_units.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
-#include "third_party/harfbuzz-ng/utils/hb_scoped.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkPoint.h"
@@ -60,12 +61,12 @@
 
 namespace blink {
 
-scoped_refptr<HarfBuzzFace> HarfBuzzFace::Create(
+std::unique_ptr<HarfBuzzFace> HarfBuzzFace::Create(
     FontPlatformData* platform_data) {
   auto harfbuzz_font_data =
       FontGlobalContext::GetHarfBuzzFontCache().GetOrCreateFontData(
           platform_data);
-  return base::AdoptRef(new HarfBuzzFace(platform_data, harfbuzz_font_data));
+  return base::WrapUnique(new HarfBuzzFace(platform_data, harfbuzz_font_data));
 }
 
 HarfBuzzFace::HarfBuzzFace(FontPlatformData* platform_data,
@@ -202,7 +203,7 @@ bool HarfBuzzFace::HasSpaceInLigaturesOrKerning(TypesettingFeatures features) {
   const hb_codepoint_t kInvalidCodepoint = static_cast<hb_codepoint_t>(-1);
   hb_codepoint_t space = kInvalidCodepoint;
 
-  HbScoped<hb_set_t> glyphs(hb_set_create());
+  hb::unique_ptr<hb_set_t> glyphs(hb_set_create());
 
   // Check whether computing is needed and compute for gpos/gsub.
   if (features & kKerning &&
@@ -261,24 +262,23 @@ bool HarfBuzzFace::ShouldSubpixelPosition() {
   return harfbuzz_font_data_->font_.isSubpixel();
 }
 
-// `HarfBuzzSkiaGetFontFuncs` is shared hb_font_funcs_t`s among threads for
+// `HarfBuzzSkiaFontFuncs` is shared hb_font_funcs_t`s among threads for
 // calculating horizontal advances functions.
-class HarfBuzzSkiaGetFontFuncs final {
+class HarfBuzzSkiaFontFuncs final {
  public:
-  static HarfBuzzSkiaGetFontFuncs& Get() {
-    DEFINE_THREAD_SAFE_STATIC_LOCAL(HarfBuzzSkiaGetFontFuncs, shared_hb_funcs,
-                                    ());
+  static HarfBuzzSkiaFontFuncs& Get() {
+    DEFINE_THREAD_SAFE_STATIC_LOCAL(HarfBuzzSkiaFontFuncs, shared_hb_funcs, ());
     return shared_hb_funcs;
   }
 
 #if BUILDFLAG(IS_MAC)
-  HarfBuzzSkiaGetFontFuncs()
+  HarfBuzzSkiaFontFuncs()
       : hb_font_funcs_skia_advances_(
             CreateFontFunctions(kSkiaHorizontalAdvances)),
         hb_font_funcs_harfbuzz_advances_(
             CreateFontFunctions(kHarfBuzzHorizontalAdvances)) {}
 
-  ~HarfBuzzSkiaGetFontFuncs() {
+  ~HarfBuzzSkiaFontFuncs() {
     hb_font_funcs_destroy(hb_font_funcs_skia_advances_);
     hb_font_funcs_destroy(hb_font_funcs_harfbuzz_advances_);
   }
@@ -305,11 +305,11 @@ class HarfBuzzSkiaGetFontFuncs final {
                                  : hb_font_funcs_skia_advances_;
   }
 #else
-  HarfBuzzSkiaGetFontFuncs()
+  HarfBuzzSkiaFontFuncs()
       : hb_font_funcs_skia_advances_(
             CreateFontFunctions(kSkiaHorizontalAdvances)) {}
 
-  ~HarfBuzzSkiaGetFontFuncs() {
+  ~HarfBuzzSkiaFontFuncs() {
     hb_font_funcs_destroy(hb_font_funcs_skia_advances_);
   }
 
@@ -318,11 +318,11 @@ class HarfBuzzSkiaGetFontFuncs final {
   }
 #endif
 
-  HarfBuzzSkiaGetFontFuncs(const HarfBuzzSkiaGetFontFuncs&) = delete;
-  HarfBuzzSkiaGetFontFuncs(HarfBuzzSkiaGetFontFuncs&&) = delete;
+  HarfBuzzSkiaFontFuncs(const HarfBuzzSkiaFontFuncs&) = delete;
+  HarfBuzzSkiaFontFuncs(HarfBuzzSkiaFontFuncs&&) = delete;
 
-  HarfBuzzSkiaGetFontFuncs& operator=(const HarfBuzzSkiaGetFontFuncs&) = delete;
-  HarfBuzzSkiaGetFontFuncs& operator=(HarfBuzzSkiaGetFontFuncs&&) = delete;
+  HarfBuzzSkiaFontFuncs& operator=(const HarfBuzzSkiaFontFuncs&) = delete;
+  HarfBuzzSkiaFontFuncs& operator=(HarfBuzzSkiaFontFuncs&&) = delete;
 
  private:
   enum HorizontalAdvanceSource {
@@ -371,7 +371,7 @@ static hb_blob_t* HarfBuzzSkiaGetTable(hb_face_t* face,
   SkTypeface* typeface = reinterpret_cast<SkTypeface*>(user_data);
 
   const wtf_size_t table_size =
-      SafeCast<wtf_size_t>(typeface->getTableSize(tag));
+      base::checked_cast<wtf_size_t>(typeface->getTableSize(tag));
   if (!table_size) {
     return nullptr;
   }
@@ -391,8 +391,8 @@ static hb_blob_t* HarfBuzzSkiaGetTable(hb_face_t* face,
 }
 
 // TODO(yosin): We should move |CreateFace()| to "harfbuzz_font_cache.cc".
-static HbScoped<hb_face_t> CreateFace(FontPlatformData* platform_data) {
-  HbScoped<hb_face_t> face;
+static hb::unique_ptr<hb_face_t> CreateFace(FontPlatformData* platform_data) {
+  hb::unique_ptr<hb_face_t> face;
 
   sk_sp<SkTypeface> typeface = sk_ref_sp(platform_data->Typeface());
   CHECK(typeface);
@@ -402,8 +402,8 @@ static HbScoped<hb_face_t> CreateFace(FontPlatformData* platform_data) {
 
   // Fallback to table copies if there is no in-memory access.
   if (!face) {
-    face.reset(hb_face_create_for_tables(HarfBuzzSkiaGetTable, typeface.get(),
-                                         nullptr));
+    face = hb::unique_ptr<hb_face_t>(hb_face_create_for_tables(
+        HarfBuzzSkiaGetTable, typeface.get(), nullptr));
   }
 
   DCHECK(face);
@@ -415,7 +415,7 @@ static HbScoped<hb_face_t> CreateFace(FontPlatformData* platform_data) {
 static scoped_refptr<HarfBuzzFontData> CreateHarfBuzzFontData(
     hb_face_t* face,
     SkTypeface* typeface) {
-  HbScoped<hb_font_t> ot_font(hb_font_create(face));
+  hb::unique_ptr<hb_font_t> ot_font(hb_font_create(face));
   hb_ot_font_set_funcs(ot_font.get());
 
   int axis_count = typeface->getVariationDesignPosition(nullptr, 0);
@@ -436,7 +436,7 @@ static scoped_refptr<HarfBuzzFontData> CreateHarfBuzzFontData(
   scoped_refptr<HarfBuzzFontData> harfbuzz_font_data =
       HarfBuzzFontData::Create(unscaled_font);
   hb_font_set_funcs(unscaled_font,
-                    HarfBuzzSkiaGetFontFuncs::Get().GetFunctions(typeface),
+                    HarfBuzzSkiaFontFuncs::Get().GetFunctions(typeface),
                     harfbuzz_font_data.get(), nullptr);
   return harfbuzz_font_data;
 }
@@ -445,7 +445,7 @@ scoped_refptr<HarfBuzzFontData> HarfBuzzFontCache::GetOrCreateFontData(
     FontPlatformData* platform_data) {
   const auto& result = font_map_.insert(platform_data->UniqueID(), nullptr);
   if (result.is_new_entry) {
-    HbScoped<hb_face_t> face = CreateFace(platform_data);
+    hb::unique_ptr<hb_face_t> face = CreateFace(platform_data);
     result.stored_value->value =
         CreateHarfBuzzFontData(face.get(), platform_data->Typeface());
   }
@@ -484,9 +484,14 @@ hb_font_t* HarfBuzzFace::GetScaledFont(scoped_refptr<UnicodeRangeSet> range_set,
   return unscaled_font_;
 }
 
+hb_font_t* HarfBuzzFace::GetScaledFont() const {
+  return GetScaledFont(nullptr, HarfBuzzFace::kNoVerticalLayout,
+                       platform_data_->size());
+}
+
 void HarfBuzzFace::Init() {
   DCHECK(IsMainThread());
-  HarfBuzzSkiaGetFontFuncs::Get();
+  HarfBuzzSkiaFontFuncs::Get();
 }
 
 }  // namespace blink

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium OS Authors. All rights reserved.
+// Copyright 2021 The ChromiumOS Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@ const char kTransitionPreviousStateMethod[] = "TransitionPreviousState";
 const char kAbortRmaMethod[] = "AbortRma";
 const char kGetLogMethod[] = "GetLog";
 const char kSaveLogMethod[] = "SaveLog";
+const char kRecordBrowserActionMetricMethod[] = "RecordBrowserActionMetric";
 
 // Signals.
 const char kErrorSignal[] = "Error";
@@ -30,6 +31,7 @@ const char kFinalizeProgressSignal[] = "FinalizeProgress";
 const char kHardwareWriteProtectionStateSignal[] =
     "HardwareWriteProtectionState";
 const char kPowerCableStateSignal[] = "PowerCableState";
+const char kExternalDiskDetectedSignal[] = "ExternalDiskDetected";
 
 }  // namespace rmad
 

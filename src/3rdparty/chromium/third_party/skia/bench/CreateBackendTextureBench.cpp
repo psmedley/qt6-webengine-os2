@@ -16,8 +16,8 @@ private:
     GrMipmapped fMipmapped;
 
 public:
-    CreateBackendTextureBench(GrMipmapped mipMapped) : fMipmapped(mipMapped) {
-        fName.printf("create_backend_texture%s", mipMapped == GrMipmapped::kYes ? "_mipped" : "");
+    CreateBackendTextureBench(GrMipmapped mipmapped) : fMipmapped(mipmapped) {
+        fName.printf("create_backend_texture%s", mipmapped == GrMipmapped::kYes ? "_mipped" : "");
     }
 
 private:
@@ -32,9 +32,17 @@ private:
 
         static const int kSize = 16;
         for (int i = 0; i < loops; ++i) {
-            fBackendTextures.push_back(context->createBackendTexture(
-                    kSize, kSize, kRGBA_8888_SkColorType, SkColors::kRed, fMipmapped,
-                    GrRenderable::kNo, GrProtected::kNo));
+            fBackendTextures.push_back(
+                    context->createBackendTexture(kSize,
+                                                  kSize,
+                                                  kRGBA_8888_SkColorType,
+                                                  SkColors::kRed,
+                                                  fMipmapped,
+                                                  GrRenderable::kNo,
+                                                  GrProtected::kNo,
+                                                  nullptr,
+                                                  nullptr,
+                                                  /*label=*/"DrawBackendTextureBench"));
         }
     }
 

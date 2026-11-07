@@ -8,11 +8,21 @@
 #ifndef SKSL_FUNCTIONCALL
 #define SKSL_FUNCTIONCALL
 
-#include "include/private/SkTArray.h"
+#include "include/private/SkSLDefines.h"
+#include "include/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLExpression.h"
-#include "src/sksl/ir/SkSLFunctionDeclaration.h"
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
 
 namespace SkSL {
+
+class Context;
+class FunctionDeclaration;
+class Type;
+enum class OperatorPrecedence : uint8_t;
 
 /**
  * A function invocation.
@@ -46,10 +56,9 @@ public:
                                             const FunctionDeclaration& function,
                                             ExpressionArray arguments);
 
-    static const FunctionDeclaration* FindBestFunctionForCall(
-            const Context& context,
-            const std::vector<const FunctionDeclaration*>& functions,
-            const ExpressionArray& arguments);
+    static const FunctionDeclaration* FindBestFunctionForCall(const Context& context,
+                                                              const FunctionDeclaration* overloads,
+                                                              const ExpressionArray& arguments);
 
     const FunctionDeclaration& function() const {
         return fFunction;
@@ -63,17 +72,11 @@ public:
         return fArguments;
     }
 
-    bool hasProperty(Property property) const override;
+    std::unique_ptr<Expression> clone(Position pos) const override;
 
-    std::unique_ptr<Expression> clone() const override;
-
-    std::string description() const override;
+    std::string description(OperatorPrecedence) const override;
 
 private:
-    static CoercionCost CallCost(const Context& context,
-                                 const FunctionDeclaration& function,
-                                 const ExpressionArray& arguments);
-
     const FunctionDeclaration& fFunction;
     ExpressionArray fArguments;
 

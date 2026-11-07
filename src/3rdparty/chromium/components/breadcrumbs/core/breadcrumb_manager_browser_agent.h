@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,7 +59,7 @@ class BreadcrumbManagerBrowserAgent {
   // position `index`.
   void LogActiveTabChanged(absl::optional<int> old_tab_id,
                            absl::optional<int> new_tab_id,
-                           int index);
+                           absl::optional<size_t> index);
 
   // Logs a breadcrumb event with message data `event` for the associated
   // browser. NOTE: `event` must not include newline characters, as newlines are

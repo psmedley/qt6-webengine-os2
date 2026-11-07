@@ -1,4 +1,4 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Definitions of builders in the chromium.packager builder group."""
@@ -14,6 +14,9 @@ ci.defaults.set(
     os = os.LINUX_DEFAULT,
     pool = ci.DEFAULT_POOL,
     service_account = "chromium-cipd-builder@chops-service-accounts.iam.gserviceaccount.com",
+
+    # TODO(crbug.com/1362440): remove this.
+    omit_python2 = False,
 )
 
 consoles.console_view(
@@ -44,7 +47,8 @@ ci.builder(
             "gclient_apply_config": ["android"],
         },
     },
-    schedule = "with 6h interval",
+    # Every 6 hours starting at 5am UTC.
+    schedule = "0 5/6 * * * *",
     triggered_by = [],
 )
 
@@ -110,6 +114,8 @@ ci.builder(
             "tools/android/avd/proto/creation/generic_playstore_android31.textpb",
             "tools/android/avd/proto/creation/generic_android32_foldable.textpb",
             "tools/android/avd/proto/creation/generic_playstore_android32_foldable.textpb",
+            "tools/android/avd/proto/creation/generic_android33.textpb",
+            "tools/android/avd/proto/creation/generic_playstore_android33.textpb",
         ],
     },
     # Triggered manually through the scheduler UI
@@ -134,16 +140,12 @@ ci.builder(
                 "cipd_yaml": "third_party/android_sdk/cipd/build-tools/25.0.2.yaml",
             },
             {
-                "sdk_package_name": "build-tools;29.0.2",
-                "cipd_yaml": "third_party/android_sdk/cipd/build-tools/29.0.2.yaml",
-            },
-            {
-                "sdk_package_name": "build-tools;30.0.1",
-                "cipd_yaml": "third_party/android_sdk/cipd/build-tools/30.0.1.yaml",
-            },
-            {
                 "sdk_package_name": "build-tools;31.0.0",
                 "cipd_yaml": "third_party/android_sdk/cipd/build-tools/31.0.0.yaml",
+            },
+            {
+                "sdk_package_name": "build-tools;33.0.0",
+                "cipd_yaml": "third_party/android_sdk/cipd/build-tools/33.0.0.yaml",
             },
             {
                 "sdk_package_name": "cmdline-tools;latest",
@@ -158,28 +160,16 @@ ci.builder(
                 "cipd_yaml": "third_party/android_sdk/cipd/patcher/v4.yaml",
             },
             {
-                "sdk_package_name": "platforms;android-29",
-                "cipd_yaml": "third_party/android_sdk/cipd/platforms/android-29.yaml",
-            },
-            {
-                "sdk_package_name": "platforms;android-30",
-                "cipd_yaml": "third_party/android_sdk/cipd/platforms/android-30.yaml",
-            },
-            {
                 "sdk_package_name": "platforms;android-31",
                 "cipd_yaml": "third_party/android_sdk/cipd/platforms/android-31.yaml",
             },
             {
+                "sdk_package_name": "platforms;android-33",
+                "cipd_yaml": "third_party/android_sdk/cipd/platforms/android-33.yaml",
+            },
+            {
                 "sdk_package_name": "platform-tools",
                 "cipd_yaml": "third_party/android_sdk/cipd/platform-tools.yaml",
-            },
-            {
-                "sdk_package_name": "sources;android-29",
-                "cipd_yaml": "third_party/android_sdk/cipd/sources/android-29.yaml",
-            },
-            {
-                "sdk_package_name": "sources;android-30",
-                "cipd_yaml": "third_party/android_sdk/cipd/sources/android-30.yaml",
             },
             {
                 "sdk_package_name": "sources;android-31",
@@ -247,6 +237,10 @@ ci.builder(
             },
             # use x86_64 since sdkmanager don't ship x86 for android-31 and above.
             {
+                "sdk_package_name": "system-images;android-31;google_apis;arm64-v8a",
+                "cipd_yaml": "third_party/android_sdk/cipd/system_images/android-31/google_apis/arm64.yaml",
+            },
+            {
                 "sdk_package_name": "system-images;android-31;google_apis;x86_64",
                 "cipd_yaml": "third_party/android_sdk/cipd/system_images/android-31/google_apis/x86_64.yaml",
             },
@@ -261,6 +255,14 @@ ci.builder(
             {
                 "sdk_package_name": "system-images;android-32;google_apis_playstore;x86_64",
                 "cipd_yaml": "third_party/android_sdk/cipd/system_images/android-32/google_apis_playstore/x86_64.yaml",
+            },
+            {
+                "sdk_package_name": "system-images;android-33;google_apis;x86_64",
+                "cipd_yaml": "third_party/android_sdk/cipd/system_images/android-33/google_apis/x86_64.yaml",
+            },
+            {
+                "sdk_package_name": "system-images;android-33;google_apis_playstore;x86_64",
+                "cipd_yaml": "third_party/android_sdk/cipd/system_images/android-33/google_apis_playstore/x86_64.yaml",
             },
         ],
     },

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,9 +34,9 @@ enum GLImplementation {
   kGLImplementationNone = 0,
   kGLImplementationDesktopGL = 1,
   kGLImplementationDesktopGLCoreProfile = 2,
-  // Note: 3 used to be legacy SwiftShader, so 3 is skipped and should not be
-  // reused.
-  kGLImplementationAppleGL = 4,
+  // Note: 3 and 4 are skipped and should not be reused.
+  // 3 used to be legacy SwiftShader.
+  // 4 used to be Apple's software GL.
   kGLImplementationEGLGLES2 = 5,  // Native EGL/GLES2
   kGLImplementationMockGL = 6,
   kGLImplementationStubGL = 7,

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,7 +46,7 @@ class BASE_EXPORT PowerMonitorDeviceSource : public PowerMonitorSource {
 
   ~PowerMonitorDeviceSource() override;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   // On Chrome OS, Chrome receives power-related events from powerd, the system
   // power daemon, via D-Bus signals received on the UI thread. base can't
   // directly depend on that code, so this class instead exposes static methods
@@ -80,10 +80,13 @@ class BASE_EXPORT PowerMonitorDeviceSource : public PowerMonitorSource {
                                          UINT message,
                                          WPARAM wparam,
                                          LPARAM lparam);
+
     // Instance of the module containing the window procedure.
     HMODULE instance_;
     // A hidden message-only window.
     HWND message_hwnd_;
+    // A handle, returned when we register for power setting notification
+    HPOWERNOTIFY power_notify_handle_ = nullptr;
   };
 #endif  // BUILDFLAG(IS_WIN)
 
@@ -149,7 +152,7 @@ class BASE_EXPORT PowerMonitorDeviceSource : public PowerMonitorSource {
       speed_limit_observer_;
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   PowerThermalObserver::DeviceThermalState current_thermal_state_ =
       PowerThermalObserver::DeviceThermalState::kUnknown;
 #endif

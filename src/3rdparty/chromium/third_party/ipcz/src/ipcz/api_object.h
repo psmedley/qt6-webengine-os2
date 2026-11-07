@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,8 @@
 
 namespace ipcz {
 
+class Portal;
+
 // Base class for any object which can be referenced by an IpczHandle.
 //
 // A subclass T should inherit from APIObjectImpl<T, U> rather than inheriting
@@ -22,6 +24,7 @@ class APIObject : public RefCounted {
     kPortal,
     kBox,
     kTransport,
+    kValidator,
   };
 
   explicit APIObject(ObjectType type);
@@ -48,6 +51,10 @@ class APIObject : public RefCounted {
   // Closes this underlying object, ceasing its operations and freeing its
   // resources ASAP.
   virtual IpczResult Close() = 0;
+
+  // Indicates whether it's possible to send this object from `sender`. By
+  // default the answer is NO.
+  virtual bool CanSendFrom(Portal& sender);
 
  protected:
   ~APIObject() override;

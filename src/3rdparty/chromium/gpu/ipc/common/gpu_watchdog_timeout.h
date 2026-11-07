@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,6 +42,9 @@ constexpr int kInitFactor = 2;
 #else
 constexpr int kInitFactor = 1;
 #endif
+
+// Software rasterizer runs slower than hardware accelerated.
+constexpr int kSoftwareRenderingFactor = 2;
 
 }  // namespace gpu
 

@@ -15,40 +15,48 @@
 #ifndef SRC_DAWN_NATIVE_VULKAN_COMMANDBUFFERVK_H_
 #define SRC_DAWN_NATIVE_VULKAN_COMMANDBUFFERVK_H_
 
+#include <set>
+
 #include "dawn/native/CommandBuffer.h"
 #include "dawn/native/Error.h"
 
 #include "dawn/common/vulkan_platform.h"
 
 namespace dawn::native {
-    struct BeginRenderPassCmd;
-    struct TextureCopy;
+struct BeginComputePassCmd;
+struct BeginRenderPassCmd;
+struct TextureCopy;
 }  // namespace dawn::native
 
 namespace dawn::native::vulkan {
 
-    struct CommandRecordingContext;
-    class Device;
+struct CommandRecordingContext;
+class Device;
 
-    class CommandBuffer final : public CommandBufferBase {
-      public:
-        static Ref<CommandBuffer> Create(CommandEncoder* encoder,
-                                         const CommandBufferDescriptor* descriptor);
+class CommandBuffer final : public CommandBufferBase {
+  public:
+    static Ref<CommandBuffer> Create(CommandEncoder* encoder,
+                                     const CommandBufferDescriptor* descriptor);
 
-        MaybeError RecordCommands(CommandRecordingContext* recordingContext);
+    MaybeError RecordCommands(CommandRecordingContext* recordingContext);
 
-      private:
-        CommandBuffer(CommandEncoder* encoder, const CommandBufferDescriptor* descriptor);
+  private:
+    CommandBuffer(CommandEncoder* encoder, const CommandBufferDescriptor* descriptor);
 
-        MaybeError RecordComputePass(CommandRecordingContext* recordingContext,
-                                     const ComputePassResourceUsage& resourceUsages);
-        MaybeError RecordRenderPass(CommandRecordingContext* recordingContext,
-                                    BeginRenderPassCmd* renderPass);
-        MaybeError RecordCopyImageWithTemporaryBuffer(CommandRecordingContext* recordingContext,
-                                                      const TextureCopy& srcCopy,
-                                                      const TextureCopy& dstCopy,
-                                                      const Extent3D& copySize);
-    };
+    MaybeError RecordComputePass(CommandRecordingContext* recordingContext,
+                                 BeginComputePassCmd* computePass,
+                                 const ComputePassResourceUsage& resourceUsages);
+    MaybeError RecordRenderPass(CommandRecordingContext* recordingContext,
+                                BeginRenderPassCmd* renderPass);
+    MaybeError RecordCopyImageWithTemporaryBuffer(CommandRecordingContext* recordingContext,
+                                                  const TextureCopy& srcCopy,
+                                                  const TextureCopy& dstCopy,
+                                                  const Extent3D& copySize);
+
+    // Need to track depth/stencil textures used by render passes if the
+    // VulkanSplitCommandBufferOnDepthStencilComputeSampleAfterRenderPass toggle is enabled.
+    std::set<TextureBase*> mRenderPassDepthStencilAttachments;
+};
 
 }  // namespace dawn::native::vulkan
 

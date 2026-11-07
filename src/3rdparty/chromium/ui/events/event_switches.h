@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 namespace switches {
 
 EVENTS_BASE_EXPORT extern const char kCompensateForUnstablePinchZoom[];
+EVENTS_BASE_EXPORT extern const char kTouchSlopDistance[];
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 EVENTS_BASE_EXPORT extern const char kTouchDevices[];
@@ -20,6 +21,9 @@ EVENTS_BASE_EXPORT extern const char kPenDevices[];
 #if defined(USE_OZONE)
 EVENTS_BASE_EXPORT extern const char kEdgeTouchFiltering[];
 EVENTS_BASE_EXPORT extern const char kDisableCancelAllTouches[];
+EVENTS_BASE_EXPORT
+extern const char kEnableMicrophoneMuteSwitchDeviceSwitch[];
+
 #endif
 
 }  // namespace switches

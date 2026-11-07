@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@
 #include "net/base/elements_upload_data_stream.h"
 #include "net/base/isolation_info.h"
 #include "net/base/load_flags.h"
-#include "net/base/network_isolation_key.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/http/http_response_headers.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
@@ -86,8 +86,7 @@ struct PendingUpload {
                 const std::string& json,
                 int max_depth,
                 ReportingUploader::UploadCallback callback)
-      : state(CREATED),
-        report_origin(report_origin),
+      : report_origin(report_origin),
         url(url),
         isolation_info(isolation_info),
         payload_reader(UploadOwnedBytesElementReader::CreateWithString(json)),
@@ -98,7 +97,7 @@ struct PendingUpload {
     std::move(callback).Run(outcome);
   }
 
-  State state;
+  State state = CREATED;
   const url::Origin report_origin;
   const GURL url;
   const IsolationInfo isolation_info;
@@ -110,7 +109,8 @@ struct PendingUpload {
 
 class ReportingUploaderImpl : public ReportingUploader, URLRequest::Delegate {
  public:
-  ReportingUploaderImpl(const URLRequestContext* context) : context_(context) {
+  explicit ReportingUploaderImpl(const URLRequestContext* context)
+      : context_(context) {
     DCHECK(context_);
   }
 
@@ -200,11 +200,12 @@ class ReportingUploaderImpl : public ReportingUploader, URLRequest::Delegate {
     upload->request->set_site_for_cookies(
         upload->isolation_info.site_for_cookies());
     // Prior to using `isolation_info` directly here we built the
-    // `upload->network_isolation_key` to create the set the `isolation_info`.
-    // As experiments roll out to determine whether network partitions should be
-    // double or triple keyed the isolation_info might have a null value for
-    // `frame_origin`. Thus we should again get it from `network_isolation_key`
-    // until we can trust `isolation_info::frame_origin`.
+    // `upload->network_anonymization_key` to create the set the
+    // `isolation_info`. As experiments roll out to determine whether network
+    // partitions should be double or triple keyed the isolation_info might have
+    // a null value for `frame_origin`. Thus we should again get it from
+    // `network_anonymization_key` until we can trust
+    // `isolation_info::frame_origin`.
     upload->request->set_initiator(upload->report_origin);
     upload->request->set_isolation_info(upload->isolation_info);
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -264,7 +264,7 @@ class TabletEventConverterEvdevTest : public testing::Test {
   }
 
   void DispatchEventForTest(ui::Event* event) {
-    std::unique_ptr<ui::Event> cloned_event = ui::Event::Clone(*event);
+    std::unique_ptr<ui::Event> cloned_event = event->Clone();
     dispatched_events_.push_back(std::move(cloned_event));
   }
 

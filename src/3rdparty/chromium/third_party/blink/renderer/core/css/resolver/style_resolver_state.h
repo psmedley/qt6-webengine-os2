@@ -55,7 +55,7 @@ class CORE_EXPORT StyleResolverState {
  public:
   StyleResolverState(Document&,
                      Element&,
-                     const StyleRecalcContext& = StyleRecalcContext(),
+                     const StyleRecalcContext* = nullptr,
                      const StyleRequest& = StyleRequest());
   StyleResolverState(const StyleResolverState&) = delete;
   StyleResolverState& operator=(const StyleResolverState&) = delete;
@@ -95,6 +95,10 @@ class CORE_EXPORT StyleResolverState {
     DCHECK(style_);
     return *style_;
   }
+  const ComputedStyle& StyleRef() const {
+    DCHECK(style_);
+    return *style_;
+  }
   scoped_refptr<ComputedStyle> TakeStyle();
 
   const CSSToLengthConversionData& CssToLengthConversionData() const {
@@ -117,6 +121,10 @@ class CORE_EXPORT StyleResolverState {
   }
 
   Element* GetAnimatingElement() const;
+
+  // Returns the pseudo element if the style resolution is targeting a pseudo
+  // element, null otherwise.
+  PseudoElement* GetPseudoElement() const;
 
   void SetParentStyle(scoped_refptr<const ComputedStyle>);
   const ComputedStyle* ParentStyle() const { return parent_style_.get(); }
@@ -164,6 +172,9 @@ class CORE_EXPORT StyleResolverState {
     return originating_element_style_.get();
   }
   bool IsForHighlight() const { return is_for_highlight_; }
+  bool UsesHighlightPseudoInheritance() const {
+    return uses_highlight_pseudo_inheritance_;
+  }
 
   bool CanCacheBaseStyle() const { return can_cache_base_style_; }
 
@@ -183,6 +194,18 @@ class CORE_EXPORT StyleResolverState {
     return affects_compositor_snapshots_;
   }
   void SetAffectsCompositorSnapshots() { affects_compositor_snapshots_ = true; }
+
+  bool RejectedLegacyOverlapping() const {
+    return rejected_legacy_overlapping_;
+  }
+  void SetRejectedLegacyOverlapping() { rejected_legacy_overlapping_ = true; }
+
+  // Update the Font object on the ComputedStyle and the CSSLengthResolver to
+  // reflect applied font properties.
+  void UpdateFont();
+
+  // Update computed line-height and font used for 'lh' unit resolution.
+  void UpdateLineHeight();
 
  private:
   void UpdateLengthConversionData();
@@ -213,13 +236,14 @@ class CORE_EXPORT StyleResolverState {
   PseudoElement* pseudo_element_;
   ElementStyleResources element_style_resources_;
   ElementType element_type_;
-  Element* nearest_container_;
+  Element* container_unit_context_;
 
   scoped_refptr<const ComputedStyle> originating_element_style_;
   // True if we are resolving styles for a highlight pseudo-element.
   const bool is_for_highlight_;
-  // True if we are resolving styles for a custom highlight pseudo-element.
-  const bool is_for_custom_highlight_;
+  // True if this is a highlight style request, and highlight inheritance
+  // should be used for this highlight pseudo.
+  const bool uses_highlight_pseudo_inheritance_;
 
   // True if the base style can be cached to optimize style recalculations for
   // animation updates or transition retargeting.
@@ -235,6 +259,10 @@ class CORE_EXPORT StyleResolverState {
 
   // True if snapshots of composited keyframes require re-validation.
   bool affects_compositor_snapshots_ = false;
+
+  // True if the cascade rejected any properties with the kLegacyOverlapping
+  // flag.
+  bool rejected_legacy_overlapping_ = false;
 };
 
 }  // namespace blink

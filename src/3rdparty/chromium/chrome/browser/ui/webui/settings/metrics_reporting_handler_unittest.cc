@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,9 +43,9 @@ class MetricsReportingHandlerTest : public testing::Test {
     ASSERT_EQ(local_state(), g_browser_process->local_state());
     EXPECT_TRUE(test_web_ui()->call_data().empty());
 
-    base::ListValue args;
-    args.Append(std::make_unique<base::Value>(1));
-    handler()->HandleGetMetricsReporting(args.GetList());
+    base::Value::List args;
+    args.Append(1);
+    handler()->HandleGetMetricsReporting(args);
 
     EXPECT_TRUE(handler()->IsJavascriptAllowed());
     EXPECT_EQ(1u, test_web_ui()->call_data().size());

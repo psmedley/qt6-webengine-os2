@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "build/build_config.h"
+#include "core/fpdfapi/parser/cpdf_stream.h"
 #include "core/fpdfdoc/cpdf_formcontrol.h"
 #include "core/fpdfdoc/cpdf_interactiveform.h"
 #include "core/fxcrt/fx_extension.h"
@@ -36,7 +37,6 @@
 #include "fxjs/js_resources.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/base/check.h"
-#include "third_party/base/cxx17_backports.h"
 #include "third_party/base/numerics/safe_conversions.h"
 #include "v8/include/v8-container.h"
 
@@ -362,9 +362,8 @@ v8::Local<v8::Array> CJS_PublicMethods::AF_MakeArrayFromList(
     return pRuntime->ToArray(val);
 
   DCHECK(val->IsString());
-  WideString wsStr = pRuntime->ToWideString(val);
-  ByteString t = wsStr.ToDefANSI();
-  const char* p = t.c_str();
+  ByteString bsVal = pRuntime->ToByteString(val);
+  const char* p = bsVal.c_str();
 
   int nIndex = 0;
   v8::Local<v8::Array> StrArray = pRuntime->NewArray();
@@ -522,23 +521,23 @@ WideString CJS_PublicMethods::PrintDateUsingFormat(double dDate,
               sPart += c;
               break;
             case 'm':
-              sPart = WideString::Format(L"%d", nMonth);
+              sPart = WideString::FormatInteger(nMonth);
               break;
             case 'd':
-              sPart = WideString::Format(L"%d", nDay);
+              sPart = WideString::FormatInteger(nDay);
               break;
             case 'H':
-              sPart = WideString::Format(L"%d", nHour);
+              sPart = WideString::FormatInteger(nHour);
               break;
             case 'h':
               sPart =
-                  WideString::Format(L"%d", nHour > 12 ? nHour - 12 : nHour);
+                  WideString::FormatInteger(nHour > 12 ? nHour - 12 : nHour);
               break;
             case 'M':
-              sPart = WideString::Format(L"%d", nMin);
+              sPart = WideString::FormatInteger(nMin);
               break;
             case 's':
-              sPart = WideString::Format(L"%d", nSec);
+              sPart = WideString::FormatInteger(nSec);
               break;
             case 't':
               sPart += nHour > 12 ? 'p' : 'a';
@@ -638,7 +637,7 @@ CJS_Result CJS_PublicMethods::AFNumber_Format(
     return CJS_Result::Failure(WideString::FromASCII("No event handler"));
 
   WideString& Value = pEventContext->Value();
-  ByteString strValue = StrTrim(Value.ToDefANSI());
+  ByteString strValue = StrTrim(Value.ToUTF8());
   if (strValue.IsEmpty())
     return CJS_Result::Success();
 
@@ -684,7 +683,7 @@ CJS_Result CJS_PublicMethods::AFNumber_Format(
   }
 
   // Processing currency string
-  Value = WideString::FromDefANSI(strValue.AsStringView());
+  Value = WideString::FromUTF8(strValue.AsStringView());
   if (bCurrencyPrepend)
     Value = wstrCurrency + Value;
   else
@@ -851,7 +850,7 @@ CJS_Result CJS_PublicMethods::AFPercent_Format(
     return CJS_Result::Success();
   }
 
-  ByteString strValue = StrTrim(Value.ToDefANSI());
+  ByteString strValue = StrTrim(Value.ToUTF8());
   if (strValue.IsEmpty())
     strValue = "0";
 
@@ -902,7 +901,7 @@ CJS_Result CJS_PublicMethods::AFPercent_Format(
     strValue.InsertAtFront('%');
   else
     strValue.InsertAtBack('%');
-  Value = WideString::FromDefANSI(strValue.AsStringView());
+  Value = WideString::FromUTF8(strValue.AsStringView());
 #endif
   return CJS_Result::Success();
 }
@@ -968,7 +967,7 @@ double CJS_PublicMethods::ParseDateAsGMT(v8::Isolate* isolate,
 
   int nMonth = 1;
   sTemp = wsArray[1];
-  for (size_t i = 0; i < pdfium::size(fxjs::kMonths); ++i) {
+  for (size_t i = 0; i < std::size(fxjs::kMonths); ++i) {
     if (sTemp == fxjs::kMonths[i]) {
       nMonth = static_cast<int>(i) + 1;
       break;
@@ -1027,8 +1026,8 @@ CJS_Result CJS_PublicMethods::AFDate_Format(
   if (params.size() != 1)
     return CJS_Result::Failure(JSMessage::kParamError);
 
-  int iIndex = WithinBoundsOrZero(pRuntime->ToInt32(params[0]),
-                                  pdfium::size(kDateFormats));
+  int iIndex =
+      WithinBoundsOrZero(pRuntime->ToInt32(params[0]), std::size(kDateFormats));
   std::vector<v8::Local<v8::Value>> newParams;
   newParams.push_back(pRuntime->NewString(kDateFormats[iIndex]));
   return AFDate_FormatEx(pRuntime, newParams);
@@ -1041,8 +1040,8 @@ CJS_Result CJS_PublicMethods::AFDate_Keystroke(
   if (params.size() != 1)
     return CJS_Result::Failure(JSMessage::kParamError);
 
-  int iIndex = WithinBoundsOrZero(pRuntime->ToInt32(params[0]),
-                                  pdfium::size(kDateFormats));
+  int iIndex =
+      WithinBoundsOrZero(pRuntime->ToInt32(params[0]), std::size(kDateFormats));
   std::vector<v8::Local<v8::Value>> newParams;
   newParams.push_back(pRuntime->NewString(kDateFormats[iIndex]));
   return AFDate_KeystrokeEx(pRuntime, newParams);
@@ -1055,8 +1054,8 @@ CJS_Result CJS_PublicMethods::AFTime_Format(
   if (params.size() != 1)
     return CJS_Result::Failure(JSMessage::kParamError);
 
-  int iIndex = WithinBoundsOrZero(pRuntime->ToInt32(params[0]),
-                                  pdfium::size(kTimeFormats));
+  int iIndex =
+      WithinBoundsOrZero(pRuntime->ToInt32(params[0]), std::size(kTimeFormats));
   std::vector<v8::Local<v8::Value>> newParams;
   newParams.push_back(pRuntime->NewString(kTimeFormats[iIndex]));
   return AFDate_FormatEx(pRuntime, newParams);
@@ -1068,8 +1067,8 @@ CJS_Result CJS_PublicMethods::AFTime_Keystroke(
   if (params.size() != 1)
     return CJS_Result::Failure(JSMessage::kParamError);
 
-  int iIndex = WithinBoundsOrZero(pRuntime->ToInt32(params[0]),
-                                  pdfium::size(kTimeFormats));
+  int iIndex =
+      WithinBoundsOrZero(pRuntime->ToInt32(params[0]), std::size(kTimeFormats));
   std::vector<v8::Local<v8::Value>> newParams;
   newParams.push_back(pRuntime->NewString(kTimeFormats[iIndex]));
   return AFDate_KeystrokeEx(pRuntime, newParams);
@@ -1427,7 +1426,7 @@ CJS_Result CJS_PublicMethods::AFRange_Validate(
   if (pEvent->Value().IsEmpty())
     return CJS_Result::Success();
 
-  double dEentValue = atof(pEvent->Value().ToDefANSI().c_str());
+  double dEventValue = atof(pEvent->Value().ToUTF8().c_str());
   bool bGreaterThan = pRuntime->ToBoolean(params[0]);
   double dGreaterThan = pRuntime->ToDouble(params[1]);
   bool bLessThan = pRuntime->ToBoolean(params[2]);
@@ -1435,18 +1434,18 @@ CJS_Result CJS_PublicMethods::AFRange_Validate(
   WideString swMsg;
 
   if (bGreaterThan && bLessThan) {
-    if (dEentValue < dGreaterThan || dEentValue > dLessThan)
+    if (dEventValue < dGreaterThan || dEventValue > dLessThan)
       swMsg = WideString::Format(
           JSGetStringFromID(JSMessage::kRangeBetweenError).c_str(),
           pRuntime->ToWideString(params[1]).c_str(),
           pRuntime->ToWideString(params[3]).c_str());
   } else if (bGreaterThan) {
-    if (dEentValue < dGreaterThan)
+    if (dEventValue < dGreaterThan)
       swMsg = WideString::Format(
           JSGetStringFromID(JSMessage::kRangeGreaterError).c_str(),
           pRuntime->ToWideString(params[1]).c_str());
   } else if (bLessThan) {
-    if (dEentValue > dLessThan)
+    if (dEventValue > dLessThan)
       swMsg = WideString::Format(
           JSGetStringFromID(JSMessage::kRangeLessError).c_str(),
           pRuntime->ToWideString(params[3]).c_str());

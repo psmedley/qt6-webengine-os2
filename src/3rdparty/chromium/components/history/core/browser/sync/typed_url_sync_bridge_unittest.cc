@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@
 #include "components/sync/protocol/entity_metadata.pb.h"
 #include "components/sync/protocol/entity_specifics.pb.h"
 #include "components/sync/protocol/typed_url_specifics.pb.h"
-#include "components/sync/test/model/mock_model_type_change_processor.h"
+#include "components/sync/test/mock_model_type_change_processor.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -39,21 +39,17 @@ using syncer::DataBatch;
 using syncer::EntityChange;
 using syncer::EntityChangeList;
 using syncer::EntityData;
-using syncer::KeyAndData;
 using syncer::MetadataBatch;
 using syncer::MetadataChangeList;
 using syncer::MockModelTypeChangeProcessor;
 using testing::_;
 using testing::AllOf;
-using testing::Contains;
 using testing::DoAll;
 using testing::IsEmpty;
 using testing::Mock;
 using testing::NiceMock;
-using testing::Not;
 using testing::Pointee;
 using testing::Return;
-using testing::SizeIs;
 using testing::UnorderedElementsAre;
 
 // Constants used to limit size of visits processed. See
@@ -166,15 +162,14 @@ URLRow MakeTypedUrlRow(const std::string& url,
   Time last_visit_time = SinceEpoch(last_visit);
   history_url.set_last_visit(last_visit_time);
 
+  ui::PageTransition transition = ui::PAGE_TRANSITION_RELOAD;
+  bool incremented_omnibox_typed_score = false;
   if (typed_count > 0) {
-    // Add a typed visit for time `last_visit_time`.
-    visits->push_back(VisitRow(history_url.id(), last_visit_time, 0,
-                               ui::PAGE_TRANSITION_TYPED, 0, true, 0));
-  } else {
-    // Add a non-typed visit for time `last_visit_time`.
-    visits->push_back(VisitRow(history_url.id(), last_visit_time, 0,
-                               ui::PAGE_TRANSITION_RELOAD, 0, false, 0));
+    transition = ui::PAGE_TRANSITION_TYPED;
+    incremented_omnibox_typed_score = true;
   }
+  visits->push_back(VisitRow(history_url.id(), last_visit_time, 0, transition,
+                             0, incremented_omnibox_typed_score, 0));
 
   history_url.set_visit_count(visits->size());
   return history_url;
@@ -255,7 +250,7 @@ void StoreMetadata(const std::string& storage_key,
 
 class TestHistoryBackendDelegate : public HistoryBackend::Delegate {
  public:
-  TestHistoryBackendDelegate() {}
+  TestHistoryBackendDelegate() = default;
 
   TestHistoryBackendDelegate(const TestHistoryBackendDelegate&) = delete;
   TestHistoryBackendDelegate& operator=(const TestHistoryBackendDelegate&) =
@@ -267,10 +262,8 @@ class TestHistoryBackendDelegate : public HistoryBackend::Delegate {
       std::unique_ptr<InMemoryHistoryBackend> backend) override {}
   void NotifyFaviconsChanged(const std::set<GURL>& page_urls,
                              const GURL& icon_url) override {}
-  void NotifyURLVisited(ui::PageTransition transition,
-                        const URLRow& row,
-                        const RedirectList& redirects,
-                        Time visit_time) override {}
+  void NotifyURLVisited(const URLRow& url_row,
+                        const VisitRow& visit_row) override {}
   void NotifyURLsModified(const std::vector<URLRow>& changed_urls) override {}
   void NotifyURLsDeleted(DeletionInfo deletion_info) override {}
   void NotifyKeywordSearchTermUpdated(const URLRow& row,
@@ -291,7 +284,7 @@ class TestHistoryBackendForSync : public HistoryBackend {
                        std::move(backend_client),
                        base::ThreadTaskRunnerHandle::Get()) {}
 
-  bool IsExpiredVisitTime(const Time& time) override {
+  bool IsExpiredVisitTime(const Time& time) const override {
     return time.ToDeltaSinceWindowsEpoch().InMicroseconds() == kExpiredVisit;
   }
 
@@ -316,14 +309,14 @@ class TestHistoryBackendForSync : public HistoryBackend {
 
     std::vector<VisitInfo> added_visits;
     for (const auto& visit : visits) {
-      added_visits.push_back(VisitInfo(visit.visit_time, visit.transition));
+      added_visits.emplace_back(visit.visit_time, visit.transition);
     }
     AddVisits(new_url->url(), added_visits, SOURCE_SYNCED);
     new_url->set_id(GetIdByUrl(new_url->url()));
   }
 
  private:
-  ~TestHistoryBackendForSync() override {}
+  ~TestHistoryBackendForSync() override = default;
 };
 
 class MockHistoryBackendClient : public HistoryBackendClient {
@@ -348,10 +341,10 @@ class TypedURLSyncBridgeTest : public testing::Test {
     ASSERT_TRUE(test_dir_.CreateUniqueTempDir());
     fake_history_backend_->Init(
         false, TestHistoryDatabaseParamsForPath(test_dir_.GetPath()));
-    std::unique_ptr<TypedURLSyncBridge> bridge =
-        std::make_unique<TypedURLSyncBridge>(
-            fake_history_backend_.get(), fake_history_backend_->db(),
-            mock_processor_.CreateForwardingProcessor());
+    auto bridge = std::make_unique<TypedURLSyncBridge>(
+        fake_history_backend_.get(),
+        fake_history_backend_->db()->GetTypedURLMetadataDB(),
+        mock_processor_.CreateForwardingProcessor());
     typed_url_sync_bridge_ = bridge.get();
     typed_url_sync_bridge_->Init();
     typed_url_sync_bridge_->history_backend_observation_.Reset();
@@ -842,8 +835,8 @@ TEST_F(TypedURLSyncBridgeTest, MergeUrlsWithUsernameAndPassword) {
   StartSyncing({*typed_url});
 
   // Notify typed url sync service of the update.
-  bridge()->OnURLVisited(fake_history_backend_.get(), ui::PAGE_TRANSITION_TYPED,
-                         server_row, RedirectList(), SinceEpoch(7));
+  bridge()->OnURLVisited(fake_history_backend_.get(), server_row,
+                         server_visits.front());
 }
 
 // Starting sync with both local and sync have same typed URL, but different
@@ -980,9 +973,8 @@ TEST_F(TypedURLSyncBridgeTest, ReloadVisitLocalTypedUrl) {
   changed_urls.push_back(url_row);
 
   // Notify typed url sync service of the update.
-  bridge()->OnURLVisited(fake_history_backend_.get(),
-                         ui::PAGE_TRANSITION_RELOAD, url_row, RedirectList(),
-                         SinceEpoch(7));
+  bridge()->OnURLVisited(fake_history_backend_.get(), url_row,
+                         new_visits.front());
   // No change pass to processor
 }
 
@@ -1008,21 +1000,15 @@ TEST_F(TypedURLSyncBridgeTest, LinkVisitLocalTypedUrl) {
   AddNewestVisit(ui::PAGE_TRANSITION_LINK, 6, &url_row, &new_visits);
   fake_history_backend_->SetVisitsForUrl(&url_row, new_visits);
 
-  ui::PageTransition transition = ui::PAGE_TRANSITION_LINK;
   // Notify typed url sync service of non-typed visit, expect no change.
-  bridge()->OnURLVisited(fake_history_backend_.get(), transition, url_row,
-                         RedirectList(), SinceEpoch(6));
+  bridge()->OnURLVisited(fake_history_backend_.get(), url_row,
+                         new_visits.front());
   // No change pass to processor
 }
 
 // Appends a series of LINK visits followed by a TYPED one to an existing typed
 // url. Check that sync receives an UPDATE with the newest visit data.
 TEST_F(TypedURLSyncBridgeTest, TypedVisitLocalTypedUrl) {
-  std::vector<URLRow> url_rows;
-  std::vector<std::vector<VisitRow>> visit_vectors;
-  std::vector<std::string> urls;
-  urls.push_back(kURL);
-
   StartSyncing(std::vector<TypedUrlSpecifics>());
 
   // Update the URL row, adding another typed visit to the visit vector.
@@ -1037,9 +1023,7 @@ TEST_F(TypedURLSyncBridgeTest, TypedVisitLocalTypedUrl) {
   EntityData entity_data;
   EXPECT_CALL(mock_processor_, Put(GetStorageKey(kURL), _, _))
       .WillOnce(SaveArgPointeeMove<1>(&entity_data));
-  ui::PageTransition transition = ui::PAGE_TRANSITION_TYPED;
-  bridge()->OnURLVisited(fake_history_backend_.get(), transition, url_row,
-                         RedirectList(), Time());
+  bridge()->OnURLVisited(fake_history_backend_.get(), url_row, visits.front());
 
   const sync_pb::TypedUrlSpecifics& url_specifics =
       entity_data.specifics.typed_url();
@@ -1281,22 +1265,23 @@ TEST_F(TypedURLSyncBridgeTest, MaxVisitLocalTypedUrl) {
   // Add `kMaxTypedUrlVisits` + 10 visits to the url. The 10 oldest
   // non-typed visits are expected to be skipped.
   int i = 1;
-  for (; i <= kMaxTypedUrlVisits - 20; ++i)
+  for (; i <= kMaxTypedUrlVisits - 20; ++i) {
     AddNewestVisit(ui::PAGE_TRANSITION_TYPED, i, &url_row, &visits);
-  for (; i <= kMaxTypedUrlVisits; ++i)
+  }
+  for (; i <= kMaxTypedUrlVisits; ++i) {
     AddNewestVisit(ui::PAGE_TRANSITION_LINK, i, &url_row, &visits);
-  for (; i <= kMaxTypedUrlVisits + 10; ++i)
+  }
+  for (; i <= kMaxTypedUrlVisits + 10; ++i) {
     AddNewestVisit(ui::PAGE_TRANSITION_TYPED, i, &url_row, &visits);
+  }
 
   fake_history_backend_->SetVisitsForUrl(&url_row, visits);
 
   // Notify typed url sync service of typed visit.
-  const ui::PageTransition transition = ui::PAGE_TRANSITION_TYPED;
   EntityData entity_data;
   EXPECT_CALL(mock_processor_, Put(GetStorageKey(kURL), _, _))
       .WillOnce(SaveArgPointeeMove<1>(&entity_data));
-  bridge()->OnURLVisited(fake_history_backend_.get(), transition, url_row,
-                         RedirectList(), Time());
+  bridge()->OnURLVisited(fake_history_backend_.get(), url_row, visits.front());
 
   const sync_pb::TypedUrlSpecifics& url_specifics =
       entity_data.specifics.typed_url();
@@ -1339,18 +1324,18 @@ TEST_F(TypedURLSyncBridgeTest, ThrottleVisitLocalTypedUrl) {
   // Add enough visits to the url so that typed count is above the throttle
   // limit, and not right on the interval that gets synced.
   int i = 1;
-  for (; i < kVisitThrottleThreshold + kVisitThrottleMultiple / 2; ++i)
+  for (; i < kVisitThrottleThreshold + kVisitThrottleMultiple / 2; ++i) {
     AddNewestVisit(ui::PAGE_TRANSITION_TYPED, i, &url_row, &visits);
+  }
   fake_history_backend_->SetVisitsForUrl(&url_row, visits);
 
   // Notify typed url sync service of typed visit.
-  ui::PageTransition transition = ui::PAGE_TRANSITION_TYPED;
-  bridge()->OnURLVisited(fake_history_backend_.get(), transition, url_row,
-                         RedirectList(), Time());
+  bridge()->OnURLVisited(fake_history_backend_.get(), url_row, visits.front());
 
   visits.clear();
-  for (; i % kVisitThrottleMultiple != 1; ++i)
+  for (; i % kVisitThrottleMultiple != 1; ++i) {
     AddNewestVisit(ui::PAGE_TRANSITION_TYPED, i, &url_row, &visits);
+  }
   --i;  // Account for the increment before the condition ends.
   fake_history_backend_->SetVisitsForUrl(&url_row, visits);
 
@@ -1358,8 +1343,7 @@ TEST_F(TypedURLSyncBridgeTest, ThrottleVisitLocalTypedUrl) {
   EntityData entity_data;
   EXPECT_CALL(mock_processor_, Put(GetStorageKey(kURL), _, _))
       .WillOnce(SaveArgPointeeMove<1>(&entity_data));
-  bridge()->OnURLVisited(fake_history_backend_.get(), transition, url_row,
-                         RedirectList(), Time());
+  bridge()->OnURLVisited(fake_history_backend_.get(), url_row, visits.front());
 
   ASSERT_EQ(i, entity_data.specifics.typed_url().visits_size());
 }
@@ -1498,8 +1482,8 @@ TEST_F(TypedURLSyncBridgeTest, DiffVisitsSame) {
   const int64_t visits[] = {1024, 2065, 65534, 1237684};
 
   for (int64_t visit : visits) {
-    old_visits.push_back(VisitRow(0, SinceEpoch(visit), 0,
-                                  ui::PAGE_TRANSITION_TYPED, 0, true, 0));
+    old_visits.emplace_back(0, SinceEpoch(visit), 0, ui::PAGE_TRANSITION_TYPED,
+                            0, true, 0);
     new_url.add_visits(visit);
     new_url.add_visit_transitions(ui::PAGE_TRANSITION_TYPED);
   }
@@ -1528,8 +1512,8 @@ TEST_F(TypedURLSyncBridgeTest, DiffVisitsRemove) {
   const int64_t visits_removed[] = {1500, 6000, 2237684};
 
   for (int64_t visit : visits_left) {
-    old_visits.push_back(VisitRow(0, SinceEpoch(visit), 0,
-                                  ui::PAGE_TRANSITION_TYPED, 0, true, 0));
+    old_visits.emplace_back(0, SinceEpoch(visit), 0, ui::PAGE_TRANSITION_TYPED,
+                            0, true, 0);
   }
 
   for (int64_t visit : visits_right) {
@@ -1562,8 +1546,8 @@ TEST_F(TypedURLSyncBridgeTest, DiffVisitsAdd) {
   const int64_t visits_added[] = {1, 1500, 6000, 2237684};
 
   for (int64_t visit : visits_left) {
-    old_visits.push_back(VisitRow(0, SinceEpoch(visit), 0,
-                                  ui::PAGE_TRANSITION_TYPED, 0, true, 0));
+    old_visits.emplace_back(0, SinceEpoch(visit), 0, ui::PAGE_TRANSITION_TYPED,
+                            0, true, 0);
   }
 
   for (int64_t visit : visits_right) {

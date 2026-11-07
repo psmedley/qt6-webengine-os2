@@ -1,8 +1,8 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// Next MinVersion: 52
+// Next MinVersion: 55
 
 module arc.mojom;
 
@@ -16,6 +16,12 @@ import "ui/accessibility/mojom/ax_assistant_structure.mojom";
 struct InstallationResult {
   string package_name;
   bool success;  // true if app was installed successfully.
+};
+
+// Describes application storage.
+struct AppStorage {
+  uint64 app_size_in_bytes;
+  uint64 data_size_in_bytes;
 };
 
 // Describes ARC app.
@@ -33,6 +39,12 @@ struct AppInfo {
   // however there is no guarantee and it could be any string value,
   // see https://developer.android.com/studio/publish/versioning.
   [MinVersion=51] string? version_name;
+
+  // Size of app and associated data in bytes.
+  [MinVersion=52] AppStorage? app_storage;
+  // Option, only for ARC upgrade. True if the app is fixing up.
+  // During fixup, it cannot be launched.
+  [MinVersion=54] bool need_fixup;
 };
 
 // Describes the data required to install a web app.
@@ -295,6 +307,22 @@ enum PaiFlowState {
     TIMEOUT = 9,
 };
 
+// Names and values match the CATEGORY_ constants on
+// android.content.pm.ApplicationInfo.
+[Extensible]
+enum AppCategory {
+  [Default] kUndefined = -1,
+  kGame = 0,
+  kAudio = 1,
+  kVideo = 2,
+  kImage = 3,
+  kSocial = 4,
+  kNews = 5,
+  kMaps = 6,
+  kProductivity = 7,
+  kAccessibility = 8,
+};
+
 // Next method ID: 19
 // Deprecated method IDs: 1
 interface AppHost {
@@ -381,8 +409,8 @@ interface AppHost {
 };
 
 // TODO(lhchavez): Migrate all request/response messages to Mojo.
-// Next method ID: 40
-// Deprecated method IDs: 0, 1, 2, 3, 4, 9, 12, 13, 15, 17, 22
+// Next method ID: 42
+// Deprecated method IDs: 0, 1, 2, 3, 4, 9, 12, 13, 15, 17, 18, 19, 22
 interface AppInstance {
   // Establishes full-duplex communication with the host.
   [MinVersion=26] Init@21(pending_remote<AppHost> host_remote) => ();
@@ -401,15 +429,6 @@ interface AppInstance {
   // Sends a request to ARC to install package.
   [MinVersion=8] InstallPackage@11(ArcPackageInfo arcPackageInfo);
 
-  LaunchAppDeprecated@1(string package_name, string activity,
-                        [MinVersion=1] Rect? dimension_on_screen);
-
-  // Sends a request to ARC to launch an ARC app defined by |package_name| and
-  // |activity|, which cannot be empty.
-  [MinVersion=23] LaunchApp@18(string package_name,
-                               string activity,
-                               int64 display_id);
-
   // Sends a request to ARC to launch an ARC app with specific launch window
   // info.
   [MinVersion=47] LaunchAppWithWindowInfo@38(string package_name,
@@ -420,14 +439,6 @@ interface AppInstance {
   // shortcut.
   [MinVersion=30] LaunchAppShortcutItem@24(
       string package_name, string shortcut_id, int64 display_id);
-
-  [MinVersion=9] LaunchIntentDeprecated@12(string intent_uri,
-                                           Rect? dimension_on_screen);
-
-  // Sends a request to ARC to launch an intent. The intent is encoded as a URI
-  // string. See Intent.toUri().
-  [MinVersion=23] LaunchIntent@19(string intent_uri,
-                                  int64 display_id);
 
   // Sends a request to ARC to launch an ARC app with specific launch window
   // info.
@@ -553,4 +564,11 @@ interface AppInstance {
   // it isn't available in the user's store.
   [MinVersion=43] IsInstallable@34(string package_name) =>
       (bool is_installable);
+
+  // Returns the app category of the given package. Corresponds to |category|
+  // field on android.content.pm.ApplicationInfo.
+  // Returns kUndefined if the package is not found or if the package does not
+  // declare an app category.
+  [MinVersion=53] GetAppCategory@41(string package_name) =>
+      (AppCategory category);
 };

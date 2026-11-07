@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,25 +14,31 @@
 #include "base/compiler_specific.h"
 #include "base/containers/cxx20_erase.h"
 #include "base/debug/alias.h"
-#include "base/notreached.h"
 #include "build/build_config.h"
+#include "components/viz/common/features.h"
 #include "components/viz/common/switches.h"
 #include "components/viz/service/display/overlay_candidate.h"
 #include "components/viz/service/display_embedder/skia_output_surface_dependency.h"
 #include "gpu/command_buffer/common/capabilities.h"
+#include "gpu/command_buffer/common/shared_image_usage.h"
 #include "gpu/command_buffer/service/feature_info.h"
 #include "gpu/command_buffer/service/shared_context_state.h"
-#include "gpu/command_buffer/service/shared_image_factory.h"
-#include "gpu/command_buffer/service/shared_image_representation.h"
+#include "gpu/command_buffer/service/shared_image/shared_image_factory.h"
+#include "gpu/command_buffer/service/shared_image/shared_image_representation.h"
 #include "gpu/command_buffer/service/skia_utils.h"
 #include "gpu/config/gpu_finch_features.h"
-#include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/core/SkSurfaceProps.h"
-#include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/gpu_fence_handle.h"
 #include "ui/gfx/swap_result.h"
+#include "ui/gl/gl_fence.h"
+#include "ui/gl/gl_image.h"
 #include "ui/gl/gl_surface.h"
+
+#if defined(USE_OZONE)
+#include "ui/ozone/public/ozone_platform.h"
+#endif  // defined(USE_OZONE)
 
 namespace {
 base::TimeTicks g_last_reshape_failure = base::TimeTicks();
@@ -54,10 +60,9 @@ class SkiaOutputDeviceBufferQueue::OverlayData {
  public:
   OverlayData() = default;
 
-  OverlayData(
-      std::unique_ptr<gpu::SharedImageRepresentationOverlay> representation,
-      std::unique_ptr<gpu::SharedImageRepresentationOverlay::ScopedReadAccess>
-          scoped_read_access)
+  OverlayData(std::unique_ptr<gpu::OverlayImageRepresentation> representation,
+              std::unique_ptr<gpu::OverlayImageRepresentation::ScopedReadAccess>
+                  scoped_read_access)
       : representation_(std::move(representation)),
         scoped_read_access_(std::move(scoped_read_access)),
         ref_(1) {
@@ -106,7 +111,7 @@ class SkiaOutputDeviceBufferQueue::OverlayData {
 
   bool unique() const { return ref_ == 1; }
   const gpu::Mailbox& mailbox() const { return representation_->mailbox(); }
-  gpu::SharedImageRepresentationOverlay::ScopedReadAccess* scoped_read_access()
+  gpu::OverlayImageRepresentation::ScopedReadAccess* scoped_read_access()
       const {
     return scoped_read_access_.get();
   }
@@ -118,8 +123,8 @@ class SkiaOutputDeviceBufferQueue::OverlayData {
     ref_ = 0;
   }
 
-  std::unique_ptr<gpu::SharedImageRepresentationOverlay> representation_;
-  std::unique_ptr<gpu::SharedImageRepresentationOverlay::ScopedReadAccess>
+  std::unique_ptr<gpu::OverlayImageRepresentation> representation_;
+  std::unique_ptr<gpu::OverlayImageRepresentation::ScopedReadAccess>
       scoped_read_access_;
   int ref_ = 0;
 };
@@ -129,23 +134,30 @@ SkiaOutputDeviceBufferQueue::SkiaOutputDeviceBufferQueue(
     SkiaOutputSurfaceDependency* deps,
     gpu::SharedImageRepresentationFactory* representation_factory,
     gpu::MemoryTracker* memory_tracker,
-    const DidSwapBufferCompleteCallback& did_swap_buffer_complete_callback,
-    bool needs_background_image,
-    bool supports_non_backed_solid_color_images)
+    const DidSwapBufferCompleteCallback& did_swap_buffer_complete_callback)
     : SkiaOutputDevice(deps->GetSharedContextState()->gr_context(),
                        memory_tracker,
                        did_swap_buffer_complete_callback),
       presenter_(std::move(presenter)),
       context_state_(deps->GetSharedContextState()),
-      representation_factory_(representation_factory),
-      needs_background_image_(needs_background_image),
-      supports_non_backed_solid_color_images_(
-          supports_non_backed_solid_color_images) {
+      representation_factory_(representation_factory) {
+#if defined(USE_OZONE)
+  capabilities_.needs_background_image = ui::OzonePlatform::GetInstance()
+                                             ->GetPlatformRuntimeProperties()
+                                             .needs_background_image;
+  capabilities_.supports_non_backed_solid_color_overlays =
+      ui::OzonePlatform::GetInstance()
+          ->GetPlatformRuntimeProperties()
+          .supports_non_backed_solid_color_buffers;
+#endif  // defined(USE_OZONE)
+
   capabilities_.uses_default_gl_framebuffer = false;
   capabilities_.preserve_buffer_content = true;
   capabilities_.only_invalidates_damage_rect = false;
   capabilities_.number_of_buffers = 3;
+
 #if BUILDFLAG(IS_ANDROID)
+  capabilities_.renderer_allocates_images = true;
   if (::features::IncreaseBufferCountForHighFrameRate()) {
     capabilities_.number_of_buffers = 5;
   }
@@ -186,7 +198,7 @@ SkiaOutputDeviceBufferQueue::SkiaOutputDeviceBufferQueue(
 
 SkiaOutputDeviceBufferQueue::~SkiaOutputDeviceBufferQueue() {
   // TODO(vasilyt): We should not need this when we stop using
-  // SharedImageBackingGLImage.
+  // GLImageBacking.
   if (context_state_->context_lost()) {
     for (auto& overlay : overlays_) {
       overlay.OnContextLost();
@@ -204,6 +216,7 @@ SkiaOutputDeviceBufferQueue::~SkiaOutputDeviceBufferQueue() {
 }
 
 OutputPresenter::Image* SkiaOutputDeviceBufferQueue::GetNextImage() {
+  DCHECK(!capabilities_.renderer_allocates_images);
   CHECK(!available_images_.empty());
   auto* image = available_images_.front();
   available_images_.pop_front();
@@ -214,6 +227,7 @@ void SkiaOutputDeviceBufferQueue::PageFlipComplete(
     OutputPresenter::Image* image,
     gfx::GpuFenceHandle release_fence) {
   if (displayed_image_) {
+    DCHECK(!capabilities_.renderer_allocates_images);
     DCHECK_EQ(displayed_image_->skia_representation()->size(), image_size_);
     DCHECK_EQ(displayed_image_->GetPresentCount() > 1,
               displayed_image_ == image);
@@ -253,10 +267,8 @@ bool SkiaOutputDeviceBufferQueue::IsPrimaryPlaneOverlay() const {
 void SkiaOutputDeviceBufferQueue::SchedulePrimaryPlane(
     const absl::optional<OverlayProcessorInterface::OutputSurfaceOverlayPlane>&
         plane) {
-  // See |needs_background_image|.
-  MaybeScheduleBackgroundImage();
-
   if (plane) {
+    DCHECK(!capabilities_.renderer_allocates_images);
     // If the current_image_ is nullptr, it means there is no change on the
     // primary plane. So we just need to schedule the last submitted image.
     auto* image =
@@ -291,50 +303,12 @@ void SkiaOutputDeviceBufferQueue::SchedulePrimaryPlane(
   }
 }
 
-#if defined(USE_OZONE)
-const gpu::Mailbox SkiaOutputDeviceBufferQueue::GetImageMailboxForColor(
-    const SkColor& color) {
-  // Currently the Wayland protocol does not have protocol to support solid
-  // color quads natively as surfaces. Here we create tiny 4x4 image buffers
-  // in the color space of the frame buffer and clear them to the quad's solid
-  // color. These freshly created buffers are then treated like any other
-  // overlay via the mailbox interface.
-  std::unique_ptr<OutputPresenter::Image> solid_color = nullptr;
-  // First try for an existing same color image.
-  auto it = solid_color_cache_.find(color);
-  if (it != solid_color_cache_.end()) {
-    // This is a prefect color match so use this directly.
-    solid_color = std::move(it->second);
-    solid_color_cache_.erase(it);
-  } else {
-    // Try to reuse an existing image even if the color is different.
-    // Only do this if there are more cached images than those in flight (a
-    // sensible upper bound).
-    if (!solid_color_cache_.empty() &&
-        solid_color_cache_.size() > solid_color_images_.size()) {
-      auto it = solid_color_cache_.begin();
-      solid_color = std::move(it->second);
-      solid_color_cache_.erase(it);
-    } else {
-      // Worst case allocate a new image. This definitely will occur on startup.
-      solid_color =
-          presenter_->AllocateSingleImage(color_space_, gfx::Size(4, 4));
-    }
-    solid_color->BeginWriteSkia(/*sample_count=*/1);
-    solid_color->sk_surface()->getCanvas()->clear(color);
-    solid_color->EndWriteSkia(/*force_flush=*/true);
-  }
-  DCHECK(solid_color);
-  auto image_mailbox = solid_color->skia_representation()->mailbox();
-  solid_color_images_.insert(std::make_pair(
-      image_mailbox, std::make_pair(color, std::move(solid_color))));
-  return image_mailbox;
-}
-#endif
-
 SkiaOutputDeviceBufferQueue::OverlayData*
-SkiaOutputDeviceBufferQueue::GetOrCreateOverlayData(
-    const gpu::Mailbox& mailbox) {
+SkiaOutputDeviceBufferQueue::GetOrCreateOverlayData(const gpu::Mailbox& mailbox,
+                                                    bool* is_existing) {
+  if (is_existing)
+    *is_existing = false;
+
   if (!mailbox.IsSharedImage())
     return nullptr;
 
@@ -344,6 +318,8 @@ SkiaOutputDeviceBufferQueue::GetOrCreateOverlayData(
     // added to keep it alive. This ref will be removed, when the overlay is
     // replaced by a new frame.
     it->Ref();
+    if (is_existing)
+      *is_existing = true;
     return &*it;
   }
 
@@ -389,32 +365,62 @@ SkiaOutputDeviceBufferQueue::GetOrCreateOverlayData(
 void SkiaOutputDeviceBufferQueue::ScheduleOverlays(
     SkiaOutputSurface::OverlayList overlays) {
   DCHECK(pending_overlay_mailboxes_.empty());
-  std::vector<OutputPresenter::ScopedOverlayAccess*> accesses(overlays.size());
-  for (size_t i = 0; i < overlays.size(); ++i) {
-    auto& overlay = overlays[i];
 
+  // The fence that will be created for current ScheduleOverlays. This fence is
+  // required and passed with overlay data iff DelegatedCompositing is enabled
+  // and the overlay's shared image backing is created for raster op. Given
+  // rasterization tasks create fences when gpu operations are issued, we end up
+  // having multiple number of fences, which creation is costly. Instead, a
+  // single fence is created during overlays' scheduling, which is dupped and
+  // inserted into each OverlayPlaneData if the underlying shared image was
+  // created for rasterization.
+  //
+  // TODO(msisov): find a better place for this fence.
+  std::unique_ptr<gfx::GpuFence> current_frame_fence;
+
+  for (const auto& overlay : overlays) {
+    auto mailbox = overlay.mailbox;
 #if defined(USE_OZONE)
-    if (overlay.solid_color.has_value()) {
-      // TODO(msisov): reconsider this once Linux Wayland compositors also
-      // support that. See https://bit.ly/2ZqUO0w.
-      if (!supports_non_backed_solid_color_images_) {
-        overlay.mailbox = GetImageMailboxForColor(overlay.solid_color.value());
-      } else {
-        accesses[i] = nullptr;
-        continue;
-      }
+    if (overlay.is_solid_color) {
+      DCHECK(overlay.color.has_value());
+      DCHECK(capabilities_.supports_non_backed_solid_color_overlays);
+      presenter_->ScheduleOverlayPlane(overlay, nullptr, nullptr);
+      continue;
     }
 #endif
 
-    auto* overlay_data = GetOrCreateOverlayData(overlay.mailbox);
-    if (!overlay_data)
-      continue;
+    OutputPresenter::ScopedOverlayAccess* access = nullptr;
+    bool overlay_has_been_submitted;
+    auto* overlay_data =
+        GetOrCreateOverlayData(mailbox, &overlay_has_been_submitted);
+    if (overlay_data) {
+      access = overlay_data->scoped_read_access();
+      pending_overlay_mailboxes_.emplace_back(mailbox);
+    }
 
-    accesses[i] = overlay_data->scoped_read_access();
-    pending_overlay_mailboxes_.emplace_back(overlay.mailbox);
+    std::unique_ptr<gfx::GpuFence> acquire_fence;
+    if (context_state_->GrContextIsGL() && access &&
+        !overlay_has_been_submitted &&
+        (access->representation()->usage() &
+         gpu::SHARED_IMAGE_USAGE_RASTER_DELEGATED_COMPOSITING) &&
+        gl::GLFence::IsGpuFenceSupported()) {
+      DCHECK(features::IsDelegatedCompositingEnabled());
+      // Create a single fence that will be duplicated and inserted into each
+      // overlay plane data. This avoids unnecessary cost as creating multiple
+      // number of fences at the end of each raster task at the ShareImage
+      // level is costly. Thus, at this point, the gpu tasks have been
+      // dispatched and it's safe to create just a single fence.
+      if (!current_frame_fence)
+        current_frame_fence = gl::GLFence::CreateForGpuFence()->GetGpuFence();
+
+      // Dup the fence - it must be inserted into each shared image before
+      // ScopedReadAccess is created.
+      acquire_fence = std::make_unique<gfx::GpuFence>(
+          current_frame_fence->GetGpuFenceHandle().Clone());
+    }
+
+    presenter_->ScheduleOverlayPlane(overlay, access, std::move(acquire_fence));
   }
-
-  presenter_->ScheduleOverlays(std::move(overlays), std::move(accesses));
 }
 
 void SkiaOutputDeviceBufferQueue::Submit(bool sync_cpu,
@@ -450,6 +456,7 @@ void SkiaOutputDeviceBufferQueue::SwapBuffers(BufferPresentedCallback feedback,
   // Thus it is safe to use |base::Unretained(this)|.
   // Bind submitted_image_->GetWeakPtr(), since the |submitted_image_| could
   // be released due to reshape() or destruction.
+  auto data = std::move(frame.data);
   swap_completion_callbacks_.emplace_back(
       std::make_unique<CancelableSwapCompletionCallback>(base::BindOnce(
           &SkiaOutputDeviceBufferQueue::DoFinishSwapBuffers,
@@ -459,7 +466,7 @@ void SkiaOutputDeviceBufferQueue::SwapBuffers(BufferPresentedCallback feedback,
   committed_overlay_mailboxes_.clear();
 
   presenter_->SwapBuffers(swap_completion_callbacks_.back()->callback(),
-                          std::move(feedback));
+                          std::move(feedback), std::move(data));
   std::swap(committed_overlay_mailboxes_, pending_overlay_mailboxes_);
 }
 
@@ -489,6 +496,7 @@ void SkiaOutputDeviceBufferQueue::PostSubBuffer(
   // Thus it is safe to use |base::Unretained(this)|.
   // Bind submitted_image_->GetWeakPtr(), since the |submitted_image_| could
   // be released due to reshape() or destruction.
+  auto data = std::move(frame.data);
   swap_completion_callbacks_.emplace_back(
       std::make_unique<CancelableSwapCompletionCallback>(base::BindOnce(
           &SkiaOutputDeviceBufferQueue::DoFinishSwapBuffers,
@@ -498,7 +506,7 @@ void SkiaOutputDeviceBufferQueue::PostSubBuffer(
   committed_overlay_mailboxes_.clear();
 
   presenter_->PostSubBuffer(rect, swap_completion_callbacks_.back()->callback(),
-                            std::move(feedback));
+                            std::move(feedback), std::move(data));
   std::swap(committed_overlay_mailboxes_, pending_overlay_mailboxes_);
 }
 
@@ -520,6 +528,7 @@ void SkiaOutputDeviceBufferQueue::CommitOverlayPlanes(
   // Thus it is safe to use |base::Unretained(this)|.
   // Bind submitted_image_->GetWeakPtr(), since the |submitted_image_| could
   // be released due to reshape() or destruction.
+  auto data = std::move(frame.data);
   swap_completion_callbacks_.emplace_back(
       std::make_unique<CancelableSwapCompletionCallback>(base::BindOnce(
           &SkiaOutputDeviceBufferQueue::DoFinishSwapBuffers,
@@ -529,7 +538,7 @@ void SkiaOutputDeviceBufferQueue::CommitOverlayPlanes(
   committed_overlay_mailboxes_.clear();
 
   presenter_->CommitOverlayPlanes(swap_completion_callbacks_.back()->callback(),
-                                  std::move(feedback));
+                                  std::move(feedback), std::move(data));
   std::swap(committed_overlay_mailboxes_, pending_overlay_mailboxes_);
 }
 
@@ -550,24 +559,11 @@ void SkiaOutputDeviceBufferQueue::DoFinishSwapBuffers(
     it->Unref();
   }
 
-#if defined(USE_OZONE)
-  std::set<gpu::Mailbox> released_solid_color_overlays;
-  for (const auto& mailbox : overlay_mailboxes) {
-    auto it = solid_color_images_.find(mailbox);
-    if (it != solid_color_images_.end()) {
-      released_solid_color_overlays.insert(mailbox);
-      solid_color_cache_.insert(
-          std::make_pair(it->second.first, std::move(it->second.second)));
-      solid_color_images_.erase(it);
-    }
-  }
-#endif
-
   // Code below can destroy last representation of the overlay shared image. On
   // MacOS it needs context to be current.
 #if BUILDFLAG(IS_APPLE)
   // TODO(vasilyt): We shouldn't need this after we stop using
-  // SharedImageBackingGLImage as backing.
+  // GLImageBacking as backing.
   if (!context_state_->MakeCurrent(nullptr)) {
     for (auto& overlay : overlays_) {
       overlay.OnContextLost();
@@ -577,23 +573,11 @@ void SkiaOutputDeviceBufferQueue::DoFinishSwapBuffers(
 
   std::vector<gpu::Mailbox> released_overlays;
   auto on_overlay_release =
-#if BUILDFLAG(IS_APPLE)
+#if BUILDFLAG(IS_APPLE) || defined(USE_OZONE)
       [&released_overlays](const OverlayData& overlay) {
         // Right now, only macOS needs to return maliboxes of released
         // overlays, so SkiaRenderer can unlock resources for them.
         released_overlays.push_back(overlay.mailbox());
-      };
-#elif defined(USE_OZONE)
-      [&released_overlays,
-       &released_solid_color_overlays](const OverlayData& overlay) {
-        // Delegated compositing on Ozone needs to return mailboxes of released
-        // overlays, so SkiaRenderer can unlock resources for them. However, the
-        // solid color buffers originating in this class and should not
-        // propagate up to SkiaRenderer.
-        if (released_solid_color_overlays.find(overlay.mailbox()) ==
-            released_solid_color_overlays.end()) {
-          released_overlays.push_back(overlay.mailbox());
-        }
       };
 #else
       [](const OverlayData& overlay) {};
@@ -678,6 +662,9 @@ void SkiaOutputDeviceBufferQueue::SetViewportSize(
 }
 
 bool SkiaOutputDeviceBufferQueue::RecreateImages() {
+  if (capabilities_.renderer_allocates_images) {
+    return true;
+  }
   FreeAllSurfaces();
   size_t number_to_allocate =
       capabilities_.supports_dynamic_frame_buffer_allocation
@@ -696,37 +683,9 @@ bool SkiaOutputDeviceBufferQueue::RecreateImages() {
   return !images_.empty();
 }
 
-void SkiaOutputDeviceBufferQueue::MaybeScheduleBackgroundImage() {
-  if (!needs_background_image_)
-    return;
-
-  gpu::SharedImageRepresentationOverlay::ScopedReadAccess* access = nullptr;
-  OverlayCandidate candidate;
-  candidate.color_space = color_space_;
-  candidate.display_rect = gfx::RectF(gfx::SizeF(viewport_size_));
-  candidate.solid_color = SK_ColorTRANSPARENT;
-  candidate.plane_z_order = INT32_MIN;
-
-#if defined(USE_OZONE)
-  if (!supports_non_backed_solid_color_images_) {
-    auto mailbox = GetImageMailboxForColor(candidate.solid_color.value());
-    DCHECK(mailbox.IsSharedImage());
-
-    auto* overlay_data = GetOrCreateOverlayData(mailbox);
-    DCHECK(overlay_data);
-
-    access = overlay_data->scoped_read_access();
-    pending_overlay_mailboxes_.emplace_back(mailbox);
-  }
-#else   //  defined(USE_OZONE)
-  NOTREACHED();
-#endif  //  !defined(USE_OZONE)
-
-  presenter_->ScheduleOneOverlay(candidate, access);
-}
-
 SkSurface* SkiaOutputDeviceBufferQueue::BeginPaint(
     std::vector<GrBackendSemaphore>* end_semaphores) {
+  DCHECK(!capabilities_.renderer_allocates_images);
   primary_plane_waiting_on_paint_ = false;
 
   if (!current_image_) {
@@ -740,11 +699,13 @@ SkSurface* SkiaOutputDeviceBufferQueue::BeginPaint(
 }
 
 void SkiaOutputDeviceBufferQueue::EndPaint() {
+  DCHECK(!capabilities_.renderer_allocates_images);
   DCHECK(current_image_);
   current_image_->EndWriteSkia();
 }
 
 bool SkiaOutputDeviceBufferQueue::EnsureMinNumberOfBuffers(size_t n) {
+  DCHECK(!capabilities_.renderer_allocates_images);
   DCHECK(capabilities_.supports_dynamic_frame_buffer_allocation);
   DCHECK_GT(n, 0u);
   DCHECK_LE(n, static_cast<size_t>(capabilities_.number_of_buffers));

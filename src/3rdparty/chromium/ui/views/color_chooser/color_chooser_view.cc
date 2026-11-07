@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -115,7 +115,9 @@ void DrawGradientRect(const gfx::Rect& rect,
                       SkColor end_color,
                       bool is_horizontal,
                       gfx::Canvas* canvas) {
-  SkColor colors[2] = {start_color, end_color};
+  // TODO(crbug/1308932): Remove FromColor and make all SkColor4f.
+  SkColor4f colors[2] = {SkColor4f::FromColor(start_color),
+                         SkColor4f::FromColor(end_color)};
   SkPoint points[2];
   points[0].iset(0, 0);
   if (is_horizontal)

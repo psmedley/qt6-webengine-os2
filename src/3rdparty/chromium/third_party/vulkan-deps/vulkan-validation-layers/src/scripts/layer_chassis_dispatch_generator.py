@@ -193,7 +193,8 @@ VkResult DispatchCreateGraphicsPipelines(VkDevice device, VkPipelineCache pipeli
             auto dynamic_rendering = LvlFindInChain<VkPipelineRenderingCreateInfo>(pCreateInfos[idx0].pNext);
             if (dynamic_rendering) {
                 uses_color_attachment        = (dynamic_rendering->colorAttachmentCount > 0);
-                uses_depthstencil_attachment = (dynamic_rendering->depthAttachmentFormat != VK_FORMAT_UNDEFINED);
+                uses_depthstencil_attachment = (dynamic_rendering->depthAttachmentFormat != VK_FORMAT_UNDEFINED ||
+                                                dynamic_rendering->stencilAttachmentFormat != VK_FORMAT_UNDEFINED);
             }
 
             local_pCreateInfos[idx0].initialize(&pCreateInfos[idx0], uses_color_attachment, uses_depthstencil_attachment);
@@ -966,6 +967,18 @@ VkResult DispatchGetDisplayModeProperties2KHR(VkPhysicalDevice physicalDevice, V
     return result;
 }
 
+VkResult DispatchEnumerateDeviceExtensionProperties(
+    VkPhysicalDevice                            physicalDevice,
+    const char*                                 pLayerName,
+    uint32_t*                                   pPropertyCount,
+    VkExtensionProperties*                      pProperties)
+{
+    auto layer_data = GetLayerDataPtr(get_dispatch_key(physicalDevice), layer_data_map);
+    VkResult result = layer_data->instance_dispatch_table.EnumerateDeviceExtensionProperties(physicalDevice, pLayerName, pPropertyCount, pProperties);
+
+    return result;
+}
+
 VkResult DispatchDebugMarkerSetObjectTagEXT(VkDevice device, const VkDebugMarkerObjectTagInfoEXT *pTagInfo) {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DebugMarkerSetObjectTagEXT(device, pTagInfo);
@@ -1364,6 +1377,96 @@ VkResult DispatchGetDeferredOperationResultKHR(
 
     return result;
 }
+
+VkResult DispatchBuildAccelerationStructuresKHR(
+    VkDevice                                    device,
+    VkDeferredOperationKHR                      deferredOperation,
+    uint32_t                                    infoCount,
+    const VkAccelerationStructureBuildGeometryInfoKHR* pInfos,
+    const VkAccelerationStructureBuildRangeInfoKHR* const* ppBuildRangeInfos)
+{
+    auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
+    if (!wrap_handles) return layer_data->device_dispatch_table.BuildAccelerationStructuresKHR(device, deferredOperation, infoCount, pInfos, ppBuildRangeInfos);
+    safe_VkAccelerationStructureBuildGeometryInfoKHR *local_pInfos = NULL;
+    {
+        deferredOperation = layer_data->Unwrap(deferredOperation);
+        if (pInfos) {
+            local_pInfos = new safe_VkAccelerationStructureBuildGeometryInfoKHR[infoCount];
+            for (uint32_t index0 = 0; index0 < infoCount; ++index0) {
+                local_pInfos[index0].initialize(&pInfos[index0], true, ppBuildRangeInfos[index0]);
+                if (pInfos[index0].srcAccelerationStructure) {
+                    local_pInfos[index0].srcAccelerationStructure = layer_data->Unwrap(pInfos[index0].srcAccelerationStructure);
+                }
+                if (pInfos[index0].dstAccelerationStructure) {
+                    local_pInfos[index0].dstAccelerationStructure = layer_data->Unwrap(pInfos[index0].dstAccelerationStructure);
+                }
+                for (uint32_t geometry_index = 0; geometry_index < local_pInfos[index0].geometryCount; ++geometry_index) {
+                    safe_VkAccelerationStructureGeometryKHR &geometry_info = local_pInfos[index0].pGeometries != nullptr ? local_pInfos[index0].pGeometries[geometry_index] : *(local_pInfos[index0].ppGeometries[geometry_index]);
+                    if (geometry_info.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
+                        if (geometry_info.geometry.instances.arrayOfPointers) {
+                            const uint8_t *byte_ptr = reinterpret_cast<const uint8_t*>(geometry_info.geometry.instances.data.hostAddress);
+                            VkAccelerationStructureInstanceKHR **instances = (VkAccelerationStructureInstanceKHR **)(byte_ptr + ppBuildRangeInfos[index0][geometry_index].primitiveOffset);
+                            for (uint32_t instance_index = 0; instance_index < ppBuildRangeInfos[index0][geometry_index].primitiveCount; ++instance_index) {
+                                instances[instance_index]->accelerationStructureReference = layer_data->Unwrap(instances[instance_index]->accelerationStructureReference);
+                            }
+                        } else {
+                            const uint8_t *byte_ptr = reinterpret_cast<const uint8_t*>(geometry_info.geometry.instances.data.hostAddress);
+                            VkAccelerationStructureInstanceKHR *instances = (VkAccelerationStructureInstanceKHR *)(byte_ptr + ppBuildRangeInfos[index0][geometry_index].primitiveOffset);
+                            for (uint32_t instance_index = 0; instance_index < ppBuildRangeInfos[index0][geometry_index].primitiveCount; ++instance_index) {
+                                instances[instance_index].accelerationStructureReference = layer_data->Unwrap(instances[instance_index].accelerationStructureReference);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    VkResult result = layer_data->device_dispatch_table.BuildAccelerationStructuresKHR(device, deferredOperation, infoCount, (const VkAccelerationStructureBuildGeometryInfoKHR*)local_pInfos, ppBuildRangeInfos);
+    if (local_pInfos) {
+        if (deferredOperation != VK_NULL_HANDLE) {
+            std::vector<std::function<void()>> cleanup{ [local_pInfos](){ delete[] local_pInfos; } };
+            layer_data->deferred_operation_post_completion.insert(deferredOperation, cleanup);
+        } else {
+            delete[] local_pInfos;
+        }
+    }
+    return result;
+}
+
+void DispatchGetAccelerationStructureBuildSizesKHR(
+    VkDevice                                    device,
+    VkAccelerationStructureBuildTypeKHR         buildType,
+    const VkAccelerationStructureBuildGeometryInfoKHR* pBuildInfo,
+    const uint32_t*                             pMaxPrimitiveCounts,
+    VkAccelerationStructureBuildSizesInfoKHR*   pSizeInfo)
+{
+    auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
+    if (!wrap_handles) return layer_data->device_dispatch_table.GetAccelerationStructureBuildSizesKHR(device, buildType, pBuildInfo, pMaxPrimitiveCounts, pSizeInfo);
+    safe_VkAccelerationStructureBuildGeometryInfoKHR var_local_pBuildInfo;
+    safe_VkAccelerationStructureBuildGeometryInfoKHR *local_pBuildInfo = NULL;
+    {
+        if (pBuildInfo) {
+            local_pBuildInfo = &var_local_pBuildInfo;
+            local_pBuildInfo->initialize(pBuildInfo, false, nullptr);
+            if (pBuildInfo->srcAccelerationStructure) {
+                local_pBuildInfo->srcAccelerationStructure = layer_data->Unwrap(pBuildInfo->srcAccelerationStructure);
+            }
+            if (pBuildInfo->dstAccelerationStructure) {
+                local_pBuildInfo->dstAccelerationStructure = layer_data->Unwrap(pBuildInfo->dstAccelerationStructure);
+            }
+            for (uint32_t geometry_index = 0; geometry_index < local_pBuildInfo->geometryCount; ++geometry_index) {
+                safe_VkAccelerationStructureGeometryKHR &geometry_info = local_pBuildInfo->pGeometries != nullptr ? local_pBuildInfo->pGeometries[geometry_index] : *(local_pBuildInfo->ppGeometries[geometry_index]);
+                if (geometry_info.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
+                    WrapPnextChainHandles(layer_data, geometry_info.geometry.triangles.pNext);
+                }
+            }
+        }
+    }
+    layer_data->device_dispatch_table.GetAccelerationStructureBuildSizesKHR(device, buildType, (const VkAccelerationStructureBuildGeometryInfoKHR*)local_pBuildInfo, pMaxPrimitiveCounts, pSizeInfo);
+
+}
+
+
 """
     # Separate generated text for source and headers
     ALL_SECTIONS = ['source_file', 'header_file']
@@ -1426,11 +1529,13 @@ VkResult DispatchGetDeferredOperationResultKHR(
             'vkGetDeferredOperationResultKHR',
             'vkSetPrivateData',
             'vkGetPrivateData',
+            'vkBuildAccelerationStructuresKHR',
             # These are for special-casing the pInheritanceInfo issue (must be ignored for primary CBs)
             'vkAllocateCommandBuffers',
             'vkFreeCommandBuffers',
             'vkDestroyCommandPool',
             'vkBeginCommandBuffer',
+            'vkGetAccelerationStructureBuildSizesKHR'
             ]
         self.headerVersion = None
         # Internal state - accumulators for different inner block text
@@ -1933,7 +2038,11 @@ VkResult DispatchGetDeferredOperationResultKHR(
                         indent = self.incIndent(indent)
                         if first_level_param == True:
                             if 'safe_' in safe_type:
-                                pre_code += '%s    %s[%s].initialize(&%s[%s]);\n' % (indent, new_prefix, index, member.name, index)
+                                # Handle special initialize function for VkAccelerationStructureBuildGeometryInfoKHR
+                                if member.type == "VkAccelerationStructureBuildGeometryInfoKHR":
+                                    pre_code += '%s    %s[%s].initialize(&%s[%s], false, nullptr);\n' % (indent, new_prefix, index, member.name, index)
+                                else:
+                                    pre_code += '%s    %s[%s].initialize(&%s[%s]);\n' % (indent, new_prefix, index, member.name, index)
                             else:
                                 pre_code += '%s    %s[%s] = %s[%s];\n' % (indent, new_prefix, index, member.name, index)
                             if process_pnext:
@@ -1971,7 +2080,11 @@ VkResult DispatchGetDeferredOperationResultKHR(
                             else:
                                 pre_code += '%s    local_%s = new %s;\n' % (indent, member.name, safe_type)
                             if 'safe_' in safe_type:
-                                pre_code += '%s    local_%s%s->initialize(%s);\n' % (indent, prefix, member.name, member.name)
+                                # Handle special initialize function for VkAccelerationStructureBuildGeometryInfoKHR
+                                if member.type == "VkAccelerationStructureBuildGeometryInfoKHR":
+                                    pre_code += '%s    local_%s%s->initialize(%s, false, nullptr);\n' % (indent, prefix, member.name, member.name)
+                                else:
+                                    pre_code += '%s    local_%s%s->initialize(%s);\n' % (indent, prefix, member.name, member.name)
                             else:
                                 pre_code += '%s    *local_%s%s = *%s;\n' % (indent, prefix, member.name, member.name)
                         # Process sub-structs in this struct
@@ -1980,7 +2093,7 @@ VkResult DispatchGetDeferredOperationResultKHR(
                         pre_code += tmp_pre
                         post_code += tmp_post
                         if process_pnext:
-                            pre_code += '%s    WrapPnextChainHandles(layer_data, local_%s%s->pNext);\n' % (indent, prefix, member.name)
+                            pre_code += '%s    WrapPnextChainHandles(layer_data, %spNext);\n' % (indent, new_prefix)
                         indent = self.decIndent(indent)
                         pre_code += '%s    }\n' % indent
                         if first_level_param == True:
@@ -1997,7 +2110,7 @@ VkResult DispatchGetDeferredOperationResultKHR(
                         pre_code += tmp_pre
                         post_code += tmp_post
                         if process_pnext:
-                            pre_code += '%s    WrapPnextChainHandles(layer_data, local_%s%s.pNext);\n' % (indent, prefix, member.name)
+                            pre_code += '%s    WrapPnextChainHandles(layer_data, %s%s.pNext);\n' % (indent, prefix, member.name)
         return decls, pre_code, post_code
     #
     # For a particular API, generate the non-dispatchable-object wrapping/unwrapping code
@@ -2157,7 +2270,10 @@ VkResult DispatchGetDeferredOperationResultKHR(
             for param in params:
                 if param.islocal == True or self.StructWithExtensions(param.type):
                     if param.ispointer == True:
-                        wrapped_paramstext = wrapped_paramstext.replace(param.name, '(%s %s*)local_%s' % ('const', param.type, param.name))
+                        if param.isconst == True:
+                          wrapped_paramstext = wrapped_paramstext.replace(param.name, '(%s %s*)local_%s' % ('const', param.type, param.name))
+                        else:
+                          wrapped_paramstext = wrapped_paramstext.replace(param.name, '(%s*)local_%s' % (param.type, param.name))
                     else:
                         wrapped_paramstext = wrapped_paramstext.replace(param.name, '(%s %s)local_%s' % ('const', param.type, param.name))
 

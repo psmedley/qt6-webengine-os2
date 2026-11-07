@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -38,7 +38,6 @@ static_library("protocol") {
     "auth_util.h",
     "authenticator.cc",
     "authenticator.h",
-    "bandwidth_estimator.h",
     "capability_names.h",
     "channel_authenticator.h",
     "channel_dispatcher_base.cc",
@@ -77,6 +76,7 @@ static_library("protocol") {
     "data_channel_manager.cc",
     "data_channel_manager.h",
     "datagram_channel_factory.h",
+    "desktop_capturer.h",
     "display_size.cc",
     "display_size.h",
     "file_transfer_helpers.cc",
@@ -209,8 +209,6 @@ static_library("protocol") {
     "webrtc_audio_module.h",
     "webrtc_audio_sink_adapter.cc",
     "webrtc_audio_sink_adapter.h",
-    "webrtc_bandwidth_estimator.cc",
-    "webrtc_bandwidth_estimator.h",
     "webrtc_connection_to_host.cc",
     "webrtc_connection_to_host.h",
     "webrtc_data_stream_adapter.cc",
@@ -250,6 +248,7 @@ static_library("protocol") {
     "//remoting/proto/remoting/v1:network_traversal_proto",
     "//remoting/signaling",
     "//services/network/public/cpp:cpp",
+    "//third_party/abseil-cpp:absl",
     "//third_party/boringssl",
     "//third_party/libyuv",
     "//third_party/webrtc_overrides:webrtc_component",
@@ -258,8 +257,8 @@ static_library("protocol") {
 
   defines = []
 
-  # Must match condition in //remoting/codec/BUILD.gn
-  if (is_win || is_linux || is_chromeos) {
+  # Must be a subset of the platforms built in //remoting/codec/BUILD.gn
+  if (is_win) {
     defines += [ "USE_H264_ENCODER" ]
     deps += [
       "//media",
@@ -288,8 +287,6 @@ static_library("protocol") {
       "webrtc_frame_scheduler.h",
       "webrtc_frame_scheduler_constant_rate.cc",
       "webrtc_frame_scheduler_constant_rate.h",
-      "webrtc_frame_scheduler_simple.cc",
-      "webrtc_frame_scheduler_simple.h",
       "webrtc_video_encoder_factory.cc",
       "webrtc_video_encoder_factory.h",
       "webrtc_video_encoder_wrapper.cc",

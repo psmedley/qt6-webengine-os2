@@ -27,7 +27,7 @@ class BarcodeTest : public testing::Test {
     if (bitmap->Create(640, 480, FXDIB_Format::kRgb32))
       bitmap_ = bitmap;
     ASSERT_TRUE(bitmap_);
-    ASSERT_TRUE(device->Attach(bitmap_, false, nullptr, false));
+    ASSERT_TRUE(device->Attach(bitmap_));
     device_ = std::move(device);
   }
 
@@ -49,8 +49,8 @@ class BarcodeTest : public testing::Test {
   bool RenderDevice() { return barcode_->RenderDevice(device_.get(), matrix_); }
 
   std::string BitmapChecksum() {
-    return GenerateMD5Base16(bitmap_->GetBuffer(),
-                             bitmap_->GetPitch() * bitmap_->GetHeight());
+    return GenerateMD5Base16(
+        {bitmap_->GetBuffer(), bitmap_->GetPitch() * bitmap_->GetHeight()});
   }
 
   // Manually insert calls to this as needed for debugging.

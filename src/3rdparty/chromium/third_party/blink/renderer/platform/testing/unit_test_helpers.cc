@@ -61,14 +61,14 @@ base::FilePath WebTestsFilePath() {
 }  // namespace
 
 void RunPendingTasks() {
-  Thread::Current()->GetTaskRunner()->PostTask(FROM_HERE,
-                                               WTF::Bind(&ExitRunLoop));
+  Thread::Current()->GetDeprecatedTaskRunner()->PostTask(
+      FROM_HERE, WTF::BindOnce(&ExitRunLoop));
   EnterRunLoop();
 }
 
 void RunDelayedTasks(base::TimeDelta delay) {
-  Thread::Current()->GetTaskRunner()->PostDelayedTask(
-      FROM_HERE, WTF::Bind(&ExitRunLoop), delay);
+  Thread::Current()->GetDeprecatedTaskRunner()->PostDelayedTask(
+      FROM_HERE, WTF::BindOnce(&ExitRunLoop), delay);
   EnterRunLoop();
 }
 
@@ -137,6 +137,13 @@ String BlinkWebTestsFontsTestDataPath(const String& relative_path) {
   return FilePathToWebString(
       WebTestsFilePath()
           .Append(FILE_PATH_LITERAL("external/wpt/fonts"))
+          .Append(WebStringToFilePath(relative_path)));
+}
+
+String StylePerfTestDataPath(const String& relative_path) {
+  return FilePathToWebString(
+      BlinkRootFilePath()
+          .Append(FILE_PATH_LITERAL("renderer/core/css/perftest_data"))
           .Append(WebStringToFilePath(relative_path)));
 }
 

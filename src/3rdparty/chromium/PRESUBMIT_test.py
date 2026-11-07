@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -799,7 +799,7 @@ class IncludeGuardTest(unittest.TestCase):
           '#ifndef CHROME_ODL_H_',
           '#define CHROME_ODL_H_',
           '#endif  // CHROME_ODL_H_',
-        ]),
+        ], action='M'),
         # Using a Blink style include guard outside Blink is wrong.
         MockAffectedFile('content/NotInBlink.h', [
           '#ifndef NotInBlink_h',
@@ -821,8 +821,9 @@ class IncludeGuardTest(unittest.TestCase):
           'struct McBoatFace;',
           '#endif  // WrongInBlink_h',
         ]),
-        # Using a bad include guard in Blink is not accepted even if
-        # it's an old file.
+        # Using a bad include guard in Blink is not supposed to be accepted even
+        # if it's an old file. However the current presubmit has accepted this
+        # for a while.
         MockAffectedFile('third_party/blink/StillInBlink.h', [
           '// New contents',
           '#ifndef AcceptedInBlink_h',
@@ -835,7 +836,7 @@ class IncludeGuardTest(unittest.TestCase):
           '#define AcceptedInBlink_h',
           'struct McBoatFace;',
           '#endif  // AcceptedInBlink_h',
-        ]),
+        ], action='M'),
         # Using a non-Chromium include guard in third_party
         # (outside blink) is accepted.
         MockAffectedFile('third_party/foo/some_file.h', [
@@ -935,7 +936,7 @@ class AccessibilityRelnotesFieldTest(unittest.TestCase):
 
   # The relnotes footer is not required for changes which do not touch any
   # accessibility directories.
-  def testIgnoresNonAccesssibilityCode(self):
+  def testIgnoresNonAccessibilityCode(self):
     mock_input_api = MockInputApi()
     mock_output_api = MockOutputApi()
 
@@ -1031,7 +1032,7 @@ class AccessibilityRelnotesFieldTest(unittest.TestCase):
         MockAffectedFile('ui/accessibility/foo.bar', ['']),
     ]
     mock_input_api.change.DescriptionText = lambda : ('Description:\n' +
-        'ax-relnotes= this is a valid format for accessibiliy relnotes')
+        'ax-relnotes= this is a valid format for accessibility relnotes')
 
     msgs = PRESUBMIT.CheckAccessibilityRelnotesField(
         mock_input_api, mock_output_api)
@@ -1643,13 +1644,13 @@ class LogUsageTest(unittest.TestCase):
       MockAffectedFile('HasTooLongTag.java', [
         'import org.chromium.base.Log;',
         'some random stuff',
-        'private static final String TAG = "21_charachers_long___";',
+        'private static final String TAG = "21_characters_long___";',
         'Log.d(TAG, "foo");',
       ]),
       MockAffectedFile('HasTooLongTagWithNoLogCallsInDiff.java', [
         'import org.chromium.base.Log;',
         'some random stuff',
-        'private static final String TAG = "21_charachers_long___";',
+        'private static final String TAG = "21_characters_long___";',
       ]),
     ]
 
@@ -2291,25 +2292,243 @@ class CorrectProductNameInMessagesTest(unittest.TestCase):
         'chrome/app/chromium_strings.grd:8' in warnings[1].items[1])
 
 
-class ServiceManifestOwnerTest(unittest.TestCase):
-  def testServiceManifestChangeNeedsSecurityOwner(self):
+class _SecurityOwnersTestCase(unittest.TestCase):
+  def _createMockInputApi(self):
     mock_input_api = MockInputApi()
+    def FakeRepositoryRoot():
+      return mock_input_api.os_path.join('chromium', 'src')
+    mock_input_api.change.RepositoryRoot = FakeRepositoryRoot
+    self._injectFakeOwnersClient(
+        mock_input_api,
+        ['apple@chromium.org', 'orange@chromium.org'])
+    return mock_input_api
+
+  def _setupFakeChange(self, input_api):
+    class FakeGerrit(object):
+      def IsOwnersOverrideApproved(self, issue):
+        return False
+
+    input_api.change.issue = 123
+    input_api.gerrit = FakeGerrit()
+
+  def _injectFakeOwnersClient(self, input_api, owners):
+    class FakeOwnersClient(object):
+      def ListOwners(self, f):
+        return owners
+
+    input_api.owners_client = FakeOwnersClient()
+
+  def _injectFakeChangeOwnerAndReviewers(self, input_api, owner, reviewers):
+    def MockOwnerAndReviewers(input_api, email_regexp, approval_needed=False):
+      return [owner, reviewers]
+    input_api.canned_checks.GetCodereviewOwnerAndReviewers = \
+        MockOwnerAndReviewers
+
+
+class IpcSecurityOwnerTest(_SecurityOwnersTestCase):
+  _test_cases = [
+      ('*_messages.cc', 'scary_messages.cc'),
+      ('*_messages*.h', 'scary_messages.h'),
+      ('*_messages*.h', 'scary_messages_android.h'),
+      ('*_param_traits*.*', 'scary_param_traits.h'),
+      ('*_param_traits*.*', 'scary_param_traits_win.h'),
+      ('*.mojom', 'scary.mojom'),
+      ('*_mojom_traits*.*', 'scary_mojom_traits.h'),
+      ('*_mojom_traits*.*', 'scary_mojom_traits_mac.h'),
+      ('*_type_converter*.*', 'scary_type_converter.h'),
+      ('*_type_converter*.*', 'scary_type_converter_nacl.h'),
+      ('*.aidl', 'scary.aidl'),
+  ]
+
+  def testHasCorrectPerFileRulesAndSecurityReviewer(self):
+    mock_input_api = self._createMockInputApi()
+    new_owners_file_path = mock_input_api.os_path.join(
+        'services', 'goat', 'public', 'OWNERS')
+    new_owners_file = [
+        'per-file *.mojom=set noparent',
+        'per-file *.mojom=file://ipc/SECURITY_OWNERS'
+    ]
+    def FakeReadFile(filename):
+      self.assertEqual(
+          mock_input_api.os_path.join('chromium', 'src', new_owners_file_path),
+          filename)
+      return '\n'.join(new_owners_file)
+    mock_input_api.ReadFile = FakeReadFile
     mock_input_api.files = [
-      MockAffectedFile('services/goat/public/cpp/manifest.cc',
-                       [
-                         '#include "services/goat/public/cpp/manifest.h"',
-                         'const service_manager::Manifest& GetManifest() {}',
-                       ])]
+      MockAffectedFile(
+          new_owners_file_path, new_owners_file),
+      MockAffectedFile(
+          mock_input_api.os_path.join(
+              'services', 'goat', 'public', 'goat.mojom'),
+          ['// Scary contents.'])]
+    self._setupFakeChange(mock_input_api)
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'owner@chromium.org', ['orange@chromium.org'])
+    mock_input_api.is_committing = True
+    mock_input_api.dry_run = False
+    mock_output_api = MockOutputApi()
+    results = PRESUBMIT.CheckSecurityOwners(
+        mock_input_api, mock_output_api)
+    self.assertEqual(0, len(results))
+
+  def testMissingSecurityReviewerAtUpload(self):
+    mock_input_api = self._createMockInputApi()
+    new_owners_file_path = mock_input_api.os_path.join(
+        'services', 'goat', 'public', 'OWNERS')
+    new_owners_file = [
+        'per-file *.mojom=set noparent',
+        'per-file *.mojom=file://ipc/SECURITY_OWNERS'
+    ]
+    def FakeReadFile(filename):
+      self.assertEqual(
+          mock_input_api.os_path.join('chromium', 'src', new_owners_file_path),
+          filename)
+      return '\n'.join(new_owners_file)
+    mock_input_api.ReadFile = FakeReadFile
+    mock_input_api.files = [
+      MockAffectedFile(
+          new_owners_file_path, new_owners_file),
+      MockAffectedFile(
+          mock_input_api.os_path.join(
+              'services', 'goat', 'public', 'goat.mojom'),
+          ['// Scary contents.'])]
+    self._setupFakeChange(mock_input_api)
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
+    mock_input_api.is_committing = False
+    mock_input_api.dry_run = False
+    mock_output_api = MockOutputApi()
+    results = PRESUBMIT.CheckSecurityOwners(
+        mock_input_api, mock_output_api)
+    self.assertEqual(1, len(results))
+    self.assertEqual('notify', results[0].type)
+    self.assertEqual(
+        'Review from an owner in ipc/SECURITY_OWNERS is required for the '
+        'following newly-added files:', results[0].message)
+
+  def testMissingSecurityReviewerAtDryRunCommit(self):
+    mock_input_api = self._createMockInputApi()
+    new_owners_file_path = mock_input_api.os_path.join(
+        'services', 'goat', 'public', 'OWNERS')
+    new_owners_file = [
+        'per-file *.mojom=set noparent',
+        'per-file *.mojom=file://ipc/SECURITY_OWNERS'
+    ]
+    def FakeReadFile(filename):
+      self.assertEqual(
+          mock_input_api.os_path.join('chromium', 'src', new_owners_file_path),
+          filename)
+      return '\n'.join(new_owners_file)
+    mock_input_api.ReadFile = FakeReadFile
+    mock_input_api.files = [
+      MockAffectedFile(
+          new_owners_file_path, new_owners_file),
+      MockAffectedFile(
+          mock_input_api.os_path.join(
+              'services', 'goat', 'public', 'goat.mojom'),
+          ['// Scary contents.'])]
+    self._setupFakeChange(mock_input_api)
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
+    mock_input_api.is_committing = True
+    mock_input_api.dry_run = True
+    mock_output_api = MockOutputApi()
+    results = PRESUBMIT.CheckSecurityOwners(
+        mock_input_api, mock_output_api)
+    self.assertEqual(1, len(results))
+    self.assertEqual('error', results[0].type)
+    self.assertEqual(
+        'Review from an owner in ipc/SECURITY_OWNERS is required for the '
+        'following newly-added files:', results[0].message)
+
+  def testMissingSecurityApprovalAtRealCommit(self):
+    mock_input_api = self._createMockInputApi()
+    new_owners_file_path = mock_input_api.os_path.join(
+        'services', 'goat', 'public', 'OWNERS')
+    new_owners_file = [
+        'per-file *.mojom=set noparent',
+        'per-file *.mojom=file://ipc/SECURITY_OWNERS'
+    ]
+    def FakeReadFile(filename):
+      self.assertEqual(
+          mock_input_api.os_path.join('chromium', 'src', new_owners_file_path),
+          filename)
+      return '\n'.join(new_owners_file)
+    mock_input_api.ReadFile = FakeReadFile
+    mock_input_api.files = [
+      MockAffectedFile(
+          new_owners_file_path, new_owners_file),
+      MockAffectedFile(
+          mock_input_api.os_path.join(
+              'services', 'goat', 'public', 'goat.mojom'),
+          ['// Scary contents.'])]
+    self._setupFakeChange(mock_input_api)
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
+    mock_input_api.is_committing = True
+    mock_input_api.dry_run = False
+    mock_output_api = MockOutputApi()
+    results = PRESUBMIT.CheckSecurityOwners(
+        mock_input_api, mock_output_api)
+    self.assertEqual('error', results[0].type)
+    self.assertEqual(
+        'Review from an owner in ipc/SECURITY_OWNERS is required for the '
+        'following newly-added files:', results[0].message)
+
+  def testIpcChangeNeedsSecurityOwner(self):
+    for is_committing in [True, False]:
+      for pattern, filename in self._test_cases:
+        with self.subTest(
+            line=f'is_committing={is_committing}, filename={filename}'):
+          mock_input_api = self._createMockInputApi()
+          mock_input_api.files = [
+            MockAffectedFile(
+                mock_input_api.os_path.join(
+                    'services', 'goat', 'public', filename),
+                ['// Scary contents.'])]
+          self._setupFakeChange(mock_input_api)
+          self._injectFakeChangeOwnerAndReviewers(
+              mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
+          mock_input_api.is_committing = is_committing
+          mock_input_api.dry_run = False
+          mock_output_api = MockOutputApi()
+          results = PRESUBMIT.CheckSecurityOwners(
+              mock_input_api, mock_output_api)
+          self.assertEqual(1, len(results))
+          self.assertEqual('error', results[0].type)
+          self.assertTrue(results[0].message.replace('\\', '/').startswith(
+              'Found missing OWNERS lines for security-sensitive files. '
+              'Please add the following lines to services/goat/public/OWNERS:'))
+          self.assertEqual(['ipc-security-reviews@chromium.org'],
+                           mock_output_api.more_cc)
+
+
+  def testServiceManifestChangeNeedsSecurityOwner(self):
+    mock_input_api = self._createMockInputApi()
+    mock_input_api.files = [
+      MockAffectedFile(
+          mock_input_api.os_path.join(
+              'services', 'goat', 'public', 'cpp', 'manifest.cc'),
+              [
+                '#include "services/goat/public/cpp/manifest.h"',
+                'const service_manager::Manifest& GetManifest() {}',
+              ])]
+    self._setupFakeChange(mock_input_api)
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
     mock_output_api = MockOutputApi()
     errors = PRESUBMIT.CheckSecurityOwners(
         mock_input_api, mock_output_api)
     self.assertEqual(1, len(errors))
-    self.assertEqual(
-        'Found OWNERS files that need to be updated for IPC security review ' +
-        'coverage.\nPlease update the OWNERS files below:', errors[0].message)
+    self.assertTrue(errors[0].message.replace('\\', '/').startswith(
+        'Found missing OWNERS lines for security-sensitive files. '
+        'Please add the following lines to services/goat/public/cpp/OWNERS:'))
+    self.assertEqual(['ipc-security-reviews@chromium.org'], mock_output_api.more_cc)
 
   def testNonServiceManifestSourceChangesDoNotRequireSecurityOwner(self):
-    mock_input_api = MockInputApi()
+    mock_input_api = self._createMockInputApi()
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
     mock_input_api.files = [
       MockAffectedFile('some/non/service/thing/foo_manifest.cc',
                        [
@@ -2319,56 +2538,68 @@ class ServiceManifestOwnerTest(unittest.TestCase):
     errors = PRESUBMIT.CheckSecurityOwners(
         mock_input_api, mock_output_api)
     self.assertEqual([], errors)
+    self.assertEqual([], mock_output_api.more_cc)
 
 
-class FuchsiaSecurityOwnerTest(unittest.TestCase):
+class FuchsiaSecurityOwnerTest(_SecurityOwnersTestCase):
   def testFidlChangeNeedsSecurityOwner(self):
-    mock_input_api = MockInputApi()
+    mock_input_api = self._createMockInputApi()
     mock_input_api.files = [
       MockAffectedFile('potentially/scary/ipc.fidl',
                        [
                          'library test.fidl'
                        ])]
+    self._setupFakeChange(mock_input_api)
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
     mock_output_api = MockOutputApi()
     errors = PRESUBMIT.CheckSecurityOwners(
         mock_input_api, mock_output_api)
     self.assertEqual(1, len(errors))
-    self.assertEqual(
-        'Found OWNERS files that need to be updated for IPC security review ' +
-        'coverage.\nPlease update the OWNERS files below:', errors[0].message)
+    self.assertTrue(errors[0].message.replace('\\', '/').startswith(
+        'Found missing OWNERS lines for security-sensitive files. '
+        'Please add the following lines to potentially/scary/OWNERS:'))
 
   def testComponentManifestV1ChangeNeedsSecurityOwner(self):
-    mock_input_api = MockInputApi()
+    mock_input_api = self._createMockInputApi()
     mock_input_api.files = [
       MockAffectedFile('potentially/scary/v2_manifest.cmx',
                        [
                          '{ "that is no": "manifest!" }'
                        ])]
+    self._setupFakeChange(mock_input_api)
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
     mock_output_api = MockOutputApi()
     errors = PRESUBMIT.CheckSecurityOwners(
         mock_input_api, mock_output_api)
     self.assertEqual(1, len(errors))
-    self.assertEqual(
-        'Found OWNERS files that need to be updated for IPC security review ' +
-        'coverage.\nPlease update the OWNERS files below:', errors[0].message)
+    self.assertTrue(errors[0].message.replace('\\', '/').startswith(
+        'Found missing OWNERS lines for security-sensitive files. '
+        'Please add the following lines to potentially/scary/OWNERS:'))
 
   def testComponentManifestV2NeedsSecurityOwner(self):
-    mock_input_api = MockInputApi()
+    mock_input_api = self._createMockInputApi()
     mock_input_api.files = [
       MockAffectedFile('potentially/scary/v2_manifest.cml',
                        [
                          '{ "that is no": "manifest!" }'
                        ])]
+    self._setupFakeChange(mock_input_api)
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
     mock_output_api = MockOutputApi()
     errors = PRESUBMIT.CheckSecurityOwners(
         mock_input_api, mock_output_api)
     self.assertEqual(1, len(errors))
-    self.assertEqual(
-        'Found OWNERS files that need to be updated for IPC security review ' +
-        'coverage.\nPlease update the OWNERS files below:', errors[0].message)
+    self.assertTrue(errors[0].message.replace('\\', '/').startswith(
+        'Found missing OWNERS lines for security-sensitive files. '
+        'Please add the following lines to potentially/scary/OWNERS:'))
 
   def testThirdPartyTestsDoNotRequireSecurityOwner(self):
     mock_input_api = MockInputApi()
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
     mock_input_api.files = [
       MockAffectedFile('third_party/crashpad/test/tests.cmx',
                        [
@@ -2381,6 +2612,8 @@ class FuchsiaSecurityOwnerTest(unittest.TestCase):
 
   def testOtherFuchsiaChangesDoNotRequireSecurityOwner(self):
     mock_input_api = MockInputApi()
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
     mock_input_api.files = [
       MockAffectedFile('some/non/service/thing/fuchsia_fidl_cml_cmx_magic.cc',
                        [
@@ -2392,17 +2625,7 @@ class FuchsiaSecurityOwnerTest(unittest.TestCase):
     self.assertEqual([], errors)
 
 
-class SecurityChangeTest(unittest.TestCase):
-  class _MockOwnersClient(object):
-    def ListOwners(self, f):
-      return ['apple@chromium.org', 'orange@chromium.org']
-
-  def _mockChangeOwnerAndReviewers(self, input_api, owner, reviewers):
-    def __MockOwnerAndReviewers(input_api, email_regexp, approval_needed=False):
-      return [owner, reviewers]
-    input_api.canned_checks.GetCodereviewOwnerAndReviewers = \
-        __MockOwnerAndReviewers
-
+class SecurityChangeTest(_SecurityOwnersTestCase):
   def testDiffGetServiceSandboxType(self):
     mock_input_api = MockInputApi()
     mock_input_api.files = [
@@ -2451,65 +2674,65 @@ class SecurityChangeTest(unittest.TestCase):
         files_to_functions)
 
   def testChangeOwnersMissing(self):
-    mock_input_api = MockInputApi()
-    mock_input_api.owners_client = self._MockOwnersClient()
+    mock_input_api = self._createMockInputApi()
+    self._setupFakeChange(mock_input_api)
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
     mock_input_api.is_committing = False
     mock_input_api.files = [
         MockAffectedFile('file.cc', ['GetServiceSandboxType<Goat>(Sandbox)'])
     ]
     mock_output_api = MockOutputApi()
-    self._mockChangeOwnerAndReviewers(
-        mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
     result = PRESUBMIT.CheckSecurityChanges(mock_input_api, mock_output_api)
     self.assertEqual(1, len(result))
     self.assertEqual(result[0].type, 'notify')
     self.assertEqual(result[0].message,
-        'The following files change calls to security-sensive functions\n' \
+        'The following files change calls to security-sensitive functions\n' \
         'that need to be reviewed by ipc/SECURITY_OWNERS.\n'
         '  file.cc\n'
         '    content::GetServiceSandboxType<>()\n\n')
 
   def testChangeOwnersMissingAtCommit(self):
-    mock_input_api = MockInputApi()
-    mock_input_api.owners_client = self._MockOwnersClient()
+    mock_input_api = self._createMockInputApi()
+    self._setupFakeChange(mock_input_api)
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
     mock_input_api.is_committing = True
+    mock_input_api.dry_run = False
     mock_input_api.files = [
         MockAffectedFile('file.cc', ['GetServiceSandboxType<mojom::Goat>()'])
     ]
     mock_output_api = MockOutputApi()
-    self._mockChangeOwnerAndReviewers(
-        mock_input_api, 'owner@chromium.org', ['banana@chromium.org'])
     result = PRESUBMIT.CheckSecurityChanges(mock_input_api, mock_output_api)
     self.assertEqual(1, len(result))
     self.assertEqual(result[0].type, 'error')
     self.assertEqual(result[0].message,
-        'The following files change calls to security-sensive functions\n' \
+        'The following files change calls to security-sensitive functions\n' \
         'that need to be reviewed by ipc/SECURITY_OWNERS.\n'
         '  file.cc\n'
         '    content::GetServiceSandboxType<>()\n\n')
 
   def testChangeOwnersPresent(self):
-    mock_input_api = MockInputApi()
-    mock_input_api.owners_client = self._MockOwnersClient()
+    mock_input_api = self._createMockInputApi()
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'owner@chromium.org',
+        ['apple@chromium.org', 'banana@chromium.org'])
     mock_input_api.files = [
         MockAffectedFile('file.cc', ['WithSandboxType(Sandbox)'])
     ]
     mock_output_api = MockOutputApi()
-    self._mockChangeOwnerAndReviewers(
-        mock_input_api, 'owner@chromium.org',
-        ['apple@chromium.org', 'banana@chromium.org'])
     result = PRESUBMIT.CheckSecurityChanges(mock_input_api, mock_output_api)
     self.assertEqual(0, len(result))
 
   def testChangeOwnerIsSecurityOwner(self):
-    mock_input_api = MockInputApi()
-    mock_input_api.owners_client = self._MockOwnersClient()
+    mock_input_api = self._createMockInputApi()
+    self._setupFakeChange(mock_input_api)
+    self._injectFakeChangeOwnerAndReviewers(
+        mock_input_api, 'orange@chromium.org', ['pear@chromium.org'])
     mock_input_api.files = [
         MockAffectedFile('file.cc', ['GetServiceSandboxType<T>(Sandbox)'])
     ]
     mock_output_api = MockOutputApi()
-    self._mockChangeOwnerAndReviewers(
-        mock_input_api, 'orange@chromium.org', ['pear@chromium.org'])
     result = PRESUBMIT.CheckSecurityChanges(mock_input_api, mock_output_api)
     self.assertEqual(1, len(result))
 
@@ -2741,6 +2964,18 @@ class NewImagesWarningTest(unittest.TestCase):
     results = PRESUBMIT._CheckNewImagesWarning(mock_input_api, MockOutputApi())
     self.assertEqual(0, len(results))
 
+class ProductIconsTest(unittest.TestCase):
+  def test(self):
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [
+      MockFile('components/vector_icons/google_jetpack.icon', []),
+      MockFile('components/vector_icons/generic_jetpack.icon', []),
+    ]
+
+    results = PRESUBMIT.CheckNoProductIconsAddedToPublicRepo(mock_input_api, MockOutputApi())
+    self.assertEqual(1, len(results))
+    self.assertEqual(1, len(results[0].items))
+    self.assertTrue('google_jetpack.icon' in results[0].items[0])
 
 class CheckUniquePtrTest(unittest.TestCase):
   def testTruePositivesNullptr(self):
@@ -2822,7 +3057,7 @@ class CheckNoDirectIncludesHeadersWhichRedefineStrCat(unittest.TestCase):
       MockFile('dir/baz.h', ['#include <atlbase.h>']),
       MockFile('dir/jumbo.h', ['#include "sphelper.h"']),
     ]
-    results = PRESUBMIT._CheckNoStrCatRedefines(mock_input_api, MockOutputApi())
+    results = PRESUBMIT.CheckNoStrCatRedefines(mock_input_api, MockOutputApi())
     self.assertEqual(1, len(results))
     self.assertEqual(4, len(results[0].items))
     self.assertTrue('StrCat' in results[0].message)
@@ -2837,7 +3072,7 @@ class CheckNoDirectIncludesHeadersWhichRedefineStrCat(unittest.TestCase):
       MockFile('dir/baz_win.cc', ['#include "base/win/shlwapi.h"']),
       MockFile('dir/baz-win.h', ['#include "base/win/atl.h"']),
     ]
-    results = PRESUBMIT._CheckNoStrCatRedefines(mock_input_api, MockOutputApi())
+    results = PRESUBMIT.CheckNoStrCatRedefines(mock_input_api, MockOutputApi())
     self.assertEqual(0, len(results))
 
   def testAllowsToCreateWrapper(self):
@@ -2847,7 +3082,16 @@ class CheckNoDirectIncludesHeadersWhichRedefineStrCat(unittest.TestCase):
         '#include <shlwapi.h>',
         '#include "base/win/windows_defines.inc"']),
     ]
-    results = PRESUBMIT._CheckNoStrCatRedefines(mock_input_api, MockOutputApi())
+    results = PRESUBMIT.CheckNoStrCatRedefines(mock_input_api, MockOutputApi())
+    self.assertEqual(0, len(results))
+
+  def testIgnoresNonImplAndHeaders(self):
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [
+      MockFile('dir/foo_win.txt', ['#include "shlwapi.h"']),
+      MockFile('dir/bar.asm', ['#include <propvarutil.h>']),
+    ]
+    results = PRESUBMIT.CheckNoStrCatRedefines(mock_input_api, MockOutputApi())
     self.assertEqual(0, len(results))
 
 
@@ -3066,8 +3310,7 @@ class StringTest(unittest.TestCase):
                        self.NEW_GRD_CONTENTS1, action='M'),
       MockAffectedFile('part.grdp', self.NEW_GRDP_CONTENTS1,
                        self.NEW_GRDP_CONTENTS1, action='M')])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual(0, len(warnings))
 
     # Add two new strings. Should have two warnings.
@@ -3076,8 +3319,7 @@ class StringTest(unittest.TestCase):
                        self.NEW_GRD_CONTENTS1, action='M'),
       MockAffectedFile('part.grdp', self.NEW_GRDP_CONTENTS2,
                        self.NEW_GRDP_CONTENTS1, action='M')])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual(1, len(warnings))
     self.assertEqual(self.GENERATE_SIGNATURES_MESSAGE, warnings[0].message)
     self.assertEqual('error', warnings[0].type)
@@ -3092,8 +3334,7 @@ class StringTest(unittest.TestCase):
                        self.OLD_GRD_CONTENTS, action='M'),
       MockAffectedFile('part.grdp', self.NEW_GRDP_CONTENTS2,
                        self.OLD_GRDP_CONTENTS, action='M')])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual(1, len(warnings))
     self.assertEqual('error', warnings[0].type)
     self.assertEqual(self.GENERATE_SIGNATURES_MESSAGE, warnings[0].message)
@@ -3158,8 +3399,7 @@ class StringTest(unittest.TestCase):
         MockAffectedFile(
             os.path.join('test_grd', 'IDS_TEST1.png'), 'binary', action='A')
     ])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual(2, len(warnings))
     self.assertEqual('error', warnings[0].type)
     self.assertEqual(self.DO_NOT_UPLOAD_PNG_MESSAGE, warnings[0].message)
@@ -3195,8 +3435,7 @@ class StringTest(unittest.TestCase):
             os.path.join('part_grdp', 'IDS_PART_TEST1.png'), 'binary',
             action='A')
     ])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual(2, len(warnings))
     self.assertEqual('error', warnings[0].type)
     self.assertEqual(self.DO_NOT_UPLOAD_PNG_MESSAGE, warnings[0].message)
@@ -3242,8 +3481,7 @@ class StringTest(unittest.TestCase):
             'binary',
             action='A'),
     ])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual([], warnings)
 
   def testScreenshotsRemovedWithSha1(self):
@@ -3270,8 +3508,7 @@ class StringTest(unittest.TestCase):
         MockFile(os.path.join('part_grdp', 'IDS_PART_TEST2.png.sha1'),
                  'binary', '')
     ])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual(1, len(warnings))
     self.assertEqual('error', warnings[0].type)
     self.assertEqual(self.REMOVE_SIGNATURES_MESSAGE, warnings[0].message)
@@ -3311,8 +3548,7 @@ class StringTest(unittest.TestCase):
             'old_contents',
             action='D')
     ])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual(1, len(warnings))
     self.assertEqual('error', warnings[0].type)
     self.assertEqual(self.REMOVE_SIGNATURES_MESSAGE, warnings[0].message)
@@ -3351,8 +3587,7 @@ class StringTest(unittest.TestCase):
             'binary',
             action='D')
     ])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual([], warnings)
 
   def testIcuSyntax(self):
@@ -3588,7 +3823,7 @@ class DISABLETypoInTest(unittest.TestCase):
           msg=('expected foo_unittest.cc in message but got %s in test %s' %
                (results[0].message, test)))
 
-  def testIngoreNotTestFiles(self):
+  def testIgnoreNotTestFiles(self):
     mock_input_api = MockInputApi()
     mock_input_api.files = [
         MockFile('some/path/foo.cc', 'TEST_F(FoobarTest, DISABLE_Foo)'),
@@ -3598,7 +3833,7 @@ class DISABLETypoInTest(unittest.TestCase):
                                                    MockOutputApi())
     self.assertEqual(0, len(results))
 
-  def testIngoreDeletedFiles(self):
+  def testIgnoreDeletedFiles(self):
     mock_input_api = MockInputApi()
     mock_input_api.files = [
         MockFile('some/path/foo.cc', 'TEST_F(FoobarTest, Foo)', action='D'),
@@ -3849,7 +4084,7 @@ class CheckForUseOfChromeAppsDeprecationsTest(unittest.TestCase):
     ]
     mock_output_api = MockOutputApi()
     errors = PRESUBMIT.CheckForUseOfChromeAppsDeprecations(mock_input_api,
-                                                     mock_output_api)
+                                                           mock_output_api)
     self.assertEqual(1, len(errors))
     self.assertTrue( self.ERROR_MSG_PIECE in errors[0].message)
     self.assertTrue( 'foo.NMF' in errors[0].message)
@@ -3872,7 +4107,7 @@ class CheckForUseOfChromeAppsDeprecationsTest(unittest.TestCase):
     ]
     mock_output_api = MockOutputApi()
     errors = PRESUBMIT.CheckForUseOfChromeAppsDeprecations(mock_input_api,
-                                                     mock_output_api)
+                                                           mock_output_api)
     self.assertEqual(1, len(errors))
     self.assertTrue( self.ERROR_MSG_PIECE in errors[0].message)
     self.assertTrue( 'manifest.json' in errors[0].message)
@@ -3895,7 +4130,7 @@ class CheckForUseOfChromeAppsDeprecationsTest(unittest.TestCase):
     ]
     mock_output_api = MockOutputApi()
     errors = PRESUBMIT.CheckForUseOfChromeAppsDeprecations(mock_input_api,
-                                                     mock_output_api)
+                                                           mock_output_api)
     self.assertEqual(0, len(errors))
 
   def testWarningPPAPI(self):
@@ -3916,7 +4151,7 @@ class CheckForUseOfChromeAppsDeprecationsTest(unittest.TestCase):
     ]
     mock_output_api = MockOutputApi()
     errors = PRESUBMIT.CheckForUseOfChromeAppsDeprecations(mock_input_api,
-                                                     mock_output_api)
+                                                           mock_output_api)
     self.assertEqual(1, len(errors))
     self.assertTrue( self.ERROR_MSG_PIECE in errors[0].message)
     self.assertTrue( 'foo.hpp' in errors[0].message)
@@ -3939,7 +4174,7 @@ class CheckForUseOfChromeAppsDeprecationsTest(unittest.TestCase):
     ]
     mock_output_api = MockOutputApi()
     errors = PRESUBMIT.CheckForUseOfChromeAppsDeprecations(mock_input_api,
-                                                     mock_output_api)
+                                                           mock_output_api)
     self.assertEqual(0, len(errors))
 
 class CheckDeprecationOfPreferencesTest(unittest.TestCase):
@@ -4070,7 +4305,7 @@ class CheckDeprecationOfPreferencesTest(unittest.TestCase):
         'Discovered possible removal of preference registrations' in
         errors[0].message)
 
-  # Check that the presubmit fails if a marker line in brower_prefs.cc is
+  # Check that the presubmit fails if a marker line in browser_prefs.cc is
   # deleted.
   def testDeletedMarkerRaisesError(self):
     mock_input_api = MockInputApi()
@@ -4094,40 +4329,31 @@ class CheckDeprecationOfPreferencesTest(unittest.TestCase):
 
 class MPArchApiUsage(unittest.TestCase):
   def _assert_notify(
-      self, expected_uses, msg, local_path, new_contents):
+      self, expected_uses, expect_fyi, msg, local_path, new_contents):
     mock_input_api = MockInputApi()
     mock_output_api = MockOutputApi()
     mock_input_api.files = [
         MockFile(local_path, new_contents),
     ]
     result = PRESUBMIT.CheckMPArchApiUsage(mock_input_api, mock_output_api)
+
+    watchlist_email = ('mparch-reviews+watchfyi@chromium.org'
+        if expect_fyi else 'mparch-reviews+watch@chromium.org')
     self.assertEqual(
-        bool(expected_uses),
-        'mparch-reviews+watch@chromium.org' in mock_output_api.more_cc,
+        bool(expected_uses or expect_fyi),
+        watchlist_email in mock_output_api.more_cc,
         msg)
     if expected_uses:
         self.assertEqual(1, len(result), msg)
         self.assertEqual(result[0].type, 'notify', msg)
         self.assertEqual(sorted(result[0].items), sorted(expected_uses), msg)
+    else:
+        self.assertEqual(0, len(result), msg)
 
   def testNotify(self):
     self._assert_notify(
-        ['WebContentsObserver', 'WebContentsUserData'],
-        'Introduce WCO and WCUD',
-        'chrome/my_feature.h',
-        ['class MyFeature',
-         '    : public content::WebContentsObserver,',
-         '      public content::WebContentsUserData<MyFeature> {};',
-        ])
-    self._assert_notify(
-        ['DidFinishNavigation'],
-        'Introduce WCO override',
-        'chrome/my_feature.h',
-        ['void DidFinishNavigation(',
-         '    content::NavigationHandle* navigation_handle) override;',
-        ])
-    self._assert_notify(
         ['IsInMainFrame'],
+        False,
         'Introduce IsInMainFrame',
         'chrome/my_feature.cc',
         ['void DoSomething(content::NavigationHandle* navigation_handle) {',
@@ -4137,6 +4363,7 @@ class MPArchApiUsage(unittest.TestCase):
         ])
     self._assert_notify(
         ['FromRenderFrameHost'],
+        False,
         'Introduce WC::FromRenderFrameHost',
         'chrome/my_feature.cc',
         ['void DoSomething(content::RenderFrameHost* rfh) {',
@@ -4145,9 +4372,29 @@ class MPArchApiUsage(unittest.TestCase):
          '}',
         ])
 
+  def testFyi(self):
+    self._assert_notify(
+        [],
+        True,
+        'Introduce WCO and WCUD',
+        'chrome/my_feature.h',
+        ['class MyFeature',
+         '    : public content::WebContentsObserver,',
+         '      public content::WebContentsUserData<MyFeature> {};',
+        ])
+    self._assert_notify(
+        [],
+        True,
+        'Introduce WCO override',
+        'chrome/my_feature.h',
+        ['void DidFinishNavigation(',
+         '    content::NavigationHandle* navigation_handle) override;',
+        ])
+
   def testNoNotify(self):
     self._assert_notify(
         [],
+        False,
         'No API usage',
         'chrome/my_feature.cc',
         ['void DoSomething() {',
@@ -4158,6 +4405,7 @@ class MPArchApiUsage(unittest.TestCase):
     # to share a name with a content API.
     self._assert_notify(
         [],
+        False,
         'Uninteresting top level directory',
         'third_party/my_dep/my_code.cc',
         ['bool HasParent(Node* node) {',
@@ -4167,10 +4415,11 @@ class MPArchApiUsage(unittest.TestCase):
     # We're not concerned with usage in test code.
     self._assert_notify(
         [],
+        False,
         'Usage in test code',
         'chrome/my_feature_unittest.cc',
         ['TEST_F(MyFeatureTest, DoesSomething) {',
-         '  EXPECT_TRUE(web_contents()->GetMainFrame());',
+         '  EXPECT_TRUE(rfh()->GetMainFrame());',
          '}',
         ])
 
@@ -4287,6 +4536,207 @@ class AssertPythonShebangTest(unittest.TestCase):
         errors = PRESUBMIT.CheckPythonShebang(input_api, MockOutputApi())
         self.assertEqual(0, len(errors))
 
+class VerifyDcheckParentheses(unittest.TestCase):
+  def testPermissibleUsage(self):
+    input_api = MockInputApi()
+    input_api.files = [
+      MockFile('okay1.cc', ['DCHECK_IS_ON()']),
+      MockFile('okay2.cc', ['#if DCHECK_IS_ON()']),
+
+      # Other constructs that aren't exactly `DCHECK_IS_ON()` do their
+      # own thing at their own risk.
+      MockFile('okay3.cc', ['PA_DCHECK_IS_ON']),
+      MockFile('okay4.cc', ['#if PA_DCHECK_IS_ON']),
+      MockFile('okay6.cc', ['BUILDFLAG(PA_DCHECK_IS_ON)']),
+    ]
+    errors = PRESUBMIT.CheckDCHECK_IS_ONHasBraces(input_api, MockOutputApi())
+    self.assertEqual(0, len(errors))
+
+  def testMissingParentheses(self):
+    input_api = MockInputApi()
+    input_api.files = [
+      MockFile('bad1.cc', ['DCHECK_IS_ON']),
+      MockFile('bad2.cc', ['#if DCHECK_IS_ON']),
+      MockFile('bad3.cc', ['DCHECK_IS_ON && foo']),
+    ]
+    errors = PRESUBMIT.CheckDCHECK_IS_ONHasBraces(input_api, MockOutputApi())
+    self.assertEqual(3, len(errors))
+    for error in errors:
+      self.assertRegex(error.message, r'DCHECK_IS_ON().+parentheses')
+
+
+class CheckBatchAnnotation(unittest.TestCase):
+  """Test the CheckBatchAnnotation presubmit check."""
+
+  def testTruePositives(self):
+    """Examples of when there is no @Batch or @DoNotBatch is correctly flagged.
+"""
+    mock_input = MockInputApi()
+    mock_input.files = [
+        MockFile('path/OneTest.java', ['public class OneTest']),
+        MockFile('path/TwoTest.java', ['public class TwoTest']),
+        MockFile('path/ThreeTest.java',
+                 ['@Batch(Batch.PER_CLASS)',
+                  'import org.chromium.base.test.BaseRobolectricTestRunner;',
+                  'public class Three {']),
+        MockFile('path/FourTest.java',
+                 ['@DoNotBatch(reason = "dummy reason 1")',
+                  'import org.chromium.base.test.BaseRobolectricTestRunner;',
+                  'public class Four {']),
+    ]
+    errors = PRESUBMIT.CheckBatchAnnotation(mock_input, MockOutputApi())
+    self.assertEqual(2, len(errors))
+    self.assertEqual(2, len(errors[0].items))
+    self.assertIn('OneTest.java', errors[0].items[0])
+    self.assertIn('TwoTest.java', errors[0].items[1])
+    self.assertEqual(2, len(errors[1].items))
+    self.assertIn('ThreeTest.java', errors[1].items[0])
+    self.assertIn('FourTest.java', errors[1].items[1])
+
+
+  def testAnnotationsPresent(self):
+    """Examples of when there is @Batch or @DoNotBatch is correctly flagged."""
+    mock_input = MockInputApi()
+    mock_input.files = [
+        MockFile('path/OneTest.java',
+                 ['@Batch(Batch.PER_CLASS)', 'public class One {']),
+        MockFile('path/TwoTest.java',
+                 ['@DoNotBatch(reason = "dummy reasons.")', 'public class Two {'
+                 ]),
+        MockFile('path/ThreeTest.java',
+                 ['@Batch(Batch.PER_CLASS)',
+                  'public class Three extends BaseTestA {'],
+                 ['@Batch(Batch.PER_CLASS)',
+                  'public class Three extends BaseTestB {']),
+        MockFile('path/FourTest.java',
+                 ['@DoNotBatch(reason = "dummy reason 1")',
+                  'public class Four extends BaseTestA {'],
+                 ['@DoNotBatch(reason = "dummy reason 2")',
+                  'public class Four extends BaseTestB {']),
+        MockFile('path/FiveTest.java',
+                 ['import androidx.test.uiautomator.UiDevice;',
+                  'public class Five extends BaseTestA {'],
+                 ['import androidx.test.uiautomator.UiDevice;',
+                  'public class Five extends BaseTestB {']),
+        MockFile('path/SixTest.java',
+                 ['import org.chromium.base.test.BaseRobolectricTestRunner;',
+                  'public class Six extends BaseTestA {'],
+                 ['import org.chromium.base.test.BaseRobolectricTestRunner;',
+                  'public class Six extends BaseTestB {']),
+        MockFile('path/SevenTest.java',
+                 ['import org.robolectric.annotation.Config;',
+                  'public class Seven extends BaseTestA {'],
+                 ['import org.robolectric.annotation.Config;',
+                  'public class Seven extends BaseTestB {']),
+        MockFile(
+            'path/OtherClass.java',
+            ['public class OtherClass {'],
+        ),
+        MockFile('path/PRESUBMIT.py',
+                 ['@Batch(Batch.PER_CLASS)',
+                  '@DoNotBatch(reason = "dummy reason)']),
+    ]
+    errors = PRESUBMIT.CheckBatchAnnotation(mock_input, MockOutputApi())
+    self.assertEqual(0, len(errors))
+
+
+class CheckMockAnnotation(unittest.TestCase):
+    """Test the CheckMockAnnotation presubmit check."""
+
+    def testTruePositives(self):
+        """Examples of @Mock or @Spy being used and nothing should be flagged."""
+        mock_input = MockInputApi()
+        mock_input.files = [
+            MockFile('path/OneTest.java', [
+                'import a.b.c.Bar;',
+                'import a.b.c.Foo;',
+                '@Mock',
+                'public static Foo f = new Foo();',
+                'Mockito.mock(new Bar(a, b, c))'
+            ]),
+            MockFile('path/TwoTest.java', [
+                'package x.y.z;',
+                'import static org.mockito.Mockito.spy;',
+                '@Spy',
+                'public static FooBar<Baz> f;',
+                'a = spy(Baz.class)'
+            ]),
+        ]
+        errors = PRESUBMIT.CheckMockAnnotation(mock_input, MockOutputApi())
+        self.assertEqual(1, len(errors))
+        self.assertEqual(2, len(errors[0].items))
+        self.assertIn('a.b.c.Bar in path/OneTest.java', errors[0].items)
+        self.assertIn('x.y.z.Baz in path/TwoTest.java', errors[0].items)
+
+    def testTrueNegatives(self):
+        """Examples of when we should not be flagging mock() or spy() calls."""
+        mock_input = MockInputApi()
+        mock_input.files = [
+            MockFile('path/OneTest.java', [
+                'package a.b.c;',
+                'import org.chromium.base.test.BaseRobolectricTestRunner;',
+                'Mockito.mock(Abc.class)'
+            ]),
+            MockFile('path/TwoTest.java', [
+                'package a.b.c;',
+                'import androidx.test.uiautomator.UiDevice;',
+                'Mockito.spy(new Def())'
+            ]),
+            MockFile('path/ThreeTest.java', [
+                'package a.b.c;',
+                'import static org.mockito.Mockito.spy;',
+                '@Spy',
+                'public static Foo f = new Abc();',
+                'a = spy(Foo.class)'
+            ]),
+            MockFile('path/FourTest.java', [
+                'package a.b.c;',
+                'import static org.mockito.Mockito.mock;',
+                '@Spy',
+                'public static Bar b = new Abc(a, b, c, d);',
+                ' mock(new Bar(a,b,c))'
+            ]),
+            MockFile('path/FiveTest.java', [
+                'package a.b.c;',
+                '@Mock',
+                'public static Baz<abc> b;',
+                'Mockito.mock(Baz.class)']),
+            MockFile('path/SixTest.java', [
+                'package a.b.c;',
+                'import android.view.View;',
+                'import java.ArrayList;',
+                'Mockito.spy(new View())',
+                'Mockito.mock(ArrayList.class)'
+            ]),
+        ]
+        errors = PRESUBMIT.CheckMockAnnotation(mock_input, MockOutputApi())
+        self.assertEqual(0, len(errors))
+
+
+class LayoutInTestsTest(unittest.TestCase):
+  def testLayoutInTest(self):
+    mock_input = MockInputApi()
+    mock_input.files = [
+        MockFile('path/to/foo_unittest.cc',
+                 ['  foo->Layout();', '  bar.Layout();']),
+    ]
+    errors = PRESUBMIT.CheckNoLayoutCallsInTests(mock_input, MockOutputApi())
+    self.assertNotEqual(0, len(errors))
+
+  def testNoTriggerOnLayoutOverride(self):
+    mock_input = MockInputApi();
+    mock_input.files = [
+        MockFile('path/to/foo_unittest.cc',
+                 ['class TestView: public views::View {',
+                  ' public:',
+                  '  void Layout(); override {',
+                  '    views::View::Layout();',
+                  '    // perform bespoke layout',
+                  '  }',
+                  '};'])
+    ]
+    errors = PRESUBMIT.CheckNoLayoutCallsInTests(mock_input, MockOutputApi())
+    self.assertEqual(0, len(errors))
 
 if __name__ == '__main__':
   unittest.main()

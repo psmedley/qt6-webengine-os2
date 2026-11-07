@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/check.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/numerics/checked_math.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/scoped_localalloc.h"
 #include "base/win/win_util.h"
@@ -19,11 +20,14 @@
 namespace base {
 namespace win {
 
-bool GrantAccessToPath(const FilePath& path,
-                       const std::vector<Sid>& sids,
-                       DWORD access_mask,
-                       DWORD inheritance,
-                       bool recursive) {
+namespace {
+
+bool AddACEToPath(const FilePath& path,
+                  const std::vector<Sid>& sids,
+                  DWORD access_mask,
+                  DWORD inheritance,
+                  bool recursive,
+                  ACCESS_MODE access_mode) {
   DCHECK(!path.empty());
   if (sids.empty())
     return true;
@@ -46,15 +50,15 @@ bool GrantAccessToPath(const FilePath& path,
   auto entries_interator = access_entries.begin();
   for (const Sid& sid : sids) {
     EXPLICIT_ACCESS& new_access = *entries_interator++;
-    new_access.grfAccessMode = GRANT_ACCESS;
+    new_access.grfAccessMode = access_mode;
     new_access.grfAccessPermissions = access_mask;
     new_access.grfInheritance = inheritance;
     ::BuildTrusteeWithSid(&new_access.Trustee, sid.GetPSID());
   }
 
   PACL new_dacl = nullptr;
-  error = ::SetEntriesInAcl(access_entries.size(), access_entries.data(), dacl,
-                            &new_dacl);
+  error = ::SetEntriesInAcl(checked_cast<ULONG>(access_entries.size()),
+                            access_entries.data(), dacl, &new_dacl);
   if (error != ERROR_SUCCESS) {
     ::SetLastError(error);
     DPLOG(ERROR) << "Failed adding ACEs to DACL for path \"" << path.value()
@@ -87,6 +91,26 @@ bool GrantAccessToPath(const FilePath& path,
   }
 
   return true;
+}
+
+}  // namespace
+
+bool GrantAccessToPath(const FilePath& path,
+                       const std::vector<Sid>& sids,
+                       DWORD access_mask,
+                       DWORD inheritance,
+                       bool recursive) {
+  return AddACEToPath(path, sids, access_mask, inheritance, recursive,
+                      GRANT_ACCESS);
+}
+
+bool DenyAccessToPath(const FilePath& path,
+                      const std::vector<Sid>& sids,
+                      DWORD access_mask,
+                      DWORD inheritance,
+                      bool recursive) {
+  return AddACEToPath(path, sids, access_mask, inheritance, recursive,
+                      DENY_ACCESS);
 }
 
 std::vector<Sid> CloneSidVector(const std::vector<Sid>& sids) {

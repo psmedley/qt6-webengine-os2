@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -544,6 +544,10 @@ TEST(CSPSourceList, SubsumeAllowAllInline) {
        {"http://example1.com/foo/ 'unsafe-inline' 'nonce-yay'",
         "http://example1.com/foo/ 'unsafe-inline' 'sha512-321cba'"},
        true},
+      {mojom::CSPDirectiveName::DefaultSrc,
+       "http://example1.com/foo/ 'unsafe-inline' 'strict-dynamic'",
+       {"http://example1.com/foo/ 'unsafe-inline'"},
+       false},
   };
 
   auto origin_b =

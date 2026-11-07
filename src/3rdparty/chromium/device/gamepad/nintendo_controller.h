@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -183,7 +183,7 @@ class NintendoController final : public AbstractHapticGamepad {
 
   // AbstractHapticGamepad implementation.
   void DoShutdown() override;
-  void SetVibration(double strong_magnitude, double weak_magnitude) override;
+  void SetVibration(mojom::GamepadEffectParametersPtr params) override;
   double GetMaxEffectDurationMillis() override;
   base::WeakPtr<AbstractHapticGamepad> GetWeakPtr() override;
 

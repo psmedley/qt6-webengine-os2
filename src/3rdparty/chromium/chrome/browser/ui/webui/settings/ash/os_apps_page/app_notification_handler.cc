@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,11 +13,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/settings/ash/os_apps_page/mojom/app_type_mojom_traits.h"
 #include "components/services/app_service/public/cpp/app_types.h"
+#include "components/services/app_service/public/cpp/features.h"
 #include "components/services/app_service/public/cpp/permission.h"
 #include "components/services/app_service/public/cpp/types_util.h"
 
-namespace chromeos {
-namespace settings {
+namespace ash::settings {
 
 namespace {
 app_notification::mojom::AppPtr CreateAppPtr(const apps::AppUpdate& update) {
@@ -102,8 +102,12 @@ void AppNotificationHandler::SetQuietMode(bool in_quiet_mode) {
 void AppNotificationHandler::SetNotificationPermission(
     const std::string& app_id,
     apps::PermissionPtr permission) {
-  app_service_proxy_->SetPermission(
-      app_id, apps::ConvertPermissionToMojomPermission(permission));
+  if (base::FeatureList::IsEnabled(apps::kAppServiceLaunchWithoutMojom)) {
+    app_service_proxy_->SetPermission(app_id, std::move(permission));
+  } else {
+    app_service_proxy_->SetPermission(
+        app_id, apps::ConvertPermissionToMojomPermission(permission));
+  }
 }
 
 void AppNotificationHandler::GetApps(GetAppsCallback callback) {
@@ -146,5 +150,4 @@ void AppNotificationHandler::OnAppRegistryCacheWillBeDestroyed(
   Observe(nullptr);
 }
 
-}  // namespace settings
-}  // namespace chromeos
+}  // namespace ash::settings

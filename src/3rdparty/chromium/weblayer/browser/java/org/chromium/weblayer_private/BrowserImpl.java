@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,17 @@ package org.chromium.weblayer_private;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.RemoteException;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.view.SurfaceControlViewHost;
 import android.view.View;
-import android.webkit.ValueCallback;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.RequiresApi;
 import androidx.fragment.app.FragmentManager;
 
 import org.chromium.base.ObserverList;
@@ -27,7 +29,6 @@ import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.IntentRequestTracker;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.weblayer_private.interfaces.APICallException;
-import org.chromium.weblayer_private.interfaces.BrowserEmbeddabilityMode;
 import org.chromium.weblayer_private.interfaces.DarkModeStrategy;
 import org.chromium.weblayer_private.interfaces.IBrowser;
 import org.chromium.weblayer_private.interfaces.IBrowserClient;
@@ -279,22 +280,6 @@ public class BrowserImpl extends IBrowser.Stub implements View.OnAttachStateChan
     }
 
     @Override
-    public void setSupportsEmbedding(boolean enable, IObjectWrapper valueCallback) {
-        StrictModeWorkaround.apply();
-        getViewController().setEmbeddabilityMode(
-                enable ? BrowserEmbeddabilityMode.SUPPORTED : BrowserEmbeddabilityMode.UNSUPPORTED,
-                (ValueCallback<Boolean>) ObjectWrapper.unwrap(valueCallback, ValueCallback.class));
-    }
-
-    @Override
-    public void setEmbeddabilityMode(
-            @BrowserEmbeddabilityMode int mode, IObjectWrapper valueCallback) {
-        StrictModeWorkaround.apply();
-        getViewController().setEmbeddabilityMode(mode,
-                (ValueCallback<Boolean>) ObjectWrapper.unwrap(valueCallback, ValueCallback.class));
-    }
-
-    @Override
     public void setChangeVisibilityOnNextDetach(boolean changeVisibility) {
         StrictModeWorkaround.apply();
         if (isViewAttachedToWindow()) {
@@ -460,7 +445,7 @@ public class BrowserImpl extends IBrowser.Stub implements View.OnAttachStateChan
     }
 
     @Override
-    public List getTabs() {
+    public List<TabImpl> getTabs() {
         StrictModeWorkaround.apply();
         return Arrays.asList(BrowserImplJni.get().getTabs(mNativeBrowser));
     }
@@ -469,6 +454,17 @@ public class BrowserImpl extends IBrowser.Stub implements View.OnAttachStateChan
     public int getActiveTabId() {
         StrictModeWorkaround.apply();
         return getActiveTab() != null ? getActiveTab().getId() : 0;
+    }
+
+    @Override
+    public int[] getTabIds() {
+        StrictModeWorkaround.apply();
+        List<TabImpl> tabs = getTabs();
+        int[] ids = new int[tabs.size()];
+        for(int i = 0; i < tabs.size(); i++) {
+            ids[i] = tabs.get(i).getId();
+        }
+        return ids;
     }
 
     @Override
@@ -726,6 +722,20 @@ public class BrowserImpl extends IBrowser.Stub implements View.OnAttachStateChan
         for (Object tab : getTabs()) {
             ((TabImpl) tab).updateFromBrowser();
         }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    @Override
+    public void setSurfaceControlViewHost(IObjectWrapper wrappedHost) {
+        // TODO(rayankans): Handle fallback for older devices.
+        SurfaceControlViewHost host =
+                ObjectWrapper.unwrap(wrappedHost, SurfaceControlViewHost.class);
+        host.setView(mViewController.getView(), 0, 0);
+    }
+
+    @Override
+    public IObjectWrapper getContentViewRenderView() {
+        return ObjectWrapper.wrap(mViewController.getView());
     }
 
     @NativeMethods

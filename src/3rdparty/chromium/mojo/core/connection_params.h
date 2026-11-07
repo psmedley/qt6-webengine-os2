@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,11 +42,17 @@ class MOJO_SYSTEM_IMPL_EXPORT ConnectionParams {
   void set_is_async(bool is_async) { is_async_ = is_async; }
   bool is_async() const { return is_async_; }
 
+  void set_is_untrusted_process(bool is_untrusted_process) {
+    is_untrusted_process_ = is_untrusted_process;
+  }
+  bool is_untrusted_process() const { return is_untrusted_process_; }
+
   void set_leak_endpoint(bool leak_endpoint) { leak_endpoint_ = leak_endpoint; }
   bool leak_endpoint() const { return leak_endpoint_; }
 
  private:
   bool is_async_ = false;
+  bool is_untrusted_process_ = false;
   bool leak_endpoint_ = false;
   PlatformChannelEndpoint endpoint_;
   PlatformChannelServerEndpoint server_endpoint_;

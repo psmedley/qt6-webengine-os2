@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,13 +23,14 @@ message LicenseType {
   enum LicenseTypeEnum {
     // Unknown/undefined
     UNDEFINED = 0;
-    // Chrome Device Management Perpetual, unused as 1 & 2 are in the same
-    // license pool.
+    // Chrome Device Management Perpetual
     CDM_PERPETUAL = 1;
-    // Chrome Device Management Annual, unused
+    // Chrome Device Management Annual
     CDM_ANNUAL = 2;
     // Chrome Kiosk
     KIOSK = 3;
+    // Chrome Enterprise bundled license
+    CDM_PACKAGED = 4;
   }
 
   optional LicenseTypeEnum license_type = 1;
@@ -74,6 +75,7 @@ message DeviceRegisterRequest {
     DEVICE = 2;           // Register for Chrome OS device policies.
     BROWSER = 3;          // Register for desktop Chrome browser user policies.
     ANDROID_BROWSER = 4;  // Register for Android Chrome browser user policies.
+    IOS_BROWSER = 6;      // Register for iOS Chrome browser user policies.
   }
   // NOTE: we also use this field to detect client version.  If this
   // field is missing, then the request comes from TT.  We will remove
@@ -148,6 +150,14 @@ message DeviceRegisterRequest {
     // is mandatory, but it failed and we are doing a fallback to manual
     // enrollment.
     FLAVOR_ENROLLMENT_ATTESTATION_INITIAL_MANUAL_FALLBACK = 15;
+    // An enterprise rollback just took place and the device was wiped.
+    // Attempt to re-enroll with attestation. This is forced from the
+    // client side.
+    FLAVOR_ENROLLMENT_ATTESTATION_ROLLBACK_FORCED = 16;
+    // An enterprise rollback just took place and the device was wiped.
+    // Attestation re-enrollment just failed, attempt manual enrollment as
+    // fallback.
+    FLAVOR_ENROLLMENT_ATTESTATION_ROLLBACK_MANUAL_FALLBACK = 17;
   }
 
   // Indicates the registration flavor. This is passed to the server FYI when
@@ -711,6 +721,11 @@ message PolicyData {
   // device's managing OU's SSO profile. Currently, this points to the OU's
   // SAML settings. May support OIDC in the future.
   optional string sso_profile = 37;
+
+  // Indicates which kind of licenses this device is using, so that chrome OS
+  // can check that. The value is from ChromeOsDeviceInfo
+  // http://google3/ccc/hosted/devices/services/chromeos/common.proto;rcl=436571779;l=549
+  optional string license_sku = 38;
 }
 
 message ClientActionRequired {
@@ -1083,7 +1098,7 @@ message DiskLifetimeEstimation {
 }
 
 // Status of the single storage device
-// Next id: 27
+// Next id: 29
 message DiskInfo {
   optional string serial = 1;
   optional string manufacturer = 2;
@@ -1116,6 +1131,7 @@ message DiskInfo {
     // https://screenshot.googleplex.com/eZWNnV8qGnc
     uint32 emmc_oemid = 15;
     uint32 other_vendor = 16;
+    uint32 jedec_manfid = 27;
   }
 
   // The manufacturer-specific product identifier.
@@ -1137,6 +1153,7 @@ message DiskInfo {
     uint64 nvme_firmware_rev = 23;
     uint64 emmc_firmware_rev = 24;
     uint32 other_firmware_rev = 25;
+    uint32 ufs_firmware_rev = 28;
   }
 
   // The purpose of the device on the system.
@@ -1427,6 +1444,17 @@ message NetworkAdapterInfo {
   repeated string driver = 7;
 }
 
+// Information about the list of browsers and profiles that are
+// running and installed on the device in the DeviceStatusReport
+message LaCrOsBrowserReport {
+  // Limited to one user since LaCrosBrowserReport is repeated based on each
+  // user. If multiple lacros user profiles exist, each LaCrOsBrowserReport
+  // message (one per lacros user profile) will contain the same |device_user|.
+  optional DeviceUser device_user = 1;
+  // Group of data regarding the browser and user profile.
+  optional BrowserReport browser_report = 2;
+}
+
 // Report device level status.
 message DeviceStatusReportRequest {
   reserved 4, 7, 13, 20;
@@ -1565,6 +1593,12 @@ message DeviceStatusReportRequest {
 
   // Information about the device's network hardware.
   repeated NetworkAdapterInfo network_adapter_info = 45;
+
+  // Information about LaCrOs
+  repeated LaCrOsBrowserReport lacros_browser_report = 46;
+
+  // Root device size as displayed in the device UI.
+  optional int64 root_device_total_storage_bytes = 47;
 }
 
 message OsUpdateStatus {
@@ -2499,6 +2533,9 @@ message DeviceStateRetrievalResponse {
 
   // Initial device state if |restore_mode| is |RESTORE_MODE_NONE|.
   optional DeviceInitialEnrollmentStateResponse initial_state_response = 4;
+
+  // license type the device used in last enrollment
+  optional LicenseType license_type = 5;
 }
 
 // Request from device to server to retrieve the enrollment mode and domain for
@@ -2727,7 +2764,7 @@ message RemoteCommand {
   // params_dict}, where params_dict varies by routine.
   // |DEVICE_GET_DIAGNOSTIC_ROUTINE_UPDATE|: {"id" : id_integer, "command" :
   // command, "includeOutput" : include_output_bool}, where command must be a
-  // valid chromeos::cros_healthd::mojom::DiagnosticRoutineCommandEnum.
+  // valid `ash::cros_healthd::mojom::DiagnosticRoutineCommandEnum`.
   optional string payload = 4;
 
   // An identifier for the target this command is for. This is the same as
@@ -3438,6 +3475,8 @@ message AppInstallReportLogEvent {
     DIRECT_INSTALL = 13;
     // No more regular attempts to install
     CLOUDDPC_MAIN_LOOP_FAILED = 14;
+    // PlayStore local policy was set
+    PLAYSTORE_LOCAL_POLICY_SET = 15;
   }
 
   // Enumerates the possible changes in session state.
@@ -3968,8 +4007,8 @@ message BrowserPublicKeyUploadRequest {
   enum KeyTrustLevel {
     // UNSPECIFIED.
     KEY_TRUST_LEVEL_UNSPECIFIED = 0;
-    // Chrome Browser with the key stored in TPM.
-    CHROME_BROWSER_TPM_KEY = 1;
+    // Chrome Browser with the key stored in the device hardware.
+    CHROME_BROWSER_HW_KEY = 1;
     // Chrome Browser with the key stored at OS level.
     CHROME_BROWSER_OS_KEY = 2;
   }
@@ -4001,6 +4040,20 @@ message BrowserPublicKeyUploadResponse {
     INVALID_SIGNATURE = 2;
   }
   optional ResponseCode response_code = 1;
+}
+
+// Additional detail about the error which can be used to clarify user messaging
+// around the error or to influence Chrome's error-handling behavior.
+enum DeviceManagementErrorDetail {
+  NO_ERROR_DETAIL = 0;
+
+  // Only valid for CBCM browser DEVICE_NOT_FOUND errors. Indicates that the
+  // DMToken should be deleted entirely from its storage location.
+  CBCM_DELETION_POLICY_PREFERENCE_DELETE_TOKEN = 1;
+
+  // Only valid for CBCM browser DEVICE_NOT_FOUND errors. Indicates that the
+  // DMToken should be invalidated, preventing device re-enrollment.
+  CBCM_DELETION_POLICY_PREFERENCE_INVALIDATE_TOKEN = 2;
 }
 
 // Request from the DMAgent on the device to the DMServer.  This is
@@ -4272,6 +4325,9 @@ message DeviceManagementResponse {
   // Error message.
   optional string error_message = 2;
 
+  // Additional details about the error message.
+  repeated DeviceManagementErrorDetail error_detail = 39;
+
   // Register response
   optional DeviceRegisterResponse register_response = 3;
 
@@ -4383,7 +4439,7 @@ message DeviceManagementResponse {
   // Response to a Chrome Profile report request.
   optional ChromeProfileReportResponse chrome_profile_report_response = 38;
 
-  // Next id: 39.
+  // Next id: 40.
 }
 
 // Device State Information stored in the server is retrieval at

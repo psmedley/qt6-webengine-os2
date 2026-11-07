@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,9 +34,10 @@ class SessionChangeObserver::WtsRegistrationNotificationManager {
         base::BindRepeating(&WtsRegistrationNotificationManager::OnWndProc,
                             base::Unretained(this)));
 
-    base::OnceClosure wts_register = base::BindOnce(
-        base::IgnoreResult(&WTSRegisterSessionNotification),
-        gfx::SingletonHwnd::GetInstance()->hwnd(), NOTIFY_FOR_THIS_SESSION);
+    base::OnceClosure wts_register =
+        base::BindOnce(base::IgnoreResult(&WTSRegisterSessionNotification),
+                       gfx::SingletonHwnd::GetInstance()->hwnd(),
+                       DWORD{NOTIFY_FOR_THIS_SESSION});
 
     base::ThreadPool::CreateCOMSTATaskRunner({})->PostTask(
         FROM_HERE, std::move(wts_register));

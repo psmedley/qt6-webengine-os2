@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,9 @@
 #include "base/command_line.h"
 #include "base/system/sys_info.h"
 #include "build/build_config.h"
+#include "cc/base/math_util.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/rrect_f.h"
 
 #if BUILDFLAG(IS_ANDROID)
@@ -147,6 +149,32 @@ bool GatherFDStats(base::TimeDelta* delta_time_taken,
   *delta_time_taken = timer.Elapsed();
   return true;
 #endif  // BUILDFLAG(IS_POSIX)
+}
+gfx::RectF ClippedQuadRectangleF(const DrawQuad* quad) {
+  gfx::RectF quad_rect = cc::MathUtil::MapClippedRect(
+      quad->shared_quad_state->quad_to_target_transform,
+      gfx::RectF(quad->rect));
+  if (quad->shared_quad_state->clip_rect)
+    quad_rect.Intersect(gfx::RectF(*quad->shared_quad_state->clip_rect));
+  return quad_rect;
+}
+
+gfx::Rect ClippedQuadRectangle(const DrawQuad* quad) {
+  return gfx::ToEnclosingRect(ClippedQuadRectangleF(quad));
+}
+
+gfx::Rect GetExpandedRectWithPixelMovingForegroundFilter(
+    const DrawQuad& rpdq,
+    const cc::FilterOperations& filters) {
+  const SharedQuadState* shared_quad_state = rpdq.shared_quad_state;
+  float max_pixel_movement = filters.MaximumPixelMovement();
+  gfx::RectF rect(rpdq.rect);
+  rect.Inset(-max_pixel_movement);
+  gfx::Rect expanded_rect = gfx::ToEnclosingRect(rect);
+
+  // expanded_rect in the target space
+  return cc::MathUtil::MapEnclosingClippedRect(
+      shared_quad_state->quad_to_target_transform, expanded_rect);
 }
 
 }  // namespace viz

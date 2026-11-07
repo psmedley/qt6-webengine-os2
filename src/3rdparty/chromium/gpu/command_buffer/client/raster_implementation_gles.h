@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -79,6 +79,7 @@ class RASTER_EXPORT RasterImplementationGLES : public RasterInterface {
   void ConvertYUVAMailboxesToRGB(
       const gpu::Mailbox& dest_mailbox,
       SkYUVColorSpace planes_yuv_color_space,
+      const SkColorSpace* planes_rgb_color_space,
       SkYUVAInfo::PlaneConfig plane_config,
       SkYUVAInfo::Subsampling subsampling,
       const gpu::Mailbox yuva_plane_mailboxes[]) override;
@@ -90,7 +91,7 @@ class RASTER_EXPORT RasterImplementationGLES : public RasterInterface {
                                   const gpu::Mailbox& source_mailbox) override;
 
   // OOP-Raster
-  void BeginRasterCHROMIUM(GLuint sk_color,
+  void BeginRasterCHROMIUM(SkColor4f sk_color_4f,
                            GLboolean needs_clear,
                            GLuint msaa_sample_count,
                            MsaaMode msaa_mode,
@@ -124,7 +125,7 @@ class RASTER_EXPORT RasterImplementationGLES : public RasterInterface {
       const SkImageInfo& dst_info,
       GLuint dst_row_bytes,
       unsigned char* out,
-      base::OnceCallback<void(GrSurfaceOrigin, bool)> readback_done) override;
+      base::OnceCallback<void(bool)> readback_done) override;
 
   void ReadbackYUVPixelsAsync(
       const gpu::Mailbox& source_mailbox,
@@ -177,11 +178,9 @@ class RASTER_EXPORT RasterImplementationGLES : public RasterInterface {
 
  private:
   GLHelper* GetGLHelper();
-  void OnReadARGBPixelsAsync(
-      GLuint texture_id,
-      base::OnceCallback<void(GrSurfaceOrigin, bool)> callback,
-      GrSurfaceOrigin result_origin,
-      bool success);
+  void OnReadARGBPixelsAsync(GLuint texture_id,
+                             base::OnceCallback<void(bool)> callback,
+                             bool success);
   void OnReadYUVPixelsAsync(GLuint copy_texture_id,
                             base::OnceCallback<void()> on_release_mailbox,
                             base::OnceCallback<void(bool)> readback_done,

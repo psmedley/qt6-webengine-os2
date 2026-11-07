@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,7 +49,8 @@ DXGISharedHandleState::DXGISharedHandleState(
     gfx::DXGIHandleToken token,
     base::win::ScopedHandle shared_handle,
     Microsoft::WRL::ComPtr<ID3D11Texture2D> d3d11_texture)
-    : base::subtle::RefCountedThreadSafeBase(kRefCountPreference),
+    : base::subtle::RefCountedThreadSafeBase(
+          base::subtle::GetRefCountPreference<DXGISharedHandleState>()),
       manager_(std::move(manager)),
       token_(std::move(token)),
       shared_handle_(std::move(shared_handle)),

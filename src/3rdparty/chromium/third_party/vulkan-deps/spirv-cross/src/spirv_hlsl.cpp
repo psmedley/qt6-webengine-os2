@@ -643,6 +643,13 @@ void CompilerHLSL::emit_builtin_outputs_in_struct()
 			else
 				SPIRV_CROSS_THROW("Unsupported builtin in HLSL.");
 
+		case BuiltInLayer:
+			if (hlsl_options.shader_model < 50 || get_entry_point().model != ExecutionModelGeometry)
+				SPIRV_CROSS_THROW("Render target array index output is only supported in GS 5.0 or higher.");
+			type = "uint";
+			semantic = "SV_RenderTargetArrayIndex";
+			break;
+
 		default:
 			SPIRV_CROSS_THROW("Unsupported builtin in HLSL.");
 		}
@@ -726,6 +733,13 @@ void CompilerHLSL::emit_builtin_inputs_in_struct()
 			semantic = "SV_IsFrontFace";
 			break;
 
+		case BuiltInViewIndex:
+			if (hlsl_options.shader_model < 61 || (get_entry_point().model != ExecutionModelVertex && get_entry_point().model != ExecutionModelFragment))
+				SPIRV_CROSS_THROW("View Index input is only supported in VS and PS 6.1 or higher.");
+			type = "uint";
+			semantic = "SV_ViewID";
+			break;
+
 		case BuiltInNumWorkgroups:
 		case BuiltInSubgroupSize:
 		case BuiltInSubgroupLocalInvocationId:
@@ -734,6 +748,8 @@ void CompilerHLSL::emit_builtin_inputs_in_struct()
 		case BuiltInSubgroupLeMask:
 		case BuiltInSubgroupGtMask:
 		case BuiltInSubgroupGeMask:
+		case BuiltInBaseVertex:
+		case BuiltInBaseInstance:
 			// Handled specially.
 			break;
 
@@ -780,6 +796,13 @@ void CompilerHLSL::emit_builtin_inputs_in_struct()
 				break;
 			else
 				SPIRV_CROSS_THROW("Unsupported builtin in HLSL.");
+
+		case BuiltInLayer:
+			if (hlsl_options.shader_model < 50 || get_entry_point().model != ExecutionModelFragment)
+				SPIRV_CROSS_THROW("Render target array index input is only supported in PS 5.0 or higher.");
+			type = "uint";
+			semantic = "SV_RenderTargetArrayIndex";
+			break;
 
 		default:
 			SPIRV_CROSS_THROW("Unsupported builtin in HLSL.");
@@ -1011,8 +1034,6 @@ void CompilerHLSL::emit_builtin_variables()
 	Bitset builtins = active_input_builtins;
 	builtins.merge_or(active_output_builtins);
 
-	bool need_base_vertex_info = false;
-
 	std::unordered_map<uint32_t, ID> builtin_to_initializer;
 	ir.for_each_typed_id<SPIRVariable>([&](uint32_t, SPIRVariable &var) {
 		if (!is_builtin_variable(var) || var.storage != StorageClassOutput || !var.initializer)
@@ -1066,7 +1087,13 @@ void CompilerHLSL::emit_builtin_variables()
 		case BuiltInInstanceIndex:
 			type = "int";
 			if (hlsl_options.support_nonzero_base_vertex_base_instance)
-				need_base_vertex_info = true;
+				base_vertex_info.used = true;
+			break;
+
+		case BuiltInBaseVertex:
+		case BuiltInBaseInstance:
+			type = "int";
+			base_vertex_info.used = true;
 			break;
 
 		case BuiltInInstanceId:
@@ -1139,6 +1166,8 @@ void CompilerHLSL::emit_builtin_variables()
 			break;
 
 		case BuiltInPrimitiveId:
+		case BuiltInViewIndex:
+		case BuiltInLayer:
 			type = "uint";
 			break;
 
@@ -1164,15 +1193,47 @@ void CompilerHLSL::emit_builtin_variables()
 		}
 	});
 
-	if (need_base_vertex_info)
+	if (base_vertex_info.used)
 	{
-		statement("cbuffer SPIRV_Cross_VertexInfo");
+		string binding_info;
+		if (base_vertex_info.explicit_binding)
+		{
+			binding_info = join(" : register(b", base_vertex_info.register_index);
+			if (base_vertex_info.register_space)
+				binding_info += join(", space", base_vertex_info.register_space);
+			binding_info += ")";
+		}
+		statement("cbuffer SPIRV_Cross_VertexInfo", binding_info);
 		begin_scope();
 		statement("int SPIRV_Cross_BaseVertex;");
 		statement("int SPIRV_Cross_BaseInstance;");
 		end_scope_decl();
 		statement("");
 	}
+}
+
+void CompilerHLSL::set_hlsl_aux_buffer_binding(HLSLAuxBinding binding, uint32_t register_index, uint32_t register_space)
+{
+	if (binding == HLSL_AUX_BINDING_BASE_VERTEX_INSTANCE)
+	{
+		base_vertex_info.explicit_binding = true;
+		base_vertex_info.register_space = register_space;
+		base_vertex_info.register_index = register_index;
+	}
+}
+
+void CompilerHLSL::unset_hlsl_aux_buffer_binding(HLSLAuxBinding binding)
+{
+	if (binding == HLSL_AUX_BINDING_BASE_VERTEX_INSTANCE)
+		base_vertex_info.explicit_binding = false;
+}
+
+bool CompilerHLSL::is_hlsl_aux_buffer_binding_used(HLSLAuxBinding binding) const
+{
+	if (binding == HLSL_AUX_BINDING_BASE_VERTEX_INSTANCE)
+		return base_vertex_info.used;
+	else
+		return false;
 }
 
 void CompilerHLSL::emit_composite_constants()
@@ -1294,7 +1355,33 @@ void CompilerHLSL::replace_illegal_names()
 {
 	static const unordered_set<string> keywords = {
 		// Additional HLSL specific keywords.
-		"line", "linear", "matrix", "point", "row_major", "sampler", "vector"
+		// From https://docs.microsoft.com/en-US/windows/win32/direct3dhlsl/dx-graphics-hlsl-appendix-keywords
+		"AppendStructuredBuffer", "asm", "asm_fragment",
+		"BlendState", "bool", "break", "Buffer", "ByteAddressBuffer",
+		"case", "cbuffer", "centroid", "class", "column_major", "compile",
+		"compile_fragment", "CompileShader", "const", "continue", "ComputeShader",
+		"ConsumeStructuredBuffer",
+		"default", "DepthStencilState", "DepthStencilView", "discard", "do",
+		"double", "DomainShader", "dword",
+		"else", "export", "false", "float", "for", "fxgroup",
+		"GeometryShader", "groupshared", "half", "HullShader",
+		"if", "in", "inline", "inout", "InputPatch", "int", "interface",
+		"line", "lineadj", "linear", "LineStream",
+		"matrix", "min16float", "min10float", "min16int", "min16uint",
+		"namespace", "nointerpolation", "noperspective", "NULL",
+		"out", "OutputPatch",
+		"packoffset", "pass", "pixelfragment", "PixelShader", "point",
+		"PointStream", "precise", "RasterizerState", "RenderTargetView",
+		"return", "register", "row_major", "RWBuffer", "RWByteAddressBuffer",
+		"RWStructuredBuffer", "RWTexture1D", "RWTexture1DArray", "RWTexture2D",
+		"RWTexture2DArray", "RWTexture3D", "sample", "sampler", "SamplerState",
+		"SamplerComparisonState", "shared", "snorm", "stateblock", "stateblock_state",
+		"static", "string", "struct", "switch", "StructuredBuffer", "tbuffer",
+		"technique", "technique10", "technique11", "texture", "Texture1D",
+		"Texture1DArray", "Texture2D", "Texture2DArray", "Texture2DMS", "Texture2DMSArray",
+		"Texture3D", "TextureCube", "TextureCubeArray", "true", "typedef", "triangle",
+		"triangleadj", "TriangleStream", "uint", "uniform", "unorm", "unsigned",
+		"vector", "vertexfragment", "VertexShader", "void", "volatile", "while",
 	};
 
 	CompilerGLSL::replace_illegal_names(keywords);
@@ -2355,12 +2442,32 @@ string CompilerHLSL::to_func_call_arg(const SPIRFunction::Parameter &arg, uint32
 	return arg_str;
 }
 
+string CompilerHLSL::get_inner_entry_point_name() const
+{
+	auto &execution = get_entry_point();
+
+	if (hlsl_options.use_entry_point_name)
+	{
+		auto name = join(execution.name, "_inner");
+		ParsedIR::sanitize_underscores(name);
+		return name;
+	}
+
+	if (execution.model == ExecutionModelVertex)
+		return "vert_main";
+	else if (execution.model == ExecutionModelFragment)
+		return "frag_main";
+	else if (execution.model == ExecutionModelGLCompute)
+		return "comp_main";
+	else
+		SPIRV_CROSS_THROW("Unsupported execution model.");
+}
+
 void CompilerHLSL::emit_function_prototype(SPIRFunction &func, const Bitset &return_flags)
 {
 	if (func.self != ir.default_entry_point)
 		add_function_overload(func);
 
-	auto &execution = get_entry_point();
 	// Avoid shadow declarations.
 	local_variable_names = resource_names;
 
@@ -2381,14 +2488,7 @@ void CompilerHLSL::emit_function_prototype(SPIRFunction &func, const Bitset &ret
 
 	if (func.self == ir.default_entry_point)
 	{
-		if (execution.model == ExecutionModelVertex)
-			decl += "vert_main";
-		else if (execution.model == ExecutionModelFragment)
-			decl += "frag_main";
-		else if (execution.model == ExecutionModelGLCompute)
-			decl += "comp_main";
-		else
-			SPIRV_CROSS_THROW("Unsupported execution model.");
+		decl += get_inner_entry_point_name();
 		processing_entry_point = true;
 	}
 	else
@@ -2506,7 +2606,13 @@ void CompilerHLSL::emit_hlsl_entry_point()
 		break;
 	}
 
-	statement(require_output ? "SPIRV_Cross_Output " : "void ", "main(", merge(arguments), ")");
+	const char *entry_point_name;
+	if (hlsl_options.use_entry_point_name)
+		entry_point_name = get_entry_point().name.c_str();
+	else
+		entry_point_name = "main";
+
+	statement(require_output ? "SPIRV_Cross_Output " : "void ", entry_point_name, "(", merge(arguments), ")");
 	begin_scope();
 	bool legacy = hlsl_options.shader_model <= 30;
 
@@ -2542,6 +2648,14 @@ void CompilerHLSL::emit_hlsl_entry_point()
 			}
 			else
 				statement(builtin, " = int(stage_input.", builtin, ");");
+			break;
+
+		case BuiltInBaseVertex:
+			statement(builtin, " = SPIRV_Cross_BaseVertex;");
+			break;
+
+		case BuiltInBaseInstance:
+			statement(builtin, " = SPIRV_Cross_BaseInstance;");
 			break;
 
 		case BuiltInInstanceId:
@@ -2679,12 +2793,12 @@ void CompilerHLSL::emit_hlsl_entry_point()
 	});
 
 	// Run the shader.
-	if (execution.model == ExecutionModelVertex)
-		statement("vert_main();");
-	else if (execution.model == ExecutionModelFragment)
-		statement("frag_main();");
-	else if (execution.model == ExecutionModelGLCompute)
-		statement("comp_main();");
+	if (execution.model == ExecutionModelVertex ||
+	    execution.model == ExecutionModelFragment ||
+	    execution.model == ExecutionModelGLCompute)
+	{
+		statement(get_inner_entry_point_name(), "();");
+	}
 	else
 		SPIRV_CROSS_THROW("Unsupported shader stage.");
 
@@ -3548,6 +3662,18 @@ string CompilerHLSL::bitcast_glsl_op(const SPIRType &out_type, const SPIRType &i
 			force_recompile();
 		}
 		return "spvPackFloat2x16";
+	}
+	else if (out_type.basetype == SPIRType::UShort && in_type.basetype == SPIRType::Half)
+	{
+		if (hlsl_options.shader_model < 40)
+			SPIRV_CROSS_THROW("Half to UShort requires Shader Model 4.");
+		return "(" + type_to_glsl(out_type) + ")f32tof16";
+	}
+	else if (out_type.basetype == SPIRType::Half && in_type.basetype == SPIRType::UShort)
+	{
+		if (hlsl_options.shader_model < 40)
+			SPIRV_CROSS_THROW("UShort to Half requires Shader Model 4.");
+		return "(" + type_to_glsl(out_type) + ")f16tof32";
 	}
 	else
 		return "";
@@ -4667,9 +4793,9 @@ void CompilerHLSL::emit_subgroup_op(const Instruction &i)
 	case OpGroupNonUniformBallotBitCount:
 	{
 		auto operation = static_cast<GroupOperation>(ops[3]);
+		bool forward = should_forward(ops[4]);
 		if (operation == GroupOperationReduce)
 		{
-			bool forward = should_forward(ops[4]);
 			auto left = join("countbits(", to_enclosed_expression(ops[4]), ".x) + countbits(",
 			                 to_enclosed_expression(ops[4]), ".y)");
 			auto right = join("countbits(", to_enclosed_expression(ops[4]), ".z) + countbits(",
@@ -4678,9 +4804,31 @@ void CompilerHLSL::emit_subgroup_op(const Instruction &i)
 			inherit_expression_dependencies(id, ops[4]);
 		}
 		else if (operation == GroupOperationInclusiveScan)
-			SPIRV_CROSS_THROW("Cannot trivially implement BallotBitCount Inclusive Scan in HLSL.");
+		{
+			auto left = join("countbits(", to_enclosed_expression(ops[4]), ".x & gl_SubgroupLeMask.x) + countbits(",
+			                 to_enclosed_expression(ops[4]), ".y & gl_SubgroupLeMask.y)");
+			auto right = join("countbits(", to_enclosed_expression(ops[4]), ".z & gl_SubgroupLeMask.z) + countbits(",
+			                  to_enclosed_expression(ops[4]), ".w & gl_SubgroupLeMask.w)");
+			emit_op(result_type, id, join(left, " + ", right), forward);
+			if (!active_input_builtins.get(BuiltInSubgroupLeMask))
+			{
+				active_input_builtins.set(BuiltInSubgroupLeMask);
+				force_recompile_guarantee_forward_progress();
+			}
+		}
 		else if (operation == GroupOperationExclusiveScan)
-			SPIRV_CROSS_THROW("Cannot trivially implement BallotBitCount Exclusive Scan in HLSL.");
+		{
+			auto left = join("countbits(", to_enclosed_expression(ops[4]), ".x & gl_SubgroupLtMask.x) + countbits(",
+			                 to_enclosed_expression(ops[4]), ".y & gl_SubgroupLtMask.y)");
+			auto right = join("countbits(", to_enclosed_expression(ops[4]), ".z & gl_SubgroupLtMask.z) + countbits(",
+			                  to_enclosed_expression(ops[4]), ".w & gl_SubgroupLtMask.w)");
+			emit_op(result_type, id, join(left, " + ", right), forward);
+			if (!active_input_builtins.get(BuiltInSubgroupLtMask))
+			{
+				active_input_builtins.set(BuiltInSubgroupLtMask);
+				force_recompile_guarantee_forward_progress();
+			}
+		}
 		else
 			SPIRV_CROSS_THROW("Invalid BitCount operation.");
 		break;

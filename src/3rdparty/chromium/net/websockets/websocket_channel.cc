@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -127,11 +127,11 @@ void GetFrameTypeForOpcode(WebSocketFrameHeader::OpCode opcode,
 base::Value NetLogFailParam(uint16_t code,
                             base::StringPiece reason,
                             base::StringPiece message) {
-  base::Value dict(base::Value::Type::DICTIONARY);
-  dict.SetDoubleKey("code", code);
-  dict.SetStringKey("reason", reason);
-  dict.SetStringKey("internal_reason", message);
-  return dict;
+  base::Value::Dict dict;
+  dict.Set("code", code);
+  dict.Set("reason", reason);
+  dict.Set("internal_reason", message);
+  return base::Value(std::move(dict));
 }
 
 class DependentIOBuffer : public WrappedIOBuffer {
@@ -150,7 +150,7 @@ class DependentIOBuffer : public WrappedIOBuffer {
 // those frames.
 class WebSocketChannel::SendBuffer {
  public:
-  SendBuffer() : total_bytes_(0) {}
+  SendBuffer() = default;
 
   // Add a WebSocketFrame to the buffer and increase total_bytes_.
   void AddFrame(std::unique_ptr<WebSocketFrame> chunk,
@@ -168,7 +168,7 @@ class WebSocketChannel::SendBuffer {
   // The total size of the payload data in |frames_|. This will be used to
   // measure the throughput of the link.
   // TODO(ricea): Measure the throughput of the link.
-  uint64_t total_bytes_;
+  uint64_t total_bytes_ = 0;
 };
 
 void WebSocketChannel::SendBuffer::AddFrame(
@@ -248,14 +248,7 @@ WebSocketChannel::WebSocketChannel(
       closing_handshake_timeout_(
           base::Seconds(kClosingHandshakeTimeoutSeconds)),
       underlying_connection_close_timeout_(
-          base::Seconds(kUnderlyingConnectionCloseTimeoutSeconds)),
-      has_received_close_frame_(false),
-      received_close_code_(0),
-      state_(FRESHLY_CONSTRUCTED),
-      sending_text_message_(false),
-      receiving_text_message_(false),
-      expecting_to_handle_continuation_(false),
-      initial_frame_forwarded_(false) {}
+          base::Seconds(kUnderlyingConnectionCloseTimeoutSeconds)) {}
 
 WebSocketChannel::~WebSocketChannel() {
   // The stream may hold a pointer to read_frames_, and so it needs to be
@@ -614,8 +607,8 @@ ChannelState WebSocketChannel::OnReadDone(bool synchronous, int result) {
       // with no data read, not an empty response.
       DCHECK(!read_frames_.empty())
           << "ReadFrames() returned OK, but nothing was read.";
-      for (size_t i = 0; i < read_frames_.size(); ++i) {
-        if (HandleFrame(std::move(read_frames_[i])) == CHANNEL_DELETED)
+      for (auto& read_frame : read_frames_) {
+        if (HandleFrame(std::move(read_frame)) == CHANNEL_DELETED)
           return CHANNEL_DELETED;
       }
       read_frames_.clear();
@@ -965,7 +958,7 @@ bool WebSocketChannel::ParseClose(base::span<const char> payload,
 
     DVLOG(1) << "Close frame with payload size " << size << " received "
              << "(the first byte is " << std::hex
-             << static_cast<int>(payload.data()[0]) << ")";
+             << static_cast<int>(payload[0]) << ")";
     *code = kWebSocketErrorProtocolError;
     *message =
         "Received a broken close frame containing an invalid size body.";
@@ -1015,7 +1008,11 @@ void WebSocketChannel::CloseTimeout() {
       net::NetLogEventType::WEBSOCKET_CLOSE_TIMEOUT);
   stream_->Close();
   SetState(CLOSED);
-  DoDropChannel(false, kWebSocketErrorAbnormalClosure, "");
+  if (has_received_close_frame_) {
+    DoDropChannel(true, received_close_code_, received_close_reason_);
+  } else {
+    DoDropChannel(false, kWebSocketErrorAbnormalClosure, "");
+  }
   // |this| has been deleted.
 }
 

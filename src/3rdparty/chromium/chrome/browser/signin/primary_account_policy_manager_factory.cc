@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
-#include "components/keyed_service/content/browser_context_dependency_manager.h"
 
 // static
 PrimaryAccountPolicyManagerFactory*
@@ -24,9 +23,7 @@ PrimaryAccountPolicyManager* PrimaryAccountPolicyManagerFactory::GetForProfile(
 }
 
 PrimaryAccountPolicyManagerFactory::PrimaryAccountPolicyManagerFactory()
-    : BrowserContextKeyedServiceFactory(
-          "PrimaryAccountPolicyManager",
-          BrowserContextDependencyManager::GetInstance()) {
+    : ProfileKeyedServiceFactory("PrimaryAccountPolicyManager") {
   DependsOn(IdentityManagerFactory::GetInstance());
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/stl_util.h"
+#include "base/types/optional_util.h"
 #include "components/keyed_service/content/browser_context_keyed_service_shutdown_notifier_factory.h"
 #include "components/keyed_service/core/keyed_service_shutdown_notifier.h"
 #include "content/public/browser/child_process_security_policy.h"
@@ -16,6 +16,7 @@
 #include "extensions/browser/bad_message.h"
 #include "extensions/browser/content_script_tracker.h"
 #include "extensions/browser/event_router_factory.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/common/extension_features.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/trace_util.h"
@@ -49,17 +50,6 @@ class ShutdownNotifierFactory
   ~ShutdownNotifierFactory() override = default;
 };
 
-// Returns true if the process corresponding to `render_process_id` can host an
-// extension with `extension_id`.  (It doesn't necessarily mean that the process
-// *does* host this specific extension at this point in time.)
-bool CanRendererHostExtensionOrigin(int render_process_id,
-                                    const std::string& extension_id) {
-  url::Origin extension_origin =
-      Extension::CreateOriginFromExtensionId(extension_id);
-  auto* policy = content::ChildProcessSecurityPolicy::GetInstance();
-  return policy->CanAccessDataForOrigin(render_process_id, extension_origin);
-}
-
 // Returns true if `source_endpoint` can be legitimately claimed/used by
 // `process`.  Otherwise reports a bad IPC message and returns false (expecting
 // the caller to not take any action based on the rejected, untrustworthy
@@ -87,7 +77,7 @@ bool IsValidMessagingSource(RenderProcessHost& process,
             &process, bad_message::EMF_NO_EXTENSION_ID_FOR_EXTENSION_SOURCE);
         return false;
       }
-      if (!CanRendererHostExtensionOrigin(
+      if (!util::CanRendererHostExtensionOrigin(
               process.GetID(), source_endpoint.extension_id.value())) {
         bad_message::ReceivedBadMessage(
             &process,
@@ -103,31 +93,11 @@ bool IsValidMessagingSource(RenderProcessHost& process,
             ContentScriptTracker::DidProcessRunContentScriptFromExtension(
                 process, extension_id);
         if (!is_content_script_expected) {
-          // TODO(https://crbug.com/1212918): Remove some of the more excessive
-          // tracing once there are no more bad message reports to investigate.
-          // (Remove here + in ContentScriptTracker.)
-          TRACE_EVENT_INSTANT("extensions",
-                              "IsValidMessagingSource: kTab: bad message",
-                              ChromeTrackEvent::kRenderProcessHost, process,
-                              ChromeTrackEvent::kChromeExtensionId,
-                              ExtensionIdForTracing(extension_id));
-          if (!base::FeatureList::IsEnabled(
-                  extensions_features::
-                      kCheckingUnexpectedExtensionIdInContentScriptIpcs)) {
-            base::UmaHistogramSparse(
-                "Stability.BadMessageTerminated.Extensions",
-                bad_message::EMF_INVALID_EXTENSION_ID_FOR_CONTENT_SCRIPT);
-            return true;
-          }
           bad_message::ReceivedBadMessage(
               &process,
               bad_message::EMF_INVALID_EXTENSION_ID_FOR_CONTENT_SCRIPT);
           return false;
         }
-        TRACE_EVENT_INSTANT("extensions", "IsValidMessagingSource: kTab: ok",
-                            ChromeTrackEvent::kRenderProcessHost, process,
-                            ChromeTrackEvent::kChromeExtensionId,
-                            ExtensionIdForTracing(extension_id));
       }
       return true;
   }
@@ -148,8 +118,8 @@ bool IsValidSourceContext(RenderProcessHost& process,
     // exists using ProcessManager::HasServiceWorker) might incorrectly return
     // false=invalid-IPC for IPCs from workers that were recently torn down /
     // made inactive.
-    if (!CanRendererHostExtensionOrigin(process.GetID(),
-                                        worker_context.extension_id)) {
+    if (!util::CanRendererHostExtensionOrigin(process.GetID(),
+                                              worker_context.extension_id)) {
       bad_message::ReceivedBadMessage(
           &process, bad_message::EMF_INVALID_EXTENSION_ID_FOR_WORKER_CONTEXT);
       return false;
@@ -171,20 +141,20 @@ bool IsValidSourceContext(RenderProcessHost& process,
 
 base::debug::CrashKeyString* GetTargetIdCrashKey() {
   static auto* crash_key = base::debug::AllocateCrashKeyString(
-      "ExternalConnectionInfo::target_id", base::debug::CrashKeySize::Size64);
+      "ExternalConnectionInfo-target_id", base::debug::CrashKeySize::Size64);
   return crash_key;
 }
 
 base::debug::CrashKeyString* GetSourceOriginCrashKey() {
   static auto* crash_key = base::debug::AllocateCrashKeyString(
-      "ExternalConnectionInfo::source_origin",
+      "ExternalConnectionInfo-source_origin",
       base::debug::CrashKeySize::Size256);
   return crash_key;
 }
 
 base::debug::CrashKeyString* GetSourceUrlCrashKey() {
   static auto* crash_key = base::debug::AllocateCrashKeyString(
-      "ExternalConnectionInfo::source_url", base::debug::CrashKeySize::Size256);
+      "ExternalConnectionInfo-source_url", base::debug::CrashKeySize::Size256);
   return crash_key;
 }
 
@@ -195,7 +165,7 @@ class ScopedExternalConnectionInfoCrashKeys {
       : target_id_(GetTargetIdCrashKey(), info.target_id),
         source_endpoint_(info.source_endpoint),
         source_origin_(GetSourceOriginCrashKey(),
-                       base::OptionalOrNullptr(info.source_origin)),
+                       base::OptionalToPtr(info.source_origin)),
         source_url_(GetSourceUrlCrashKey(),
                     info.source_url.possibly_invalid_spec()) {}
 
@@ -349,7 +319,7 @@ void MessagingAPIMessageFilter::OnOpenChannelToTab(
   TRACE_EVENT("extensions", "MessageFilter::OnOpenChannelToTab",
               ChromeTrackEvent::kRenderProcessHost, *process);
 
-  if (!CanRendererHostExtensionOrigin(render_process_id_, extension_id)) {
+  if (!util::CanRendererHostExtensionOrigin(render_process_id_, extension_id)) {
     bad_message::ReceivedBadMessage(
         process, bad_message::EMF_INVALID_EXTENSION_ID_FOR_TAB_MSG);
     return;

@@ -27,7 +27,6 @@
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "encode.h"
-#include "internal.h"
 #include "wma.h"
 #include "libavutil/avassert.h"
 
@@ -110,7 +109,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
 static int apply_window_and_mdct(AVCodecContext *avctx, const AVFrame *frame)
 {
     WMACodecContext *s = avctx->priv_data;
-    float **audio      = (float **) frame->extended_data;
+    const float *const *audio = (const float *const *) frame->extended_data;
     int len            = frame->nb_samples;
     int window_index   = s->frame_len_bits - s->block_len_bits;
     FFTContext *mdct   = &s->mdct_ctx[window_index];
@@ -435,30 +434,32 @@ static int encode_superframe(AVCodecContext *avctx, AVPacket *avpkt,
 #if CONFIG_WMAV1_ENCODER
 const FFCodec ff_wmav1_encoder = {
     .p.name         = "wmav1",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Windows Media Audio 1"),
+    CODEC_LONG_NAME("Windows Media Audio 1"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_WMAV1,
+    .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(WMACodecContext),
     .init           = encode_init,
-    .encode2        = encode_superframe,
+    FF_CODEC_ENCODE_CB(encode_superframe),
     .close          = ff_wma_end,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };
 #endif
 #if CONFIG_WMAV2_ENCODER
 const FFCodec ff_wmav2_encoder = {
     .p.name         = "wmav2",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Windows Media Audio 2"),
+    CODEC_LONG_NAME("Windows Media Audio 2"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_WMAV2,
+    .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(WMACodecContext),
     .init           = encode_init,
-    .encode2        = encode_superframe,
+    FF_CODEC_ENCODE_CB(encode_superframe),
     .close          = ff_wma_end,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };
 #endif

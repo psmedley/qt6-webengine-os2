@@ -35,6 +35,7 @@
 #include "build/build_config.h"
 #include "cc/layers/content_layer_client.h"
 #include "cc/layers/picture_layer.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
@@ -77,6 +78,7 @@
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 #include "third_party/blink/renderer/platform/data_resource_helper.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
+#include "third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/cull_rect.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
@@ -386,7 +388,9 @@ InspectorOverlayAgent::InspectorOverlayAgent(
       show_size_on_resize_(&agent_state_, false),
       paused_in_debugger_message_(&agent_state_, String()),
       inspect_mode_(&agent_state_, protocol::Overlay::InspectModeEnum::None),
-      inspect_mode_protocol_config_(&agent_state_, std::vector<uint8_t>()) {}
+      inspect_mode_protocol_config_(&agent_state_, std::vector<uint8_t>()) {
+  DCHECK(dom_agent);
+}
 
 InspectorOverlayAgent::~InspectorOverlayAgent() {
   DCHECK(!overlay_page_);
@@ -1214,6 +1218,8 @@ void InspectorOverlayAgent::LoadOverlayPageResource() {
       settings.GetGenericFontFamilySettings().Cursive());
   overlay_settings.GetGenericFontFamilySettings().UpdateFantasy(
       settings.GetGenericFontFamilySettings().Fantasy());
+  overlay_settings.GetGenericFontFamilySettings().UpdateMath(
+      settings.GetGenericFontFamilySettings().Math());
   overlay_settings.SetMinimumFontSize(settings.GetMinimumFontSize());
   overlay_settings.SetMinimumLogicalFontSize(
       settings.GetMinimumLogicalFontSize());
@@ -1228,7 +1234,8 @@ void InspectorOverlayAgent::LoadOverlayPageResource() {
       FrameInsertType::kInsertInConstructor, LocalFrameToken(), nullptr,
       nullptr);
   frame->SetView(MakeGarbageCollected<LocalFrameView>(*frame));
-  frame->Init(/*opener=*/nullptr, /*policy_container=*/nullptr);
+  frame->Init(/*opener=*/nullptr, DocumentToken(), /*policy_container=*/nullptr,
+              StorageKey());
   frame->View()->SetCanHaveScrollbars(false);
   frame->View()->SetBaseBackgroundColor(Color::kTransparent);
 
@@ -1245,7 +1252,8 @@ void InspectorOverlayAgent::LoadOverlayPageResource() {
   DCHECK(script_state);
   ScriptState::Scope scope(script_state);
   v8::MicrotasksScope microtasks_scope(
-      isolate, v8::MicrotasksScope::kDoNotRunMicrotasks);
+      isolate, ToMicrotaskQueue(script_state),
+      v8::MicrotasksScope::kDoNotRunMicrotasks);
   v8::Local<v8::Object> global = script_state->GetContext()->Global();
   v8::Local<v8::Value> overlay_host_obj =
       ToV8(overlay_host_.Get(), global, isolate);
@@ -1281,11 +1289,14 @@ void InspectorOverlayAgent::Reset(
   reset_data->setDouble("pageScaleFactor",
                         GetFrame()->GetPage()->GetVisualViewport().Scale());
 
-  gfx::Rect viewport_in_screen =
-      GetFrame()->GetPage()->GetChromeClient().ViewportToScreen(
-          gfx::Rect(gfx::Point(), viewport_size), GetFrame()->View());
+  float physical_to_dips =
+      1.f / GetFrame()->GetPage()->GetChromeClient().WindowToViewportScalar(
+                GetFrame(), 1.f);
+  gfx::Size viewport_size_in_dips =
+      gfx::ScaleToFlooredSize(viewport_size, physical_to_dips);
+
   reset_data->setObject("viewportSize",
-                        BuildObjectForSize(viewport_in_screen.size()));
+                        BuildObjectForSize(viewport_size_in_dips));
   reset_data->setObject("viewportSizeForMediaQueries",
                         BuildObjectForSize(viewport_size_for_media_queries));
 
@@ -1337,7 +1348,8 @@ void InspectorOverlayAgent::EvaluateInOverlay(const String& method,
 
   v8::Local<v8::Value> v8_method;
   if (!GetV8Property(context, context->Global(), "dispatch")
-           .ToLocal(&v8_method)) {
+           .ToLocal(&v8_method) ||
+      v8_method->IsUndefined()) {
     return;
   }
 
@@ -1400,7 +1412,7 @@ void InspectorOverlayAgent::PageLayoutInvalidated(bool resized) {
     resize_timer_active_ = false;
     // Handle the resize in the next cycle to decouple overlay page rebuild from
     // the main page layout to avoid document lifecycle issues caused by
-    // Microtask::PerformCheckpoint() called when we rebuild the overlay page.
+    // EventLoop::PerformCheckpoint() called when we rebuild the overlay page.
     resize_timer_.Stop();
     resize_timer_.StartOneShot(base::Seconds(0), FROM_HERE);
     return;
@@ -1510,8 +1522,11 @@ void InspectorOverlayAgent::DisableFrameOverlay() {
   client.SetCursorOverridden(false);
   client.SetCursor(PointerCursor(), GetFrame());
 
-  if (auto* frame_view = frame_impl_->GetFrameView())
-    frame_view->SetPaintArtifactCompositorNeedsUpdate();
+  if (auto* frame_view = frame_impl_->GetFrameView()) {
+    frame_view->SetPaintArtifactCompositorNeedsUpdate(
+        PaintArtifactCompositorUpdateReason::
+            kInspectorOverlayAgentDisableFrameOverlay);
+  }
 }
 
 void InspectorOverlayAgent::EnsureEnableFrameOverlay() {

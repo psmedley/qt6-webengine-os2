@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -100,7 +100,7 @@ class IdleManager : public ExtensionRegistryObserver,
   // other operating systems.
   base::TimeDelta GetAutoLockDelay() const;
 
-  static std::unique_ptr<base::Value> CreateIdleValue(ui::IdleState idle_state);
+  static base::Value CreateIdleValue(ui::IdleState idle_state);
 
   // Override default event class. Callee assumes ownership. Used for testing.
   void SetEventDelegateForTest(std::unique_ptr<EventDelegate> event_delegate);

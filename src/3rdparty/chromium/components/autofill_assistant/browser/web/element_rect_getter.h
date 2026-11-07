@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,12 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/autofill_assistant/browser/devtools/devtools_client.h"
-#include "components/autofill_assistant/browser/rectf.h"
-#include "components/autofill_assistant/browser/web/element_finder.h"
+#include "components/autofill_assistant/browser/public/rectf.h"
 #include "components/autofill_assistant/browser/web/web_controller_worker.h"
 
 namespace autofill_assistant {
+class ClientStatus;
+class ElementFinderResult;
 
 // Worker class to get an element's bounding rectangle in viewport coordinates.
 // This returns the global coordinates of the element rect, summing up (and

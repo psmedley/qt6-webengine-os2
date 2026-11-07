@@ -34,11 +34,12 @@ static_library("utils") {
   # Export all of these as public deps so that `gn check` allows includes
   public_deps = [
     "${dawn_root}/src/dawn:cpp",
+    "${dawn_root}/src/dawn:proc_shared",
     "${dawn_root}/src/dawn/common",
+    "${dawn_root}/src/dawn/glfw",
     "${dawn_root}/src/dawn/native",
     "${dawn_root}/src/dawn/utils",
     "${dawn_root}/src/dawn/utils:bindings",
-    "${dawn_root}/src/dawn/utils:glfw",
     "${dawn_root}/src/dawn/wire",
   ]
   public_configs = [ "${dawn_root}/src/dawn/common:internal_config" ]

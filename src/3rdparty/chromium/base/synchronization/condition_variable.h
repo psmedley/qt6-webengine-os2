@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,6 +62,7 @@
 #ifndef BASE_SYNCHRONIZATION_CONDITION_VARIABLE_H_
 #define BASE_SYNCHRONIZATION_CONDITION_VARIABLE_H_
 
+#include "base/dcheck_is_on.h"
 #include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 
@@ -70,7 +71,6 @@
 #endif
 
 #include "base/base_export.h"
-#include "base/check_op.h"
 #include "base/synchronization/lock.h"
 
 #if BUILDFLAG(IS_WIN)

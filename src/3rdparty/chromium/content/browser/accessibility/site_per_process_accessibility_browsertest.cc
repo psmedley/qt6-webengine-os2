@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -102,7 +102,7 @@ IN_PROC_BROWSER_TEST_P(MAYBE_SitePerProcessAccessibilityBrowserTest,
                                                 "Title Of Awesomeness");
 
   RenderFrameHostImpl* main_frame = static_cast<RenderFrameHostImpl*>(
-      shell()->web_contents()->GetMainFrame());
+      shell()->web_contents()->GetPrimaryMainFrame());
   BrowserAccessibilityManager* main_frame_manager =
       main_frame->browser_accessibility_manager();
   VLOG(1) << "Main frame accessibility tree:\n"
@@ -110,7 +110,8 @@ IN_PROC_BROWSER_TEST_P(MAYBE_SitePerProcessAccessibilityBrowserTest,
 
   // Assert that we can walk from the main frame down into the child frame
   // directly, getting correct roles and data along the way.
-  BrowserAccessibility* ax_root = main_frame_manager->GetRoot();
+  BrowserAccessibility* ax_root =
+      main_frame_manager->GetBrowserAccessibilityRoot();
   EXPECT_EQ(ax::mojom::Role::kRootWebArea, ax_root->GetRole());
   ASSERT_EQ(1U, ax_root->PlatformChildCount());
 
@@ -241,7 +242,7 @@ IN_PROC_BROWSER_TEST_P(
   child = root->child_at(0);
 
   RenderFrameHostImpl* main_frame = static_cast<RenderFrameHostImpl*>(
-      shell()->web_contents()->GetMainFrame());
+      shell()->web_contents()->GetPrimaryMainFrame());
   BrowserAccessibilityManager* main_frame_manager =
       main_frame->browser_accessibility_manager();
   VLOG(1) << "Main frame accessibility tree:\n"
@@ -249,7 +250,8 @@ IN_PROC_BROWSER_TEST_P(
 
   // Assert that we can walk from the main frame down into the child frame
   // directly, getting correct roles and data along the way.
-  BrowserAccessibility* ax_root = main_frame_manager->GetRoot();
+  BrowserAccessibility* ax_root =
+      main_frame_manager->GetBrowserAccessibilityRoot();
   EXPECT_EQ(ax::mojom::Role::kRootWebArea, ax_root->GetRole());
   ASSERT_EQ(1U, ax_root->PlatformChildCount());
 

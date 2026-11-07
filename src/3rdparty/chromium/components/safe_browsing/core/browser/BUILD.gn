@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -151,6 +151,20 @@ source_set("token_fetcher_unit_tests") {
     ":token_fetcher",
     "//base/test:test_support",
     "//testing/gtest",
+  ]
+}
+
+source_set("token_fetcher_testing_helper") {
+  testonly = true
+  sources = [
+    "test_safe_browsing_token_fetcher.cc",
+    "test_safe_browsing_token_fetcher.h",
+  ]
+
+  deps = [
+    ":token_fetcher",
+    "//base",
+    "//testing/gmock",
   ]
 }
 

@@ -14,6 +14,7 @@
 #include "quiche/quic/core/crypto/client_proof_source.h"
 #include "quiche/quic/core/crypto/proof_source.h"
 #include "quiche/quic/core/crypto/quic_random.h"
+#include "quiche/quic/core/quic_connection_id.h"
 #include "quiche/quic/core/quic_crypto_client_stream.h"
 #include "quiche/quic/core/quic_session.h"
 #include "quiche/quic/core/quic_types.h"
@@ -169,7 +170,7 @@ class TlsServerHandshakerTest : public QuicTestWithParam<TestParams> {
             QuicCompressedCertsCache::kQuicCompressedCertsCacheSize),
         server_id_(kServerHostname, kServerPort, false),
         supported_versions_({GetParam().version}) {
-    SetQuicFlag(FLAGS_quic_disable_server_tls_resumption,
+    SetQuicFlag(quic_disable_server_tls_resumption,
                 GetParam().disable_resumption);
     client_crypto_config_ = std::make_unique<QuicCryptoClientConfig>(
         crypto_test_utils::ProofVerifierForTesting(),
@@ -600,6 +601,23 @@ TEST_P(TlsServerHandshakerTest, ExtractSNI) {
             "test.example.com");
 }
 
+TEST_P(TlsServerHandshakerTest, ServerConnectionIdPassedToSelectCert) {
+  InitializeServerWithFakeProofSourceHandle();
+
+  // Disable early data.
+  server_session_->set_early_data_enabled(false);
+
+  server_handshaker_->SetupProofSourceHandle(
+      /*select_cert_action=*/FakeProofSourceHandle::Action::DELEGATE_SYNC,
+      /*compute_signature_action=*/FakeProofSourceHandle::Action::
+          DELEGATE_SYNC);
+  InitializeFakeClient();
+  CompleteCryptoHandshake();
+  ExpectHandshakeSuccessful();
+
+  EXPECT_EQ(last_select_cert_args().original_connection_id, TestConnectionId());
+}
+
 TEST_P(TlsServerHandshakerTest, HostnameForCertSelectionAndComputeSignature) {
   // Client uses upper case letters in hostname. It is considered valid by
   // QuicHostnameUtils::IsValidSNI, but it should be normalized for cert
@@ -924,11 +942,7 @@ TEST_P(TlsServerHandshakerTest, RequestClientCert) {
 
   CompleteCryptoHandshake();
   ExpectHandshakeSuccessful();
-  if (GetQuicRestartFlag(quic_tls_server_support_client_cert)) {
-    EXPECT_TRUE(server_handshaker_->received_client_cert());
-  } else {
-    EXPECT_FALSE(server_handshaker_->received_client_cert());
-  }
+  EXPECT_TRUE(server_handshaker_->received_client_cert());
 }
 
 TEST_P(TlsServerHandshakerTest, RequestClientCertByDelayedSslConfig) {
@@ -950,11 +964,7 @@ TEST_P(TlsServerHandshakerTest, RequestClientCertByDelayedSslConfig) {
 
   CompleteCryptoHandshake();
   ExpectHandshakeSuccessful();
-  if (GetQuicRestartFlag(quic_tls_server_support_client_cert)) {
-    EXPECT_TRUE(server_handshaker_->received_client_cert());
-  } else {
-    EXPECT_FALSE(server_handshaker_->received_client_cert());
-  }
+  EXPECT_TRUE(server_handshaker_->received_client_cert());
 }
 
 TEST_P(TlsServerHandshakerTest, RequestClientCert_NoCert) {
@@ -983,12 +993,7 @@ TEST_P(TlsServerHandshakerTest, RequestAndRequireClientCert) {
 
   CompleteCryptoHandshake();
   ExpectHandshakeSuccessful();
-
-  if (GetQuicRestartFlag(quic_tls_server_support_client_cert)) {
-    EXPECT_TRUE(server_handshaker_->received_client_cert());
-  } else {
-    EXPECT_FALSE(server_handshaker_->received_client_cert());
-  }
+  EXPECT_TRUE(server_handshaker_->received_client_cert());
 }
 
 TEST_P(TlsServerHandshakerTest, RequestAndRequireClientCertByDelayedSslConfig) {
@@ -1010,11 +1015,7 @@ TEST_P(TlsServerHandshakerTest, RequestAndRequireClientCertByDelayedSslConfig) {
 
   CompleteCryptoHandshake();
   ExpectHandshakeSuccessful();
-  if (GetQuicRestartFlag(quic_tls_server_support_client_cert)) {
-    EXPECT_TRUE(server_handshaker_->received_client_cert());
-  } else {
-    EXPECT_FALSE(server_handshaker_->received_client_cert());
-  }
+  EXPECT_TRUE(server_handshaker_->received_client_cert());
 }
 
 TEST_P(TlsServerHandshakerTest, RequestAndRequireClientCert_NoCert) {
@@ -1025,10 +1026,9 @@ TEST_P(TlsServerHandshakerTest, RequestAndRequireClientCert_NoCert) {
       /*compute_signature_action=*/FakeProofSourceHandle::Action::
           DELEGATE_SYNC);
 
-  if (GetQuicRestartFlag(quic_tls_server_support_client_cert)) {
-    EXPECT_CALL(*server_connection_,
-                CloseConnection(QUIC_TLS_CERTIFICATE_REQUIRED, _, _, _));
-  }
+  EXPECT_CALL(*server_connection_,
+              CloseConnection(QUIC_TLS_CERTIFICATE_REQUIRED, _, _, _));
+
   AdvanceHandshakeWithFakeClient();
   AdvanceHandshakeWithFakeClient();
   EXPECT_FALSE(server_handshaker_->received_client_cert());

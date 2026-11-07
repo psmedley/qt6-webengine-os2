@@ -26,31 +26,31 @@ static void append_index_uv_varyings(GrGeometryProcessor::ProgramImpl::EmitArgs&
     // Packing structure: texel coordinates have the 2-bit texture page encoded in bits 13 & 14 of
     // the x coordinate. It would be nice to use bits 14 and 15, but iphone6 has problem with those
     // bits when in gles. Iphone6 works fine with bits 14 and 15 in metal.
-    if (args.fShaderCaps->integerSupport()) {
+    if (args.fShaderCaps->fIntegerSupport) {
         if (numTextureSamplers <= 1) {
-            args.fVertBuilder->codeAppendf(R"code(
-                int texIdx = 0;
-                float2 unormTexCoords = float2(%s.x, %s.y);
-           )code", inTexCoordsName, inTexCoordsName);
+            args.fVertBuilder->codeAppendf(
+                "int texIdx = 0;"
+                "float2 unormTexCoords = float2(%s.x, %s.y);"
+           , inTexCoordsName, inTexCoordsName);
         } else {
-            args.fVertBuilder->codeAppendf(R"code(
-                int2 coords = int2(%s.x, %s.y);
-                int texIdx = coords.x >> 13;
-                float2 unormTexCoords = float2(coords.x & 0x1FFF, coords.y);
-            )code", inTexCoordsName, inTexCoordsName);
+            args.fVertBuilder->codeAppendf(
+                "int2 coords = int2(%s.x, %s.y);"
+                "int texIdx = coords.x >> 13;"
+                "float2 unormTexCoords = float2(coords.x & 0x1FFF, coords.y);"
+            , inTexCoordsName, inTexCoordsName);
         }
     } else {
         if (numTextureSamplers <= 1) {
-            args.fVertBuilder->codeAppendf(R"code(
-                float texIdx = 0;
-                float2 unormTexCoords = float2(%s.x, %s.y);
-            )code", inTexCoordsName, inTexCoordsName);
+            args.fVertBuilder->codeAppendf(
+                "float texIdx = 0;"
+                "float2 unormTexCoords = float2(%s.x, %s.y);"
+            , inTexCoordsName, inTexCoordsName);
         } else {
-            args.fVertBuilder->codeAppendf(R"code(
-                float2 coord = float2(%s.x, %s.y);
-                float texIdx = floor(coord.x * exp2(-13));
-                float2 unormTexCoords = float2(coord.x - texIdx * exp2(13), coord.y);
-            )code", inTexCoordsName, inTexCoordsName);
+            args.fVertBuilder->codeAppendf(
+                "float2 coord = float2(%s.x, %s.y);"
+                "float texIdx = floor(coord.x * exp2(-13));"
+                "float2 unormTexCoords = float2(coord.x - texIdx * exp2(13), coord.y);"
+            , inTexCoordsName, inTexCoordsName);
         }
     }
 
@@ -64,7 +64,7 @@ static void append_index_uv_varyings(GrGeometryProcessor::ProgramImpl::EmitArgs&
     // it is worse to use a float so for now we always do.
     texIdx->reset(SkSLType::kFloat);
     // If we computed the local var "texIdx" as an int we will need to cast it to float
-    const char* cast = args.fShaderCaps->integerSupport() ? "float" : "";
+    const char* cast = args.fShaderCaps->fIntegerSupport ? "float" : "";
     args.fVaryingHandler->addVarying("TexIndex", texIdx, Interpolation::kCanBeFlat);
     args.fVertBuilder->codeAppendf("%s = %s(texIdx);", texIdx->vsOut(), cast);
 

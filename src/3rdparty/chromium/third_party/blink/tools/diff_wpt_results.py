@@ -1,4 +1,4 @@
-#!/usr/bin/env vpython
+#!/usr/bin/env vpython3
 
 # Copyright (C) 2021 Google Inc.  All rights reserved.
 #
@@ -34,7 +34,6 @@ import tempfile
 from blinkpy.common.host import Host
 from blinkpy.common.system.executive import ScriptError
 from blinkpy.web_tests.layout_package.bot_test_expectations import BotTestExpectationsFactory
-from blinkpy.web_tests.models.typ_types import ResultType
 from blinkpy.web_tests.port.android import (
     PRODUCTS, PRODUCTS_TO_STEPNAMES)
 
@@ -50,7 +49,7 @@ _log = logging.getLogger(os.path.basename(__file__))
 PRODUCTS = PRODUCTS + ['chrome_linux', 'content_shell']
 PRODUCTS_TO_STEPNAMES.update({
     'chrome_linux': 'wpt_tests_suite',
-    'content_shell': 'blink_web_tests'})
+    'content_shell': 'blink_wpt_tests'})
 PRODUCTS_TO_BUILDER_NAME = {
     'android_weblayer': 'android-weblayer-pie-x86-wpt-fyi-rel',
     'android_webview': 'android-webview-pie-x86-wpt-fyi-rel',
@@ -63,7 +62,7 @@ STEP_NAME_VARIANTS = {
     'weblayer_shell_wpt': ['weblayer_shell_wpt on Ubuntu-16.04 or Ubuntu-18.04'],
     'system_webview_wpt': ['system_webview_wpt on Ubuntu-16.04 or Ubuntu-18.04'],
     'wpt_tests_suite': ['wpt_tests_suite on Ubuntu-18.04'],
-    'blink_web_tests': ['blink_web_tests on Ubuntu-18.04']
+    'blink_web_tests': ['blink_wpt_tests on Ubuntu-18.04']
 }
 
 def map_tests_to_results(output_mp, input_mp, path=''):

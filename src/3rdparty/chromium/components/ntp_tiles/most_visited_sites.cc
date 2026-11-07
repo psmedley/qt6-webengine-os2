@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -765,11 +765,9 @@ bool MostVisitedSites::IsNtpTileFromPreinstalledApp(GURL url) {
 
 // static
 bool MostVisitedSites::WasNtpAppMigratedToWebApp(PrefService* prefs, GURL url) {
-  const base::Value* migrated_apps =
+  const base::Value::List& migrated_apps =
       prefs->GetList(webapps::kWebAppsMigratedPreinstalledApps);
-  if (!migrated_apps)
-    return false;
-  for (const auto& val : migrated_apps->GetListDeprecated()) {
+  for (const auto& val : migrated_apps) {
     if (val.is_string() && val.GetString() == url.host())
       return true;
   }

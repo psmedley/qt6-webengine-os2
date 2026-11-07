@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -167,6 +167,9 @@ TimeDelta ProcessMetrics::GetPreciseCumulativeCPUUsage() {
   // constant rate TSC.
   return GetCumulativeCPUUsage();
 #else   // !defined(ARCH_CPU_ARM64)
+  if (!time_internal::HasConstantRateTSC())
+    return GetCumulativeCPUUsage();
+
   ULONG64 process_cycle_time = 0;
   if (!QueryProcessCycleTime(process_.get(), &process_cycle_time)) {
     NOTREACHED();
@@ -235,10 +238,10 @@ bool GetSystemMemoryInfo(SystemMemoryInfoKB* meminfo) {
   if (!::GlobalMemoryStatusEx(&mem_status))
     return false;
 
-  meminfo->total = mem_status.ullTotalPhys / 1024;
-  meminfo->avail_phys = mem_status.ullAvailPhys / 1024;
-  meminfo->swap_total = mem_status.ullTotalPageFile / 1024;
-  meminfo->swap_free = mem_status.ullAvailPageFile / 1024;
+  meminfo->total = saturated_cast<int>(mem_status.ullTotalPhys / 1024);
+  meminfo->avail_phys = saturated_cast<int>(mem_status.ullAvailPhys / 1024);
+  meminfo->swap_total = saturated_cast<int>(mem_status.ullTotalPageFile / 1024);
+  meminfo->swap_free = saturated_cast<int>(mem_status.ullAvailPageFile / 1024);
 
   return true;
 }
@@ -251,6 +254,8 @@ size_t ProcessMetrics::GetMallocUsage() {
 
 SystemPerformanceInfo::SystemPerformanceInfo() = default;
 SystemPerformanceInfo::SystemPerformanceInfo(
+    const SystemPerformanceInfo& other) = default;
+SystemPerformanceInfo& SystemPerformanceInfo::operator=(
     const SystemPerformanceInfo& other) = default;
 
 Value SystemPerformanceInfo::ToValue() const {
@@ -303,10 +308,13 @@ BASE_EXPORT bool GetSystemPerformanceInfo(SystemPerformanceInfo* info) {
     }
   }
 
-  info->idle_time = counters.IdleTime.QuadPart;
-  info->read_transfer_count = counters.ReadTransferCount.QuadPart;
-  info->write_transfer_count = counters.WriteTransferCount.QuadPart;
-  info->other_transfer_count = counters.OtherTransferCount.QuadPart;
+  info->idle_time = static_cast<uint64_t>(counters.IdleTime.QuadPart);
+  info->read_transfer_count =
+      static_cast<uint64_t>(counters.ReadTransferCount.QuadPart);
+  info->write_transfer_count =
+      static_cast<uint64_t>(counters.WriteTransferCount.QuadPart);
+  info->other_transfer_count =
+      static_cast<uint64_t>(counters.OtherTransferCount.QuadPart);
   info->read_operation_count = counters.ReadOperationCount;
   info->write_operation_count = counters.WriteOperationCount;
   info->other_operation_count = counters.OtherOperationCount;

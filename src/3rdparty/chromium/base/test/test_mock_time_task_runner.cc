@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -308,6 +308,10 @@ TimeDelta TestMockTimeTaskRunner::NextPendingTaskDelay() {
     tasks_.pop();
   return tasks_.empty() ? TimeDelta::Max()
                         : tasks_.top().GetTimeToRun() - now_ticks_;
+}
+
+void TestMockTimeTaskRunner::DetachFromThread() {
+  thread_checker_.DetachFromThread();
 }
 
 // TODO(gab): Combine |thread_checker_| with a SequenceToken to differentiate

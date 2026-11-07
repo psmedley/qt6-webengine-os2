@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,6 +32,8 @@ const char kScriptServerUrl[] = "https://www.fake.backend.com/script_server";
 const char kActionServerUrl[] = "https://www.fake.backend.com/action_server";
 const char kUserDataServerUrl[] =
     "https://www.fake.backend.com/user_data_server";
+const char kReportProgressServerUrl[] =
+    "https://www.fake.backend.com/report_progress";
 const char kFakeUrl[] = "https://www.example.com";
 
 std::string ExpectedGetUserDataRequestBody(uint64_t run_id,
@@ -40,8 +42,12 @@ std::string ExpectedGetUserDataRequestBody(uint64_t run_id,
   return ProtocolUtils::CreateGetUserDataRequest(
       run_id, /* request_name= */ false, /* request_email= */ false,
       /* request_phone= */ false,
-      /* request_shipping= */ false, request_payment_methods,
-      /* supported_card_networks= */ {}, client_token);
+      /* request_shipping= */ false,
+      /* preexisting_address_ids= */ std::vector<std::string>(),
+      request_payment_methods,
+      /* supported_card_networks= */ std::vector<std::string>(),
+      /* preexisting_payment_instrument_ids= */ std::vector<std::string>(),
+      client_token);
 }
 
 class ServiceImplTest : public testing::Test {
@@ -57,7 +63,7 @@ class ServiceImplTest : public testing::Test {
     service_ = std::make_unique<ServiceImpl>(
         &mock_client_, std::move(mock_request_sender), GURL(kScriptServerUrl),
         GURL(kActionServerUrl), GURL(kUserDataServerUrl),
-        std::move(mock_client_context));
+        GURL(kReportProgressServerUrl), std::move(mock_client_context));
   }
   ~ServiceImplTest() override = default;
 
@@ -200,8 +206,8 @@ TEST_F(ServiceImplTest, GetNextActions) {
               Run(net::HTTP_OK, std::string("response"), _));
 
   service_->GetNextActions(
-      TriggerContext(), previous_global_payload, previous_script_payload,
-      /* processed_actions = */ {},
+      TriggerContext(), std::string("fake_previous_global_payload"),
+      std::string("fake_previous_script_payload"), /* processed_actions = */ {},
       /* timing_stats = */ RoundtripTimingStats(), RoundtripNetworkStats(),
       mock_response_callback_.Get());
 }
@@ -226,7 +232,8 @@ TEST_F(ServiceImplTest, GetUserDataWithPayments) {
   EXPECT_CALL(mock_response_callback_,
               Run(net::HTTP_OK, std::string("response"), _));
 
-  service_->GetUserData(options, run_id, mock_response_callback_.Get());
+  service_->GetUserData(options, run_id, /* user_data= */ nullptr,
+                        mock_response_callback_.Get());
 }
 
 TEST_F(ServiceImplTest, GetUserDataWithoutPayments) {
@@ -237,7 +244,7 @@ TEST_F(ServiceImplTest, GetUserDataWithoutPayments) {
   EXPECT_CALL(*mock_request_sender_,
               OnSendRequest(GURL(kUserDataServerUrl),
                             ExpectedGetUserDataRequestBody(
-                                run_id, /* client_token= */ "",
+                                run_id, /* client_token= */ std::string(),
                                 options.request_payment_method),
                             _, RpcType::GET_USER_DATA))
       .WillOnce(RunOnceCallback<2>(net::HTTP_OK, std::string("response"),
@@ -245,7 +252,80 @@ TEST_F(ServiceImplTest, GetUserDataWithoutPayments) {
   EXPECT_CALL(mock_response_callback_,
               Run(net::HTTP_OK, std::string("response"), _));
 
-  service_->GetUserData(options, run_id, mock_response_callback_.Get());
+  service_->GetUserData(options, run_id, /* user_data= */ nullptr,
+                        mock_response_callback_.Get());
+}
+
+TEST_F(ServiceImplTest, UpdateAnnotateDomModelService) {
+  EXPECT_CALL(*mock_client_context_, UpdateAnnotateDomModelContext(123456));
+  service_->UpdateAnnotateDomModelContext(123456);
+}
+
+TEST_F(ServiceImplTest, UpdateJsFlowLibraryLoaded) {
+  EXPECT_CALL(*mock_client_context_, UpdateJsFlowLibraryLoaded(true));
+  service_->UpdateJsFlowLibraryLoaded(true);
+}
+
+TEST_F(ServiceImplTest, ReportProgress) {
+  const std::string token = "token";
+  const std::string payload = "payload";
+
+  EXPECT_CALL(mock_client_, GetMakeSearchesAndBrowsingBetterEnabled)
+      .Times(1)
+      .WillOnce(Return(true));
+  EXPECT_CALL(mock_client_, GetMetricsReportingEnabled)
+      .Times(1)
+      .WillOnce(Return(true));
+  EXPECT_CALL(
+      *mock_request_sender_,
+      OnSendRequest(GURL(kReportProgressServerUrl),
+                    ProtocolUtils::CreateReportProgressRequest(token, payload),
+                    _, RpcType::REPORT_PROGRESS))
+      .WillOnce(RunOnceCallback<2>(net::HTTP_OK, std::string(""),
+                                   ServiceRequestSender::ResponseInfo{}));
+  EXPECT_CALL(mock_response_callback_, Run(net::HTTP_OK, std::string(""), _));
+
+  service_->ReportProgress("token", "payload", mock_response_callback_.Get());
+}
+
+TEST_F(ServiceImplTest, ReportProgressMSBBDisabled) {
+  const std::string token = "token";
+  const std::string payload = "payload";
+
+  EXPECT_CALL(mock_client_, GetMakeSearchesAndBrowsingBetterEnabled)
+      .Times(1)
+      .WillOnce(Return(false));
+  EXPECT_CALL(mock_client_, GetMetricsReportingEnabled).Times(0);
+
+  EXPECT_CALL(
+      *mock_request_sender_,
+      OnSendRequest(GURL(kReportProgressServerUrl),
+                    ProtocolUtils::CreateReportProgressRequest(token, payload),
+                    _, RpcType::REPORT_PROGRESS))
+      .Times(0);
+
+  service_->ReportProgress("token", "payload", mock_response_callback_.Get());
+}
+
+TEST_F(ServiceImplTest, ReportProgressMetricsDisabled) {
+  const std::string token = "token";
+  const std::string payload = "payload";
+
+  EXPECT_CALL(mock_client_, GetMakeSearchesAndBrowsingBetterEnabled)
+      .Times(1)
+      .WillOnce(Return(true));
+  EXPECT_CALL(mock_client_, GetMetricsReportingEnabled)
+      .Times(1)
+      .WillOnce(Return(false));
+
+  EXPECT_CALL(
+      *mock_request_sender_,
+      OnSendRequest(GURL(kReportProgressServerUrl),
+                    ProtocolUtils::CreateReportProgressRequest(token, payload),
+                    _, RpcType::REPORT_PROGRESS))
+      .Times(0);
+
+  service_->ReportProgress("token", "payload", mock_response_callback_.Get());
 }
 
 }  // namespace

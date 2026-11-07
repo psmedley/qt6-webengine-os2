@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,6 +48,8 @@ struct NET_EXPORT DnsConfigOverrides {
 
   // Overriding values. See same-named fields in DnsConfig for explanations.
   absl::optional<std::vector<IPEndPoint>> nameservers;
+  absl::optional<bool> dns_over_tls_active;
+  absl::optional<std::string> dns_over_tls_hostname;
   absl::optional<std::vector<std::string>> search;
   absl::optional<bool> append_to_multi_label_name;
   absl::optional<int> ndots;

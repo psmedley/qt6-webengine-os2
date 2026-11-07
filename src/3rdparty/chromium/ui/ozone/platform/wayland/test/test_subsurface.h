@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <wayland-server-protocol.h>
 
-
+#include "base/memory/raw_ptr.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/ozone/platform/wayland/test/server_object.h"
@@ -53,12 +53,12 @@ class TestSubSurface : public ServerObject {
   bool sync_ = false;
 
   // Surface resource that is the ground for this subsurface.
-  wl_resource* surface_ = nullptr;
+  raw_ptr<wl_resource> surface_ = nullptr;
 
   // Parent surface resource.
-  wl_resource* parent_resource_ = nullptr;
+  raw_ptr<wl_resource> parent_resource_ = nullptr;
 
-  TestAugmentedSubSurface* augmented_subsurface_ = nullptr;
+  raw_ptr<TestAugmentedSubSurface> augmented_subsurface_ = nullptr;
 };
 
 }  // namespace wl

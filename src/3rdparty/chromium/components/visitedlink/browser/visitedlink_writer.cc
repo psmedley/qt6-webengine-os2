@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -259,8 +259,7 @@ VisitedLinkWriter::~VisitedLinkWriter() {
     // state. On the next start table will be rebuilt.
     base::FilePath filename;
     GetDatabaseFileName(&filename);
-    PostIOTask(FROM_HERE,
-               base::BindOnce(base::GetDeleteFileCallback(), filename));
+    PostIOTask(FROM_HERE, base::GetDeleteFileCallback(filename));
   }
 }
 

@@ -1,20 +1,20 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import '../module_header.js';
-import 'chrome://resources/cr_elements/hidden_style_css.m.js';
+import 'chrome://resources/cr_elements/cr_hidden_style.css.js';
 import 'chrome://resources/cr_elements/cr_action_menu/cr_action_menu.js';
-import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
-import 'chrome://resources/cr_elements/cr_icons_css.m.js';
+import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
+import 'chrome://resources/cr_elements/cr_icons.css.js';
 import 'chrome://resources/cr_elements/cr_auto_img/cr_auto_img.js';
 import 'chrome://resources/cr_elements/cr_toast/cr_toast.js';
 
 import {CrActionMenuElement} from 'chrome://resources/cr_elements/cr_action_menu/cr_action_menu.js';
-import {CrLazyRenderElement} from 'chrome://resources/cr_elements/cr_lazy_render/cr_lazy_render.m.js';
+import {CrLazyRenderElement} from 'chrome://resources/cr_elements/cr_lazy_render/cr_lazy_render.js';
 import {CrToastElement} from 'chrome://resources/cr_elements/cr_toast/cr_toast.js';
 import {assertNotReached} from 'chrome://resources/js/assert_ts.js';
-import {EventTracker} from 'chrome://resources/js/event_tracker.m.js';
+import {EventTracker} from 'chrome://resources/js/event_tracker.js';
 import {DomIf, DomRepeat, DomRepeatEvent, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {ConsentStatus, MerchantCart} from '../../chrome_cart.mojom-webui.js';
@@ -87,16 +87,16 @@ export class ChromeCartModuleElement extends I18nMixin
         type: Boolean,
         value: () =>
             loadTimeData.getInteger('modulesCartDiscountConsentVariation') >
-            DiscountConsentVariation.StringChange
+            DiscountConsentVariation.STRING_CHANGE,
       },
       firstThreeCartItems_:
           {type: Array, computed: 'computeFirstThreeCartItems_(cartItems)'},
 
       /** This is used for animation when the consent become invisible. */
-      discountConsentVisible_: {
+      discountConsentVisible: {
         type: Boolean,
         reflectToAttribute: true,
-      }
+      },
     };
   }
 
@@ -104,8 +104,8 @@ export class ChromeCartModuleElement extends I18nMixin
   headerChipText: string;
   headerDescriptionText: string;
   showDiscountConsent: boolean;
-  discountConsentVisible_: boolean;
   scrollBehavior: ScrollBehavior = 'smooth';
+  discountConsentVisible: boolean;
   private showLeftScrollButton_: boolean;
   private showRightScrollButton_: boolean;
   private cartMenuHideItem_: string;
@@ -182,9 +182,9 @@ export class ChromeCartModuleElement extends I18nMixin
   private getFaviconUrl_(url: string): string {
     const faviconUrl = new URL('chrome://favicon2/');
     faviconUrl.searchParams.set('size', '24');
-    faviconUrl.searchParams.set('scale_factor', '1x');
-    faviconUrl.searchParams.set('show_fallback_monogram', '');
-    faviconUrl.searchParams.set('page_url', url);
+    faviconUrl.searchParams.set('scaleFactor', '1x');
+    faviconUrl.searchParams.set('showFallbackMonogram', '');
+    faviconUrl.searchParams.set('pageUrl', url);
     return faviconUrl.href;
   }
 
@@ -343,7 +343,8 @@ export class ChromeCartModuleElement extends I18nMixin
    */
   private onLeftScrollClick_() {
     const carts = this.$.cartCarousel.querySelectorAll('.cart-container');
-    let visibleRange = 0, firstVisibleIndex = 0;
+    let visibleRange = 0;
+    let firstVisibleIndex = 0;
     for (let i = carts.length - 1; i >= 0; i--) {
       if (this.getVisibilityForIndex_(i)) {
         visibleRange += 1;
@@ -421,7 +422,7 @@ export class ChromeCartModuleElement extends I18nMixin
   }
 
   private onDiscountConsentHidden_() {
-    if (this.showDiscountConsent && !this.discountConsentVisible_ &&
+    if (this.showDiscountConsent && !this.discountConsentVisible &&
         this.consentStatus_ !== undefined) {
       this.showDiscountConsent = false;
       switch (this.consentStatus_) {
@@ -452,7 +453,7 @@ export class ChromeCartModuleElement extends I18nMixin
 
   private onDiscountConsentRejected_() {
     this.consentStatus_ = ConsentStatus.REJECTED;
-    this.discountConsentVisible_ = false;
+    this.discountConsentVisible = false;
     ChromeCartProxy.getHandler().onDiscountConsentAcknowledged(false);
     chrome.metricsPrivate.recordUserAction(
         'NewTabPage.Carts.RejectDiscountConsent');
@@ -460,7 +461,7 @@ export class ChromeCartModuleElement extends I18nMixin
 
   private onDiscountConsentAccepted_() {
     this.consentStatus_ = ConsentStatus.ACCEPTED;
-    this.discountConsentVisible_ = false;
+    this.discountConsentVisible = false;
     ChromeCartProxy.getHandler().onDiscountConsentAcknowledged(true);
     chrome.metricsPrivate.recordUserAction(
         'NewTabPage.Carts.AcceptDiscountConsent');
@@ -468,7 +469,7 @@ export class ChromeCartModuleElement extends I18nMixin
 
   private onDiscountConsentDismissed_() {
     this.consentStatus_ = ConsentStatus.DISMISSED;
-    this.discountConsentVisible_ = false;
+    this.discountConsentVisible = false;
     ChromeCartProxy.getHandler().onDiscountConsentDismissed();
     chrome.metricsPrivate.recordUserAction(
         'NewTabPage.Carts.DismissDiscountConsent');
@@ -476,7 +477,7 @@ export class ChromeCartModuleElement extends I18nMixin
 
   private async onDiscountConsentContinued_() {
     if (loadTimeData.getInteger('modulesCartDiscountConsentVariation') ===
-        DiscountConsentVariation.NativeDialog) {
+        DiscountConsentVariation.NATIVE_DIALOG) {
       const {consentStatus} =
           await ChromeCartProxy.getHandler().showNativeConsentDialog();
 
@@ -485,7 +486,6 @@ export class ChromeCartModuleElement extends I18nMixin
           this.onDiscountConsentAccepted_();
           break;
         case ConsentStatus.DISMISSED:
-          this.onDiscountConsentDismissed_();
           break;
         case ConsentStatus.REJECTED:
           this.onDiscountConsentRejected_();
@@ -529,12 +529,12 @@ async function createCartElement(): Promise<HTMLElement|null> {
     return null;
   }
 
+  let discountedCartCount = 0;
+
   if (loadTimeData.getBoolean('ruleBasedDiscountEnabled')) {
     if (consentVisible) {
       recordOccurence('NewTabPage.Carts.DiscountConsentShow');
     }
-
-    let discountedCartCount = 0;
 
     for (let i = 0; i < carts.length; i++) {
       const cart = carts[i];
@@ -544,20 +544,30 @@ async function createCartElement(): Promise<HTMLElement|null> {
             'NewTabPage.Carts.DiscountAt', i);
       }
     }
-
-    chrome.metricsPrivate.recordSmallCount(
-        'NewTabPage.Carts.DiscountCountAtLoad', discountedCartCount);
   }
+  chrome.metricsPrivate.recordSmallCount(
+      'NewTabPage.Carts.DiscountCountAtLoad', discountedCartCount);
 
+  chrome.metricsPrivate.recordSmallCount(
+      'NewTabPage.Carts.NonDiscountCountAtLoad',
+      carts.length - discountedCartCount);
   const element = new ChromeCartModuleElement();
   if (welcomeVisible) {
     element.headerChipText = loadTimeData.getString('modulesNewTagLabel');
     element.headerDescriptionText =
         loadTimeData.getString('modulesCartWarmWelcome');
+  } else {
+    for (let i = 0; i < carts.length; i++) {
+      const images = carts[i].productImageUrls;
+      chrome.metricsPrivate.recordSmallCount(
+          'NewTabPage.Carts.CartImageCount',
+          images === undefined ? 0 : images.length);
+    }
   }
+
   element.cartItems = carts;
   element.showDiscountConsent = consentVisible;
-  element.discountConsentVisible_ = consentVisible;
+  element.discountConsentVisible = consentVisible;
   return element;
 }
 

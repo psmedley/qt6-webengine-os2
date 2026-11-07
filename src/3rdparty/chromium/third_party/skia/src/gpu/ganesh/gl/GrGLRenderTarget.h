@@ -40,7 +40,8 @@ public:
                                                GrGLFormat,
                                                int sampleCount,
                                                const IDs&,
-                                               int stencilBits);
+                                               int stencilBits,
+                                               std::string_view label);
 
     bool isFBO0(bool multisample) const {
         return (multisample ? fMultisampleFBOID : fSingleSampleFBOID) == 0;
@@ -127,6 +128,8 @@ private:
     bool completeStencilAttachment(GrAttachment* stencil, bool useMultisampleFBO) override;
 
     size_t onGpuMemorySize() const override;
+
+    void onSetLabel() override;
 
     sk_sp<GrGLAttachment> fDynamicMSAAAttachment;
 

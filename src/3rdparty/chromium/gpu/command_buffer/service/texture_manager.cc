@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,7 @@
 #include "gpu/command_buffer/service/service_discardable_manager.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_enums.h"
+#include "ui/gl/gl_image.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_state_restorer.h"
 #include "ui/gl/gl_version_info.h"
@@ -1937,10 +1938,6 @@ void Texture::SetLevelImageState(GLenum target, GLint level, ImageState state) {
   Texture::LevelInfo& info = face_infos_[face_index].level_infos[level];
   DCHECK_EQ(info.target, target);
   DCHECK_EQ(info.level, level);
-  // Workaround for StreamTexture which must be re-copied on each access.
-  // TODO(ericrk): Remove this once SharedImage transition is complete.
-  if (info.image && !info.image->HasMutableState())
-    return;
   info.image_state = state;
 }
 
@@ -2132,7 +2129,7 @@ void TextureRef::ForceContextLost() {
 }
 
 void TextureRef::SetSharedImageRepresentation(
-    std::unique_ptr<SharedImageRepresentationGLTexture> shared_image) {
+    std::unique_ptr<GLTextureImageRepresentation> shared_image) {
   shared_image_ = std::move(shared_image);
 }
 
@@ -2415,7 +2412,7 @@ TextureRef* TextureManager::Consume(
 
 TextureRef* TextureManager::ConsumeSharedImage(
     GLuint client_id,
-    std::unique_ptr<SharedImageRepresentationGLTexture> shared_image) {
+    std::unique_ptr<GLTextureImageRepresentation> shared_image) {
   DCHECK(client_id);
   Texture* texture = shared_image->GetTexture();
   TextureRef* ref = Consume(client_id, texture);

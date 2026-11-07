@@ -9,7 +9,7 @@
 #define skgpu_graphite_ResourceTypes_DEFINED
 
 #include "include/gpu/graphite/GraphiteTypes.h"
-#include "src/gpu/graphite/EnumBitMask.h"
+#include "src/core/SkEnumBitMask.h"
 
 namespace skgpu::graphite {
 
@@ -27,7 +27,7 @@ enum class DepthStencilFlags : int {
     kStencil = 0b010,
     kDepthStencil = kDepth | kStencil,
 };
-SKGPU_MAKE_MASK_OPS(DepthStencilFlags);
+SK_MAKE_BITMASK_OPS(DepthStencilFlags);
 
 /**
  * What a GPU buffer will be used for
@@ -38,8 +38,9 @@ enum class BufferType {
     kXferCpuToGpu,
     kXferGpuToCpu,
     kUniform,
+    kStorage,
 };
-static const int kBufferTypeCount = static_cast<int>(BufferType::kUniform) + 1;
+static const int kBufferTypeCount = static_cast<int>(BufferType::kStorage) + 1;
 
 /**
  * When creating the memory for a resource should we use a memory type that prioritizes the
@@ -49,6 +50,15 @@ static const int kBufferTypeCount = static_cast<int>(BufferType::kUniform) + 1;
 enum class PrioritizeGpuReads : bool {
     kNo = false,
     kYes = true,
+};
+
+/**
+ * Must the contents of the Resource be preserved af a render pass or can a more efficient
+ * representation be chosen when supported by hardware.
+ */
+enum class Discardable : bool {
+    kNo = false,
+    kYes = true
 };
 
 enum class Ownership {

@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """code generator for raster command buffers."""
 
 import filecmp
 import os
-import os.path
 import sys
 from optparse import OptionParser
 
 import build_cmd_buffer_lib
 
+# Additional space required after "type" here and elsewhere because otherwise
+# pylint detects "# type:" as invalid syntax on Python 3.8, see
+# https://github.com/PyCQA/pylint/issues/3556.
 # Named type info object represents a named type that is used in OpenGL call
 # arguments.  Each named type defines a set of valid OpenGL call arguments.  The
 # named types are used in 'raster_cmd_buffer_functions.txt'.
-# type: The actual GL type of the named type.
+# type : The actual GL type of the named type.
 # valid: The list of values that are valid for both the client and the service.
 # invalid: Examples of invalid values for the type. At least these values
 #          should be tested to be invalid.
@@ -160,7 +162,7 @@ _NAMED_TYPE_INFO = {
 #
 # Must match function names specified in "raster_cmd_buffer_functions.txt".
 #
-# type:         defines which handler will be used to generate code.
+# type :        defines which handler will be used to generate code.
 # decoder_func: defines which function to call in the decoder to execute the
 #               corresponding GL command. If not specified the GL command will
 #               be called directly.
@@ -228,7 +230,7 @@ _FUNCTION_INFO = {
     'decoder_func': 'DoConvertYUVAMailboxesToRGBINTERNAL',
     'internal': True,
     'type': 'PUT',
-    'count': 80, #GL_MAILBOX_SIZE_CHROMIUM x5
+    'count': 144, #GL_MAILBOX_SIZE_CHROMIUM x5 + 16 floats
     'unit_test': False,
     'trace_level': 2,
   },
@@ -379,15 +381,11 @@ _FUNCTION_INFO = {
     'client_test': False,
     'unit_test': False,
   },
-  'DeletePaintCacheTextBlobsINTERNAL': {
-    'type': 'DELn',
-    'internal': True,
-    'unit_test': False,
-  },
   'DeletePaintCachePathsINTERNAL': {
     'type': 'DELn',
     'internal': True,
     'unit_test': False,
+    'data_transfer_methods': ['immediate', 'shm'],
   },
   'ClearPaintCacheINTERNAL': {
     'decoder_func': 'DoClearPaintCacheINTERNAL',

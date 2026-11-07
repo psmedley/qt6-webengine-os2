@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,17 +13,14 @@
 #include <utility>
 #include <vector>
 
+#include "base/allocator/partition_allocator/partition_alloc_base/memory/scoped_refptr.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/no_destructor.h"
 #include "base/allocator/partition_allocator/starscan/metadata_allocator.h"
 #include "base/allocator/partition_allocator/starscan/pcscan.h"
 #include "base/allocator/partition_allocator/starscan/starscan_fwd.h"
 #include "base/allocator/partition_allocator/starscan/write_protector.h"
-#include "base/memory/scoped_refptr.h"
-#include "base/no_destructor.h"
 
-// TODO(crbug.com/1288247): Remove this when migration is complete.
 namespace partition_alloc::internal {
-
-class StarScanSnapshot;
 
 class PCScanTask;
 
@@ -46,7 +43,7 @@ class PCScanInternal final {
   static PCScanInternal& Instance() {
     // Since the data that PCScanInternal holds is cold, it's fine to have the
     // runtime check for thread-safe local static initialization.
-    static base::NoDestructor<PCScanInternal> instance;
+    static internal::base::NoDestructor<PCScanInternal> instance;
     return *instance;
   }
 
@@ -110,15 +107,16 @@ class PCScanInternal final {
   partition_alloc::StatsReporter& GetReporter();
 
  private:
-  friend base::NoDestructor<PCScanInternal>;
-  friend class partition_alloc::internal::StarScanSnapshot;
+  friend internal::base::NoDestructor<PCScanInternal>;
+  friend class StarScanSnapshot;
 
   using StackTops = std::unordered_map<
-      ::base::PlatformThreadId,
+      internal::base::PlatformThreadId,
       void*,
-      std::hash<::base::PlatformThreadId>,
+      std::hash<internal::base::PlatformThreadId>,
       std::equal_to<>,
-      MetadataAllocator<std::pair<const ::base::PlatformThreadId, void*>>>;
+      MetadataAllocator<
+          std::pair<const internal::base::PlatformThreadId, void*>>>;
 
   PCScanInternal();
 
@@ -147,12 +145,5 @@ class PCScanInternal final {
 };
 
 }  // namespace partition_alloc::internal
-
-// TODO(crbug.com/1288247): Remove this when migration is complete.
-namespace base::internal {
-
-using ::partition_alloc::internal::PCScanInternal;
-
-}  // namespace base::internal
 
 #endif  // BASE_ALLOCATOR_PARTITION_ALLOCATOR_STARSCAN_PCSCAN_INTERNAL_H_

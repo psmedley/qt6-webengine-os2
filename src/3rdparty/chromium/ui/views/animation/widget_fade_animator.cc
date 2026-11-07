@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,14 @@ void WidgetFadeAnimator::FadeIn() {
   widget_->SetOpacity(0.01f);
   widget_->Show();
   fade_animation_.Start();
+}
+
+void WidgetFadeAnimator::CancelFadeIn() {
+  if (!IsFadingIn())
+    return;
+
+  fade_animation_.Stop();
+  animation_type_ = FadeType::kNone;
 }
 
 void WidgetFadeAnimator::FadeOut() {

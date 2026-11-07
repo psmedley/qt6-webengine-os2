@@ -1,4 +1,4 @@
-// Copyright (c) 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,10 @@
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/ozone/platform/headless/vulkan_surface_headless.h"
 
+#if BUILDFLAG(IS_FUCHSIA)
+#include <lib/zx/channel.h>
+#endif
+
 namespace ui {
 
 VulkanImplementationHeadless::VulkanImplementationHeadless(bool use_swiftshader)
@@ -38,6 +42,10 @@ bool VulkanImplementationHeadless::InitializeVulkanInstance(
   }
 
   base::FilePath path;
+#if BUILDFLAG(IS_FUCHSIA)
+  path = base::FilePath(use_swiftshader() ? "libvk_swiftshader.so"
+                                          : "libvulkan.so");
+#else
   if (use_swiftshader()) {
     if (!base::PathService::Get(base::DIR_MODULE, &path))
       return false;
@@ -45,6 +53,7 @@ bool VulkanImplementationHeadless::InitializeVulkanInstance(
   } else {
     path = base::FilePath("libvulkan.so.1");
   }
+#endif
 
   return vulkan_instance_.Initialize(path, required_extensions, {});
 }
@@ -130,10 +139,9 @@ VulkanImplementationHeadless::GetExternalImageHandleType() {
 }
 
 bool VulkanImplementationHeadless::CanImportGpuMemoryBuffer(
+    gpu::VulkanDeviceQueue* device_queue,
     gfx::GpuMemoryBufferType memory_buffer_type) {
-  if (memory_buffer_type == gfx::GpuMemoryBufferType::NATIVE_PIXMAP)
-    return true;
-  return false;
+  return memory_buffer_type == gfx::GpuMemoryBufferType::NATIVE_PIXMAP;
 }
 
 std::unique_ptr<gpu::VulkanImage>
@@ -141,17 +149,37 @@ VulkanImplementationHeadless::CreateImageFromGpuMemoryHandle(
     gpu::VulkanDeviceQueue* device_queue,
     gfx::GpuMemoryBufferHandle gmb_handle,
     gfx::Size size,
-    VkFormat vk_format) {
+    VkFormat vk_format,
+    const gfx::ColorSpace& color_space) {
   constexpr auto kUsage =
       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
       VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-  auto tiling = gmb_handle.native_pixmap_handle.modifier ==
-                        gfx::NativePixmapHandle::kNoModifier
-                    ? VK_IMAGE_TILING_OPTIMAL
-                    : VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
+  auto tiling = VK_IMAGE_TILING_OPTIMAL;
+#if BUILDFLAG(IS_LINUX)
+  if (gmb_handle.native_pixmap_handle.modifier !=
+      gfx::NativePixmapHandle::kNoModifier) {
+    tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
+  }
+#endif  // BUILDFLAG(IS_LINUX)
   return gpu::VulkanImage::CreateFromGpuMemoryBufferHandle(
       device_queue, std::move(gmb_handle), size, vk_format, kUsage, /*flags=*/0,
       tiling, VK_QUEUE_FAMILY_EXTERNAL);
 }
+
+#if BUILDFLAG(IS_FUCHSIA)
+std::unique_ptr<gpu::SysmemBufferCollection>
+VulkanImplementationHeadless::RegisterSysmemBufferCollection(
+    VkDevice device,
+    gfx::SysmemBufferCollectionId id,
+    zx::channel token,
+    gfx::BufferFormat format,
+    gfx::BufferUsage usage,
+    gfx::Size size,
+    size_t min_buffer_count,
+    bool register_with_image_pipe) {
+  NOTIMPLEMENTED();
+  return nullptr;
+}
+#endif  // BUILDFLAG(IS_FUCHSIA)
 
 }  // namespace ui

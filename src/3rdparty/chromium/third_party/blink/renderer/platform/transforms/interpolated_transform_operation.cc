@@ -32,10 +32,8 @@
 
 namespace blink {
 
-bool InterpolatedTransformOperation::operator==(
+bool InterpolatedTransformOperation::IsEqualAssumingSameType(
     const TransformOperation& o) const {
-  if (!IsSameType(o))
-    return false;
   const InterpolatedTransformOperation* t =
       static_cast<const InterpolatedTransformOperation*>(&o);
   return progress_ == t->progress_ && from_ == t->from_ && to_ == t->to_;
@@ -50,7 +48,7 @@ void InterpolatedTransformOperation::Apply(
   to_.ApplyRemaining(border_box_size, starting_index_, to_transform);
 
   to_transform.Blend(from_transform, progress_);
-  transform.Multiply(to_transform);
+  transform.PreConcat(to_transform);
 }
 
 scoped_refptr<TransformOperation> InterpolatedTransformOperation::Blend(

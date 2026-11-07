@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,23 +10,19 @@
 
 namespace blink {
 
-ChromeOS::ChromeOS(ExecutionContext* execution_context)
-    : window_management_(
-          MakeGarbageCollected<CrosWindowManagement>(execution_context)),
-      hid_(MakeGarbageCollected<CrosHID>(execution_context)) {}
+ChromeOS::ChromeOS() = default;
 
-CrosWindowManagement* ChromeOS::windowManagement() {
-  return window_management_;
+CrosWindowManagement* ChromeOS::windowManagement(
+    ExecutionContext* execution_context) {
+  return &CrosWindowManagement::From(*execution_context);
 }
 
-CrosHID* ChromeOS::hid() {
-  return hid_;
+CrosHID* ChromeOS::hid(ExecutionContext* execution_context) {
+  return &CrosHID::From(*execution_context);
 }
 
 void ChromeOS::Trace(Visitor* visitor) const {
   ScriptWrappable::Trace(visitor);
-  visitor->Trace(window_management_);
-  visitor->Trace(hid_);
 }
 
 }  // namespace blink

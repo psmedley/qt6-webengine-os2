@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "build/chromecast_buildflags.h"
 #include "build/chromeos_buildflags.h"
 #include "components/dbus/properties/types.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -52,8 +53,8 @@ class TestMenuModel : public ui::SimpleMenuModel,
 
  protected:
   // ui::MenuModel::
-  bool IsItemDynamicAt(int index) const override {
-    EXPECT_LE(index, 0);
+  bool IsItemDynamicAt(size_t index) const override {
+    EXPECT_EQ(index, 0u);
     // Return true so that GetIconForCommandId() will always be called.
     return true;
   }
@@ -325,7 +326,7 @@ TEST(MenuPropertyListTest, ComputePropertiesIcon) {
   EXPECT_EQ(menu->ComputeProperties(), props);
 }
 
-#if BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CASTOS)
 TEST(MenuPropertyListTest, ComputePropertiesAccelerator) {
   // The Wayland implementation requires the keyboard layout to be set.
   // The ScopedKeyboardLayout does not unset the already existing layout engine,
@@ -365,7 +366,7 @@ TEST(MenuPropertyListTest, ComputePropertiesAccelerator) {
   if (old_layout)
     ui::KeyboardLayoutEngineManager::SetKeyboardLayoutEngine(old_layout);
 }
-#endif
+#endif  // BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CASTOS)
 
 TEST(MenuPropertyListTest, ComputePropertyChanges) {
   MenuItemProperties old_props;

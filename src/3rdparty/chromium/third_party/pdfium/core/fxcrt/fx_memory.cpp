@@ -12,47 +12,15 @@
 
 #include "build/build_config.h"
 #include "core/fxcrt/fx_safe_types.h"
-#include "third_party/base/allocator/partition_allocator/partition_alloc.h"
 #include "third_party/base/debug/alias.h"
-#include "third_party/base/no_destructor.h"
+#include "third_party/base/numerics/safe_math.h"
 
 #if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #endif
 
-pdfium::base::PartitionAllocatorGeneric& GetArrayBufferPartitionAllocator() {
-  static pdfium::base::NoDestructor<pdfium::base::PartitionAllocatorGeneric>
-      s_array_buffer_allocator;
-  return *s_array_buffer_allocator;
-}
-
-pdfium::base::PartitionAllocatorGeneric& GetGeneralPartitionAllocator() {
-  static pdfium::base::NoDestructor<pdfium::base::PartitionAllocatorGeneric>
-      s_general_allocator;
-  return *s_general_allocator;
-}
-
-pdfium::base::PartitionAllocatorGeneric& GetStringPartitionAllocator() {
-  static pdfium::base::NoDestructor<pdfium::base::PartitionAllocatorGeneric>
-      s_string_allocator;
-  return *s_string_allocator;
-}
-
-void FXMEM_InitializePartitionAlloc() {
-  static bool s_partition_allocators_initialized = false;
-  if (!s_partition_allocators_initialized) {
-    pdfium::base::PartitionAllocGlobalInit(FX_OutOfMemoryTerminate);
-    GetArrayBufferPartitionAllocator().init();
-    GetGeneralPartitionAllocator().init();
-    GetStringPartitionAllocator().init();
-    s_partition_allocators_initialized = true;
-  }
-}
-
 void* FXMEM_DefaultAlloc(size_t byte_size) {
-  return pdfium::base::PartitionAllocGenericFlags(
-      GetGeneralPartitionAllocator().root(),
-      pdfium::base::PartitionAllocReturnNull, byte_size, "GeneralPartition");
+  return pdfium::internal::Alloc(byte_size, 1);
 }
 
 void* FXMEM_DefaultCalloc(size_t num_elems, size_t byte_size) {
@@ -60,14 +28,11 @@ void* FXMEM_DefaultCalloc(size_t num_elems, size_t byte_size) {
 }
 
 void* FXMEM_DefaultRealloc(void* pointer, size_t new_size) {
-  return pdfium::base::PartitionReallocGenericFlags(
-      GetGeneralPartitionAllocator().root(),
-      pdfium::base::PartitionAllocReturnNull, pointer, new_size,
-      "GeneralPartition");
+  return pdfium::internal::Realloc(pointer, new_size, 1);
 }
 
 void FXMEM_DefaultFree(void* pointer) {
-  pdfium::base::PartitionFree(pointer);
+  FX_Free(pointer);
 }
 
 NOINLINE void FX_OutOfMemoryTerminate(size_t size) {
@@ -81,7 +46,7 @@ NOINLINE void FX_OutOfMemoryTerminate(size_t size) {
   constexpr DWORD kOomExceptionCode = 0xe0000008;
   ULONG_PTR exception_args[] = {size};
   ::RaiseException(kOomExceptionCode, EXCEPTION_NONCONTINUABLE,
-                   pdfium::size(exception_args), exception_args);
+                   std::size(exception_args), exception_args);
 #endif
 
   // Terminate cleanly.
@@ -90,18 +55,6 @@ NOINLINE void FX_OutOfMemoryTerminate(size_t size) {
 
 namespace pdfium {
 namespace internal {
-
-void* Alloc(size_t num_members, size_t member_size) {
-  FX_SAFE_SIZE_T total = member_size;
-  total *= num_members;
-  if (!total.IsValid())
-    return nullptr;
-
-  constexpr int kFlags = pdfium::base::PartitionAllocReturnNull;
-  return pdfium::base::PartitionAllocGenericFlags(
-      GetGeneralPartitionAllocator().root(), kFlags, total.ValueOrDie(),
-      "GeneralPartition");
-}
 
 void* AllocOrDie(size_t num_members, size_t member_size) {
   void* result = Alloc(num_members, member_size);
@@ -117,32 +70,6 @@ void* AllocOrDie2D(size_t w, size_t h, size_t member_size) {
 
   return AllocOrDie(w * h, member_size);
 }
-
-void* Calloc(size_t num_members, size_t member_size) {
-  FX_SAFE_SIZE_T total = member_size;
-  total *= num_members;
-  if (!total.IsValid())
-    return nullptr;
-
-  constexpr int kFlags = pdfium::base::PartitionAllocReturnNull |
-                         pdfium::base::PartitionAllocZeroFill;
-  return pdfium::base::PartitionAllocGenericFlags(
-      GetGeneralPartitionAllocator().root(), kFlags, total.ValueOrDie(),
-      "GeneralPartition");
-}
-
-void* Realloc(void* ptr, size_t num_members, size_t member_size) {
-  FX_SAFE_SIZE_T size = num_members;
-  size *= member_size;
-  if (!size.IsValid())
-    return nullptr;
-
-  return pdfium::base::PartitionReallocGenericFlags(
-      GetGeneralPartitionAllocator().root(),
-      pdfium::base::PartitionAllocReturnNull, ptr, size.ValueOrDie(),
-      "GeneralPartition");
-}
-
 void* CallocOrDie(size_t num_members, size_t member_size) {
   void* result = Calloc(num_members, member_size);
   if (!result)
@@ -173,31 +100,11 @@ void* StringAllocOrDie(size_t num_members, size_t member_size) {
 
   return result;
 }
-
-void* StringAlloc(size_t num_members, size_t member_size) {
-  FX_SAFE_SIZE_T total = member_size;
-  total *= num_members;
-  if (!total.IsValid())
-    return nullptr;
-
-  constexpr int kFlags = pdfium::base::PartitionAllocReturnNull;
-  return pdfium::base::PartitionAllocGenericFlags(
-      GetStringPartitionAllocator().root(), kFlags, total.ValueOrDie(),
-      "StringPartition");
-}
-
 }  // namespace internal
 }  // namespace pdfium
 
-void FX_Free(void* ptr) {
-  // TODO(palmer): Removing this check exposes crashes when PDFium callers
-  // attempt to free |nullptr|. Although libc's |free| allows freeing |NULL|, no
-  // other Partition Alloc callers need this tolerant behavior. Additionally,
-  // checking for |nullptr| adds a branch to |PartitionFree|, and it's nice to
-  // not have to have that.
-  //
-  // So this check is hiding (what I consider to be) bugs, and we should try to
-  // fix them. https://bugs.chromium.org/p/pdfium/issues/detail?id=690
-  if (ptr)
-    pdfium::base::PartitionFree(ptr);
+size_t Fx2DSizeOrDie(size_t w, size_t h) {
+  pdfium::base::CheckedNumeric<size_t> safe_size = w;
+  safe_size *= h;
+  return safe_size.ValueOrDie();
 }

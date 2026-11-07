@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,10 +44,6 @@ class TestPaymentRequestDelegate : public PaymentRequestDelegate {
   const std::string& GetApplicationLocale() const override;
   bool IsOffTheRecord() const override;
   const GURL& GetLastCommittedURL() const override;
-  void DoFullCardRequest(
-      const autofill::CreditCard& credit_card,
-      base::WeakPtr<autofill::payments::FullCardRequest::ResultDelegate>
-          result_delegate) override;
   autofill::AddressNormalizer* GetAddressNormalizer() override;
   autofill::RegionDataLoader* GetRegionDataLoader() override;
   ukm::UkmRecorder* GetUkmRecorder() override;

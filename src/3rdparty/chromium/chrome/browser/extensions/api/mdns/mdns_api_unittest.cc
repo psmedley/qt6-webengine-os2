@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,7 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension_messages.h"
+#include "extensions/common/features/feature_channel.h"
 #include "extensions/common/manifest_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -122,28 +123,23 @@ class EventServiceListSizeMatcher
 
   virtual bool MatchAndExplain(const Event& e,
                                testing::MatchResultListener* listener) const {
-    if (!e.event_args) {
-      *listener << "event.event_arg is null when it shouldn't be";
-      return false;
-    }
-    if (e.event_args->GetListDeprecated().size() != 1) {
+    if (e.event_args.size() != 1) {
       *listener << "event.event_arg.GetSize() should be 1 but is "
-                << e.event_args->GetListDeprecated().size();
+                << e.event_args.size();
       return false;
     }
     const base::ListValue* services = nullptr;
     {
-      const base::Value& out = e.event_args->GetListDeprecated()[0];
+      const base::Value& out = e.event_args[0];
       services = static_cast<const base::ListValue*>(&out);
     }
     if (!services) {
       *listener << "event's service list argument is not a ListValue";
       return false;
     }
-    *listener << "number of services is "
-              << services->GetListDeprecated().size();
+    *listener << "number of services is " << services->GetList().size();
     return static_cast<testing::Matcher<size_t>>(testing::Eq(expected_size_))
-        .MatchAndExplain(services->GetListDeprecated().size(), listener);
+        .MatchAndExplain(services->GetList().size(), listener);
   }
 
   virtual void DescribeTo(::std::ostream* os) const {
@@ -269,6 +265,10 @@ class MDnsAPIDiscoveryTest : public MDnsAPITest {
   raw_ptr<MockedMDnsAPI> mdns_api_;
 };
 
+class MDnsAPIExtensionTest
+    : public MDnsAPITest,
+      public testing::WithParamInterface<version_info::Channel> {};
+
 TEST_F(MDnsAPIDiscoveryTest, ServiceListenersAddedAndRemoved) {
   EventRouterFactory::GetInstance()->SetTestingFactory(
       browser_context(), base::BindRepeating(&MockEventRouterFactoryFunction));
@@ -344,7 +344,10 @@ TEST_F(MDnsAPIMaxServicesTest, OnServiceListDoesNotExceedLimit) {
   dns_sd_registry()->DispatchMDnsEvent("_testing._tcp.local", services);
 }
 
-TEST_F(MDnsAPITest, ExtensionRespectsAllowlist) {
+TEST_P(MDnsAPIExtensionTest, ExtensionRespectsAllowlist) {
+  const bool is_dev = GetParam() == version_info::Channel::DEV;
+  extensions::ScopedCurrentChannel channel_override(GetParam());
+
   scoped_refptr<extensions::Extension> extension =
       CreateExtension("Dinosaur networker", false, kExtId);
   ExtensionRegistry::Get(browser_context())->AddEnabled(extension);
@@ -358,16 +361,17 @@ TEST_F(MDnsAPITest, ExtensionRespectsAllowlist) {
     filter.SetStringKey(kEventFilterServiceTypeKey, "_trex._tcp.local");
 
     ASSERT_TRUE(dns_sd_registry());
-    // Test that the extension is able to listen to a non-allowlisted service
+    // Test that the extension is not able to listen to a non-allowlisted
+    // service, unless we are on dev channel.
     EXPECT_CALL(*dns_sd_registry(), RegisterDnsSdListener("_trex._tcp.local"))
-        .Times(0);
+        .Times(is_dev ? 1 : 0);
     EventRouter::Get(browser_context())
         ->AddFilteredEventListener(api::mdns::OnServiceList::kEventName,
                                    render_process_host(), param.Clone(),
                                    absl::nullopt, filter, false);
 
     EXPECT_CALL(*dns_sd_registry(), UnregisterDnsSdListener("_trex._tcp.local"))
-        .Times(0);
+        .Times(is_dev ? 1 : 0);
     EventRouter::Get(browser_context())
         ->RemoveFilteredEventListener(api::mdns::OnServiceList::kEventName,
                                       render_process_host(), param.Clone(),
@@ -394,6 +398,11 @@ TEST_F(MDnsAPITest, ExtensionRespectsAllowlist) {
                                       absl::nullopt, filter, false);
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(Channels,
+                         MDnsAPIExtensionTest,
+                         testing::Values(version_info::Channel::DEV,
+                                         version_info::Channel::STABLE));
 
 TEST_F(MDnsAPITest, PlatformAppsNotSubjectToAllowlist) {
   scoped_refptr<extensions::Extension> extension =

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,6 +50,8 @@ const char kUrnScheme[] = "urn";
 const char16_t kUrnScheme16[] = u"urn";
 const char kUuidInPackageScheme[] = "uuid-in-package";
 const char16_t kUuidInPackageScheme16[] = u"uuid-in-package";
+const char kWebcalScheme[] = "webcal";
+const char16_t kWebcalScheme16[] = u"webcal";
 const char kWsScheme[] = "ws";
 const char16_t kWsScheme16[] = u"ws";
 const char kWssScheme[] = "wss";

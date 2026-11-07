@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,12 @@
 
 #include "base/bind.h"
 #include "base/check.h"
-#include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
+#include "base/timer/elapsed_timer.h"
 #include "build/build_config.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/color/color_metrics.h"
 #include "ui/color/color_provider.h"
 #include "ui/color/color_provider_utils.h"
 
@@ -46,11 +48,16 @@ ColorProviderManager::InitializerSupplier::InitializerSupplier() = default;
 
 ColorProviderManager::InitializerSupplier::~InitializerSupplier() = default;
 
+ColorProviderManager::ThemeInitializerSupplier::ThemeInitializerSupplier(
+    ThemeType theme_type)
+    : theme_type_(theme_type) {}
+
 ColorProviderManager::Key::Key()
     : Key(ColorMode::kLight,
           ContrastMode::kNormal,
           SystemTheme::kDefault,
           FrameType::kChromium,
+          absl::nullopt,
           nullptr) {}
 
 ColorProviderManager::Key::Key(
@@ -58,12 +65,14 @@ ColorProviderManager::Key::Key(
     ContrastMode contrast_mode,
     SystemTheme system_theme,
     FrameType frame_type,
+    absl::optional<SkColor> user_color,
     scoped_refptr<ThemeInitializerSupplier> custom_theme)
     : color_mode(color_mode),
       contrast_mode(contrast_mode),
       elevation_mode(ElevationMode::kLow),
       system_theme(system_theme),
       frame_type(frame_type),
+      user_color(user_color),
       custom_theme(std::move(custom_theme)) {}
 
 ColorProviderManager::Key::Key(const Key&) = default;
@@ -129,13 +138,19 @@ void ColorProviderManager::AppendColorProviderInitializer(
 ColorProvider* ColorProviderManager::GetColorProviderFor(Key key) {
   auto iter = color_providers_.find(key);
   if (iter == color_providers_.end()) {
+    base::ElapsedTimer timer;
+
     auto provider = std::make_unique<ColorProvider>();
     DCHECK(initializer_list_);
     if (!initializer_list_->empty())
       initializer_list_->Notify(provider.get(), key);
 
     provider->GenerateColorMap();
+    RecordTimeSpentInitializingColorProvider(timer.Elapsed());
+    ++num_providers_initialized_;
+
     iter = color_providers_.emplace(key, std::move(provider)).first;
+    RecordColorProviderCacheSize(color_providers_.size());
   }
   ColorProvider* provider = iter->second.get();
   DCHECK(provider);

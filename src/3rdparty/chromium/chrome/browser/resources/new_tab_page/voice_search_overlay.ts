@@ -1,11 +1,10 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import 'chrome://resources/polymer/v3_0/iron-pages/iron-pages.js';
 import 'chrome://resources/polymer/v3_0/iron-selector/iron-selector.js';
-import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
-import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
+import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
 
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
@@ -86,13 +85,13 @@ enum State {
  * persisted to logs. Entries should not be renumbered, removed or reused.
  */
 export enum Action {
-  kActivateSearchBox = 0,
-  kActivateKeyboard = 1,
-  kCloseOverlay = 2,
-  kQuerySubmitted = 3,
-  kSupportLinkClicked = 4,
-  kTryAgainLink = 5,
-  kTryAgainMicButton = 6,
+  ACTIVATE_SEARCH_BOX = 0,
+  ACTIVATE_KEYBOARD = 1,
+  CLOSE_OVERLAY = 2,
+  QUERY_SUBMITTED = 3,
+  SUPPORT_LINK_CLICKED = 4,
+  TRY_AGAIN_LINK = 5,
+  TRY_AGAIN_MIC_BUTTON = 6,  // Deprecated.
 }
 
 /**
@@ -101,16 +100,16 @@ export enum Action {
  * to logs. Entries should not be renumbered, removed or reused.
  */
 export enum Error {
-  kAborted = 0,
-  kAudioCapture = 1,
-  kBadGrammar = 2,
-  kLanguageNotSupported = 3,
-  kNetwork = 4,
-  kNoMatch = 5,
-  kNoSpeech = 6,
-  kNotAllowed = 7,
-  kOther = 8,
-  kServiceNotAllowed = 9,
+  ABORTED = 0,
+  AUDIO_CAPTURE = 1,
+  BAD_GRAMMAR = 2,
+  LANGUAGE_NOT_SUPPORTED = 3,
+  NETWORK = 4,
+  NO_MATCH = 5,
+  NO_SPEECH = 6,
+  NOT_ALLOWED = 7,
+  OTHER = 8,
+  SERVICE_NOT_ALLOWED = 9,
 }
 
 export function recordVoiceAction(action: Action) {
@@ -128,23 +127,23 @@ export function recordVoiceAction(action: Action) {
 function toError(webkitError: string): Error {
   switch (webkitError) {
     case 'aborted':
-      return Error.kAborted;
+      return Error.ABORTED;
     case 'audio-capture':
-      return Error.kAudioCapture;
+      return Error.AUDIO_CAPTURE;
     case 'language-not-supported':
-      return Error.kLanguageNotSupported;
+      return Error.LANGUAGE_NOT_SUPPORTED;
     case 'network':
-      return Error.kNetwork;
+      return Error.NETWORK;
     case 'no-speech':
-      return Error.kNoSpeech;
+      return Error.NO_SPEECH;
     case 'not-allowed':
-      return Error.kNotAllowed;
+      return Error.NOT_ALLOWED;
     case 'service-not-allowed':
-      return Error.kServiceNotAllowed;
+      return Error.SERVICE_NOT_ALLOWED;
     case 'bad-grammar':
-      return Error.kBadGrammar;
+      return Error.BAD_GRAMMAR;
     default:
-      return Error.kOther;
+      return Error.OTHER;
   }
 }
 
@@ -156,10 +155,10 @@ function toError(webkitError: string): Error {
  */
 function getErrorTimeout(error: Error): number {
   switch (error) {
-    case Error.kAudioCapture:
-    case Error.kNoSpeech:
-    case Error.kNotAllowed:
-    case Error.kNoMatch:
+    case Error.AUDIO_CAPTURE:
+    case Error.NO_SPEECH:
+    case Error.NOT_ALLOWED:
+    case Error.NO_MATCH:
       return ERROR_TIMEOUT_LONG_MS;
     default:
       return ERROR_TIMEOUT_SHORT_MS;
@@ -249,7 +248,7 @@ export class VoiceSearchOverlayElement extends PolymerElement {
       this.onError_(toError(e.error));
     };
     this.voiceRecognition_.onnomatch = () => {
-      this.onError_(Error.kNoMatch);
+      this.onError_(Error.NO_MATCH);
     };
   }
 
@@ -272,7 +271,7 @@ export class VoiceSearchOverlayElement extends PolymerElement {
 
   private onOverlayClick_() {
     this.$.dialog.close();
-    recordVoiceAction(Action.kCloseOverlay);
+    recordVoiceAction(Action.CLOSE_OVERLAY);
   }
 
   /**
@@ -301,25 +300,14 @@ export class VoiceSearchOverlayElement extends PolymerElement {
   }
 
   private onLearnMoreClick_() {
-    recordVoiceAction(Action.kSupportLinkClicked);
+    recordVoiceAction(Action.SUPPORT_LINK_CLICKED);
   }
 
   private onTryAgainClick_(e: Event) {
     // Otherwise, we close the overlay.
     e.stopPropagation();
     this.start();
-    recordVoiceAction(Action.kTryAgainLink);
-  }
-
-  private onMicClick_(e: Event) {
-    if (this.state_ !== State.ERROR_RECEIVED ||
-        this.error_ !== Error.kNoMatch) {
-      return;
-    }
-    // Otherwise, we close the overlay.
-    e.stopPropagation();
-    this.start();
-    recordVoiceAction(Action.kTryAgainMicButton);
+    recordVoiceAction(Action.TRY_AGAIN_LINK);
   }
 
   private resetIdleTimer_() {
@@ -339,7 +327,7 @@ export class VoiceSearchOverlayElement extends PolymerElement {
       return;
     }
     this.voiceRecognition_.abort();
-    this.onError_(Error.kNoMatch);
+    this.onError_(Error.NO_MATCH);
   }
 
   private resetErrorTimer_(duration: number) {
@@ -416,7 +404,7 @@ export class VoiceSearchOverlayElement extends PolymerElement {
 
   private onFinalResult_() {
     if (!this.finalResult_) {
-      this.onError_(Error.kNoMatch);
+      this.onError_(Error.NO_MATCH);
       return;
     }
     this.state_ = State.RESULT_FINAL;
@@ -428,27 +416,27 @@ export class VoiceSearchOverlayElement extends PolymerElement {
     const queryUrl =
         new URL('/search', loadTimeData.getString('googleBaseUrl'));
     queryUrl.search = searchParams.toString();
-    recordVoiceAction(Action.kQuerySubmitted);
+    recordVoiceAction(Action.QUERY_SUBMITTED);
     WindowProxy.getInstance().navigate(queryUrl.href);
   }
 
   private onEnd_() {
     switch (this.state_) {
       case State.STARTED:
-        this.onError_(Error.kAudioCapture);
+        this.onError_(Error.AUDIO_CAPTURE);
         return;
       case State.AUDIO_RECEIVED:
-        this.onError_(Error.kNoSpeech);
+        this.onError_(Error.NO_SPEECH);
         return;
       case State.SPEECH_RECEIVED:
       case State.RESULT_RECEIVED:
-        this.onError_(Error.kNoMatch);
+        this.onError_(Error.NO_MATCH);
         return;
       case State.ERROR_RECEIVED:
       case State.RESULT_FINAL:
         return;
       default:
-        this.onError_(Error.kOther);
+        this.onError_(Error.OTHER);
         return;
     }
   }
@@ -456,7 +444,7 @@ export class VoiceSearchOverlayElement extends PolymerElement {
   private onError_(error: Error) {
     chrome.metricsPrivate.recordEnumerationValue(
         'NewTabPage.VoiceErrors', error, Object.keys(Error).length);
-    if (error === Error.kAborted) {
+    if (error === Error.ABORTED) {
       // We are in the process of closing voice search.
       return;
     }
@@ -500,21 +488,21 @@ export class VoiceSearchOverlayElement extends PolymerElement {
 
   private getErrorText_(): string {
     switch (this.error_) {
-      case Error.kNoSpeech:
+      case Error.NO_SPEECH:
         return 'no-speech';
-      case Error.kAudioCapture:
+      case Error.AUDIO_CAPTURE:
         return 'audio-capture';
-      case Error.kNetwork:
+      case Error.NETWORK:
         return 'network';
-      case Error.kNotAllowed:
-      case Error.kServiceNotAllowed:
+      case Error.NOT_ALLOWED:
+      case Error.SERVICE_NOT_ALLOWED:
         return 'not-allowed';
-      case Error.kLanguageNotSupported:
+      case Error.LANGUAGE_NOT_SUPPORTED:
         return 'language-not-supported';
-      case Error.kNoMatch:
+      case Error.NO_MATCH:
         return 'no-match';
-      case Error.kAborted:
-      case Error.kOther:
+      case Error.ABORTED:
+      case Error.OTHER:
       default:
         return 'other';
     }
@@ -522,13 +510,13 @@ export class VoiceSearchOverlayElement extends PolymerElement {
 
   private getErrorLink_(): string {
     switch (this.error_) {
-      case Error.kNoSpeech:
-      case Error.kAudioCapture:
+      case Error.NO_SPEECH:
+      case Error.AUDIO_CAPTURE:
         return 'learn-more';
-      case Error.kNotAllowed:
-      case Error.kServiceNotAllowed:
+      case Error.NOT_ALLOWED:
+      case Error.SERVICE_NOT_ALLOWED:
         return 'details';
-      case Error.kNoMatch:
+      case Error.NO_MATCH:
         return 'try-again';
       default:
         return 'none';

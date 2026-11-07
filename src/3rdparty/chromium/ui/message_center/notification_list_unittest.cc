@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,10 @@
 #include "ui/message_center/public/cpp/message_center_constants.h"
 #include "ui/message_center/public/cpp/notification_types.h"
 #include "ui/message_center/public/cpp/notifier_id.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/constants/notifier_catalogs.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace message_center {
 
@@ -275,7 +279,12 @@ TEST_F(NotificationListTest, GetNotificationsByNotifierId) {
   NotifierId id0(NotifierType::APPLICATION, "ext0");
   NotifierId id1(NotifierType::APPLICATION, "ext1");
   NotifierId id2(GURL("http://example.com"));
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  NotifierId id3(NotifierType::SYSTEM_COMPONENT, "system-notifier",
+                 ash::NotificationCatalogName::kTestCatalogName);
+#else
   NotifierId id3(NotifierType::SYSTEM_COMPONENT, "system-notifier");
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
   std::unique_ptr<Notification> notification(new Notification(
       NOTIFICATION_TYPE_SIMPLE, "id0", u"title0", u"message0", ui::ImageModel(),
       u"source0", GURL(), id0, RichNotificationData(), nullptr));

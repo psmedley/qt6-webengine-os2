@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -146,9 +146,8 @@ class DEVICE_BLUETOOTH_EXPORT FakeBluetoothDeviceClient
   void CreateDeviceWithProperties(const dbus::ObjectPath& adapter_path,
                                   const IncomingDeviceProperties& props);
 
-  // Creates and returns a list of std::unique_ptr<base::DictionaryValue>
-  // objects, which contain all the data from the constants for devices with
-  // predefined behavior.
+  // Creates and returns a list of dictionary objects as a Value, which contain
+  // all the data from the constants for devices with predefined behavior.
   base::Value GetBluetoothDevicesAsDictionaries() const;
 
   SimulatedPairingOptions* GetPairingOptions(

@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -40,8 +40,8 @@ source_set("download") {
     "//base",
     "//components/keyed_service/core",
     "//components/keyed_service/ios",
-    "//components/strings:components_strings_grit",
-    "//ios/chrome/app/strings:ios_strings",
+    "//components/strings",
+    "//ios/chrome/app/strings",
     "//ios/chrome/browser/browser_state",
     "//ios/chrome/browser/overlays",
     "//ios/chrome/browser/overlays/public/common/confirmation",
@@ -66,6 +66,8 @@ source_set("download") {
 
 source_set("mime_types") {
   sources = [
+    "download_mimetype_util.cc",
+    "download_mimetype_util.h",
     "mime_type_util.cc",
     "mime_type_util.h",
   ]
@@ -99,6 +101,7 @@ source_set("unit_tests") {
     "//ios/web/public",
     "//ios/web/public/download",
     "//ios/web/public/test",
+    "//ios/web/public/test:download_test_utils",
     "//ios/web/public/test/fakes",
     "//net",
     "//testing/gtest",

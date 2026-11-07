@@ -8,17 +8,39 @@
 #ifndef SkShaderCodeDictionary_DEFINED
 #define SkShaderCodeDictionary_DEFINED
 
-#include <array>
-#include <string>
-#include <unordered_map>
-#include <vector>
 #include "include/core/SkSpan.h"
+#include "include/core/SkTypes.h"
+#include "include/private/SkMacros.h"
 #include "include/private/SkSpinlock.h"
+#include "include/private/SkTHash.h"
+#include "include/private/SkThreadAnnotations.h"
+#include "include/private/SkTo.h"
 #include "include/private/SkUniquePaintParamsID.h"
 #include "src/core/SkArenaAlloc.h"
+#include "src/core/SkBuiltInCodeSnippetID.h"
+#include "src/core/SkEnumBitMask.h"
 #include "src/core/SkPaintParamsKey.h"
-#include "src/core/SkPipelineData.h"
 #include "src/core/SkUniform.h"
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#ifdef SK_GRAPHITE_ENABLED
+namespace skgpu::graphite {
+class RenderStep;
+#ifdef SK_ENABLE_PRECOMPILE
+class BlenderID;
+#endif
+}
+#endif
+
+class SkRuntimeEffect;
+class SkRuntimeEffectDictionary;
 
 // TODO: How to represent the type (e.g., 2D) of texture being sampled?
 class SkTextureAndSampler {
@@ -31,39 +53,72 @@ private:
     const char* fName;
 };
 
+enum class SnippetRequirementFlags : uint32_t {
+    kNone = 0x0,
+    kLocalCoords = 0x1,
+    kPriorStageOutput = 0x2,  // AKA the "input" color, or the "source" color for a blender
+    kDestColor = 0x4,
+};
+SK_MAKE_BITMASK_OPS(SnippetRequirementFlags);
+
 struct SkShaderSnippet {
-    using GenerateGlueCodeForEntry = std::string (*)(const std::string& resultName,
-                                                     int entryIndex, // for uniform name mangling
-                                                     const SkPaintParamsKey::BlockReader&,
-                                                     const std::string& priorStageOutputName,
-                                                     const std::vector<std::string>& childNames,
-                                                     int indent);
+    using GeneratePreambleForSnippetFn = void (*)(const SkShaderInfo& shaderInfo,
+                                                  int* entryIndex,
+                                                  const SkPaintParamsKey::BlockReader&,
+                                                  std::string* preamble);
+    struct Args {
+        std::string_view fPriorStageOutput;
+        std::string_view fDestColor;
+        std::string_view fFragCoord;
+    };
+    using GenerateExpressionForSnippetFn = std::string (*)(const SkShaderInfo& shaderInfo,
+                                                           int entryIndex,
+                                                           const SkPaintParamsKey::BlockReader&,
+                                                           const Args& args);
 
     SkShaderSnippet() = default;
 
-    SkShaderSnippet(SkSpan<const SkUniform> uniforms,
+    SkShaderSnippet(const char* name,
+                    SkSpan<const SkUniform> uniforms,
+                    SkEnumBitMask<SnippetRequirementFlags> snippetRequirementFlags,
                     SkSpan<const SkTextureAndSampler> texturesAndSamplers,
                     const char* functionName,
-                    const char* code,
-                    GenerateGlueCodeForEntry glueCodeGenerator,
+                    GenerateExpressionForSnippetFn expressionGenerator,
+                    GeneratePreambleForSnippetFn preambleGenerator,
                     int numChildren,
                     SkSpan<const SkPaintParamsKey::DataPayloadField> dataPayloadExpectations)
-            : fUniforms(uniforms)
+            : fName(name)
+            , fUniforms(uniforms)
+            , fSnippetRequirementFlags(snippetRequirementFlags)
             , fTexturesAndSamplers(texturesAndSamplers)
             , fStaticFunctionName(functionName)
-            , fStaticSkSL(code)
-            , fGlueCodeGenerator(glueCodeGenerator)
+            , fExpressionGenerator(expressionGenerator)
+            , fPreambleGenerator(preambleGenerator)
             , fNumChildren(numChildren)
-            , fDataPayloadExpectations(dataPayloadExpectations) {
+            , fDataPayloadExpectations(dataPayloadExpectations) {}
+
+    std::string getMangledUniformName(const SkShaderInfo& shaderInfo,
+                                      int uniformIdx,
+                                      int mangleId) const;
+    std::string getMangledSamplerName(int samplerIdx, int mangleId) const;
+
+    bool needsLocalCoords() const {
+        return fSnippetRequirementFlags & SnippetRequirementFlags::kLocalCoords;
+    }
+    bool needsPriorStageOutput() const {
+        return fSnippetRequirementFlags & SnippetRequirementFlags::kPriorStageOutput;
+    }
+    bool needsDestColor() const {
+        return fSnippetRequirementFlags & SnippetRequirementFlags::kDestColor;
     }
 
-    std::string getMangledUniformName(int uniformIndex, int mangleId) const;
-
+    const char* fName = nullptr;
     SkSpan<const SkUniform> fUniforms;
+    SkEnumBitMask<SnippetRequirementFlags> fSnippetRequirementFlags{SnippetRequirementFlags::kNone};
     SkSpan<const SkTextureAndSampler> fTexturesAndSamplers;
     const char* fStaticFunctionName = nullptr;
-    const char* fStaticSkSL = nullptr;
-    GenerateGlueCodeForEntry fGlueCodeGenerator = nullptr;
+    GenerateExpressionForSnippetFn fExpressionGenerator = nullptr;
+    GeneratePreambleForSnippetFn fPreambleGenerator = nullptr;
     int fNumChildren = 0;
     SkSpan<const SkPaintParamsKey::DataPayloadField> fDataPayloadExpectations;
 };
@@ -72,32 +127,58 @@ struct SkShaderSnippet {
 // for program creation and its invocation.
 class SkShaderInfo {
 public:
+    SkShaderInfo(const SkRuntimeEffectDictionary* rteDict = nullptr,
+                 const char* ssboIndex = nullptr)
+            : fRuntimeEffectDictionary(rteDict)
+            , fSsboIndex(ssboIndex) {}
+    ~SkShaderInfo() = default;
+    SkShaderInfo(SkShaderInfo&&) = default;
+    SkShaderInfo& operator=(SkShaderInfo&&) = default;
+    SkShaderInfo(const SkShaderInfo&) = delete;
+    SkShaderInfo& operator=(const SkShaderInfo&) = delete;
+
     void add(const SkPaintParamsKey::BlockReader& reader) {
         fBlockReaders.push_back(reader);
     }
+    void addFlags(SkEnumBitMask<SnippetRequirementFlags> flags) {
+        fSnippetRequirementFlags |= flags;
+    }
+    bool needsLocalCoords() const {
+        return fSnippetRequirementFlags & SnippetRequirementFlags::kLocalCoords;
+    }
+    const SkPaintParamsKey::BlockReader& blockReader(int index) const {
+        return fBlockReaders[index];
+    }
+    const SkRuntimeEffectDictionary* runtimeEffectDictionary() const {
+        return fRuntimeEffectDictionary;
+    }
+    const char* ssboIndex() const { return fSsboIndex; }
+
 #ifdef SK_GRAPHITE_ENABLED
-    void setBlendInfo(const SkPipelineDataGatherer::BlendInfo& blendInfo) {
+    void setBlendInfo(const skgpu::BlendInfo& blendInfo) {
         fBlendInfo = blendInfo;
     }
-    const SkPipelineDataGatherer::BlendInfo& blendInfo() const { return fBlendInfo; }
+    const skgpu::BlendInfo& blendInfo() const { return fBlendInfo; }
 #endif
 
-#if SK_SUPPORT_GPU && defined(SK_GRAPHITE_ENABLED) && defined(SK_METAL)
-    std::string toSkSL() const;
+#if defined(SK_GRAPHITE_ENABLED) && defined(SK_ENABLE_SKSL)
+    std::string toSkSL(const skgpu::graphite::RenderStep* step,
+                       const bool defineShadingSsboIndexVarying,
+                       const bool defineLocalCoordsVarying) const;
 #endif
 
 private:
-    std::string emitGlueCodeForEntry(int* entryIndex,
-                                     const std::string& priorStageOutputName,
-                                     std::string* result,
-                                     int indent) const;
-
     std::vector<SkPaintParamsKey::BlockReader> fBlockReaders;
+
+    SkEnumBitMask<SnippetRequirementFlags> fSnippetRequirementFlags{SnippetRequirementFlags::kNone};
+    const SkRuntimeEffectDictionary* fRuntimeEffectDictionary = nullptr;
+
+    const char* fSsboIndex;
 
 #ifdef SK_GRAPHITE_ENABLED
     // The blendInfo doesn't actually contribute to the program's creation but, it contains the
     // matching fixed-function settings that the program's caller needs to set up.
-    SkPipelineDataGatherer::BlendInfo fBlendInfo;
+    skgpu::BlendInfo fBlendInfo;
 #endif
 };
 
@@ -113,14 +194,14 @@ public:
         }
         const SkPaintParamsKey& paintParamsKey() const { return fKey; }
 #ifdef SK_GRAPHITE_ENABLED
-        const SkPipelineDataGatherer::BlendInfo& blendInfo() const { return fBlendInfo; }
+        const skgpu::BlendInfo& blendInfo() const { return fBlendInfo; }
 #endif
 
     private:
         friend class SkShaderCodeDictionary;
 
 #ifdef SK_GRAPHITE_ENABLED
-        Entry(const SkPaintParamsKey& key, const SkPipelineDataGatherer::BlendInfo& blendInfo)
+        Entry(const SkPaintParamsKey& key, const skgpu::BlendInfo& blendInfo)
                 : fKey(key.asSpan())
                 , fBlendInfo(blendInfo) {
         }
@@ -140,22 +221,23 @@ public:
         // The BlendInfo isn't used in the hash (that is the key's job) but it does directly vary
         // with the key. It could, theoretically, be recreated from the key but that would add
         // extra complexity.
-        SkPipelineDataGatherer::BlendInfo fBlendInfo;
+        skgpu::BlendInfo fBlendInfo;
 #endif
     };
 
-#ifdef SK_GRAPHITE_ENABLED
-    const Entry* findOrCreate(const SkPaintParamsKey&,
-                              const SkPipelineDataGatherer::BlendInfo&) SK_EXCLUDES(fSpinLock);
-#else
-    const Entry* findOrCreate(const SkPaintParamsKey&) SK_EXCLUDES(fSpinLock);
-#endif
+    const Entry* findOrCreate(SkPaintParamsKeyBuilder*) SK_EXCLUDES(fSpinLock);
 
     const Entry* lookup(SkUniquePaintParamsID) const SK_EXCLUDES(fSpinLock);
 
     SkSpan<const SkUniform> getUniforms(SkBuiltInCodeSnippetID) const;
+    SkEnumBitMask<SnippetRequirementFlags> getSnippetRequirementFlags(
+            SkBuiltInCodeSnippetID id) const {
+        return fBuiltInCodeSnippets[(int) id].fSnippetRequirementFlags;
+    }
 
     SkSpan<const SkPaintParamsKey::DataPayloadField> dataPayloadExpectations(int snippetID) const;
+
+    bool isValidID(int snippetID) const;
 
     // This method can return nullptr
     const SkShaderSnippet* getEntry(int codeSnippetID) const;
@@ -163,34 +245,41 @@ public:
         return this->getEntry(SkTo<int>(codeSnippetID));
     }
 
-    void getShaderInfo(SkUniquePaintParamsID, SkShaderInfo*);
+    void getShaderInfo(SkUniquePaintParamsID, SkShaderInfo*) const;
 
-    int maxCodeSnippetID() const {
-        return static_cast<int>(SkBuiltInCodeSnippetID::kLast) + fUserDefinedCodeSnippets.size();
-    }
+    int findOrCreateRuntimeEffectSnippet(const SkRuntimeEffect* effect);
 
-    // TODO: this is still experimental but, most likely, it will need to be made thread-safe
-    // It returns the code snippet ID to use to identify the supplied user-defined code
-    // TODO: add hooks for user to actually provide code.
     int addUserDefinedSnippet(const char* name,
                               SkSpan<const SkPaintParamsKey::DataPayloadField> expectations);
 
+#if defined(SK_ENABLE_PRECOMPILE) && defined(SK_GRAPHITE_ENABLED)
+    skgpu::graphite::BlenderID addUserDefinedBlender(sk_sp<SkRuntimeEffect>);
+    const SkShaderSnippet* getEntry(skgpu::graphite::BlenderID) const;
+#endif
+
 private:
 #ifdef SK_GRAPHITE_ENABLED
-    Entry* makeEntry(const SkPaintParamsKey&, const SkPipelineDataGatherer::BlendInfo&);
+    Entry* makeEntry(const SkPaintParamsKey&, const skgpu::BlendInfo&);
 #else
     Entry* makeEntry(const SkPaintParamsKey&);
 #endif
 
-    struct Hash {
-        size_t operator()(const SkPaintParamsKey*) const;
-    };
+    // TODO: this is still experimental but, most likely, it will need to be made thread-safe
+    // It returns the code snippet ID to use to identify the supplied user-defined code
+    int addUserDefinedSnippet(
+            const char* name,
+            SkSpan<const SkUniform> uniforms,
+            SkEnumBitMask<SnippetRequirementFlags> snippetRequirementFlags,
+            SkSpan<const SkTextureAndSampler> texturesAndSamplers,
+            const char* functionName,
+            SkShaderSnippet::GenerateExpressionForSnippetFn expressionGenerator,
+            SkShaderSnippet::GeneratePreambleForSnippetFn preambleGenerator,
+            int numChildren,
+            SkSpan<const SkPaintParamsKey::DataPayloadField> dataPayloadExpectations);
 
-    struct KeyEqual {
-        bool operator()(const SkPaintParamsKey* k1, const SkPaintParamsKey* k2) const {
-            return k1->operator==(*k2);
-        }
-    };
+    const char* addTextToArena(std::string_view text);
+
+    SkSpan<const SkUniform> convertUniforms(const SkRuntimeEffect* effect);
 
     std::array<SkShaderSnippet, kBuiltInCodeSnippetIDCount> fBuiltInCodeSnippets;
 
@@ -201,13 +290,49 @@ private:
     // TODO: can we do something better given this should have write-seldom/read-often behavior?
     mutable SkSpinlock fSpinLock;
 
-    using PaintHashMap = std::unordered_map<const SkPaintParamsKey*, Entry*, Hash, KeyEqual>;
+    struct SkPaintParamsKeyPtr {
+        const SkPaintParamsKey* fKey;
+
+        bool operator==(SkPaintParamsKeyPtr rhs) const {
+            return *fKey == *rhs.fKey;
+        }
+        struct Hash {
+            size_t operator()(SkPaintParamsKeyPtr) const;
+        };
+    };
+
+    using PaintHashMap = SkTHashMap<SkPaintParamsKeyPtr, Entry*, SkPaintParamsKeyPtr::Hash>;
 
     PaintHashMap fHash SK_GUARDED_BY(fSpinLock);
     std::vector<Entry*> fEntryVector SK_GUARDED_BY(fSpinLock);
 
+    SK_BEGIN_REQUIRE_DENSE
+    struct RuntimeEffectKey {
+        uint32_t fHash;
+        uint32_t fUniformSize;
+
+        bool operator==(RuntimeEffectKey rhs) const {
+            return fHash == rhs.fHash && fUniformSize == rhs.fUniformSize;
+        }
+        struct Hash {
+            size_t operator()(RuntimeEffectKey) const;
+        };
+    };
+    SK_END_REQUIRE_DENSE
+
+    // A map from RuntimeEffectKeys (hash plus uniforms) to code-snippet IDs. RuntimeEffectKeys
+    // don't track the lifetime of a runtime effect at all; they live forever, and a newly-
+    // instantiated runtime effect with the same program as a previously-discarded effect will reuse
+    // an existing ID. Entries in the runtime-effect map are never removed; they only disappear when
+    // the context is discarded, which takes the ShaderCodeDictionary along with it. However, they
+    // are extremely small (< 20 bytes) so the memory footprint should be unnoticeable.
+    using RuntimeEffectMap = SkTHashMap<RuntimeEffectKey, int32_t>;
+    RuntimeEffectMap fRuntimeEffectMap SK_GUARDED_BY(fSpinLock);
+
     // This arena holds:
-    //    the Entries held in 'fHash' and 'fEntryVector' - thus, guarded by 'fSpinLock'
+    //   - the Entries held in `fHash` and `fEntryVector`
+    //   - SkUniform data created by `findOrCreateRuntimeEffectSnippet`
+    // and in all cases is guarded by `fSpinLock`
     SkArenaAlloc fArena{256};
 };
 

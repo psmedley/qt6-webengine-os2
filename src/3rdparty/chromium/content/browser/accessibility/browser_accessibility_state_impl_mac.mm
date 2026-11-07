@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,19 +11,6 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/gfx/animation/animation.h"
-
-@interface NSWorkspace (Partials)
-
-@property(readonly) BOOL accessibilityDisplayShouldDifferentiateWithoutColor;
-@property(readonly) BOOL accessibilityDisplayShouldIncreaseContrast;
-@property(readonly) BOOL accessibilityDisplayShouldReduceTransparency;
-
-@end
-
-// Only available since 10.12.
-@interface NSWorkspace (AvailableSinceSierra)
-@property(readonly) BOOL accessibilityDisplayShouldReduceMotion;
-@end
 
 namespace content {
 

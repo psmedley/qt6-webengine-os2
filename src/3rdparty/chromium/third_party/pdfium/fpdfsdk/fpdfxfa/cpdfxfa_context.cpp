@@ -6,6 +6,8 @@
 
 #include "fpdfsdk/fpdfxfa/cpdfxfa_context.h"
 
+#include <stdint.h>
+
 #include <algorithm>
 #include <utility>
 
@@ -14,7 +16,7 @@
 #include "core/fpdfapi/parser/cpdf_document.h"
 #include "core/fpdfapi/parser/cpdf_seekablemultistream.h"
 #include "core/fxcrt/autonuller.h"
-#include "core/fxcrt/fx_memory_wrappers.h"
+#include "core/fxcrt/fixed_zeroed_data_vector.h"
 #include "core/fxcrt/stl_util.h"
 #include "core/fxcrt/xml/cfx_xmldocument.h"
 #include "core/fxcrt/xml/cfx_xmlparser.h"
@@ -27,7 +29,6 @@
 #include "fxjs/ijs_runtime.h"
 #include "public/fpdf_formfill.h"
 #include "third_party/base/check.h"
-#include "third_party/base/notreached.h"
 #include "v8/include/cppgc/allocation.h"
 #include "xfa/fgas/font/cfgas_gemodule.h"
 #include "xfa/fxfa/cxfa_eventparam.h"
@@ -62,28 +63,30 @@ RetainPtr<CPDF_SeekableMultiStream> CreateXFAMultiStream(
   if (!pRoot)
     return nullptr;
 
-  const CPDF_Dictionary* pAcroForm = pRoot->GetDictFor("AcroForm");
+  RetainPtr<const CPDF_Dictionary> pAcroForm = pRoot->GetDictFor("AcroForm");
   if (!pAcroForm)
     return nullptr;
 
-  const CPDF_Object* pElementXFA = pAcroForm->GetDirectObjectFor("XFA");
+  RetainPtr<const CPDF_Object> pElementXFA =
+      pAcroForm->GetDirectObjectFor("XFA");
   if (!pElementXFA)
     return nullptr;
 
-  std::vector<const CPDF_Stream*> xfaStreams;
+  std::vector<RetainPtr<const CPDF_Stream>> xfa_streams;
   if (pElementXFA->IsArray()) {
     const CPDF_Array* pXFAArray = pElementXFA->AsArray();
     for (size_t i = 0; i < pXFAArray->size() / 2; i++) {
-      if (const CPDF_Stream* pStream = pXFAArray->GetStreamAt(i * 2 + 1))
-        xfaStreams.push_back(pStream);
+      RetainPtr<const CPDF_Stream> pStream = pXFAArray->GetStreamAt(i * 2 + 1);
+      if (pStream)
+        xfa_streams.push_back(std::move(pStream));
     }
   } else if (pElementXFA->IsStream()) {
-    xfaStreams.push_back(pElementXFA->AsStream());
+    xfa_streams.push_back(ToStream(pElementXFA));
   }
-  if (xfaStreams.empty())
+  if (xfa_streams.empty())
     return nullptr;
 
-  return pdfium::MakeRetain<CPDF_SeekableMultiStream>(xfaStreams);
+  return pdfium::MakeRetain<CPDF_SeekableMultiStream>(std::move(xfa_streams));
 }
 
 }  // namespace
@@ -204,8 +207,6 @@ int CPDFXFA_Context::GetPageCount() const {
     case FormType::kXFAFull:
       return m_pXFADoc ? m_pXFADocView->CountPageViews() : 0;
   }
-  NOTREACHED();
-  return 0;
 }
 
 RetainPtr<CPDFXFA_Page> CPDFXFA_Context::GetOrCreateXFAPage(int page_index) {
@@ -253,10 +254,6 @@ RetainPtr<CPDFXFA_Page> CPDFXFA_Context::GetXFAPage(
       return pTempPage;
   }
   return nullptr;
-}
-
-CPDF_Document* CPDFXFA_Context::GetPDFDoc() const {
-  return m_pPDFDoc.Get();
 }
 
 void CPDFXFA_Context::DeletePage(int page_index) {
@@ -342,18 +339,18 @@ WideString CPDFXFA_Context::Response(const WideString& wsQuestion,
   if (!m_pFormFillEnv)
     return WideString();
 
-  int nLength = 2048;
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> pBuff(nLength);
-  nLength = m_pFormFillEnv->JS_appResponse(wsQuestion, wsTitle, wsDefaultAnswer,
-                                           WideString(), bMark, pBuff);
-  if (nLength <= 0)
+  constexpr int kMaxWideChars = 1024;
+  FixedZeroedDataVector<uint16_t> buffer(kMaxWideChars);
+  pdfium::span<uint16_t> buffer_span = buffer.writable_span();
+  int byte_length = m_pFormFillEnv->JS_appResponse(
+      wsQuestion, wsTitle, wsDefaultAnswer, WideString(), bMark,
+      pdfium::as_writable_bytes(buffer_span));
+  if (byte_length <= 0)
     return WideString();
 
-  nLength = std::min(2046, nLength);
-  pBuff[nLength] = 0;
-  pBuff[nLength + 1] = 0;
-  return WideString::FromUTF16LE(reinterpret_cast<uint16_t*>(pBuff.data()),
-                                 nLength / sizeof(uint16_t));
+  buffer_span = buffer_span.first(
+      std::min<size_t>(kMaxWideChars, byte_length / sizeof(uint16_t)));
+  return WideString::FromUTF16LE(buffer_span.data(), buffer_span.size());
 }
 
 RetainPtr<IFX_SeekableReadStream> CPDFXFA_Context::DownloadURL(

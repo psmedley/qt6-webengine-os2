@@ -1,5 +1,5 @@
 #!/usr/bin/env vpython3
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,10 +11,10 @@ from unexpected_passes_common import data_types
 
 
 class BuilderRunsTestOfInterestUnittest(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.instance = builders.WebTestBuilders(False)
 
-    def testMatch(self):
+    def testMatch(self) -> None:
         """Tests that a match can be successfully found."""
         test_map = {
             'isolated_scripts': [
@@ -23,8 +23,7 @@ class BuilderRunsTestOfInterestUnittest(unittest.TestCase):
                 },
             ],
         }
-        self.assertTrue(
-            self.instance._BuilderRunsTestOfInterest(test_map, None))
+        self.assertTrue(self.instance._BuilderRunsTestOfInterest(test_map))
 
         # Re-add once WebGPU tests are supported.
         # test_map = {
@@ -35,9 +34,9 @@ class BuilderRunsTestOfInterestUnittest(unittest.TestCase):
         #     ],
         # }
         # self.assertTrue(
-        #     self.instance._BuilderRunsTestOfInterest(test_map, None))
+        #     self.instance._BuilderRunsTestOfInterest(test_map))
 
-    def testNoMatch(self):
+    def testNoMatch(self) -> None:
         test_map = {
             'isolated_scripts': [
                 {
@@ -45,12 +44,11 @@ class BuilderRunsTestOfInterestUnittest(unittest.TestCase):
                 },
             ],
         }
-        self.assertFalse(
-            self.instance._BuilderRunsTestOfInterest(test_map, None))
+        self.assertFalse(self.instance._BuilderRunsTestOfInterest(test_map))
 
 
 class GetFakeCiBuildersUnittest(unittest.TestCase):
-    def testStringsConvertedToBuilderEntries(self):
+    def testStringsConvertedToBuilderEntries(self) -> None:
         """Tests that the easier-to-read strings get converted to BuilderEntry."""
         instance = builders.WebTestBuilders(False)
         fake_builders = instance.GetFakeCiBuilders()
@@ -66,7 +64,7 @@ class GetFakeCiBuildersUnittest(unittest.TestCase):
 
 
 class GetNonChromiumBuildersUnittest(unittest.TestCase):
-    def testStringsConvertedToBuilderEntries(self):
+    def testStringsConvertedToBuilderEntries(self) -> None:
         """Tests that the easier-to-read strings get converted to BuilderEntry."""
         instance = builders.WebTestBuilders(False)
         builder = data_types.BuilderEntry('ToTMacOfficial',

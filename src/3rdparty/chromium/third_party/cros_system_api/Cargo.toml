@@ -1,7 +1,7 @@
 [package]
 name = "system_api"
 version = "0.24.53"
-authors = ["The Chromium OS Authors"]
+authors = ["The ChromiumOS Authors"]
 edition = "2018"
 include = ["Cargo.toml", "build.rs", "src/*", "src/bindings/*"]
 
@@ -11,4 +11,4 @@ protoc-rust = "2.3"
 
 [dependencies]
 dbus = "0.9"
-protobuf = "2.3"
+protobuf = "2.24"

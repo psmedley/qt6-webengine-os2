@@ -581,7 +581,7 @@ static void handler(vbi_event *ev, void *user_data)
     vbi_unref_page(&page);
 }
 
-static int slice_to_vbi_lines(TeletextContext *ctx, uint8_t* buf, int size)
+static int slice_to_vbi_lines(TeletextContext *ctx, const uint8_t *buf, int size)
 {
     int lines = 0;
     while (size >= 2 && lines < MAX_SLICES) {
@@ -637,10 +637,10 @@ static int slice_to_vbi_lines(TeletextContext *ctx, uint8_t* buf, int size)
     return lines;
 }
 
-static int teletext_decode_frame(AVCodecContext *avctx, void *data, int *got_sub_ptr, AVPacket *pkt)
+static int teletext_decode_frame(AVCodecContext *avctx, AVSubtitle *sub,
+                                 int *got_sub_ptr, const AVPacket *pkt)
 {
     TeletextContext *ctx = avctx->priv_data;
-    AVSubtitle      *sub = data;
     int             ret = 0;
 
     if (!ctx->vbi) {
@@ -813,15 +813,16 @@ static const AVClass teletext_class = {
 
 const FFCodec ff_libzvbi_teletext_decoder = {
     .p.name         = "libzvbi_teletextdec",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Libzvbi DVB teletext decoder"),
+    CODEC_LONG_NAME("Libzvbi DVB teletext decoder"),
     .p.type         = AVMEDIA_TYPE_SUBTITLE,
     .p.id           = AV_CODEC_ID_DVB_TELETEXT,
     .p.capabilities = AV_CODEC_CAP_DELAY,
     .p.priv_class   = &teletext_class,
     .p.wrapper_name = "libzvbi",
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
     .priv_data_size = sizeof(TeletextContext),
     .init      = teletext_init_decoder,
     .close     = teletext_close_decoder,
-    .decode    = teletext_decode_frame,
+    FF_CODEC_DECODE_SUB_CB(teletext_decode_frame),
     .flush     = teletext_flush,
 };

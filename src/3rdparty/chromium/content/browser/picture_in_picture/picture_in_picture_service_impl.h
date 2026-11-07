@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,13 +48,14 @@ class CONTENT_EXPORT PictureInPictureServiceImpl final
       const gfx::Size& natural_size,
       bool show_play_pause_button,
       mojo::PendingRemote<blink::mojom::PictureInPictureSessionObserver>,
+      const gfx::Rect& source_bounds,
       StartSessionCallback) final;
 
  private:
   friend class PictureInPictureSession;
 
   PictureInPictureServiceImpl(
-      RenderFrameHost*,
+      RenderFrameHost&,
       mojo::PendingReceiver<blink::mojom::PictureInPictureService>);
   ~PictureInPictureServiceImpl() override;
 

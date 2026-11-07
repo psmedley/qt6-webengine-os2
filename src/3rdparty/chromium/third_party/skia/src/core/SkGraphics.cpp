@@ -10,6 +10,7 @@
 #include "include/core/SkCanvas.h"
 #include "include/core/SkMath.h"
 #include "include/core/SkMatrix.h"
+#include "include/core/SkOpenTypeSVGDecoder.h"
 #include "include/core/SkPath.h"
 #include "include/core/SkPathEffect.h"
 #include "include/core/SkRefCnt.h"
@@ -79,7 +80,7 @@ void SkGraphics::SetFlags(const char* flags) {
             paramEnd = nextSemi;
         }
         size_t paramLen = paramEnd - flags;
-        for (int i = 0; i < (int)SK_ARRAY_COUNT(gFlags); ++i) {
+        for (int i = 0; i < (int)std::size(gFlags); ++i) {
             if (paramLen != gFlags[i].fLen) {
                 continue;
             }
@@ -123,6 +124,34 @@ int SkGraphics::GetFontCacheCountUsed() {
 void SkGraphics::PurgeFontCache() {
     SkStrikeCache::GlobalStrikeCache()->purgeAll();
     SkTypefaceCache::PurgeAll();
+}
+
+static SkGraphics::OpenTypeSVGDecoderFactory gSVGDecoderFactory = nullptr;
+
+SkGraphics::OpenTypeSVGDecoderFactory
+SkGraphics::SetOpenTypeSVGDecoderFactory(OpenTypeSVGDecoderFactory svgDecoderFactory) {
+    OpenTypeSVGDecoderFactory old(gSVGDecoderFactory);
+    gSVGDecoderFactory = svgDecoderFactory;
+    return old;
+}
+
+SkGraphics::OpenTypeSVGDecoderFactory SkGraphics::GetOpenTypeSVGDecoderFactory() {
+    return gSVGDecoderFactory;
+}
+
+static SkGraphics::VariableColrV1EnabledFunc gVariableCOLRv1EnabledFunc = nullptr;
+
+/* static */
+SkGraphics::VariableColrV1EnabledFunc SkGraphics::SetVariableColrV1EnabledFunc(
+        VariableColrV1EnabledFunc variableCOLRV1EnabledFunc) {
+    VariableColrV1EnabledFunc old = gVariableCOLRv1EnabledFunc;
+    gVariableCOLRv1EnabledFunc = variableCOLRV1EnabledFunc;
+    return old;
+}
+
+/* static */
+bool SkGraphics::GetVariableColrV1Enabled() {
+    return gVariableCOLRv1EnabledFunc ? gVariableCOLRv1EnabledFunc() : false;
 }
 
 extern bool gSkVMAllowJIT;

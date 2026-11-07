@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,44 @@
 #define MEDIA_MOJO_MOJOM_STABLE_STABLE_VIDEO_DECODER_TYPES_MOJOM_TRAITS_H_
 
 #include "base/notreached.h"
+#include "media/base/cdm_context.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_frame_metadata.h"
 #include "media/mojo/mojom/stable/stable_video_decoder_types.mojom.h"
 #include "mojo/public/cpp/bindings/optional_as_pointer.h"
 
 namespace mojo {
+
+template <>
+struct EnumTraits<media::stable::mojom::CdmContextEvent,
+                  ::media::CdmContext::Event> {
+  static media::stable::mojom::CdmContextEvent ToMojom(
+      ::media::CdmContext::Event input) {
+    switch (input) {
+      case ::media::CdmContext::Event::kHasAdditionalUsableKey:
+        return media::stable::mojom::CdmContextEvent::kHasAdditionalUsableKey;
+      case ::media::CdmContext::Event::kHardwareContextReset:
+        return media::stable::mojom::CdmContextEvent::kHardwareContextReset;
+    }
+
+    NOTREACHED();
+    return media::stable::mojom::CdmContextEvent::kHasAdditionalUsableKey;
+  }
+
+  static bool FromMojom(media::stable::mojom::CdmContextEvent input,
+                        ::media::CdmContext::Event* output) {
+    switch (input) {
+      case media::stable::mojom::CdmContextEvent::kHasAdditionalUsableKey:
+        *output = ::media::CdmContext::Event::kHasAdditionalUsableKey;
+        return true;
+      case media::stable::mojom::CdmContextEvent::kHardwareContextReset:
+        *output = ::media::CdmContext::Event::kHardwareContextReset;
+        return true;
+    }
+    NOTREACHED();
+    return false;
+  }
+};
 
 template <>
 struct EnumTraits<media::stable::mojom::ColorSpacePrimaryID,
@@ -173,6 +205,8 @@ struct EnumTraits<media::stable::mojom::ColorSpaceTransferID,
         return media::stable::mojom::ColorSpaceTransferID::kCustomHDR;
       case gfx::ColorSpace::TransferID::PIECEWISE_HDR:
         return media::stable::mojom::ColorSpaceTransferID::kPiecewiseHDR;
+      case gfx::ColorSpace::TransferID::SCRGB_LINEAR_80_NITS:
+        return media::stable::mojom::ColorSpaceTransferID::kScrgbLinear80Nits;
     }
 
     NOTREACHED();
@@ -258,6 +292,9 @@ struct EnumTraits<media::stable::mojom::ColorSpaceTransferID,
         return true;
       case media::stable::mojom::ColorSpaceTransferID::kPiecewiseHDR:
         *output = gfx::ColorSpace::TransferID::PIECEWISE_HDR;
+        return true;
+      case media::stable::mojom::ColorSpaceTransferID::kScrgbLinear80Nits:
+        *output = gfx::ColorSpace::TransferID::SCRGB_LINEAR_80_NITS;
         return true;
     }
 
@@ -503,6 +540,44 @@ struct StructTraits<media::stable::mojom::DecryptConfigDataView,
 };
 
 template <>
+struct EnumTraits<media::stable::mojom::DecryptStatus,
+                  ::media::Decryptor::Status> {
+  static media::stable::mojom::DecryptStatus ToMojom(
+      ::media::Decryptor::Status input) {
+    switch (input) {
+      case ::media::Decryptor::Status::kSuccess:
+        return media::stable::mojom::DecryptStatus::kSuccess;
+      case ::media::Decryptor::Status::kNoKey:
+        return media::stable::mojom::DecryptStatus::kNoKey;
+      case ::media::Decryptor::Status::kNeedMoreData:
+        return media::stable::mojom::DecryptStatus::kFailure;
+      case ::media::Decryptor::Status::kError:
+        return media::stable::mojom::DecryptStatus::kFailure;
+    }
+
+    NOTREACHED();
+    return media::stable::mojom::DecryptStatus::kFailure;
+  }
+
+  static bool FromMojom(media::stable::mojom::DecryptStatus input,
+                        ::media::Decryptor::Status* output) {
+    switch (input) {
+      case media::stable::mojom::DecryptStatus::kSuccess:
+        *output = ::media::Decryptor::Status::kSuccess;
+        return true;
+      case media::stable::mojom::DecryptStatus::kNoKey:
+        *output = ::media::Decryptor::Status::kNoKey;
+        return true;
+      case media::stable::mojom::DecryptStatus::kFailure:
+        *output = ::media::Decryptor::Status::kError;
+        return true;
+    }
+    NOTREACHED();
+    return false;
+  }
+};
+
+template <>
 struct EnumTraits<media::stable::mojom::EncryptionScheme,
                   ::media::EncryptionScheme> {
   static media::stable::mojom::EncryptionScheme ToMojom(
@@ -606,7 +681,7 @@ struct StructTraits<media::stable::mojom::MediaLogRecordDataView,
 
   static media::MediaLogRecord::Type type(const media::MediaLogRecord& input);
 
-  static const base::Value& params(const media::MediaLogRecord& input);
+  static const base::Value::Dict& params(const media::MediaLogRecord& input);
 
   static base::TimeTicks time(const media::MediaLogRecord& input);
 
@@ -824,6 +899,29 @@ struct EnumTraits<media::stable::mojom::VideoCodecProfile,
       case ::media::VideoCodecProfile::HEVCPROFILE_MAIN_STILL_PICTURE:
         return media::stable::mojom::VideoCodecProfile::
             kHEVCProfileMainStillPicture;
+      case ::media::VideoCodecProfile::HEVCPROFILE_REXT:
+        return media::stable::mojom::VideoCodecProfile::kHEVCProfileRext;
+      case ::media::VideoCodecProfile::HEVCPROFILE_HIGH_THROUGHPUT:
+        return media::stable::mojom::VideoCodecProfile::
+            kHEVCProfileHighThroughput;
+      case ::media::VideoCodecProfile::HEVCPROFILE_MULTIVIEW_MAIN:
+        return media::stable::mojom::VideoCodecProfile::
+            kHEVCProfileMultiviewMain;
+      case ::media::VideoCodecProfile::HEVCPROFILE_SCALABLE_MAIN:
+        return media::stable::mojom::VideoCodecProfile::
+            kHEVCProfileScalableMain;
+      case ::media::VideoCodecProfile::HEVCPROFILE_3D_MAIN:
+        return media::stable::mojom::VideoCodecProfile::kHEVCProfile3dMain;
+      case ::media::VideoCodecProfile::HEVCPROFILE_SCREEN_EXTENDED:
+        return media::stable::mojom::VideoCodecProfile::
+            kHEVCProfileScreenExtended;
+      case ::media::VideoCodecProfile::HEVCPROFILE_SCALABLE_REXT:
+        return media::stable::mojom::VideoCodecProfile::
+            kHEVCProfileScalableRext;
+      case ::media::VideoCodecProfile::
+          HEVCPROFILE_HIGH_THROUGHPUT_SCREEN_EXTENDED:
+        return media::stable::mojom::VideoCodecProfile::
+            kHEVCProfileHighThroughputScreenExtended;
       case ::media::VideoCodecProfile::DOLBYVISION_PROFILE0:
         return media::stable::mojom::VideoCodecProfile::kDolbyVisionProfile0;
       case ::media::VideoCodecProfile::DOLBYVISION_PROFILE4:
@@ -918,6 +1016,32 @@ struct EnumTraits<media::stable::mojom::VideoCodecProfile,
       case media::stable::mojom::VideoCodecProfile::
           kHEVCProfileMainStillPicture:
         *output = ::media::VideoCodecProfile::HEVCPROFILE_MAIN_STILL_PICTURE;
+        return true;
+      case media::stable::mojom::VideoCodecProfile::kHEVCProfileRext:
+        *output = ::media::VideoCodecProfile::HEVCPROFILE_REXT;
+        return true;
+      case media::stable::mojom::VideoCodecProfile::kHEVCProfileHighThroughput:
+        *output = ::media::VideoCodecProfile::HEVCPROFILE_HIGH_THROUGHPUT;
+        return true;
+      case media::stable::mojom::VideoCodecProfile::kHEVCProfileMultiviewMain:
+        *output = ::media::VideoCodecProfile::HEVCPROFILE_MULTIVIEW_MAIN;
+        return true;
+      case media::stable::mojom::VideoCodecProfile::kHEVCProfileScalableMain:
+        *output = ::media::VideoCodecProfile::HEVCPROFILE_SCALABLE_MAIN;
+        return true;
+      case media::stable::mojom::VideoCodecProfile::kHEVCProfile3dMain:
+        *output = ::media::VideoCodecProfile::HEVCPROFILE_3D_MAIN;
+        return true;
+      case media::stable::mojom::VideoCodecProfile::kHEVCProfileScreenExtended:
+        *output = ::media::VideoCodecProfile::HEVCPROFILE_SCREEN_EXTENDED;
+        return true;
+      case media::stable::mojom::VideoCodecProfile::kHEVCProfileScalableRext:
+        *output = ::media::VideoCodecProfile::HEVCPROFILE_SCALABLE_REXT;
+        return true;
+      case media::stable::mojom::VideoCodecProfile::
+          kHEVCProfileHighThroughputScreenExtended:
+        *output = ::media::VideoCodecProfile::
+            HEVCPROFILE_HIGH_THROUGHPUT_SCREEN_EXTENDED;
         return true;
       case media::stable::mojom::VideoCodecProfile::kDolbyVisionProfile0:
         *output = ::media::VideoCodecProfile::DOLBYVISION_PROFILE0;

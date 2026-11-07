@@ -38,6 +38,7 @@
 #include "quiche/quic/test_tools/quic_stream_peer.h"
 #include "quiche/quic/test_tools/quic_stream_send_buffer_peer.h"
 #include "quiche/quic/test_tools/quic_test_utils.h"
+#include "quiche/common/platform/api/quiche_logging.h"
 #include "quiche/common/quiche_mem_slice_storage.h"
 
 using spdy::kV3HighestPriority;
@@ -180,6 +181,26 @@ class TestCryptoStream : public QuicCryptoStream, public QuicCryptoHandshaker {
   }
 
   SSL* GetSsl() const override { return nullptr; }
+
+  bool IsCryptoFrameExpectedForEncryptionLevel(
+      EncryptionLevel level) const override {
+    return level != ENCRYPTION_ZERO_RTT;
+  }
+
+  EncryptionLevel GetEncryptionLevelToSendCryptoDataOfSpace(
+      PacketNumberSpace space) const override {
+    switch (space) {
+      case INITIAL_DATA:
+        return ENCRYPTION_INITIAL;
+      case HANDSHAKE_DATA:
+        return ENCRYPTION_HANDSHAKE;
+      case APPLICATION_DATA:
+        return ENCRYPTION_FORWARD_SECURE;
+      default:
+        QUICHE_DCHECK(false);
+        return NUM_ENCRYPTION_LEVELS;
+    }
+  }
 
  private:
   using QuicCryptoStream::session;
@@ -2483,7 +2504,7 @@ TEST_P(QuicSessionTestServer, RetransmitFrames) {
   EXPECT_CALL(*stream6, RetransmitStreamData(_, _, _, _))
       .WillOnce(Return(true));
   EXPECT_CALL(*send_algorithm, OnApplicationLimited(_));
-  session_.RetransmitFrames(frames, TLP_RETRANSMISSION);
+  session_.RetransmitFrames(frames, PTO_RETRANSMISSION);
 }
 
 // Regression test of b/110082001.
@@ -2954,7 +2975,11 @@ TEST_P(QuicSessionTestServer, WriteBufferedCryptoFrames) {
 
   EXPECT_CALL(*connection_, SendCryptoData(ENCRYPTION_INITIAL, 350, 1000))
       .WillOnce(Return(350));
-  EXPECT_CALL(*connection_, SendCryptoData(ENCRYPTION_ZERO_RTT, 1350, 0))
+  EXPECT_CALL(
+      *connection_,
+      SendCryptoData(crypto_stream->GetEncryptionLevelToSendCryptoDataOfSpace(
+                         QuicUtils::GetPacketNumberSpace(ENCRYPTION_ZERO_RTT)),
+                     1350, 0))
       .WillOnce(Return(1350));
   session_.OnCanWrite();
   EXPECT_FALSE(session_.HasPendingHandshake());
@@ -3028,6 +3053,79 @@ TEST_P(QuicSessionTestServer, IncomingStreamWithServerInitiatedStreamId) {
                         /* fin = */ false, /* offset = */ 0,
                         absl::string_view("foo"));
   session_.OnStreamFrame(frame);
+}
+
+// Regression test for b/235204908.
+TEST_P(QuicSessionTestServer, BlockedFrameCausesWriteError) {
+  CompleteHandshake();
+  MockPacketWriter* writer = static_cast<MockPacketWriter*>(
+      QuicConnectionPeer::GetWriter(session_.connection()));
+  EXPECT_CALL(*writer, WritePacket(_, _, _, _, _))
+      .WillOnce(Return(WriteResult(WRITE_STATUS_OK, 0)));
+  // Set a small connection level flow control limit.
+  const uint64_t kWindow = 36;
+  QuicFlowControllerPeer::SetSendWindowOffset(session_.flow_controller(),
+                                              kWindow);
+  auto stream =
+      session_.GetOrCreateStream(GetNthClientInitiatedBidirectionalId(0));
+  // Try to send more data than the flow control limit allows.
+  const uint64_t kOverflow = 15;
+  std::string body(kWindow + kOverflow, 'a');
+  EXPECT_CALL(*connection_, SendControlFrame(_))
+      .WillOnce(testing::InvokeWithoutArgs([this]() {
+        connection_->ReallyCloseConnection(
+            QUIC_PACKET_WRITE_ERROR, "write error",
+            ConnectionCloseBehavior::SILENT_CLOSE);
+        return false;
+      }));
+  std::string msg =
+      absl::StrCat("Marking unknown stream ", stream->id(), " blocked.");
+  if (GetQuicReloadableFlag(
+          quic_donot_mark_stream_write_blocked_if_write_side_closed)) {
+    stream->WriteOrBufferData(body, false, nullptr);
+  } else {
+    EXPECT_QUIC_BUG(stream->WriteOrBufferData(body, false, nullptr), msg);
+  }
+}
+
+TEST_P(QuicSessionTestServer, BufferedCryptoFrameCausesWriteError) {
+  if (!VersionHasIetfQuicFrames(transport_version())) {
+    return;
+  }
+  std::string data(1350, 'a');
+  TestCryptoStream* crypto_stream = session_.GetMutableCryptoStream();
+  // Only consumed 1000 bytes.
+  EXPECT_CALL(*connection_, SendCryptoData(ENCRYPTION_FORWARD_SECURE, 1350, 0))
+      .WillOnce(Return(1000));
+  crypto_stream->WriteCryptoData(ENCRYPTION_FORWARD_SECURE, data);
+  EXPECT_TRUE(session_.HasPendingHandshake());
+  EXPECT_TRUE(session_.WillingAndAbleToWrite());
+
+  EXPECT_CALL(*connection_,
+              SendCryptoData(ENCRYPTION_FORWARD_SECURE, 350, 1000))
+      .WillOnce(Return(0));
+  // Buffer the HANDSHAKE_DONE frame.
+  EXPECT_CALL(*connection_, SendControlFrame(_)).WillOnce(Return(false));
+  CryptoHandshakeMessage msg;
+  session_.GetMutableCryptoStream()->OnHandshakeMessage(msg);
+
+  // Flush both frames.
+  EXPECT_CALL(*connection_,
+              SendCryptoData(ENCRYPTION_FORWARD_SECURE, 350, 1000))
+      .WillOnce(testing::InvokeWithoutArgs([this]() {
+        connection_->ReallyCloseConnection(
+            QUIC_PACKET_WRITE_ERROR, "write error",
+            ConnectionCloseBehavior::SILENT_CLOSE);
+        return 350;
+      }));
+  if (!GetQuicReloadableFlag(
+          quic_no_write_control_frame_upon_connection_close)) {
+    EXPECT_CALL(*connection_, SendControlFrame(_)).WillOnce(Return(false));
+    EXPECT_QUIC_BUG(session_.OnCanWrite(),
+                    "Try to write control frames when connection is closed");
+  } else {
+    session_.OnCanWrite();
+  }
 }
 
 // A client test class that can be used when the automatic configuration is not

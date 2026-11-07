@@ -64,13 +64,10 @@
         {%- set Optional = "Optional" if member.optional else "" -%}
         WIRE_TRY(provider.Get{{Optional}}Id({{in}}, &{{out}}));
     {%- elif member.type.category == "structure" -%}
-        {%- if member.type.is_wire_transparent -%}
-            static_assert(sizeof({{out}}) == sizeof({{in}}), "Serialize memcpy size must match.");
-            memcpy(&{{out}}, &{{in}}, {{member_transfer_sizeof(member)}});
-        {%- else -%}
-            {%- set Provider = ", provider" if member.type.may_have_dawn_object else "" -%}
-            WIRE_TRY({{as_cType(member.type.name)}}Serialize({{in}}, &{{out}}, buffer{{Provider}}));
-        {%- endif -%}
+        //* Do not memcpy or we may serialize padding bytes which can leak information across a
+        //* trusted boundary.
+        {%- set Provider = ", provider" if member.type.may_have_dawn_object else "" -%}
+        WIRE_TRY({{as_cType(member.type.name)}}Serialize({{in}}, &{{out}}, buffer{{Provider}}));
     {%- else -%}
         {{out}} = {{in}};
     {%- endif -%}
@@ -651,31 +648,6 @@
 
 namespace dawn::wire {
 
-    ObjectHandle::ObjectHandle() = default;
-    ObjectHandle::ObjectHandle(ObjectId id, ObjectGeneration generation)
-        : id(id), generation(generation) {
-    }
-
-    ObjectHandle::ObjectHandle(const volatile ObjectHandle& rhs)
-        : id(rhs.id), generation(rhs.generation) {
-    }
-    ObjectHandle& ObjectHandle::operator=(const volatile ObjectHandle& rhs) {
-        id = rhs.id;
-        generation = rhs.generation;
-        return *this;
-    }
-
-    ObjectHandle& ObjectHandle::AssignFrom(const ObjectHandle& rhs) {
-        id = rhs.id;
-        generation = rhs.generation;
-        return *this;
-    }
-    ObjectHandle& ObjectHandle::AssignFrom(const volatile ObjectHandle& rhs) {
-        id = rhs.id;
-        generation = rhs.generation;
-        return *this;
-    }
-
     namespace {
         // Allocates enough space from allocator to countain T[count] and return it in out.
         // Return FatalError if the allocator couldn't allocate the memory.
@@ -783,73 +755,5 @@ namespace dawn::wire {
     {% for command in cmd_records["return command"] %}
         {{ write_command_serialization_methods(command, True) }}
     {% endfor %}
-
-    // Implementations of serialization/deserialization of WPGUDeviceProperties.
-    size_t SerializedWGPUDevicePropertiesSize(const WGPUDeviceProperties* deviceProperties) {
-        return sizeof(WGPUDeviceProperties) +
-               WGPUDevicePropertiesGetExtraRequiredSize(*deviceProperties);
-    }
-
-    void SerializeWGPUDeviceProperties(const WGPUDeviceProperties* deviceProperties,
-                                       char* buffer) {
-        SerializeBuffer serializeBuffer(buffer, SerializedWGPUDevicePropertiesSize(deviceProperties));
-
-        WGPUDevicePropertiesTransfer* transfer;
-
-        WireResult result = serializeBuffer.Next(&transfer);
-        ASSERT(result == WireResult::Success);
-
-        ErrorObjectIdProvider provider;
-        result = WGPUDevicePropertiesSerialize(*deviceProperties, transfer, &serializeBuffer, provider);
-        ASSERT(result == WireResult::Success);
-    }
-
-    bool DeserializeWGPUDeviceProperties(WGPUDeviceProperties* deviceProperties,
-                                         const volatile char* buffer,
-                                         size_t size) {
-        const volatile WGPUDevicePropertiesTransfer* transfer;
-        DeserializeBuffer deserializeBuffer(buffer, size);
-        if (deserializeBuffer.Read(&transfer) != WireResult::Success) {
-            return false;
-        }
-
-        ErrorObjectIdResolver resolver;
-        return WGPUDevicePropertiesDeserialize(deviceProperties, transfer, &deserializeBuffer,
-                                               nullptr, resolver) == WireResult::Success;
-    }
-
-    size_t SerializedWGPUSupportedLimitsSize(const WGPUSupportedLimits* supportedLimits) {
-        return sizeof(WGPUSupportedLimits) +
-               WGPUSupportedLimitsGetExtraRequiredSize(*supportedLimits);
-    }
-
-    void SerializeWGPUSupportedLimits(
-        const WGPUSupportedLimits* supportedLimits,
-        char* buffer) {
-        SerializeBuffer serializeBuffer(buffer, SerializedWGPUSupportedLimitsSize(supportedLimits));
-
-        WGPUSupportedLimitsTransfer* transfer;
-
-        WireResult result = serializeBuffer.Next(&transfer);
-        ASSERT(result == WireResult::Success);
-
-        ErrorObjectIdProvider provider;
-        result = WGPUSupportedLimitsSerialize(*supportedLimits, transfer, &serializeBuffer, provider);
-        ASSERT(result == WireResult::Success);
-    }
-
-    bool DeserializeWGPUSupportedLimits(WGPUSupportedLimits* supportedLimits,
-                                        const volatile char* buffer,
-                                        size_t size) {
-        const volatile WGPUSupportedLimitsTransfer* transfer;
-        DeserializeBuffer deserializeBuffer(buffer, size);
-        if (deserializeBuffer.Read(&transfer) != WireResult::Success) {
-            return false;
-        }
-
-        ErrorObjectIdResolver resolver;
-        return WGPUSupportedLimitsDeserialize(supportedLimits, transfer, &deserializeBuffer,
-                                              nullptr, resolver) == WireResult::Success;
-    }
 
 }  // namespace dawn::wire

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/callback.h"
 #include "base/component_export.h"
+#include "base/containers/flat_map.h"
 #include "base/strings/string_piece.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/color/color_id.h"
@@ -39,7 +40,7 @@ base::StringPiece COMPONENT_EXPORT(COLOR)
 
 // Converts SystemTheme.
 base::StringPiece COMPONENT_EXPORT(COLOR)
-    SystemThemeName(ColorProviderManager::SystemTheme system_theme);
+    SystemThemeName(ui::SystemTheme system_theme);
 
 // Converts ColorId.
 std::string COMPONENT_EXPORT(COLOR) ColorIdName(ColorId color_id);

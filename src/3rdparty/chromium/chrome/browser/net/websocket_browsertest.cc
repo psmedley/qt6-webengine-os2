@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
@@ -124,8 +125,10 @@ class WebSocketBrowserTest : public InProcessBrowserTest {
       const GURL& url,
       mojo::PendingRemote<network::mojom::WebSocketHandshakeClient>
           handshake_client) {
-    content::RenderFrameHost* const frame =
-        browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame();
+    content::RenderFrameHost* const frame = browser()
+                                                ->tab_strip_model()
+                                                ->GetActiveWebContents()
+                                                ->GetPrimaryMainFrame();
     content::RenderProcessHost* const process = frame->GetProcess();
 
     const std::vector<std::string> requested_protocols;
@@ -759,12 +762,21 @@ class FirstPartySetsWebSocketBrowserTest
   FirstPartySetsWebSocketBrowserTest()
       : WebSocketBrowserHTTPSConnectToTest(SSLOptions::CERT_TEST_NAMES) {}
 
+  void SetUpInProcessBrowserTestFixture() override {
+    feature_list_.InitAndEnableFeature(
+        net::features::kSamePartyAttributeEnabled);
+  }
+
   void SetUpCommandLine(base::CommandLine* command_line) override {
     WebSocketBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(
         network::switches::kUseFirstPartySet,
-        "https://a.test,https://b.test,https://c.test");
+        R"({"primary": "https://a.test",)"
+        R"("associatedSites": ["https://b.test","https://c.test"]})");
   }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_F(FirstPartySetsWebSocketBrowserTest,
@@ -778,7 +790,8 @@ IN_PROC_BROWSER_TEST_F(FirstPartySetsWebSocketBrowserTest,
                                  server().GetURL("a.test", "/"),
                                  "same-site-cookie=1; SameSite=Lax; Secure"));
 
-  content::DOMMessageQueue message_queue;
+  content::DOMMessageQueue message_queue(
+      browser()->tab_strip_model()->GetActiveWebContents());
   ConnectTo("b.test", wss_server_.GetURL("a.test", "echo-request-headers"));
 
   std::string message;

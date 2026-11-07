@@ -40,9 +40,16 @@ mkdir -p $BUILD_DIR
 rm -f $BUILD_DIR/*.a
 
 ENABLE_GPU="true"
+ENABLE_WEBGL="false"
+ENABLE_WEBGPU="false"
 if [[ $@ == *cpu* ]]; then
   echo "Using the CPU backend instead of the GPU backend"
   ENABLE_GPU="false"
+elif [[ $@ == *webgpu* ]]; then
+  echo "Using WebGPU instead of WebGL"
+  ENABLE_WEBGPU="true"
+else
+  ENABLE_WEBGL="true"
 fi
 
 SERIALIZE_SKP="true"
@@ -119,14 +126,17 @@ if [[ $@ == *no_font* ]]; then
   echo "Omitting the built-in font(s), font manager and all code dealing with fonts"
   ENABLE_FONT="false"
   ENABLE_EMBEDDED_FONT="false"
-  GN_FONT+="skia_enable_fontmgr_custom_embedded=false skia_enable_fontmgr_custom_empty=false"
+  GN_FONT+="skia_enable_fontmgr_custom_embedded=false skia_enable_fontmgr_custom_empty=false "
+  GN_FONT+="skia_fontmgr_factory=\":fontmgr_empty_factory\""
 elif [[ $@ == *no_embedded_font* ]]; then
   echo "Omitting the built-in font(s)"
   ENABLE_EMBEDDED_FONT="false"
-  GN_FONT+="skia_enable_fontmgr_custom_embedded=false skia_enable_fontmgr_custom_empty=true"
+  GN_FONT+="skia_enable_fontmgr_custom_embedded=true skia_enable_fontmgr_custom_empty=true "
+  GN_FONT+="skia_fontmgr_factory=\":fontmgr_custom_empty_factory\""
 else
   # Generate the font's binary file (which is covered by .gitignore)
-  GN_FONT+="skia_enable_fontmgr_custom_embedded=true skia_enable_fontmgr_custom_empty=false"
+  GN_FONT+="skia_enable_fontmgr_custom_embedded=true skia_enable_fontmgr_custom_empty=false "
+  GN_FONT+="skia_fontmgr_factory=\":fontmgr_custom_embedded_factory\""
 fi
 
 if [[ $@ == *no_woff2* ]]; then
@@ -207,7 +217,9 @@ echo "Compiling"
   \
   skia_use_angle=false \
   skia_use_dng_sdk=false \
-  skia_use_webgl=true \
+  skia_use_dawn=${ENABLE_WEBGPU} \
+  skia_use_webgl=${ENABLE_WEBGL} \
+  skia_use_webgpu=${ENABLE_WEBGPU} \
   skia_use_expat=${USE_EXPAT} \
   skia_use_fontconfig=false \
   skia_use_freetype=true \
@@ -255,6 +267,8 @@ echo "Compiling"
   skia_canvaskit_enable_alias_font=${ENABLE_ALIAS_FONT} \
   skia_canvaskit_legacy_draw_vertices_blend_mode=${LEGACY_DRAW_VERTICES} \
   skia_canvaskit_enable_debugger=${DEBUGGER_ENABLED} \
-  skia_canvaskit_enable_paragraph=${ENABLE_PARAGRAPH}"
+  skia_canvaskit_enable_paragraph=${ENABLE_PARAGRAPH} \
+  skia_canvaskit_enable_webgl=${ENABLE_WEBGL} \
+  skia_canvaskit_enable_webgpu=${ENABLE_WEBGPU}"
 
 ${NINJA} -C ${BUILD_DIR} canvaskit.js

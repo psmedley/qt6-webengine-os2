@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -216,13 +216,6 @@ class CORE_EXPORT OriginTrialContext final
   bool EnableTrialFromToken(const String& token,
                             const OriginInfo origin_info,
                             const Vector<OriginInfo>* script_origins);
-
-  // Validate the token result returned from token validator.
-  // `token_result` is modified in place to reflect the `OriginTrialTokenStatus`
-  // change.
-  void ValidateTokenResult(bool is_secure,
-                           const Vector<OriginInfo>* script_origins,
-                           TrialTokenResult& token_result);
 
   // Installs a series of OriginTrialFeatures listed in a HashSet. The return
   // value indicates whether binding features were added, signalling that V8

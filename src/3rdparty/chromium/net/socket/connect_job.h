@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,15 +10,16 @@
 #include <string>
 
 #include "base/callback_forward.h"
+#include "base/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "net/base/address_list.h"
 #include "net/base/load_states.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
+#include "net/dns/public/host_resolver_results.h"
 #include "net/dns/public/resolve_error_info.h"
 #include "net/log/net_log_with_source.h"
 #include "net/socket/connection_attempts.h"
@@ -114,7 +115,8 @@ enum class OnHostResolutionCallbackResult {
 using OnHostResolutionCallback =
     base::RepeatingCallback<OnHostResolutionCallbackResult(
         const HostPortPair& host_port_pair,
-        const AddressList& address_list)>;
+        const std::vector<HostResolverEndpointResult>& endpoint_results,
+        const std::set<std::string>& aliases)>;
 
 // ConnectJob provides an abstract interface for "connecting" a socket.
 // The connection may involve host resolution, tcp connection, ssl connection,
@@ -126,12 +128,12 @@ class NET_EXPORT_PRIVATE ConnectJob {
   // function doesn't own |job|.
   class NET_EXPORT_PRIVATE Delegate {
    public:
-    Delegate() {}
+    Delegate() = default;
 
     Delegate(const Delegate&) = delete;
     Delegate& operator=(const Delegate&) = delete;
 
-    virtual ~Delegate() {}
+    virtual ~Delegate() = default;
 
     // Alerts the delegate that the connection completed. |job| must be
     // destroyed by the delegate. A std::unique_ptr<> isn't used because the
@@ -216,9 +218,8 @@ class NET_EXPORT_PRIVATE ConnectJob {
   // Not safe to call after NotifyComplete() is invoked.
   virtual bool HasEstablishedConnection() const = 0;
 
-  // If the ConnectJobFailed, this method returns a list of failed attempts to
-  // connect to the destination server. Returns an empty list if connecting to a
-  // proxy.
+  // Returns a list of failed attempts to connect to the destination server.
+  // Returns an empty list if connecting to a proxy.
   virtual ConnectionAttempts GetConnectionAttempts() const;
 
   // Returns error information about any host resolution attempt.
@@ -244,6 +245,9 @@ class NET_EXPORT_PRIVATE ConnectJob {
   const LoadTimingInfo::ConnectTiming& connect_timing() const {
     return connect_timing_;
   }
+
+  // Sets |done_closure_| which will be called when |this| is deleted.
+  void set_done_closure(base::OnceClosure done_closure);
 
   const NetLogWithSource& net_log() const { return net_log_; }
 
@@ -321,6 +325,8 @@ class NET_EXPORT_PRIVATE ConnectJob {
   // ConnectJob has started / after it has completed.
   const bool top_level_job_;
   NetLogWithSource net_log_;
+  // This is called when |this| is deleted.
+  base::ScopedClosureRunner done_closure_;
   const NetLogEventType net_log_connect_event_type_;
 };
 

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,7 +47,7 @@ class MockDedicatedWorker
             ->GetStoragePartition()
             ->GetWeakPtr(),
         GURL(), absl::nullopt, absl::nullopt, base::UnguessableToken::Create(),
-        net::NetworkIsolationKey());
+        net::NetworkAnonymizationKey());
 
     mojo::MakeSelfOwnedReceiver(
         std::make_unique<DedicatedWorkerHostFactoryImpl>(
@@ -235,7 +235,7 @@ TEST_P(DedicatedWorkerServiceImplTest, DedicatedWorkerServiceObserver) {
 
   std::unique_ptr<TestWebContents> web_contents =
       CreateWebContents(GURL("http://example.com/"));
-  TestRenderFrameHost* render_frame_host = web_contents->GetMainFrame();
+  TestRenderFrameHost* render_frame_host = web_contents->GetPrimaryMainFrame();
 
   // At first, there is no live dedicated worker.
   EXPECT_TRUE(observer.dedicated_worker_infos().empty());

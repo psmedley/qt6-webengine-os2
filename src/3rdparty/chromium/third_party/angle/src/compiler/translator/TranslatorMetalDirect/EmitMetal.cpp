@@ -83,7 +83,7 @@ class GenMetalTraverser : public TIntermTraverser
                       IdGen &idGen,
                       const PipelineStructs &pipelineStructs,
                       SymbolEnv &symbolEnv,
-                      TSymbolTable *symbolTable);
+                      const ShCompileOptions &compileOptions);
 
     void visitSymbol(TIntermSymbol *) override;
     void visitConstantUnion(TIntermConstantUnion *) override;
@@ -197,6 +197,7 @@ class GenMetalTraverser : public TIntermTraverser
     size_t mMainUniformBufferIndex        = 0;
     size_t mDriverUniformsBindingIndex    = 0;
     size_t mUBOArgumentBufferBindingIndex = 0;
+    bool mRasterOrderGroupsSupported      = false;
 };
 }  // anonymous namespace
 
@@ -212,16 +213,18 @@ GenMetalTraverser::GenMetalTraverser(const TCompiler &compiler,
                                      IdGen &idGen,
                                      const PipelineStructs &pipelineStructs,
                                      SymbolEnv &symbolEnv,
-                                     TSymbolTable *symbolTable)
+                                     const ShCompileOptions &compileOptions)
     : TIntermTraverser(true, false, false),
       mOut(out),
       mCompiler(compiler),
       mPipelineStructs(pipelineStructs),
       mSymbolEnv(symbolEnv),
       mIdGen(idGen),
-      mMainUniformBufferIndex(symbolTable->getDefaultUniformsBindingIndex()),
-      mDriverUniformsBindingIndex(symbolTable->getDriverUniformsBindingIndex()),
-      mUBOArgumentBufferBindingIndex(symbolTable->getUBOArgumentBufferBindingIndex())
+      mMainUniformBufferIndex(compileOptions.metal.defaultUniformsBindingIndex),
+      mDriverUniformsBindingIndex(compileOptions.metal.driverUniformsBindingIndex),
+      mUBOArgumentBufferBindingIndex(compileOptions.metal.UBOArgumentBufferBindingIndex),
+      mRasterOrderGroupsSupported(compileOptions.pls.fragmentSynchronizationType ==
+                                  ShFragmentSynchronizationType::RasterOrderGroups_Metal)
 {}
 
 void GenMetalTraverser::emitIndentation()
@@ -555,6 +558,22 @@ static const char *GetOperatorString(TOperator op,
         case TOperator::EOpIntBitsToFloat:
         case TOperator::EOpUintBitsToFloat:
         {
+#define RETURN_AS_TYPE_SCALAR()             \
+    do                                      \
+        switch (resultType.getBasicType())  \
+        {                                   \
+            case TBasicType::EbtInt:        \
+                return "as_type<int>";      \
+            case TBasicType::EbtUInt:       \
+                return "as_type<uint32_t>"; \
+            case TBasicType::EbtFloat:      \
+                return "as_type<float>";    \
+            default:                        \
+                UNIMPLEMENTED();            \
+                return "TOperator_TODO";    \
+        }                                   \
+    while (false)
+
 #define RETURN_AS_TYPE(post)                     \
     do                                           \
         switch (resultType.getBasicType())       \
@@ -573,7 +592,7 @@ static const char *GetOperatorString(TOperator op,
 
             if (resultType.isScalar())
             {
-                RETURN_AS_TYPE("");
+                RETURN_AS_TYPE_SCALAR();
             }
             else if (resultType.isVector())
             {
@@ -597,6 +616,7 @@ static const char *GetOperatorString(TOperator op,
             }
 
 #undef RETURN_AS_TYPE
+#undef RETURN_AS_TYPE_SCALAR
         }
 
         case TOperator::EOpPackUnorm2x16:
@@ -779,7 +799,7 @@ void GenMetalTraverser::emitPostQualifier(const EmitVariableDeclarationConfig &e
     {
         case TQualifier::EvqPosition:
             isInvariant = decl.type().isInvariant();
-            ANGLE_FALLTHROUGH;
+            [[fallthrough]];
         case TQualifier::EvqFragCoord:
             mOut << " [[position]]";
             break;
@@ -872,9 +892,20 @@ void GenMetalTraverser::emitBareTypeName(const TType &type, const EmitTypeConfig
         case TBasicType::EbtBool:
         case TBasicType::EbtFloat:
         case TBasicType::EbtInt:
-        case TBasicType::EbtUInt:
         {
             mOut << type.getBasicString();
+            break;
+        }
+        case TBasicType::EbtUInt:
+        {
+            if (type.isScalar())
+            {
+                mOut << "uint32_t";
+            }
+            else
+            {
+                mOut << type.getBasicString();
+            }
         }
         break;
 
@@ -1036,6 +1067,7 @@ void GenMetalTraverser::emitFieldDeclaration(const TField &field,
             break;
 
         case TQualifier::EvqFragmentOut:
+        case TQualifier::EvqFragmentInOut:
         case TQualifier::EvqFragData:
             if (mPipelineStructs.fragmentOut.external == &parent)
             {
@@ -1052,7 +1084,17 @@ void GenMetalTraverser::emitFieldDeclaration(const TField &field,
                     const TLayoutQualifier &layoutQualifier = type.getLayoutQualifier();
                     size_t index = layoutQualifier.locationsSpecified ? layoutQualifier.location
                                                                       : annotationIndices.color++;
-                    mOut << " [[color(" << index << ")]]";
+                    mOut << " [[color(" << index << ")";
+                    if (mRasterOrderGroupsSupported && qual == TQualifier::EvqFragmentInOut)
+                    {
+                        // Put fragment inouts in their own raster order group for better
+                        // parallelism.
+                        // NOTE: this is not required for the reads to be ordered and coherent.
+                        // TODO(anglebug.com/7279): Consider making raster order groups a PLS layout
+                        // qualifier?
+                        mOut << ", raster_order_group(0)";
+                    }
+                    mOut << "]]";
                 }
             }
             break;
@@ -1281,6 +1323,8 @@ void GenMetalTraverser::emitVariableDeclaration(const VarDecl &decl,
         {
             if (type.isStructSpecifier() && !evdConfig.disableStructSpecifier)
             {
+                // It's invalid to declare a struct inside a function argument. When emitting a
+                // function parameter, the callsite should set evdConfig.disableStructSpecifier.
                 ASSERT(!evdConfig.isParameter);
                 emitStructDeclaration(type);
                 if (symbolType != SymbolType::Empty)
@@ -1785,12 +1829,13 @@ void GenMetalTraverser::emitFunctionParameter(const TFunction &func, const TVari
     const TStructure *structure = type.getStruct();
 
     EmitVariableDeclarationConfig evdConfig;
-    evdConfig.isParameter       = true;
-    evdConfig.isMainParameter   = isMain;
-    evdConfig.emitPostQualifier = isMain;
-    evdConfig.isUBO             = mSymbolEnv.isUBO(param);
-    evdConfig.isPointer         = mSymbolEnv.isPointer(param);
-    evdConfig.isReference       = mSymbolEnv.isReference(param);
+    evdConfig.isParameter            = true;
+    evdConfig.disableStructSpecifier = true;  // It's invalid to declare a struct in a function arg.
+    evdConfig.isMainParameter        = isMain;
+    evdConfig.emitPostQualifier      = isMain;
+    evdConfig.isUBO                  = mSymbolEnv.isUBO(param);
+    evdConfig.isPointer              = mSymbolEnv.isPointer(param);
+    evdConfig.isReference            = mSymbolEnv.isReference(param);
     emitVariableDeclaration(VarDecl(param), evdConfig);
 
     if (isMain)
@@ -2453,7 +2498,7 @@ bool sh::EmitMetal(TCompiler &compiler,
                    const PipelineStructs &pipelineStructs,
                    SymbolEnv &symbolEnv,
                    const ProgramPreludeConfig &ppc,
-                   TSymbolTable *symbolTable)
+                   const ShCompileOptions &compileOptions)
 {
     TInfoSinkBase &out = compiler.getInfoSink().obj;
 
@@ -2510,7 +2555,8 @@ bool sh::EmitMetal(TCompiler &compiler,
 #else
         TInfoSinkBase &outWrapper = out;
 #endif
-        GenMetalTraverser gen(compiler, outWrapper, idGen, pipelineStructs, symbolEnv, symbolTable);
+        GenMetalTraverser gen(compiler, outWrapper, idGen, pipelineStructs, symbolEnv,
+                              compileOptions);
         root.traverse(&gen);
     }
 

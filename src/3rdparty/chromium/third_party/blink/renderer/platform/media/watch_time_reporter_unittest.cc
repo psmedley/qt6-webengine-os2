@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -272,6 +272,7 @@ class WatchTimeReporterTest
                     media::mojom::MediaURLScheme url_scheme,
                     media::mojom::MediaStreamType media_stream_type) override {}
     void OnError(const media::PipelineStatus& status) override {}
+    void OnFallback(const media::PipelineStatus& status) override {}
     void SetIsEME() override {}
     void SetTimeToMetadata(base::TimeDelta elapsed) override {}
     void SetTimeToFirstFrame(base::TimeDelta elapsed) override {}

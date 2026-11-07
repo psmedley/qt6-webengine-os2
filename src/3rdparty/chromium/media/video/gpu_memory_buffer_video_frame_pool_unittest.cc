@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "base/bind.h"
+#include "base/memory/raw_ptr.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -237,10 +238,10 @@ class GpuMemoryBufferVideoFramePoolTest : public ::testing::Test {
   static constexpr uint8_t kUValue = 50;
   static constexpr uint8_t kVValue = 150;
 
-  uint8_t* y_data_ = nullptr;
-  uint8_t* u_data_ = nullptr;
-  uint8_t* v_data_ = nullptr;
-  uint8_t* uv_data_ = nullptr;
+  raw_ptr<uint8_t> y_data_ = nullptr;
+  raw_ptr<uint8_t> u_data_ = nullptr;
+  raw_ptr<uint8_t> v_data_ = nullptr;
+  raw_ptr<uint8_t> uv_data_ = nullptr;
 
   base::SimpleTestTickClock test_clock_;
   std::unique_ptr<MockGpuVideoAcceleratorFactories> mock_gpu_factories_;
@@ -416,11 +417,11 @@ TEST_F(GpuMemoryBufferVideoFramePoolTest,
     const auto* v_memory = reinterpret_cast<uint8_t*>(
         mock_gpu_factories_->created_memory_buffers()[2]->memory(0));
 
-    const uint16_t* y_plane_data = reinterpret_cast<uint16_t*>(
+    const uint16_t* y_plane_data = reinterpret_cast<const uint16_t*>(
         software_frame->visible_data(VideoFrame::kYPlane));
-    const uint16_t* u_plane_data = reinterpret_cast<uint16_t*>(
+    const uint16_t* u_plane_data = reinterpret_cast<const uint16_t*>(
         software_frame->visible_data(VideoFrame::kUPlane));
-    const uint16_t* v_plane_data = reinterpret_cast<uint16_t*>(
+    const uint16_t* v_plane_data = reinterpret_cast<const uint16_t*>(
         software_frame->visible_data(VideoFrame::kVPlane));
 
     // Y plane = 17x17 = 289, U and V plan = 9x9.
@@ -771,8 +772,13 @@ TEST_F(GpuMemoryBufferVideoFramePoolTest, CreateOneHardwareP010Frame) {
 
   EXPECT_NE(software_frame.get(), frame.get());
   EXPECT_EQ(PIXEL_FORMAT_P016LE, frame->format());
+#if BUILDFLAG(IS_MAC)
+  EXPECT_EQ(2u, frame->NumTextures());
+  EXPECT_EQ(2u, sii_->shared_image_count());
+#else
   EXPECT_EQ(1u, frame->NumTextures());
   EXPECT_EQ(1u, sii_->shared_image_count());
+#endif
   EXPECT_TRUE(frame->metadata().read_lock_fences_enabled);
 
   EXPECT_EQ(1u, mock_gpu_factories_->created_memory_buffers().size());
@@ -806,8 +812,13 @@ TEST_F(GpuMemoryBufferVideoFramePoolTest,
       gfx::IsOddHeightMultiPlanarBuffersAllowed()) {
     EXPECT_NE(software_frame.get(), frame.get());
     EXPECT_EQ(PIXEL_FORMAT_P016LE, frame->format());
+#if BUILDFLAG(IS_MAC)
+    EXPECT_EQ(2u, frame->NumTextures());
+    EXPECT_EQ(2u, sii_->shared_image_count());
+#else
     EXPECT_EQ(1u, frame->NumTextures());
     EXPECT_EQ(1u, sii_->shared_image_count());
+#endif
     EXPECT_TRUE(frame->metadata().read_lock_fences_enabled);
 
     EXPECT_EQ(1u, mock_gpu_factories_->created_memory_buffers().size());
@@ -819,11 +830,11 @@ TEST_F(GpuMemoryBufferVideoFramePoolTest,
     const uint16_t* uv_memory = reinterpret_cast<uint16_t*>(
         mock_gpu_factories_->created_memory_buffers()[0]->memory(1));
 
-    const uint16_t* y_plane_data = reinterpret_cast<uint16_t*>(
+    const uint16_t* y_plane_data = reinterpret_cast<const uint16_t*>(
         software_frame->visible_data(VideoFrame::kYPlane));
-    const uint16_t* u_plane_data = reinterpret_cast<uint16_t*>(
+    const uint16_t* u_plane_data = reinterpret_cast<const uint16_t*>(
         software_frame->visible_data(VideoFrame::kUPlane));
-    const uint16_t* v_plane_data = reinterpret_cast<uint16_t*>(
+    const uint16_t* v_plane_data = reinterpret_cast<const uint16_t*>(
         software_frame->visible_data(VideoFrame::kVPlane));
 
     // Y plane = 7x7 = 49, U and V plan = 4x4 = 16.
@@ -928,8 +939,14 @@ TEST_F(GpuMemoryBufferVideoFramePoolTest, CreateOneHardwareRGBAFrame) {
 }
 
 TEST_F(GpuMemoryBufferVideoFramePoolTest, PreservesMetadata) {
+  gfx::HDRMetadata hdr_metadata;
+  hdr_metadata.max_content_light_level = 5000;
+  hdr_metadata.max_frame_average_light_level = 1000;
+
   scoped_refptr<VideoFrame> software_frame = CreateTestYUVVideoFrame(10);
   software_frame->metadata().end_of_stream = true;
+  software_frame->set_hdr_metadata(hdr_metadata);
+
   base::TimeTicks kTestReferenceTime =
       base::Milliseconds(12345) + base::TimeTicks();
   software_frame->metadata().reference_time = kTestReferenceTime;
@@ -941,6 +958,7 @@ TEST_F(GpuMemoryBufferVideoFramePoolTest, PreservesMetadata) {
 
   EXPECT_NE(software_frame.get(), frame.get());
   EXPECT_TRUE(frame->metadata().end_of_stream);
+  EXPECT_EQ(hdr_metadata, frame->hdr_metadata());
   EXPECT_EQ(kTestReferenceTime, *frame->metadata().reference_time);
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,8 +31,7 @@ namespace {
 
 using Logger = autofill::SavePasswordProgressLogger;
 
-void LogString(const PasswordManagerClient* client,
-               Logger::StringID string_id) {
+void LogString(PasswordManagerClient* client, Logger::StringID string_id) {
   if (client && password_manager_util::IsLoggingActive(client)) {
     BrowserSavePasswordProgressLogger logger(client->GetLogManager());
     logger.LogMessage(string_id);
@@ -92,12 +91,11 @@ void LeakDetectionDelegate::OnLeakDetectionDone(bool is_leaked,
       false);
   if (is_leaked || force_dialog_for_testing) {
     PasswordScriptsFetcher* scripts_fetcher = nullptr;
-    // Password change scripts require password generation, so only bother
-    // querying for script availability if generation is available.
-    // Similarly, password change scripts should only be offered during sign-in
+    // Password change scripts should only be offered during sign-in
     // (not during sign-up), so don't query if this was a new-password form.
-    if (client_->GetPasswordFeatureManager()->IsGenerationEnabled() &&
-        !is_likely_signup_form_ &&
+    if (!is_likely_signup_form_ &&
+        client_->GetPasswordFeatureManager()
+            ->AreRequirementsForAutomatedPasswordChangeFulfilled() &&
         password_manager::features::IsPasswordScriptsFetchingEnabled() &&
         base::FeatureList::IsEnabled(
             password_manager::features::kPasswordChange)) {
@@ -175,7 +173,7 @@ void LeakDetectionDelegate::OnError(LeakDetectionError error) {
 }
 
 bool CanStartLeakCheck(const PrefService& prefs,
-                       const PasswordManagerClient* client) {
+                       PasswordManagerClient* client) {
   const bool is_leak_protection_on =
       prefs.GetBoolean(password_manager::prefs::kPasswordLeakDetectionEnabled);
 

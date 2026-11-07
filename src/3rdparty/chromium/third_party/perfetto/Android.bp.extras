@@ -11,6 +11,16 @@ java_library_host {
 }
 
 java_library_host {
+    name: "perfetto_trace-full",
+    proto: {
+        type: "full",
+    },
+    srcs: [
+        "protos/perfetto/trace/perfetto_trace.proto",
+    ],
+}
+
+java_library_host {
     name: "perfetto_metrics-full",
     proto: {
         type: "full",
@@ -92,22 +102,21 @@ python_library {
     name: "perfetto-trace-processor-python",
     srcs: [
         ":perfetto-trace-processor-python-srcs",
+        ":perfetto-trace-uri-resolver-python-srcs",
     ],
     data: [
         ":perfetto-trace-processor-python-data",
     ],
-    version: {
-        py2: {
-            enabled: false,
-        },
-        py3: {
-            enabled: true,
-        },
-    },
     libs: [
         "libprotobuf-python",
     ],
     host_supported: true,
+}
+
+filegroup {
+    name: "perfetto-trace-uri-resolver-python-srcs",
+    srcs: ["python/perfetto/trace_uri_resolver/*.py"],
+    path: "python",
 }
 
 filegroup {
@@ -120,6 +129,11 @@ filegroup {
     name: "perfetto-trace-processor-python-data",
     srcs: ["python/perfetto/trace_processor/*.descriptor*"],
     path: "python",
+}
+
+filegroup {
+    name: "perfetto-atrace-categories-proto",
+    srcs: ["protos/perfetto/android_vendor/atrace_categories.proto"],
 }
 
 // Added automatically by a large-scale-change that took the approach of

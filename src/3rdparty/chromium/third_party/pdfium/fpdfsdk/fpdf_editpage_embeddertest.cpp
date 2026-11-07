@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "core/fxcrt/fx_system.h"
+#include "core/fxge/cfx_defaultrenderdevice.h"
 #include "public/fpdf_edit.h"
 #include "testing/embedder_test.h"
 #include "testing/embedder_test_constants.h"
@@ -10,11 +11,11 @@
 class FPDFEditPageEmbedderTest : public EmbedderTest {};
 
 TEST_F(FPDFEditPageEmbedderTest, Rotation) {
-#if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-  const char kRotatedMD5[] = "eded83f75f3d0332c584c416c571c0df";
-#else
-  const char kRotatedMD5[] = "d599429574ff0dcad3bc898ea8b874ca";
-#endif
+  const char* rotated_checksum = []() {
+    if (CFX_DefaultRenderDevice::SkiaVariantIsDefaultRenderer())
+      return "eded83f75f3d0332c584c416c571c0df";
+    return "d599429574ff0dcad3bc898ea8b874ca";
+  }();
 
   {
     ASSERT_TRUE(OpenDocument("rectangles.pdf"));
@@ -30,7 +31,7 @@ TEST_F(FPDFEditPageEmbedderTest, Rotation) {
       EXPECT_EQ(300, page_height);
       ScopedFPDFBitmap bitmap = RenderLoadedPage(page);
       CompareBitmap(bitmap.get(), page_width, page_height,
-                    pdfium::kRectanglesChecksum);
+                    pdfium::RectanglesChecksum());
     }
 
     FPDFPage_SetRotation(page, 1);
@@ -45,7 +46,7 @@ TEST_F(FPDFEditPageEmbedderTest, Rotation) {
       EXPECT_EQ(300, page_width);
       EXPECT_EQ(200, page_height);
       ScopedFPDFBitmap bitmap = RenderLoadedPage(page);
-      CompareBitmap(bitmap.get(), page_width, page_height, kRotatedMD5);
+      CompareBitmap(bitmap.get(), page_width, page_height, rotated_checksum);
     }
 
     UnloadPage(page);
@@ -65,7 +66,7 @@ TEST_F(FPDFEditPageEmbedderTest, Rotation) {
     EXPECT_EQ(300, page_width);
     EXPECT_EQ(200, page_height);
     ScopedFPDFBitmap bitmap = RenderSavedPage(saved_page);
-    CompareBitmap(bitmap.get(), page_width, page_height, kRotatedMD5);
+    CompareBitmap(bitmap.get(), page_width, page_height, rotated_checksum);
 
     CloseSavedPage(saved_page);
     CloseSavedDocument();
@@ -289,6 +290,170 @@ TEST_F(FPDFEditPageEmbedderTest, DashingArrayAndPhase) {
     EXPECT_TRUE(FPDFPageObj_GetDashPhase(path, &phase));
     EXPECT_FLOAT_EQ(4.0f, phase);
   }
+
+  UnloadPage(page);
+}
+
+TEST_F(FPDFEditPageEmbedderTest, GetRotatedBoundsBadParameters) {
+  ASSERT_TRUE(OpenDocument("hello_world.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  FPDF_PAGEOBJECT obj = FPDFPage_GetObject(page, 0);
+  ASSERT_EQ(FPDF_PAGEOBJ_TEXT, FPDFPageObj_GetType(obj));
+
+  FS_QUADPOINTSF quad;
+  ASSERT_FALSE(FPDFPageObj_GetRotatedBounds(nullptr, nullptr));
+  ASSERT_FALSE(FPDFPageObj_GetRotatedBounds(obj, nullptr));
+  ASSERT_FALSE(FPDFPageObj_GetRotatedBounds(nullptr, &quad));
+
+  UnloadPage(page);
+}
+
+TEST_F(FPDFEditPageEmbedderTest, GetBoundsForNormalText) {
+  ASSERT_TRUE(OpenDocument("hello_world.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  FPDF_PAGEOBJECT obj = FPDFPage_GetObject(page, 0);
+  ASSERT_EQ(FPDF_PAGEOBJ_TEXT, FPDFPageObj_GetType(obj));
+
+  constexpr float kExpectedLeft = 20.348f;
+  constexpr float kExpectedBottom = 48.164f;
+  constexpr float kExpectedRight = 83.36f;
+  constexpr float kExpectedTop = 58.328f;
+
+  float left;
+  float bottom;
+  float right;
+  float top;
+  ASSERT_TRUE(FPDFPageObj_GetBounds(obj, &left, &bottom, &right, &top));
+  EXPECT_FLOAT_EQ(kExpectedLeft, left);
+  EXPECT_FLOAT_EQ(kExpectedBottom, bottom);
+  EXPECT_FLOAT_EQ(kExpectedRight, right);
+  EXPECT_FLOAT_EQ(kExpectedTop, top);
+
+  FS_QUADPOINTSF quad;
+  ASSERT_TRUE(FPDFPageObj_GetRotatedBounds(obj, &quad));
+  EXPECT_FLOAT_EQ(kExpectedLeft, quad.x1);
+  EXPECT_FLOAT_EQ(kExpectedBottom, quad.y1);
+  EXPECT_FLOAT_EQ(kExpectedRight, quad.x2);
+  EXPECT_FLOAT_EQ(kExpectedBottom, quad.y2);
+  EXPECT_FLOAT_EQ(kExpectedRight, quad.x3);
+  EXPECT_FLOAT_EQ(kExpectedTop, quad.y3);
+  EXPECT_FLOAT_EQ(kExpectedLeft, quad.x4);
+  EXPECT_FLOAT_EQ(kExpectedTop, quad.y4);
+
+  UnloadPage(page);
+}
+
+TEST_F(FPDFEditPageEmbedderTest, GetBoundsForRotatedText) {
+  ASSERT_TRUE(OpenDocument("rotated_text.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  FPDF_PAGEOBJECT obj = FPDFPage_GetObject(page, 0);
+  ASSERT_EQ(FPDF_PAGEOBJ_TEXT, FPDFPageObj_GetType(obj));
+
+  constexpr float kExpectedLeft = 98.9478f;
+  constexpr float kExpectedBottom = 78.2607f;
+  constexpr float kExpectedRight = 126.32983f;
+  constexpr float kExpectedTop = 105.64272f;
+
+  float left;
+  float bottom;
+  float right;
+  float top;
+  ASSERT_TRUE(FPDFPageObj_GetBounds(obj, &left, &bottom, &right, &top));
+  EXPECT_FLOAT_EQ(kExpectedLeft, left);
+  EXPECT_FLOAT_EQ(kExpectedBottom, bottom);
+  EXPECT_FLOAT_EQ(kExpectedRight, right);
+  EXPECT_FLOAT_EQ(kExpectedTop, top);
+
+  FS_QUADPOINTSF quad;
+  ASSERT_TRUE(FPDFPageObj_GetRotatedBounds(obj, &quad));
+  EXPECT_FLOAT_EQ(kExpectedLeft, quad.x1);
+  EXPECT_FLOAT_EQ(98.4557f, quad.y1);
+  EXPECT_FLOAT_EQ(119.14279f, quad.x2);
+  EXPECT_FLOAT_EQ(kExpectedBottom, quad.y2);
+  EXPECT_FLOAT_EQ(kExpectedRight, quad.x3);
+  EXPECT_FLOAT_EQ(85.447739f, quad.y3);
+  EXPECT_FLOAT_EQ(106.13486f, quad.x4);
+  EXPECT_FLOAT_EQ(kExpectedTop, quad.y4);
+
+  UnloadPage(page);
+}
+
+TEST_F(FPDFEditPageEmbedderTest, GetBoundsForNormalImage) {
+  ASSERT_TRUE(OpenDocument("matte.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  FPDF_PAGEOBJECT obj = FPDFPage_GetObject(page, 2);
+  ASSERT_EQ(FPDF_PAGEOBJ_IMAGE, FPDFPageObj_GetType(obj));
+
+  constexpr float kExpectedLeft = 0.0f;
+  constexpr float kExpectedBottom = 90.0f;
+  constexpr float kExpectedRight = 40.0f;
+  constexpr float kExpectedTop = 150.0f;
+
+  float left;
+  float bottom;
+  float right;
+  float top;
+  ASSERT_TRUE(FPDFPageObj_GetBounds(obj, &left, &bottom, &right, &top));
+  EXPECT_FLOAT_EQ(kExpectedLeft, left);
+  EXPECT_FLOAT_EQ(kExpectedBottom, bottom);
+  EXPECT_FLOAT_EQ(kExpectedRight, right);
+  EXPECT_FLOAT_EQ(kExpectedTop, top);
+
+  FS_QUADPOINTSF quad;
+  ASSERT_TRUE(FPDFPageObj_GetRotatedBounds(obj, &quad));
+  EXPECT_FLOAT_EQ(kExpectedLeft, quad.x1);
+  EXPECT_FLOAT_EQ(kExpectedBottom, quad.y1);
+  EXPECT_FLOAT_EQ(kExpectedRight, quad.x2);
+  EXPECT_FLOAT_EQ(kExpectedBottom, quad.y2);
+  EXPECT_FLOAT_EQ(kExpectedRight, quad.x3);
+  EXPECT_FLOAT_EQ(kExpectedTop, quad.y3);
+  EXPECT_FLOAT_EQ(kExpectedLeft, quad.x4);
+  EXPECT_FLOAT_EQ(kExpectedTop, quad.y4);
+
+  UnloadPage(page);
+}
+
+TEST_F(FPDFEditPageEmbedderTest, GetBoundsForRotatedImage) {
+  ASSERT_TRUE(OpenDocument("rotated_image.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  FPDF_PAGEOBJECT obj = FPDFPage_GetObject(page, 0);
+  ASSERT_EQ(FPDF_PAGEOBJ_IMAGE, FPDFPageObj_GetType(obj));
+
+  constexpr float kExpectedLeft = 100.0f;
+  constexpr float kExpectedBottom = 70.0f;
+  constexpr float kExpectedRight = 170.0f;
+  constexpr float kExpectedTop = 140.0f;
+
+  float left;
+  float bottom;
+  float right;
+  float top;
+  ASSERT_TRUE(FPDFPageObj_GetBounds(obj, &left, &bottom, &right, &top));
+  EXPECT_FLOAT_EQ(kExpectedLeft, left);
+  EXPECT_FLOAT_EQ(kExpectedBottom, bottom);
+  EXPECT_FLOAT_EQ(kExpectedRight, right);
+  EXPECT_FLOAT_EQ(kExpectedTop, top);
+
+  FS_QUADPOINTSF quad;
+  ASSERT_TRUE(FPDFPageObj_GetRotatedBounds(obj, &quad));
+  EXPECT_FLOAT_EQ(kExpectedLeft, quad.x1);
+  EXPECT_FLOAT_EQ(100.0f, quad.y1);
+  EXPECT_FLOAT_EQ(130.0f, quad.x2);
+  EXPECT_FLOAT_EQ(kExpectedBottom, quad.y2);
+  EXPECT_FLOAT_EQ(kExpectedRight, quad.x3);
+  EXPECT_FLOAT_EQ(110.0f, quad.y3);
+  EXPECT_FLOAT_EQ(140.0f, quad.x4);
+  EXPECT_FLOAT_EQ(kExpectedTop, quad.y4);
 
   UnloadPage(page);
 }

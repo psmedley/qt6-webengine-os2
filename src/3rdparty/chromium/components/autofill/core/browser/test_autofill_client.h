@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,19 @@
 
 #include "base/compiler_specific.h"
 #include "base/i18n/rtl.h"
-#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_client.h"
+#include "components/autofill/core/browser/logging/log_manager.h"
+#include "components/autofill/core/browser/logging/log_router.h"
+#include "components/autofill/core/browser/logging/text_log_receiver.h"
 #include "components/autofill/core/browser/mock_autocomplete_history_manager.h"
+#include "components/autofill/core/browser/mock_iban_manager.h"
+#include "components/autofill/core/browser/mock_merchant_promo_code_manager.h"
+#include "components/autofill/core/browser/payments/autofill_error_dialog_context.h"
 #include "components/autofill/core/browser/payments/autofill_offer_manager.h"
+#include "components/autofill/core/browser/payments/credit_card_cvc_authenticator.h"
+#include "components/autofill/core/browser/payments/credit_card_otp_authenticator.h"
 #include "components/autofill/core/browser/payments/legal_message_line.h"
 #include "components/autofill/core/browser/payments/test_payments_client.h"
 #include "components/autofill/core/browser/payments/test_strike_database.h"
@@ -38,9 +46,13 @@
 namespace autofill {
 
 // This class is for easier writing of tests.
+//
+// If you pass the command-line flag --show-autofill-internals,
+// autofill-internals logs are recorded to LOG(INFO).
 class TestAutofillClient : public AutofillClient {
  public:
-  TestAutofillClient();
+  explicit TestAutofillClient(
+      std::unique_ptr<TestPersonalDataManager> pdm = nullptr);
 
   TestAutofillClient(const TestAutofillClient&) = delete;
   TestAutofillClient& operator=(const TestAutofillClient&) = delete;
@@ -49,8 +61,12 @@ class TestAutofillClient : public AutofillClient {
 
   // AutofillClient:
   version_info::Channel GetChannel() const override;
-  PersonalDataManager* GetPersonalDataManager() override;
+  TestPersonalDataManager* GetPersonalDataManager() override;
   AutocompleteHistoryManager* GetAutocompleteHistoryManager() override;
+  IBANManager* GetIBANManager() override;
+  MerchantPromoCodeManager* GetMerchantPromoCodeManager() override;
+  CreditCardCVCAuthenticator* GetCVCAuthenticator() override;
+  CreditCardOtpAuthenticator* GetOtpAuthenticator() override;
   PrefService* GetPrefs() override;
   const PrefService* GetPrefs() const override;
   syncer::SyncService* GetSyncService() override;
@@ -62,14 +78,15 @@ class TestAutofillClient : public AutofillClient {
   ukm::SourceId GetUkmSourceId() override;
   AddressNormalizer* GetAddressNormalizer() override;
   AutofillOfferManager* GetAutofillOfferManager() override;
-  const GURL& GetLastCommittedURL() const override;
+  const GURL& GetLastCommittedPrimaryMainFrameURL() const override;
+  url::Origin GetLastCommittedPrimaryMainFrameOrigin() const override;
   security_state::SecurityLevel GetSecurityLevelForUmaHistograms() override;
   translate::LanguageState* GetLanguageState() override;
   translate::TranslateDriver* GetTranslateDriver() override;
   std::string GetVariationConfigCountryCode() const override;
 #if !BUILDFLAG(IS_IOS)
   std::unique_ptr<webauthn::InternalAuthenticator>
-  CreateCreditCardInternalAuthenticator(content::RenderFrameHost* rfh) override;
+  CreateCreditCardInternalAuthenticator(AutofillDriver* driver) override;
 #endif
 
   void ShowAutofillSettings(bool show_credit_card_settings) override;
@@ -77,8 +94,7 @@ class TestAutofillClient : public AutofillClient {
                         UnmaskCardReason reason,
                         base::WeakPtr<CardUnmaskDelegate> delegate) override;
   void OnUnmaskVerificationResult(PaymentsRpcResult result) override;
-  raw_ptr<VirtualCardEnrollmentManager> GetVirtualCardEnrollmentManager()
-      override;
+  VirtualCardEnrollmentManager* GetVirtualCardEnrollmentManager() override;
   void ShowVirtualCardEnrollDialog(
       const VirtualCardEnrollmentFields& virtual_card_enrollment_fields,
       base::OnceClosure accept_virtual_card_callback,
@@ -139,6 +155,18 @@ class TestAutofillClient : public AutofillClient {
       AddressProfileSavePromptCallback callback) override;
   bool HasCreditCardScanFeature() override;
   void ScanCreditCard(CreditCardScanCallback callback) override;
+  bool IsFastCheckoutSupported() override;
+  bool IsFastCheckoutTriggerForm(const FormData& form,
+                                 const FormFieldData& field) override;
+  bool FastCheckoutScriptSupportsConsentlessExecution(
+      const url::Origin& origin) override;
+  bool FastCheckoutClientSupportsConsentlessExecution() override;
+  bool ShowFastCheckout(base::WeakPtr<FastCheckoutDelegate> delegate) override;
+  void HideFastCheckout() override;
+  bool IsTouchToFillCreditCardSupported() override;
+  bool ShowTouchToFillCreditCard(
+      base::WeakPtr<TouchToFillDelegate> delegate) override;
+  void HideTouchToFillCreditCard() override;
   void ShowAutofillPopup(
       const AutofillClient::PopupOpenArgs& open_args,
       base::WeakPtr<AutofillPopupDelegate> delegate) override;
@@ -151,11 +179,12 @@ class TestAutofillClient : public AutofillClient {
   void UpdatePopup(const std::vector<Suggestion>& suggestions,
                    PopupType popup_type) override;
   void HideAutofillPopup(PopupHidingReason reason) override;
-  void ShowVirtualCardErrorDialog(bool is_permanent_error) override;
+  void ShowVirtualCardErrorDialog(
+      const AutofillErrorDialogContext& context) override;
   bool IsAutocompleteEnabled() override;
   bool IsPasswordManagerEnabled() override;
   void PropagateAutofillPredictions(
-      content::RenderFrameHost* rfh,
+      AutofillDriver* driver,
       const std::vector<FormStructure*>& forms) override;
   void DidFillOrPreviewField(const std::u16string& autofilled_value,
                              const std::u16string& profile_full_name) override;
@@ -166,6 +195,8 @@ class TestAutofillClient : public AutofillClient {
   bool ShouldShowSigninPromo() override;
   bool AreServerCardsSupported() const override;
   void ExecuteCommand(int id) override;
+  void OpenPromoCodeOfferDetailsURL(const GURL& url) override;
+  LogManager* GetLogManager() const override;
 
   // RiskDataLoader:
   void LoadRiskData(
@@ -184,6 +215,20 @@ class TestAutofillClient : public AutofillClient {
     prefs_ = std::move(prefs);
   }
 
+  void set_personal_data_manager(std::unique_ptr<TestPersonalDataManager> pdm) {
+    test_personal_data_manager_ = std::move(pdm);
+  }
+
+  void set_cvc_authenticator(
+      std::unique_ptr<CreditCardCVCAuthenticator> authenticator) {
+    cvc_authenticator_ = std::move(authenticator);
+  }
+
+  void set_otp_authenticator(
+      std::unique_ptr<CreditCardOtpAuthenticator> authenticator) {
+    otp_authenticator_ = std::move(authenticator);
+  }
+
   void set_test_strike_database(
       std::unique_ptr<TestStrikeDatabase> test_strike_database) {
     test_strike_database_ = std::move(test_strike_database);
@@ -195,7 +240,7 @@ class TestAutofillClient : public AutofillClient {
   }
 
   void set_test_form_data_importer(
-      std::unique_ptr<TestFormDataImporter> form_data_importer) {
+      std::unique_ptr<FormDataImporter> form_data_importer) {
     form_data_importer_ = std::move(form_data_importer);
   }
 
@@ -209,7 +254,7 @@ class TestAutofillClient : public AutofillClient {
     security_level_ = security_level;
   }
 
-  void set_last_committed_url(const GURL& url);
+  void set_last_committed_primary_main_frame_url(const GURL& url);
 
   void SetVariationConfigCountryCode(
       const std::string& variation_config_country_code) {
@@ -250,7 +295,12 @@ class TestAutofillClient : public AutofillClient {
   }
 
   bool virtual_card_error_dialog_is_permanent_error() {
-    return virtual_card_error_dialog_is_permanent_error_;
+    return autofill_error_dialog_context().type ==
+           AutofillErrorDialogType::kVirtualCardPermanentError;
+  }
+
+  AutofillErrorDialogContext autofill_error_dialog_context() {
+    return autofill_error_dialog_context_;
   }
 
   SaveCreditCardOptions get_save_credit_card_options() {
@@ -260,6 +310,15 @@ class TestAutofillClient : public AutofillClient {
   ::testing::NiceMock<MockAutocompleteHistoryManager>*
   GetMockAutocompleteHistoryManager() {
     return &mock_autocomplete_history_manager_;
+  }
+
+  ::testing::NiceMock<MockIBANManager>* GetMockIBANManager() {
+    return mock_iban_manager_.get();
+  }
+
+  ::testing::NiceMock<MockMerchantPromoCodeManager>*
+  GetMockMerchantPromoCodeManager() {
+    return &mock_merchant_promo_code_manager_;
   }
 
   void set_migration_card_selections(
@@ -285,16 +344,26 @@ class TestAutofillClient : public AutofillClient {
   signin::IdentityTestEnvironment identity_test_env_;
   raw_ptr<syncer::SyncService> test_sync_service_ = nullptr;
   TestAddressNormalizer test_address_normalizer_;
-  TestPersonalDataManager test_personal_data_manager_;
   ::testing::NiceMock<MockAutocompleteHistoryManager>
       mock_autocomplete_history_manager_;
-  std::unique_ptr<AutofillOfferManager> autofill_offer_manager_;
+  std::unique_ptr<testing::NiceMock<MockIBANManager>> mock_iban_manager_;
+  ::testing::NiceMock<MockMerchantPromoCodeManager>
+      mock_merchant_promo_code_manager_;
 
   // NULL by default.
   std::unique_ptr<PrefService> prefs_;
   std::unique_ptr<TestStrikeDatabase> test_strike_database_;
   std::unique_ptr<payments::PaymentsClient> payments_client_;
-  std::unique_ptr<TestFormDataImporter> form_data_importer_;
+  std::unique_ptr<CreditCardCVCAuthenticator> cvc_authenticator_;
+  std::unique_ptr<CreditCardOtpAuthenticator> otp_authenticator_;
+
+  // AutofillOfferManager and TestFormDataImporter must be destroyed before
+  // TestPersonalDataManager, because the former's destructors refer to the
+  // latter.
+  std::unique_ptr<TestPersonalDataManager> test_personal_data_manager_;
+  std::unique_ptr<AutofillOfferManager> autofill_offer_manager_;
+  std::unique_ptr<FormDataImporter> form_data_importer_;
+
   GURL form_origin_;
   ukm::SourceId source_id_ = -1;
   std::string variation_config_country_code_;
@@ -308,7 +377,14 @@ class TestAutofillClient : public AutofillClient {
 
   bool virtual_card_error_dialog_shown_ = false;
 
-  bool virtual_card_error_dialog_is_permanent_error_ = false;
+  // Context parameters that are used to display an error dialog during card
+  // number retrieval. This context will have information that the autofill
+  // error dialog uses to display a dialog specific to the error that occurred.
+  // An example of where this dialog is used is if an error occurs during
+  // virtual card number retrieval, as this context is then filled with fields
+  // specific to the type of error that occurred, and then based on the contents
+  // of this context the dialog is shown.
+  AutofillErrorDialogContext autofill_error_dialog_context_;
 
   // Populated if save was offered. True if bubble was shown, false otherwise.
   absl::optional<bool> offer_to_save_credit_card_bubble_was_shown_;
@@ -327,13 +403,23 @@ class TestAutofillClient : public AutofillClient {
   // A mock translate driver which provides the language state.
   translate::testing::MockTranslateDriver mock_translate_driver_;
 
-  // The last URL submitted by the user in the URL bar. Set in the constructor.
-  GURL last_committed_url_;
+  // The last URL submitted in the primary main frame by the user. Set in the
+  // constructor.
+  GURL last_committed_primary_main_frame_url_;
 
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   std::vector<std::string> allowed_merchants_;
   std::vector<std::string> allowed_bin_ranges_;
 #endif
+
+  LogRouter log_router_;
+  std::unique_ptr<LogManager> log_manager_;
+  TextLogReceiver text_log_receiver_;
+  base::ScopedObservation<LogRouter,
+                          LogReceiver,
+                          &LogRouter::RegisterReceiver,
+                          &LogRouter::UnregisterReceiver>
+      scoped_logging_subscription_{&text_log_receiver_};
 };
 
 }  // namespace autofill

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,13 +26,15 @@ class FakePrintRenderFrame : public mojom::PrintRenderFrame {
  private:
   // printing::mojom::PrintRenderFrame:
   void PrintRequestedPages() override;
+  void PrintWithParams(mojom::PrintPagesParamsPtr params,
+                       PrintWithParamsCallback callback) override;
   void PrintForSystemDialog() override;
   void SetPrintPreviewUI(
       mojo::PendingAssociatedRemote<mojom::PrintPreviewUI> preview) override;
   void InitiatePrintPreview(
       mojo::PendingAssociatedRemote<mojom::PrintRenderer> print_renderer,
       bool has_selection) override;
-  void PrintPreview(base::Value settings) override;
+  void PrintPreview(base::Value::Dict settings) override;
   void OnPrintPreviewDialogClosed() override;
   void PrintFrameContent(mojom::PrintFrameContentParamsPtr params,
                          PrintFrameContentCallback callback) override;

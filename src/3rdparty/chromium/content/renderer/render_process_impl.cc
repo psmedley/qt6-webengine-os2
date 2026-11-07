@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,6 @@
 #include "base/debug/stack_trace.h"
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/field_trial_params.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/system/sys_info.h"
 #include "base/task/thread_pool/initialization_util.h"
@@ -51,8 +50,8 @@
 #include "v8/include/v8-wasm-trap-handler-posix.h"
 #endif
 
-#if BUILDFLAG(IS_ANDROID)
-#include "content/common/android/cpu_affinity_setter.h"
+#if BUILDFLAG(IS_MAC)
+#include "base/system/sys_info.h"
 #endif
 
 namespace {
@@ -77,30 +76,34 @@ void SetV8FlagIfHasSwitch(const char* switch_name, const char* v8_flag) {
 
 std::unique_ptr<base::ThreadPoolInstance::InitParams>
 GetThreadPoolInitParams() {
-  constexpr int kMaxNumThreadsInForegroundPoolLowerBound = 3;
+  constexpr size_t kMaxNumThreadsInForegroundPoolLowerBound = 3;
   return std::make_unique<base::ThreadPoolInstance::InitParams>(
       std::max(kMaxNumThreadsInForegroundPoolLowerBound,
                content::GetMinForegroundThreadsInRendererThreadPool()));
 }
 
-#if defined(DCHECK_IS_CONFIGURABLE)
+#if BUILDFLAG(DCHECK_IS_CONFIGURABLE)
 void V8DcheckCallbackHandler(const char* file, int line, const char* message) {
   // TODO(siggi): Set a crash key or a breadcrumb so the fact that we hit a
   //     V8 DCHECK gets out in the crash report.
   ::logging::LogMessage(file, line, logging::LOGGING_DCHECK).stream()
       << message;
 }
-#endif  // defined(DCHECK_IS_CONFIGURABLE)
+#endif  // BUILDFLAG(DCHECK_IS_CONFIGURABLE)
 
 }  // namespace
 
 namespace content {
 
 RenderProcessImpl::RenderProcessImpl()
-    : RenderProcess("Renderer", GetThreadPoolInitParams()) {
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+    : RenderProcess(GetThreadPoolInitParams()) {
+#if BUILDFLAG(IS_MAC)
+  // Specified when launching the process in
+  // RendererSandboxedProcessLauncherDelegate::EnableCpuSecurityMitigations
+  base::SysInfo::SetIsCpuSecurityMitigationsEnabled(true);
+#endif
 
-#if defined(DCHECK_IS_CONFIGURABLE)
+#if BUILDFLAG(DCHECK_IS_CONFIGURABLE)
   // Some official builds ship with DCHECKs compiled in. Failing DCHECKs then
   // are either fatal or simply log the error, based on a feature flag.
   // Make sure V8 follows suit by setting a Dcheck handler that forwards to
@@ -119,7 +122,7 @@ RenderProcessImpl::RenderProcessImpl()
 
     v8::V8::SetFlagsFromString(kDisabledFlags, sizeof(kDisabledFlags));
   }
-#endif  // defined(DCHECK_IS_CONFIGURABLE)
+#endif  // BUILDFLAG(DCHECK_IS_CONFIGURABLE)
 
   if (base::SysInfo::IsLowEndDevice()) {
     std::string optimize_flag("--optimize-for-size");
@@ -132,8 +135,13 @@ RenderProcessImpl::RenderProcessImpl()
   SetV8FlagIfHasSwitch(switches::kEnableExperimentalWebAssemblyFeatures,
                        "--wasm-staging");
 
-  SetV8FlagIfHasSwitch(switches::kEnableUnsafeFastJSCalls,
-                       "--turbo-fast-api-calls");
+  SetV8FlagIfFeature(features::kJavaScriptExperimentalSharedMemory,
+                     "--shared-string-table --harmony-struct");
+
+  SetV8FlagIfFeature(features::kJavaScriptArrayGrouping,
+                     "--harmony-array-grouping");
+  SetV8FlagIfNotFeature(features::kJavaScriptArrayGrouping,
+                        "--no-harmony-array-grouping");
 
   SetV8FlagIfFeature(features::kV8VmFuture, "--future");
   SetV8FlagIfNotFeature(features::kV8VmFuture, "--no-future");
@@ -154,6 +162,13 @@ RenderProcessImpl::RenderProcessImpl()
 #endif  // (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) &&
         // defined(ARCH_CPU_X86_64)
 
+#if defined(ARCH_CPU_X86_64) || defined(ARCH_CPU_ARM64)
+  SetV8FlagIfFeature(features::kEnableExperimentalWebAssemblyStackSwitching,
+                     "--experimental-wasm-type-reflection");
+  SetV8FlagIfFeature(features::kEnableExperimentalWebAssemblyStackSwitching,
+                     "--experimental-wasm-stack-switching");
+#endif  // defined(ARCH_CPU_X86_64) || defined(ARCH_CPU_ARM64)
+
   SetV8FlagIfFeature(features::kWebAssemblyLazyCompilation,
                      "--wasm-lazy-compilation");
   SetV8FlagIfNotFeature(features::kWebAssemblyLazyCompilation,
@@ -163,8 +178,9 @@ RenderProcessImpl::RenderProcessImpl()
   SetV8FlagIfNotFeature(features::kWebAssemblySimd,
                         "--no-experimental-wasm-simd");
 
-  SetV8FlagIfFeature(blink::features::kJSONModules,
-                     "--harmony-import-assertions");
+  constexpr char kImportAssertionsFlag[] = "--harmony-import-assertions";
+  v8::V8::SetFlagsFromString(kImportAssertionsFlag,
+                             sizeof(kImportAssertionsFlag));
 
   constexpr char kAtomicsFlag[] = "--harmony-atomics";
   v8::V8::SetFlagsFromString(kAtomicsFlag, sizeof(kAtomicsFlag));
@@ -172,13 +188,7 @@ RenderProcessImpl::RenderProcessImpl()
   bool enable_shared_array_buffer_unconditionally =
       base::FeatureList::IsEnabled(features::kSharedArrayBuffer);
 
-#if BUILDFLAG(IS_ANDROID)
-  if (base::GetFieldTrialParamByFeatureAsBool(
-          features::kBigLittleScheduling,
-          features::kBigLittleSchedulingRenderMainBigParam, false)) {
-    SetCpuAffinityForCurrentThread(base::CpuAffinityMode::kBigCoresOnly);
-  }
-#else
+#if !BUILDFLAG(IS_ANDROID)
   // Bypass the SAB restriction for the Finch "kill switch".
   enable_shared_array_buffer_unconditionally =
       enable_shared_array_buffer_unconditionally ||
@@ -186,7 +196,7 @@ RenderProcessImpl::RenderProcessImpl()
 
   // Bypass the SAB restriction when enabled by Enterprise Policy.
   if (!enable_shared_array_buffer_unconditionally &&
-      command_line->HasSwitch(
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kSharedArrayBufferUnrestrictedAccessAllowed)) {
     enable_shared_array_buffer_unconditionally = true;
     blink::WebRuntimeFeatures::EnableSharedArrayBufferUnrestrictedAccessAllowed(
@@ -210,17 +220,6 @@ RenderProcessImpl::RenderProcessImpl()
     v8::V8::SetFlagsFromString(kSABPerContextFlag, sizeof(kSABPerContextFlag));
   }
 
-  // The display-capture-permissions-policy-allowed flag is used to pass
-  // the kDisplayCapturePermissionsPolicyEnabled Enterprise policy from the
-  // browser process to the renderer process. This switch should be enabled by
-  // default for now, but after a few milestones that allow enterprises to fix
-  // broken applications, this flag will be removed.
-  // This switch will only be enabled by the Enterprise policy.
-  if (command_line->HasSwitch(
-          switches::kDisplayCapturePermissionsPolicyAllowed)) {
-    blink::WebRuntimeFeatures::EnableDisplayCapturePermissionsPolicy(true);
-  }
-
   SetV8FlagIfFeature(features::kWebAssemblyTiering, "--wasm-tier-up");
   SetV8FlagIfNotFeature(features::kWebAssemblyTiering, "--no-wasm-tier-up");
 
@@ -231,6 +230,9 @@ RenderProcessImpl::RenderProcessImpl()
 
 #if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) && defined(ARCH_CPU_X86_64)
   if (base::FeatureList::IsEnabled(features::kWebAssemblyTrapHandler)) {
+    base::CommandLine* const command_line =
+        base::CommandLine::ForCurrentProcess();
+
     if (command_line->HasSwitch(switches::kEnableCrashpad) ||
         command_line->HasSwitch(switches::kEnableCrashReporter) ||
         command_line->HasSwitch(switches::kEnableCrashReporterForTesting)) {

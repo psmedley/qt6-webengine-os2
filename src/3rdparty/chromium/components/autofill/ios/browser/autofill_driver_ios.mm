@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,12 +28,11 @@ void AutofillDriverIOS::PrepareForWebStateWebFrameAndDelegate(
     AutofillClient* client,
     id<AutofillDriverIOSBridge> bridge,
     const std::string& app_locale,
-    BrowserAutofillManager::AutofillDownloadManagerState
-        enable_download_manager) {
+    AutofillManager::EnableDownloadManager enable_download_manager) {
   // By the time this method is called, no web_frame is available. This method
   // only prepares the factory and the AutofillDriverIOS will be created in the
   // first call to FromWebStateAndWebFrame.
-  AutofillDriverIOSWebFrameFactory::CreateForWebStateAndDelegate(
+  AutofillDriverIOSWebFrameFactory::CreateForWebState(
       web_state, client, bridge, app_locale, enable_download_manager);
 }
 
@@ -52,21 +51,27 @@ AutofillDriverIOS::AutofillDriverIOS(
     AutofillClient* client,
     id<AutofillDriverIOSBridge> bridge,
     const std::string& app_locale,
-    BrowserAutofillManager::AutofillDownloadManagerState
-        enable_download_manager)
+    AutofillManager::EnableDownloadManager enable_download_manager)
     : web_state_(web_state),
       bridge_(bridge),
-      browser_autofill_manager_(this,
-                                client,
-                                app_locale,
-                                enable_download_manager) {
+      client_(client),
+      browser_autofill_manager_(
+          std::make_unique<BrowserAutofillManager>(this,
+                                                   client,
+                                                   app_locale,
+                                                   enable_download_manager)) {
   web_frame_id_ = web::GetWebFrameId(web_frame);
 }
 
-AutofillDriverIOS::~AutofillDriverIOS() {}
+AutofillDriverIOS::~AutofillDriverIOS() = default;
 
 bool AutofillDriverIOS::IsIncognito() const {
   return web_state_->GetBrowserState()->IsOffTheRecord();
+}
+
+// Return true as iOS has no MPArch.
+bool AutofillDriverIOS::IsInActiveFrame() const {
+  return true;
 }
 
 bool AutofillDriverIOS::IsInAnyMainFrame() const {
@@ -113,20 +118,13 @@ std::vector<FieldGlobalId> AutofillDriverIOS::FillOrPreviewForm(
   return safe_fields;
 }
 
-void AutofillDriverIOS::PropagateAutofillPredictions(
-    const std::vector<autofill::FormStructure*>& forms) {
-  browser_autofill_manager_.client()->PropagateAutofillPredictions(nullptr,
-                                                                   forms);
-}
-
-void AutofillDriverIOS::HandleParsedForms(
-    const std::vector<const FormData*>& forms) {
+void AutofillDriverIOS::HandleParsedForms(const std::vector<FormData>& forms) {
   const std::map<FormGlobalId, std::unique_ptr<FormStructure>>& map =
-      browser_autofill_manager_.form_structures();
+      browser_autofill_manager_->form_structures();
   std::vector<FormStructure*> form_structures;
   form_structures.reserve(forms.size());
-  for (const FormData* form : forms) {
-    auto it = map.find(form->global_id());
+  for (const FormData& form : forms) {
+    auto it = map.find(form.global_id());
     if (it != map.end())
       form_structures.push_back(it->second.get());
   }
@@ -191,6 +189,10 @@ net::IsolationInfo AutofillDriverIOS::IsolationInfo() {
       url::Origin::Create(main_web_frame->GetSecurityOrigin()),
       url::Origin::Create(web_frame->GetSecurityOrigin()),
       net::SiteForCookies());
+}
+
+web::WebFrame* AutofillDriverIOS::web_frame() {
+  return web::GetWebFrameWithId(web_state_, web_frame_id_);
 }
 
 }  // namespace autofill

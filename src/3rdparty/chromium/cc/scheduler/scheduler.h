@@ -1,4 +1,4 @@
-// Copyright 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,6 +67,7 @@ class SchedulerClient {
   // compositor thread, which allows Compositor thread to update its layer tree
   // to match the state of the layer tree on the main thread.
   virtual void ScheduledActionCommit() = 0;
+  virtual void ScheduledActionPostCommit() = 0;
   virtual void ScheduledActionActivateSyncTree() = 0;
   virtual void ScheduledActionBeginLayerTreeFrameSinkCreation() = 0;
   virtual void ScheduledActionPrepareTiles() = 0;
@@ -132,6 +133,7 @@ class CC_EXPORT Scheduler : public viz::BeginFrameObserverBase {
   // pending_tree, call this method to notify that this pending tree is ready to
   // be activated, that is to be copied to the active tree.
   void NotifyReadyToActivate();
+  bool IsReadyToActivate();
   void NotifyReadyToDraw();
   void SetBeginFrameSource(viz::BeginFrameSource* source);
 
@@ -176,6 +178,10 @@ class CC_EXPORT Scheduler : public viz::BeginFrameObserverBase {
   // new tree can be activated.
   void SetNeedsImplSideInvalidation(bool needs_first_draw_on_activation);
 
+  bool pending_tree_is_ready_for_activation() const {
+    return state_machine_.pending_tree_is_ready_for_activation();
+  }
+
   // Drawing should result in submitting a CompositorFrame to the
   // LayerTreeFrameSink and then calling this.
   void DidSubmitCompositorFrame(uint32_t frame_token,
@@ -195,7 +201,6 @@ class CC_EXPORT Scheduler : public viz::BeginFrameObserverBase {
   // main thread updates are completed to signal it is ready for the commmit.
   void NotifyReadyToCommit(std::unique_ptr<BeginMainFrameMetrics> details);
   void BeginMainFrameAborted(CommitEarlyOutReason reason);
-  void DidCommit();
 
   // In the PrepareTiles step, compositor thread divides the layers into tiles
   // to reduce cost of raster large layers. Then, each tile is rastered by a
@@ -243,6 +248,11 @@ class CC_EXPORT Scheduler : public viz::BeginFrameObserverBase {
   // updates of new layer tree state.
   void SetDeferBeginMainFrame(bool defer_begin_main_frame);
 
+  // Pausing rendering prevents new main frames and impl-side invalidations from
+  // being triggered. Impl frames are drawn until any in-flight updates from the
+  // main thread are drawn.
+  void SetPauseRendering(bool pause_rendering);
+
   // Controls whether the BeginMainFrameNotExpected messages should be sent to
   // the main thread by the cc scheduler.
   void SetMainThreadWantsBeginMainFrameNotExpected(bool new_state);
@@ -261,6 +271,9 @@ class CC_EXPORT Scheduler : public viz::BeginFrameObserverBase {
 
   const viz::BeginFrameArgs& last_dispatched_begin_main_frame_args() const {
     return last_dispatched_begin_main_frame_args_;
+  }
+  const viz::BeginFrameArgs& last_commit_origin_frame_args() const {
+    return last_commit_origin_frame_args_;
   }
   const viz::BeginFrameArgs& last_activate_origin_frame_args() const {
     return last_activate_origin_frame_args_;
@@ -288,7 +301,7 @@ class CC_EXPORT Scheduler : public viz::BeginFrameObserverBase {
 
   // Owned by LayerTreeHostImpl and is destroyed when LayerTreeHostImpl is
   // destroyed.
-  raw_ptr<CompositorFrameReportingController>
+  raw_ptr<CompositorFrameReportingController, DanglingUntriaged>
       compositor_frame_reporting_controller_;
 
   // What the latest deadline was, and when it was scheduled.
@@ -309,6 +322,7 @@ class CC_EXPORT Scheduler : public viz::BeginFrameObserverBase {
   // |last_activate_origin_frame_args_| is then set to that BeginFrameArgs when
   // the committed change is activated.
   viz::BeginFrameArgs last_dispatched_begin_main_frame_args_;
+  viz::BeginFrameArgs next_commit_origin_frame_args_;
   viz::BeginFrameArgs last_commit_origin_frame_args_;
   viz::BeginFrameArgs last_activate_origin_frame_args_;
 

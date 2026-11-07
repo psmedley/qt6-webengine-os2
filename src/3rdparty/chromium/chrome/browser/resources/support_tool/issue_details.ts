@@ -1,19 +1,25 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import './strings.m.js';
-import 'chrome://resources/cr_elements/shared_vars_css.m.js';
-import 'chrome://resources/cr_elements/cr_input/cr_input.m.js';
-import 'chrome://resources/cr_elements/md_select_css.m.js';
-import './support_tool_shared_css.js';
+import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
+import 'chrome://resources/cr_elements/cr_input/cr_input.js';
+import 'chrome://resources/cr_elements/md_select.css.js';
+import './support_tool_shared.css.js';
 
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
 import {BrowserProxy, BrowserProxyImpl, IssueDetails} from './browser_proxy.js';
 import {getTemplate} from './issue_details.html.js';
+import {SupportToolPageMixin} from './support_tool_page_mixin.js';
 
-export class IssueDetailsElement extends PolymerElement {
+const DONT_INCLUDE_EMAIL: string = 'Do not include email address';
+
+const IssueDetailsElementBase = SupportToolPageMixin(PolymerElement);
+
+export class IssueDetailsElement extends IssueDetailsElementBase {
   static get is() {
     return 'issue-details';
   }
@@ -30,7 +36,7 @@ export class IssueDetailsElement extends PolymerElement {
       },
       emails_: {
         type: Array,
-        value: () => [],
+        value: () => [DONT_INCLUDE_EMAIL],
       },
       issueDescription_: {
         type: String,
@@ -54,14 +60,21 @@ export class IssueDetailsElement extends PolymerElement {
 
     this.browserProxy_.getEmailAddresses().then((emails: string[]) => {
       this.emails_ = emails;
+      // Add default email at the end of emails list for user to be able to
+      // choose to not include email address.
+      this.emails_.push(DONT_INCLUDE_EMAIL);
     });
   }
 
   getIssueDetails(): IssueDetails {
     return {
       caseId: this.caseId_,
-      emailAddress: this.selectedEmail_,
-      issueDescription: this.issueDescription_
+      // Set emailAddress field to empty string if user selected to not include
+      // email address.
+      emailAddress: (this.selectedEmail_ === DONT_INCLUDE_EMAIL) ?
+          '' :
+          this.selectedEmail_,
+      issueDescription: this.issueDescription_,
     };
   }
 }

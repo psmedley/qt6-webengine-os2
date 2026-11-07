@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,9 @@ namespace commerce::flag_descriptions {
 // they are identified.
 extern const char kCommercePriceTrackingName[];
 extern const char kCommercePriceTrackingDescription[];
+
+extern const char kShoppingListName[];
+extern const char kShoppingListDescription[];
 
 }  // namespace commerce::flag_descriptions
 

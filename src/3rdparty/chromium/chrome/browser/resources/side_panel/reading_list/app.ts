@@ -1,24 +1,25 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
-import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
-import 'chrome://resources/cr_elements/hidden_style_css.m.js';
-import 'chrome://resources/cr_elements/shared_vars_css.m.js';
-import 'chrome://resources/cr_elements/mwb_element_shared_style.js';
-import 'chrome://resources/cr_elements/mwb_shared_style.js';
-import 'chrome://resources/cr_elements/mwb_shared_vars.js';
+import 'chrome://resources/cr_elements/cr_button/cr_button.js';
+import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
+import 'chrome://resources/cr_elements/cr_hidden_style.css.js';
+import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
+import 'chrome://resources/cr_elements/mwb_element_shared_style.css.js';
+import 'chrome://resources/cr_elements/mwb_shared_style.css.js';
+import 'chrome://resources/cr_elements/mwb_shared_vars.css.js';
 import 'chrome://resources/polymer/v3_0/iron-selector/iron-selector.js';
 import './reading_list_item.js';
 import '../strings.m.js';
 
 import {assertNotReached} from 'chrome://resources/js/assert_ts.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {listenOnce} from 'chrome://resources/js/util.m.js';
+import {listenOnce} from 'chrome://resources/js/util.js';
 import {IronSelectorElement} from 'chrome://resources/polymer/v3_0/iron-selector/iron-selector.js';
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
+import {getTemplate} from './app.html.js';
 import {CurrentPageActionButtonState, ReadLaterEntriesByStatus, ReadLaterEntry} from './reading_list.mojom-webui.js';
 import {ReadingListApiProxy, ReadingListApiProxyImpl} from './reading_list_api_proxy.js';
 import {ReadingListItemElement} from './reading_list_item.js';
@@ -38,7 +39,7 @@ export class ReadingListAppElement extends PolymerElement {
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   static get properties() {
@@ -112,12 +113,11 @@ export class ReadingListAppElement extends PolymerElement {
             (state: CurrentPageActionButtonState) =>
                 this.updateCurrentPageActionButton_(state)));
 
-    if (this.unifiedSidePanel_) {
-      this.apiProxy_.showUI();
-    }
-
     // If added in a visible state update current reading list items.
-    if (document.visibilityState === 'visible') {
+    // If UnifiedSidePanel is enabled do this immediately. This is only
+    // undesirable when UnifiedSidePanel is not enabled since previously reading
+    // list and bookmarks shared a webview.
+    if (document.visibilityState === 'visible' || this.unifiedSidePanel_) {
       this.updateReadLaterEntries_();
       this.apiProxy_.updateCurrentPageActionButtonState();
     }
@@ -182,6 +182,28 @@ export class ReadingListAppElement extends PolymerElement {
   }
 
   /**
+   * @return The appropriate text for the current page action button
+   */
+  private getCurrentPageActionButtonText_(): string {
+    if (this.getCurrentPageActionButtonMarkAsRead_()) {
+      return loadTimeData.getString('markCurrentTabAsRead');
+    } else {
+      return loadTimeData.getString('addCurrentTab');
+    }
+  }
+
+  /**
+   * @return The appropriate cr icon for the current page action button
+   */
+  private getCurrentPageActionButtonIcon_(): string {
+    if (this.getCurrentPageActionButtonMarkAsRead_()) {
+      return 'cr:check';
+    } else {
+      return 'cr:add';
+    }
+  }
+
+  /**
    * @return Whether the current page action button should be disabled
    */
   private getCurrentPageActionButtonDisabled_(): boolean {
@@ -189,12 +211,25 @@ export class ReadingListAppElement extends PolymerElement {
         CurrentPageActionButtonState.kDisabled;
   }
 
+  /**
+   * @return Whether the current page action button should be in its mark as
+   * read state
+   */
+  private getCurrentPageActionButtonMarkAsRead_(): boolean {
+    return this.currentPageActionButtonState_ ===
+        CurrentPageActionButtonState.kMarkAsRead;
+  }
+
   private isReadingListEmpty_(): boolean {
     return this.unreadItems_.length === 0 && this.readItems_.length === 0;
   }
 
   private onCurrentPageActionButtonClick_() {
-    this.apiProxy_.addCurrentTab();
+    if (this.getCurrentPageActionButtonMarkAsRead_()) {
+      this.apiProxy_.markCurrentTabAsRead();
+    } else {
+      this.apiProxy_.addCurrentTab();
+    }
   }
 
   private onItemKeyDown_(e: KeyboardEvent) {
@@ -220,11 +255,6 @@ export class ReadingListAppElement extends PolymerElement {
   private onItemFocus_(e: Event) {
     this.$.selector.selected =
         (e.currentTarget as ReadingListItemElement).dataset.url!;
-  }
-
-  private onCloseClick_(e: Event) {
-    e.stopPropagation();
-    this.apiProxy_.closeUI();
   }
 
   private shouldShowHr_(): boolean {

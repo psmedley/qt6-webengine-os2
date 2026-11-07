@@ -6,18 +6,20 @@
 
 #include "core/fxge/dib/cfx_dibitmap.h"
 
+#include <stdint.h>
 #include <string.h>
 
 #include <limits>
 #include <memory>
 #include <utility>
-#include <vector>
 
 #include "build/build_config.h"
+#include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_safe_types.h"
 #include "core/fxge/calculate_pitch.h"
 #include "core/fxge/cfx_cliprgn.h"
+#include "core/fxge/cfx_defaultrenderdevice.h"
 #include "core/fxge/dib/cfx_scanlinecompositor.h"
 #include "third_party/base/check.h"
 #include "third_party/base/check_op.h"
@@ -174,10 +176,10 @@ void CFX_DIBitmap::Clear(uint32_t color) {
     }
     case FXDIB_Format::kRgb32:
     case FXDIB_Format::kArgb: {
-#if defined(_SKIA_SUPPORT_)
-      if (FXDIB_Format::kRgb32 == GetFormat())
+      if (CFX_DefaultRenderDevice::SkiaIsDefaultRenderer() &&
+          FXDIB_Format::kRgb32 == GetFormat()) {
         color |= 0xFF000000;
-#endif
+      }
       for (int i = 0; i < m_Width; i++)
         reinterpret_cast<uint32_t*>(pBuffer)[i] = color;
       for (int row = 1; row < m_Height; row++)
@@ -246,7 +248,7 @@ bool CFX_DIBitmap::TransferWithUnequalFormats(
 
   uint8_t* dest_buf =
       m_pBuffer.Get() + dest_top * m_Pitch + offset.ValueOrDie();
-  std::vector<uint32_t, FxAllocAllocator<uint32_t>> d_plt;
+  DataVector<uint32_t> d_plt;
   return ConvertBuffer(dest_format, dest_buf, m_Pitch, width, height,
                        pSrcBitmap, src_left, src_top, &d_plt);
 }
@@ -1106,7 +1108,7 @@ bool CFX_DIBitmap::ConvertFormat(FXDIB_Format dest_format) {
   }
   bool ret = false;
   RetainPtr<CFX_DIBBase> holder(this);
-  std::vector<uint32_t, FxAllocAllocator<uint32_t>> pal_8bpp;
+  DataVector<uint32_t> pal_8bpp;
   ret = ConvertBuffer(dest_format, dest_buf.get(), dest_pitch, m_Width,
                       m_Height, holder, 0, 0, &pal_8bpp);
   if (!ret)

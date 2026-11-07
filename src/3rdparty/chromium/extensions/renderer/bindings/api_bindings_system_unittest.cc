@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,7 +68,12 @@ const char kAlphaAPISpec[] = R"(
         "parameters": [{"name": "e", "$ref": "alpha.enumRef"}]
       }],
       "events": [{
-        "name": "alphaEvent"
+        "name": "alphaEvent",
+        "parameters": [{
+          "name": "eventArg",
+          "type": "object",
+          "properties": { "key": {"type": "integer"} }
+        }]
       }, {
         "name": "alphaOtherEvent"
       }]
@@ -130,9 +135,7 @@ void APIBindingsSystemTest::SetUp() {
 
   // Create the fake API schemas.
   for (const auto& api : GetAPIs()) {
-    std::unique_ptr<base::DictionaryValue> api_schema =
-        DeprecatedDictionaryValueFromString(api.spec);
-    ASSERT_TRUE(api_schema);
+    base::Value::Dict api_schema = DictValueFromString(api.spec);
     api_schemas_[api.name] = std::move(api_schema);
   }
 
@@ -189,10 +192,10 @@ void APIBindingsSystemTest::AddConsoleError(v8::Local<v8::Context> context,
   console_errors_.push_back(error);
 }
 
-const base::DictionaryValue& APIBindingsSystemTest::GetAPISchema(
+const base::Value::Dict& APIBindingsSystemTest::GetAPISchema(
     const std::string& api_name) {
   EXPECT_TRUE(base::Contains(api_schemas_, api_name));
-  return *api_schemas_[api_name];
+  return api_schemas_[api_name];
 }
 
 void APIBindingsSystemTest::OnAPIRequest(
@@ -320,7 +323,7 @@ TEST_F(APIBindingsSystemTest, TestInitializationAndCallbacks) {
         });)";
     CallFunctionOnObject(context, alpha_api, kTestCall);
 
-    const char kResponseArgsJson[] = R"(["response",1,{"key":42}])";
+    const char kResponseArgsJson[] = R"([{"key":42}])";
     base::Value::List expected_args = ListValueFromString(kResponseArgsJson);
     bindings_system()->FireEventInContext("alpha.alphaEvent", context,
                                           expected_args, nullptr);

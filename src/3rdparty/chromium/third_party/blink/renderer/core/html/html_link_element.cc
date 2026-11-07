@@ -27,6 +27,7 @@
 
 #include <utility>
 
+#include "base/numerics/safe_conversions.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_icon_sizes_parser.h"
 #include "third_party/blink/public/platform/web_prescient_networking.h"
@@ -68,7 +69,8 @@ void HTMLLinkElement::ParseAttribute(
   const AtomicString& value = params.new_value;
   if (name == html_names::kRelAttr) {
     rel_attribute_ = LinkRelAttribute(value);
-    if (rel_attribute_.IsMonetization() && !GetDocument().ParentDocument()) {
+    if (rel_attribute_.IsMonetization() &&
+        GetDocument().IsInOutermostMainFrame()) {
       // TODO(1031476): The Web Monetization specification is an unofficial
       // draft, available at https://webmonetization.org/specification.html
       // Currently it relies on a <meta> tag but there is an open issue about
@@ -78,13 +80,20 @@ void HTMLLinkElement::ParseAttribute(
       UseCounter::Count(&GetDocument(),
                         WebFeature::kHTMLLinkElementMonetization);
     }
+    if (rel_attribute_.IsCanonical() &&
+        GetDocument().IsInOutermostMainFrame()) {
+      UseCounter::Count(&GetDocument(), WebFeature::kLinkRelCanonical);
+    }
     rel_list_->DidUpdateAttributeValue(params.old_value, value);
     Process();
   } else if (name == html_names::kBlockingAttr &&
              RuntimeEnabledFeatures::BlockingAttributeEnabled()) {
     blocking_attribute_->DidUpdateAttributeValue(params.old_value, value);
     blocking_attribute_->CountTokenUsage();
-    Process();
+    if (!IsPotentiallyRenderBlocking()) {
+      if (GetLinkStyle() && GetLinkStyle()->StyleSheetIsLoading())
+        GetLinkStyle()->UnblockRenderingForPendingSheet();
+    }
   } else if (name == html_names::kHrefAttr) {
     // Log href attribute before logging resource fetching in process().
     LogUpdateAttributeIfIsolatedWorldAndInDocument("link", params);
@@ -106,13 +115,13 @@ void HTMLLinkElement::ParseAttribute(
     sizes_->DidUpdateAttributeValue(params.old_value, value);
     WebVector<gfx::Size> web_icon_sizes =
         WebIconSizesParser::ParseIconSizes(value);
-    icon_sizes_.resize(SafeCast<wtf_size_t>(web_icon_sizes.size()));
+    icon_sizes_.resize(base::checked_cast<wtf_size_t>(web_icon_sizes.size()));
     for (wtf_size_t i = 0; i < icon_sizes_.size(); ++i)
       icon_sizes_[i] = web_icon_sizes[i];
     Process();
   } else if (name == html_names::kMediaAttr) {
     media_ = value.LowerASCII();
-    Process();
+    Process(LinkLoadParameters::Reason::kMediaChange);
   } else if (name == html_names::kIntegrityAttr) {
     integrity_ = value;
   } else if (name == html_names::kFetchpriorityAttr &&
@@ -211,9 +220,9 @@ LinkStyle* HTMLLinkElement::GetLinkStyle() const {
   return static_cast<LinkStyle*>(link_.Get());
 }
 
-void HTMLLinkElement::Process() {
+void HTMLLinkElement::Process(LinkLoadParameters::Reason reason) {
   if (LinkResource* link = LinkResourceToProcess())
-    link->Process();
+    link->Process(reason);
 }
 
 Node::InsertionNotificationRequest HTMLLinkElement::InsertedInto(
@@ -320,7 +329,7 @@ void HTMLLinkElement::ScheduleEvent() {
       .GetTaskRunner(TaskType::kDOMManipulation)
       ->PostTask(
           FROM_HERE,
-          WTF::Bind(
+          WTF::BindOnce(
               &HTMLLinkElement::DispatchPendingEvent, WrapPersistent(this),
               std::make_unique<IncrementLoadEventDelayCount>(GetDocument())));
 }
@@ -328,6 +337,11 @@ void HTMLLinkElement::ScheduleEvent() {
 void HTMLLinkElement::SetToPendingState() {
   DCHECK(GetLinkStyle());
   GetLinkStyle()->SetToPendingState();
+}
+
+bool HTMLLinkElement::IsPotentiallyRenderBlocking() const {
+  return blocking_attribute_->HasRenderToken() ||
+         (IsCreatedByParser() && rel_attribute_.IsStyleSheet());
 }
 
 bool HTMLLinkElement::IsURLAttribute(const Attribute& attribute) const {
@@ -353,7 +367,7 @@ const QualifiedName& HTMLLinkElement::SubResourceAttributeName() const {
 
 KURL HTMLLinkElement::Href() const {
   const String& url = FastGetAttribute(html_names::kHrefAttr);
-  if (url.IsEmpty())
+  if (url.empty())
     return KURL();
   return GetDocument().CompleteURL(url);
 }

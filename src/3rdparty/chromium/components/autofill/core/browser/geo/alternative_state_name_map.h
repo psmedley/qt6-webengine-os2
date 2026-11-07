@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include "base/i18n/case_conversion.h"
 #include "base/no_destructor.h"
-#include "base/sequence_checker.h"
+#include "base/synchronization/lock.h"
 #include "base/types/strong_alias.h"
 #include "components/autofill/core/browser/proto/states.pb.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -177,7 +177,8 @@ class AlternativeStateNameMap {
            CaseInsensitiveLessComparator>
       localized_state_names_reverse_lookup_map_;
 
-  SEQUENCE_CHECKER(alternative_state_name_map_sequence_checker_);
+  // TODO(crbug.com/1425951): Remove lock.
+  mutable base::Lock lock_;
 };
 
 }  // namespace autofill

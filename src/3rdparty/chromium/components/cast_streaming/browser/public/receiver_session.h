@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,12 @@
 
 #include "base/callback.h"
 #include "base/time/time.h"
-#include "components/cast_streaming/public/mojom/cast_streaming_session.mojom.h"
+#include "components/cast_streaming/public/mojom/demuxer_connector.mojom.h"
 #include "components/cast_streaming/public/mojom/renderer_controller.mojom.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
+
+// TODO(crbug.com/1220176): When fixed, remove this include and add it to a file
+// with the narrowest scope possible.
 #include "third_party/openscreen/src/cast/streaming/receiver_session.h"
 
 namespace cast_api_bindings {
@@ -26,11 +29,11 @@ class VideoDecoderConfig;
 namespace cast_streaming {
 
 // This interface handles a single Cast Streaming Receiver Session over a given
-// |message_port| and with a given |cast_streaming_receiver|. On destruction,
+// |message_port| and with a given |demuxer_connector|. On destruction,
 // the Cast Streaming Receiver Session will be terminated if it was ever
 // started.
-// TODO(1220176): Forward declare ReceiverSession::Preferences instead of
-// requiring the import above.
+// TODO(crbug.com/1220176): Forward declare ReceiverSession::Preferences instead
+// of requiring the import above.
 class ReceiverSession {
  public:
   class Client {
@@ -92,15 +95,13 @@ class ReceiverSession {
   // |PlaybackCommandForwardingRenderer| is being used, the below overload is
   // recommended instead.
   virtual void StartStreamingAsync(
-      mojo::AssociatedRemote<mojom::CastStreamingReceiver>
-          cast_streaming_receiver) = 0;
+      mojo::AssociatedRemote<mojom::DemuxerConnector> demuxer_connector) = 0;
 
   // As above, but also sets the |renderer_controller| to be used to control a
   // renderer-process |PlaybackCommandForwardingRenderer|. This control may then
   // be done through the RenderControls returned by GetRendererControls() below.
   virtual void StartStreamingAsync(
-      mojo::AssociatedRemote<mojom::CastStreamingReceiver>
-          cast_streaming_receiver,
+      mojo::AssociatedRemote<mojom::DemuxerConnector> demuxer_connector,
       mojo::AssociatedRemote<mojom::RendererController>
           renderer_controller) = 0;
 

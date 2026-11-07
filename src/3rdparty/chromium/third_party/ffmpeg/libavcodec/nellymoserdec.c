@@ -35,14 +35,13 @@
 #include "libavutil/float_dsp.h"
 #include "libavutil/lfg.h"
 #include "libavutil/mem_internal.h"
-#include "libavutil/random_seed.h"
 
 #define BITSTREAM_READER_LE
 #include "avcodec.h"
 #include "codec_internal.h"
+#include "decode.h"
 #include "fft.h"
 #include "get_bits.h"
-#include "internal.h"
 #include "nellymoser.h"
 #include "sinewin.h"
 
@@ -139,10 +138,9 @@ static av_cold int decode_init(AVCodecContext * avctx) {
     return 0;
 }
 
-static int decode_tag(AVCodecContext *avctx, void *data,
+static int decode_tag(AVCodecContext *avctx, AVFrame *frame,
                       int *got_frame_ptr, AVPacket *avpkt)
 {
-    AVFrame *frame     = data;
     const uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
     NellyMoserDecodeContext *s = avctx->priv_data;
@@ -189,15 +187,14 @@ static av_cold int decode_end(AVCodecContext * avctx) {
 
 const FFCodec ff_nellymoser_decoder = {
     .p.name         = "nellymoser",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Nellymoser Asao"),
+    CODEC_LONG_NAME("Nellymoser Asao"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_NELLYMOSER,
     .priv_data_size = sizeof(NellyMoserDecodeContext),
     .init           = decode_init,
     .close          = decode_end,
-    .decode         = decode_tag,
+    FF_CODEC_DECODE_CB(decode_tag),
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_PARAM_CHANGE | AV_CODEC_CAP_CHANNEL_CONF,
     .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLT,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };

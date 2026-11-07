@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -361,22 +361,11 @@ struct URLRequest {
   // handler.
   string? devtools_stack_id;
 
-  // True for prefetch requests when SignedExchangePrefetchCacheForNavigations
-  // feature is enabled by flags or SignedExchangeSubresourcePrefetch feature is
-  // enabled by flags, or OriginTrial. TODO(horo): Remove this when these
-  // features are enabled by default.
-  bool is_signed_exchange_prefetch_cache_enabled;
-
   // True for XHR, Fetch, and EventSource.
   bool is_fetch_like_api;
 
   // True for favicon.
   bool is_favicon;
-
-  // If set, the network service will attempt to retrieve the appropriate origin
-  // policy, if necessary, and attach it to the ResourceResponseHead.
-  // Spec: https://wicg.github.io/origin-policy/
-  bool obey_origin_policy;
 
   // The original destination of a request that was passed through by a service
   // worker.

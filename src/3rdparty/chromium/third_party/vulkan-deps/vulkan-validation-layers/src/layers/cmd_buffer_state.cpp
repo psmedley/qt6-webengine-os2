@@ -239,7 +239,8 @@ CMD_BUFFER_STATE::CMD_BUFFER_STATE(ValidationStateTracker *dev, VkCommandBuffer 
       createInfo(*pCreateInfo),
       command_pool(pool),
       dev_data(dev),
-      unprotected(pool->unprotected) {
+      unprotected(pool->unprotected),
+      lastBound({*this, *this, *this}) {
     Reset();
 }
 
@@ -273,14 +274,18 @@ void CMD_BUFFER_STATE::RemoveChild(std::shared_ptr<BASE_NODE> &child_node) {
 // Reset the command buffer state
 //  Maintain the createInfo and set state to CB_NEW, but clear all other state
 void CMD_BUFFER_STATE::Reset() {
-    ResetUse();
+    assert(!InUse());
     // Reset CB state (note that createInfo is not cleared)
     memset(&beginInfo, 0, sizeof(VkCommandBufferBeginInfo));
     memset(&inheritanceInfo, 0, sizeof(VkCommandBufferInheritanceInfo));
-    hasDrawCmd = false;
-    hasTraceRaysCmd = false;
-    hasBuildAccelerationStructureCmd = false;
-    hasDispatchCmd = false;
+    has_draw_cmd = false;
+    has_draw_cmd_in_current_render_pass = false;
+    has_dispatch_cmd = false;
+    has_trace_rays_cmd = false;
+    has_build_as_cmd = false;
+    hasRenderPassInstance = false;
+    suspendsRenderPassInstance = false;
+    resumesRenderPassInstance = false;
     state = CB_NEW;
     commandCount = 0;
     submitCount = 0;
@@ -321,6 +326,7 @@ void CMD_BUFFER_STATE::Reset() {
     startedQueries.clear();
     image_layout_map.clear();
     aliased_image_layout_map.clear();
+    descriptorset_cache.clear();
     current_vertex_buffer_binding_info.vertex_buffer_bindings.clear();
     vertex_buffer_used = false;
     primaryCommandBuffer = VK_NULL_HANDLE;
@@ -366,10 +372,6 @@ void CMD_BUFFER_STATE::Reset() {
 
     // Clean up the label data
     ResetCmdDebugUtilsLabel(dev_data->report_data, commandBuffer());
-
-    if (dev_data->command_buffer_reset_callback) {
-        (*dev_data->command_buffer_reset_callback)(commandBuffer());
-    }
 }
 
 // Track which resources are in-flight by atomically incrementing their "in_use" count
@@ -437,17 +439,12 @@ void CMD_BUFFER_STATE::ResetPushConstantDataIfIncompatible(const PIPELINE_LAYOUT
 }
 
 void CMD_BUFFER_STATE::Destroy() {
-    // Allow any derived class to clean up command buffer state
-    if (dev_data->command_buffer_reset_callback) {
-        (*dev_data->command_buffer_reset_callback)(commandBuffer());
-    }
-    if (dev_data->command_buffer_free_callback) {
-        (*dev_data->command_buffer_free_callback)(commandBuffer());
-    }
-
     // Remove the cb debug labels
     EraseCmdDebugUtilsLabel(dev_data->report_data, commandBuffer());
-    Reset();
+    {
+        auto guard = WriteLock();
+        Reset();
+    }
     BASE_NODE::Destroy();
 }
 
@@ -537,8 +534,8 @@ static bool SetQueryState(QueryObject object, QueryState value, QueryMap *localQ
 void CMD_BUFFER_STATE::BeginQuery(const QueryObject &query_obj) {
     activeQueries.insert(query_obj);
     startedQueries.insert(query_obj);
-    queryUpdates.emplace_back([query_obj](const ValidationStateTracker *device_data, bool do_validate,
-                                          VkQueryPool &firstPerfQueryPool, uint32_t perfQueryPass, QueryMap *localQueryToStateMap) {
+    queryUpdates.emplace_back([query_obj](CMD_BUFFER_STATE &cb_state_arg, bool do_validate, VkQueryPool &firstPerfQueryPool,
+                                          uint32_t perfQueryPass, QueryMap *localQueryToStateMap) {
         SetQueryState(QueryObject(query_obj, perfQueryPass), QUERYSTATE_RUNNING, localQueryToStateMap);
         return false;
     });
@@ -547,11 +544,24 @@ void CMD_BUFFER_STATE::BeginQuery(const QueryObject &query_obj) {
 
 void CMD_BUFFER_STATE::EndQuery(const QueryObject &query_obj) {
     activeQueries.erase(query_obj);
-    queryUpdates.emplace_back([query_obj](const ValidationStateTracker *device_data, bool do_validate,
-                                          VkQueryPool &firstPerfQueryPool, uint32_t perfQueryPass, QueryMap *localQueryToStateMap) {
+    queryUpdates.emplace_back([query_obj](CMD_BUFFER_STATE &cb_state_arg, bool do_validate, VkQueryPool &firstPerfQueryPool,
+                                          uint32_t perfQueryPass, QueryMap *localQueryToStateMap) {
         return SetQueryState(QueryObject(query_obj, perfQueryPass), QUERYSTATE_ENDED, localQueryToStateMap);
     });
     updatedQueries.insert(query_obj);
+}
+
+bool CMD_BUFFER_STATE::UpdatesQuery(const QueryObject &query_obj) const {
+    // Clear out the perf_pass from the caller because it isn't known when the command buffer is recorded.
+    auto key = query_obj;
+    key.perf_pass = 0;
+    for (auto *sub_cb : linkedCommandBuffers) {
+        auto guard = sub_cb->ReadLock();
+        if (sub_cb->updatedQueries.find(key) != sub_cb->updatedQueries.end()) {
+            return true;
+        }
+    }
+    return updatedQueries.find(key) != updatedQueries.end();
 }
 
 static bool SetQueryStateMulti(VkQueryPool queryPool, uint32_t firstQuery, uint32_t queryCount, uint32_t perfPass, QueryState value,
@@ -569,7 +579,7 @@ void CMD_BUFFER_STATE::EndQueries(VkQueryPool queryPool, uint32_t firstQuery, ui
         activeQueries.erase(query);
         updatedQueries.insert(query);
     }
-    queryUpdates.emplace_back([queryPool, firstQuery, queryCount](const ValidationStateTracker *device_data, bool do_validate,
+    queryUpdates.emplace_back([queryPool, firstQuery, queryCount](CMD_BUFFER_STATE &cb_state_arg, bool do_validate,
                                                                   VkQueryPool &firstPerfQueryPool, uint32_t perfQueryPass,
                                                                   QueryMap *localQueryToStateMap) {
         return SetQueryStateMulti(queryPool, firstQuery, queryCount, perfQueryPass, QUERYSTATE_ENDED, localQueryToStateMap);
@@ -583,7 +593,7 @@ void CMD_BUFFER_STATE::ResetQueryPool(VkQueryPool queryPool, uint32_t firstQuery
         updatedQueries.insert(query);
     }
 
-    queryUpdates.emplace_back([queryPool, firstQuery, queryCount](const ValidationStateTracker *device_data, bool do_validate,
+    queryUpdates.emplace_back([queryPool, firstQuery, queryCount](CMD_BUFFER_STATE &cb_state_arg, bool do_validate,
                                                                   VkQueryPool &firstPerfQueryPool, uint32_t perfQueryPass,
                                                                   QueryMap *localQueryToStateMap) {
         return SetQueryStateMulti(queryPool, firstQuery, queryCount, perfQueryPass, QUERYSTATE_RESET, localQueryToStateMap);
@@ -676,6 +686,7 @@ void CMD_BUFFER_STATE::BeginRenderPass(CMD_TYPE cmd_type, const VkRenderPassBegi
 
     active_subpasses = nullptr;
     active_attachments = nullptr;
+    has_draw_cmd_in_current_render_pass = false;
 
     if (activeFramebuffer) {
         framebuffers.insert(activeFramebuffer);
@@ -740,8 +751,14 @@ void CMD_BUFFER_STATE::BeginRendering(CMD_TYPE cmd_type, const VkRenderingInfo *
     }
 
     activeSubpassContents = ((pRenderingInfo->flags & VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT_KHR) ? VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS : VK_SUBPASS_CONTENTS_INLINE);
+    if (!hasRenderPassInstance && pRenderingInfo->flags & VK_RENDERING_RESUMING_BIT) {
+        resumesRenderPassInstance = true;
+    }
+    suspendsRenderPassInstance = (pRenderingInfo->flags & VK_RENDERING_SUSPENDING_BIT) > 0;
+    hasRenderPassInstance = true;
 
     active_attachments = nullptr;
+    has_draw_cmd_in_current_render_pass = false;
     uint32_t attachment_count = (pRenderingInfo->colorAttachmentCount + 2) * 2;
 
     // Set cb_state->active_attachments & cb_state->attachments_view_states
@@ -777,7 +794,7 @@ void CMD_BUFFER_STATE::BeginRendering(CMD_TYPE cmd_type, const VkRenderingInfo *
             pRenderingInfo->pDepthAttachment->resolveImageView != VK_NULL_HANDLE) {
             depthResolveAttachment = res.first->get();
         }
-    } 
+    }
 
     if (pRenderingInfo->pStencilAttachment && pRenderingInfo->pStencilAttachment->imageView != VK_NULL_HANDLE) {
         auto& stencilAttachment = attachments[GetDynamicStencilAttachmentImageIndex()];
@@ -798,6 +815,9 @@ void CMD_BUFFER_STATE::Begin(const VkCommandBufferBeginInfo *pBeginInfo) {
     if (CB_RECORDED == state || CB_INVALID_COMPLETE == state) {
         Reset();
     }
+
+    descriptorset_cache.clear();
+
     // Set updated state here in case implicit reset occurs above
     state = CB_RECORDING;
     beginInfo = *pBeginInfo;
@@ -868,7 +888,6 @@ void CMD_BUFFER_STATE::Begin(const VkCommandBufferBeginInfo *pBeginInfo) {
 void CMD_BUFFER_STATE::End(VkResult result) {
     // Cached validation is specific to a specific recording of a specific command buffer.
     descriptorset_cache.clear();
-    validated_descriptor_sets.clear();
     if (VK_SUCCESS == result) {
         state = CB_RECORDED;
     }
@@ -877,7 +896,8 @@ void CMD_BUFFER_STATE::End(VkResult result) {
 void CMD_BUFFER_STATE::ExecuteCommands(uint32_t commandBuffersCount, const VkCommandBuffer *pCommandBuffers) {
     RecordCmd(CMD_EXECUTECOMMANDS);
     for (uint32_t i = 0; i < commandBuffersCount; i++) {
-        auto sub_cb_state = dev_data->GetWrite<CMD_BUFFER_STATE>(pCommandBuffers[i]);
+        auto sub_command_buffer = pCommandBuffers[i];
+        auto sub_cb_state = dev_data->GetWrite<CMD_BUFFER_STATE>(sub_command_buffer);
         assert(sub_cb_state);
         if (!(sub_cb_state->beginInfo.flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT)) {
             if (beginInfo.flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT) {
@@ -904,9 +924,19 @@ void CMD_BUFFER_STATE::ExecuteCommands(uint32_t commandBuffersCount, const VkCom
         sub_cb_state->primaryCommandBuffer = commandBuffer();
         linkedCommandBuffers.insert(sub_cb_state.get());
         AddChild(sub_cb_state);
-        for (auto &function : sub_cb_state->queryUpdates) {
-            queryUpdates.push_back(function);
-        }
+        // Add a query update that runs all the query updates that happen in the sub command buffer.
+        // This avoids locking ambiguity because primary command buffers are locked when these
+        // callbacks run, but secondary command buffers are not.
+        queryUpdates.push_back([sub_command_buffer](CMD_BUFFER_STATE &cb_state_arg, bool do_validate,
+                                                    VkQueryPool &firstPerfQueryPool, uint32_t perfQueryPass,
+                                                    QueryMap *localQueryToStateMap) {
+            bool skip = false;
+            auto sub_cb_state_arg = cb_state_arg.dev_data->GetWrite<CMD_BUFFER_STATE>(sub_command_buffer);
+            for (auto &function : sub_cb_state_arg->queryUpdates) {
+                skip |= function(*sub_cb_state_arg, do_validate, firstPerfQueryPool, perfQueryPass, localQueryToStateMap);
+            }
+            return skip;
+        });
         for (auto &function : sub_cb_state->eventUpdates) {
             eventUpdates.push_back(function);
         }
@@ -920,6 +950,20 @@ void CMD_BUFFER_STATE::ExecuteCommands(uint32_t commandBuffersCount, const VkCom
         trashedScissorMask = ~uint32_t(0);
         trashedViewportCount = true;
         trashedScissorCount = true;
+
+        // Pass along if any commands are used in the secondary command buffer
+        if (sub_cb_state->has_draw_cmd) {
+            has_draw_cmd = true;
+        }
+        if (sub_cb_state->has_dispatch_cmd) {
+            has_dispatch_cmd = true;
+        }
+        if (sub_cb_state->has_trace_rays_cmd) {
+            has_trace_rays_cmd = true;
+        }
+        if (sub_cb_state->has_build_as_cmd) {
+            has_build_as_cmd = true;
+        }
     }
 }
 
@@ -940,7 +984,7 @@ void CMD_BUFFER_STATE::PushDescriptorSetState(VkPipelineBindPoint pipelineBindPo
     // If we are disturbing the current push_desriptor_set clear it
     if (!push_descriptor_set || !CompatForSet(set, last_bound, pipeline_layout->compat_for_set)) {
         last_bound.UnbindAndResetPushDescriptorSet(
-            this, std::make_shared<cvdescriptorset::DescriptorSet>(VK_NULL_HANDLE, nullptr, dsl, 0, dev_data));
+            std::make_shared<cvdescriptorset::DescriptorSet>(VK_NULL_HANDLE, nullptr, dsl, 0, dev_data));
     }
 
     UpdateLastBoundDescriptorSets(pipelineBindPoint, pipeline_layout, set, 1, nullptr, push_descriptor_set, 0, nullptr);
@@ -950,16 +994,11 @@ void CMD_BUFFER_STATE::PushDescriptorSetState(VkPipelineBindPoint pipelineBindPo
     push_descriptor_set->PerformPushDescriptorsUpdate(dev_data, descriptorWriteCount, pDescriptorWrites);
 }
 
-// Generic function to handle state update for all CmdDraw* and CmdDispatch* type functions
-void CMD_BUFFER_STATE::UpdateStateCmdDrawDispatchType(CMD_TYPE cmd_type, VkPipelineBindPoint bind_point) {
-    UpdateDrawState(cmd_type, bind_point);
-    hasDispatchCmd = true;
-}
-
 // Generic function to handle state update for all CmdDraw* type functions
-void CMD_BUFFER_STATE::UpdateStateCmdDrawType(CMD_TYPE cmd_type, VkPipelineBindPoint bind_point) {
-    UpdateStateCmdDrawDispatchType(cmd_type, bind_point);
-    hasDrawCmd = true;
+void CMD_BUFFER_STATE::UpdateDrawCmd(CMD_TYPE cmd_type) {
+    has_draw_cmd = true;
+    has_draw_cmd_in_current_render_pass = true;
+    UpdatePipelineState(cmd_type, VK_PIPELINE_BIND_POINT_GRAPHICS);
 
     // Update the consumed viewport/scissor count.
     uint32_t &used = usedViewportScissorCount;
@@ -969,7 +1008,20 @@ void CMD_BUFFER_STATE::UpdateStateCmdDrawType(CMD_TYPE cmd_type, VkPipelineBindP
     usedDynamicScissorCount |= !!(dynamic_status & CBSTATUS_SCISSOR_WITH_COUNT_SET);
 }
 
-void CMD_BUFFER_STATE::UpdateDrawState(CMD_TYPE cmd_type, const VkPipelineBindPoint bind_point) {
+// Generic function to handle state update for all CmdDispatch* type functions
+void CMD_BUFFER_STATE::UpdateDispatchCmd(CMD_TYPE cmd_type) {
+    has_dispatch_cmd = true;
+    UpdatePipelineState(cmd_type, VK_PIPELINE_BIND_POINT_COMPUTE);
+}
+
+// Generic function to handle state update for all CmdTraceRay* type functions
+void CMD_BUFFER_STATE::UpdateTraceRayCmd(CMD_TYPE cmd_type) {
+    has_trace_rays_cmd = true;
+    UpdatePipelineState(cmd_type, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR);
+}
+
+// Generic function to handle state update for all Provoking functions calls (draw/dispatch/traceray/etc)
+void CMD_BUFFER_STATE::UpdatePipelineState(CMD_TYPE cmd_type, const VkPipelineBindPoint bind_point) {
     RecordCmd(cmd_type);
 
     const auto lv_bind_point = ConvertToLvlBindPoint(bind_point);
@@ -983,6 +1035,9 @@ void CMD_BUFFER_STATE::UpdateDrawState(CMD_TYPE cmd_type, const VkPipelineBindPo
             }
             // Pull the set node
             auto &descriptor_set = state.per_set[set_index].bound_descriptor_set;
+            if (!descriptor_set) {
+                continue;
+            }
 
             // For the "bindless" style resource usage with many descriptors, need to optimize command <-> descriptor binding
 
@@ -1141,10 +1196,6 @@ void CMD_BUFFER_STATE::UpdateLastBoundDescriptorSets(VkPipelineBindPoint pipelin
                 assert(input_dynamic_offsets <= (p_dynamic_offsets + dynamic_offset_count));
             } else {
                 last_bound.per_set[set_idx].dynamicOffsets.clear();
-            }
-            if (!descriptor_set->IsPushDescriptor()) {
-                // Can't cache validation of push_descriptors
-                validated_descriptor_sets.insert(descriptor_set.get());
             }
         }
     }
@@ -1339,7 +1390,7 @@ void CMD_BUFFER_STATE::Submit(uint32_t perf_submit_pass) {
     EventToStageMap local_event_to_stage_map;
     QueryMap local_query_to_state_map;
     for (auto &function : queryUpdates) {
-        function(nullptr, /*do_validate*/ false, first_pool, perf_submit_pass, &local_query_to_state_map);
+        function(*this, /*do_validate*/ false, first_pool, perf_submit_pass, &local_query_to_state_map);
     }
 
     for (const auto &query_state_pair : local_query_to_state_map) {
@@ -1368,7 +1419,7 @@ void CMD_BUFFER_STATE::Retire(uint32_t perf_submit_pass, const std::function<boo
     QueryMap local_query_to_state_map;
     VkQueryPool first_pool = VK_NULL_HANDLE;
     for (auto &function : queryUpdates) {
-        function(nullptr, /*do_validate*/ false, first_pool, perf_submit_pass, &local_query_to_state_map);
+        function(*this, /*do_validate*/ false, first_pool, perf_submit_pass, &local_query_to_state_map);
     }
 
     for (const auto &query_state_pair : local_query_to_state_map) {
@@ -1380,12 +1431,8 @@ void CMD_BUFFER_STATE::Retire(uint32_t perf_submit_pass, const std::function<boo
 }
 
 void CMD_BUFFER_STATE::UnbindResources() {
-    // Pipeline and descriptor sets
-    lastBound[BindPoint_Graphics].Reset();
-
     // Vertex and index buffers
     index_buffer_binding.reset();
-    status &= ~CBSTATUS_INDEX_BUFFER_BOUND;
     vertex_buffer_used = false;
     current_vertex_buffer_binding_info.vertex_buffer_bindings.clear();
 
@@ -1395,6 +1442,23 @@ void CMD_BUFFER_STATE::UnbindResources() {
     push_constant_data_update.clear();
     push_constant_pipeline_layout_set = VK_NULL_HANDLE;
 
-    // Dynamic state
-    dynamic_status = CBSTATUS_NONE;
+    // Reset status of cb to force rebinding of all resources
+    // Index buffer included
+    status = CBSTATUS_NONE;
+
+    // Pipeline and descriptor sets
+    lastBound[BindPoint_Graphics].Reset();
+}
+
+bool CMD_BUFFER_STATE::RasterizationDisabled() const {
+    auto pipeline = lastBound[BindPoint_Graphics].pipeline_state;
+    if (pipeline) {
+        if (pipeline->IsDynamic(VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE_EXT)) {
+            return rasterization_disabled;
+        } else {
+            return pipeline->RasterizationDisabled();
+        }
+    }
+
+    return false;
 }

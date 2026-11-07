@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,7 @@
 #include "components/autofill_assistant/browser/wait_for_dom_operation.h"
 #include "components/autofill_assistant/browser/web/element_action_util.h"
 #include "components/autofill_assistant/browser/web/element_finder.h"
+#include "components/autofill_assistant/browser/web/element_finder_result.h"
 #include "components/autofill_assistant/browser/web/element_store.h"
 #include "components/autofill_assistant/browser/web/web_controller.h"
 #include "components/strings/grit/components_strings.h"
@@ -74,7 +75,8 @@ ScriptExecutor::ScriptExecutor(
     ScriptExecutor::Listener* listener,
     const std::vector<std::unique_ptr<Script>>* ordered_interrupts,
     ScriptExecutorDelegate* delegate,
-    ScriptExecutorUiDelegate* ui_delegate)
+    ScriptExecutorUiDelegate* ui_delegate,
+    bool is_interrupt_executor)
     : script_path_(script_path),
       additional_context_(std::move(additional_context)),
       last_global_payload_(global_payload),
@@ -85,7 +87,8 @@ ScriptExecutor::ScriptExecutor(
       ui_delegate_(ui_delegate),
       ordered_interrupts_(ordered_interrupts),
       element_store_(
-          std::make_unique<ElementStore>(delegate->GetWebContents())) {
+          std::make_unique<ElementStore>(delegate->GetWebContents())),
+      is_interrupt_executor_(is_interrupt_executor) {
   DCHECK(delegate_);
   DCHECK(ui_delegate_);
   DCHECK(ordered_interrupts_);
@@ -121,9 +124,7 @@ void ScriptExecutor::Run(const UserData* user_data,
 #endif
 
   delegate_->GetService()->GetActions(
-      script_path_, delegate_->GetScriptURL(),
-      TriggerContext(
-          {delegate_->GetTriggerContext(), additional_context_.get()}),
+      script_path_, delegate_->GetScriptURL(), GetMergedTriggerContext(),
       last_global_payload_, last_script_payload_,
       base::BindOnce(&ScriptExecutor::OnGetActions,
                      weak_ptr_factory_.GetWeakPtr(), base::TimeTicks::Now()));
@@ -132,6 +133,10 @@ void ScriptExecutor::Run(const UserData* user_data,
 const UserData* ScriptExecutor::GetUserData() const {
   DCHECK(user_data_);
   return user_data_;
+}
+
+UserData* ScriptExecutor::GetMutableUserData() const {
+  return delegate_->GetUserData();
 }
 
 UserModel* ScriptExecutor::GetUserModel() const {
@@ -340,6 +345,8 @@ void ScriptExecutor::CollectUserData(
                      weak_ptr_factory_.GetWeakPtr(),
                      std::move(collect_user_data_options->terms_link_callback));
   ui_delegate_->SetCollectUserDataOptions(collect_user_data_options);
+  ui_delegate_->SetCollectUserDataUiState(/* loading= */ false,
+                                          UserDataEventField::NONE);
   delegate_->EnterState(AutofillAssistantState::PROMPT);
 }
 
@@ -453,11 +460,13 @@ void ScriptExecutor::Prompt(
   }
 }
 
-void ScriptExecutor::CleanUpAfterPrompt() {
+void ScriptExecutor::CleanUpAfterPrompt(bool consume_touchable_area) {
   ui_delegate_->SetUserActions(nullptr);
-  // Mark touchable_elements_ as consumed, so that it won't affect the next
-  // prompt or the end of the script.
-  touchable_element_area_.reset();
+  if (consume_touchable_area) {
+    // Mark touchable_elements_ as consumed, so that it won't affect the next
+    // prompt or the end of the script.
+    touchable_element_area_.reset();
+  }
 
   delegate_->ClearTouchableElementArea();
   ui_delegate_->SetExpandSheetForPromptAction(true);
@@ -473,6 +482,7 @@ void ScriptExecutor::SetBrowseDomainsAllowlist(
 void ScriptExecutor::RetrieveElementFormAndFieldData(
     const Selector& selector,
     base::OnceCallback<void(const ClientStatus&,
+                            content::RenderFrameHost* rfh,
                             const autofill::FormData&,
                             const autofill::FormFieldData&)> callback) {
   delegate_->GetWebController()->RetrieveElementFormAndFieldData(
@@ -624,6 +634,10 @@ content::WebContents* ScriptExecutor::GetWebContents() const {
   return delegate_->GetWebContents();
 }
 
+JsFlowDevtoolsWrapper* ScriptExecutor::GetJsFlowDevtoolsWrapper() const {
+  return delegate_->GetJsFlowDevtoolsWrapper();
+}
+
 ElementStore* ScriptExecutor::GetElementStore() const {
   return element_store_.get();
 }
@@ -705,6 +719,17 @@ bool ScriptExecutor::SetForm(
                                std::move(cancel_callback));
 }
 
+void ScriptExecutor::ShowQrCodeScanUi(
+    std::unique_ptr<PromptQrCodeScanProto> qr_code_scan,
+    base::OnceCallback<void(const ClientStatus&,
+                            const absl::optional<ValueProto>&)> callback) {
+  ui_delegate_->ShowQrCodeScanUi(std::move(qr_code_scan), std::move(callback));
+}
+
+void ScriptExecutor::ClearQrCodeScanUi() {
+  ui_delegate_->ClearQrCodeScanUi();
+}
+
 void ScriptExecutor::RequireUI() {
   delegate_->RequireUI();
 }
@@ -713,10 +738,16 @@ void ScriptExecutor::SetGenericUi(
     std::unique_ptr<GenericUserInterfaceProto> generic_ui,
     base::OnceCallback<void(const ClientStatus&)> end_action_callback,
     base::OnceCallback<void(const ClientStatus&)>
-        view_inflation_finished_callback) {
+        view_inflation_finished_callback,
+    base::RepeatingCallback<void(const RequestBackendDataProto&)>
+        request_backend_data_callback,
+    base::RepeatingCallback<void(const ShowAccountScreenProto&)>
+        show_account_screen_callback) {
   ui_delegate_->SetGenericUi(std::move(generic_ui),
                              std::move(end_action_callback),
-                             std::move(view_inflation_finished_callback));
+                             std::move(view_inflation_finished_callback),
+                             std::move(request_backend_data_callback),
+                             std::move(show_account_screen_callback));
 }
 
 void ScriptExecutor::SetPersistentGenericUi(
@@ -738,6 +769,16 @@ void ScriptExecutor::ClearPersistentGenericUi() {
 void ScriptExecutor::SetOverlayBehavior(
     ConfigureUiStateProto::OverlayBehavior overlay_behavior) {
   delegate_->SetOverlayBehavior(overlay_behavior);
+}
+
+bool ScriptExecutor::IsXmlSigned(const std::string& xml_string) const {
+  return delegate_->IsXmlSigned(xml_string);
+}
+
+const std::vector<std::string> ScriptExecutor::ExtractValuesFromSingleTagXml(
+    const std::string& xml_string,
+    const std::vector<std::string>& keys) const {
+  return delegate_->ExtractValuesFromSingleTagXml(xml_string, keys);
 }
 
 void ScriptExecutor::MaybeShowSlowWebsiteWarning(
@@ -807,7 +848,7 @@ bool ScriptExecutor::MaybeShowSlowWarning(const std::string& message,
   return true;
 }
 
-base::WeakPtr<ActionDelegate> ScriptExecutor::GetWeakPtr() const {
+base::WeakPtr<ActionDelegate> ScriptExecutor::GetWeakPtr() {
   return weak_ptr_factory_.GetWeakPtr();
 }
 
@@ -824,6 +865,7 @@ void ScriptExecutor::OnGetActions(
       roundtrip_duration.InMilliseconds());
   bool success = http_status == net::HTTP_OK &&
                  ProcessNextActionResponse(response, response_info);
+
   if (should_stop_script_) {
     // The last action forced the script to stop. Sending the result of the
     // action is considered best effort in this situation. Report a successful
@@ -834,6 +876,10 @@ void ScriptExecutor::OnGetActions(
   }
 
   if (!success) {
+    roundtrip_network_stats_ = ProtocolUtils::ComputeNetworkStats(
+        response, response_info, /* actions = */ {});
+    delegate_->OnActionsResponseReceived(roundtrip_network_stats_);
+
     RunCallback(false);
     return;
   }
@@ -865,16 +911,23 @@ bool ScriptExecutor::ProcessNextActionResponse(
   actions_.clear();
 
   bool should_update_scripts = false;
+  std::string js_flow_library;
   std::vector<std::unique_ptr<Script>> scripts;
   bool parse_result = ProtocolUtils::ParseActions(
       this, response, &run_id_, &last_global_payload_, &last_script_payload_,
-      &actions_, &scripts, &should_update_scripts);
+      &actions_, &scripts, &should_update_scripts, &js_flow_library,
+      &report_token_);
   if (!parse_result) {
     return false;
   }
 
+  if (!js_flow_library.empty()) {
+    delegate_->SetJsFlowLibrary(js_flow_library);
+  }
+
   roundtrip_network_stats_ =
       ProtocolUtils::ComputeNetworkStats(response, response_info, actions_);
+  delegate_->OnActionsResponseReceived(roundtrip_network_stats_);
   ReportPayloadsToListener();
   if (should_update_scripts) {
     ReportScriptsUpdateToListener(std::move(scripts));
@@ -966,12 +1019,22 @@ void ScriptExecutor::GetNextActions() {
   VLOG(2) << "Client execution time: "
           << roundtrip_timing_stats_.client_time_ms();
   delegate_->GetService()->GetNextActions(
-      TriggerContext(
-          {delegate_->GetTriggerContext(), additional_context_.get()}),
-      last_global_payload_, last_script_payload_, processed_actions_,
-      roundtrip_timing_stats_, roundtrip_network_stats_,
+      GetMergedTriggerContext(), last_global_payload_, last_script_payload_,
+      processed_actions_, roundtrip_timing_stats_, roundtrip_network_stats_,
       base::BindOnce(&ScriptExecutor::OnGetActions,
                      weak_ptr_factory_.GetWeakPtr(), get_next_actions_start));
+}
+
+void ScriptExecutor::MaybeSetPreviousAction(
+    const ProcessedActionProto& processed_action) {
+  const auto action_info_case = processed_action.action().action_info_case();
+
+  // JS flows are themselves a way of executing a script.
+  if (action_info_case == ActionProto::kJsFlow) {
+    return;
+  }
+
+  previous_action_type_ = action_info_case;
 }
 
 void ScriptExecutor::OnProcessedAction(
@@ -979,7 +1042,7 @@ void ScriptExecutor::OnProcessedAction(
     std::unique_ptr<ProcessedActionProto> processed_action_proto) {
   DCHECK(current_action_);
   base::TimeDelta run_time = base::TimeTicks::Now() - start_time;
-  previous_action_type_ = processed_action_proto->action().action_info_case();
+  MaybeSetPreviousAction(*processed_action_proto);
   processed_actions_.emplace_back(*processed_action_proto);
 
 #ifdef NDEBUG
@@ -1079,11 +1142,21 @@ void ScriptExecutor::RequestUserData(
     base::OnceCallback<void(bool, const GetUserDataResponseProto&)> callback) {
   auto* service = delegate_->GetService();
   DCHECK(service);
-
+  delegate_->EnterState(AutofillAssistantState::RUNNING);
   service->GetUserData(
-      options, run_id_,
+      options, run_id_, user_data_,
       base::BindOnce(&ScriptExecutor::OnRequestUserData,
                      weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+}
+
+void ScriptExecutor::ShowAccountScreen(const ShowAccountScreenProto& proto,
+                                       const std::string& email_address) {
+  ui_delegate_->ShowAccountScreen(proto, email_address);
+}
+
+void ScriptExecutor::SetCollectUserDataUiState(bool loading,
+                                               UserDataEventField event_field) {
+  ui_delegate_->SetCollectUserDataUiState(/* loading= */ true, event_field);
 }
 
 void ScriptExecutor::OnRequestUserData(
@@ -1091,6 +1164,7 @@ void ScriptExecutor::OnRequestUserData(
     int http_status,
     const std::string& response,
     const ServiceRequestSender::ResponseInfo& response_info) {
+  delegate_->EnterState(AutofillAssistantState::PROMPT);
   if (http_status != net::HTTP_OK) {
     std::move(callback).Run(false, GetUserDataResponseProto());
     return;
@@ -1099,6 +1173,82 @@ void ScriptExecutor::OnRequestUserData(
   GetUserDataResponseProto response_proto;
   bool success = response_proto.ParseFromString(response);
   std::move(callback).Run(success, response_proto);
+}
+
+bool ScriptExecutor::SupportsExternalActions() {
+  return ui_delegate_->SupportsExternalActions();
+}
+
+void ScriptExecutor::RequestExternalAction(
+    const ExternalActionProto& external_action,
+    base::OnceCallback<void(ExternalActionDelegate::DomUpdateCallback)>
+        start_dom_checks_callback,
+    base::OnceCallback<void(const external::Result& result)>
+        end_action_callback) {
+  bool prompt = external_action.allow_interrupt() ||
+                external_action.show_touchable_area();
+  if (prompt && delegate_->EnterState(AutofillAssistantState::PROMPT)) {
+    if (external_action.show_touchable_area() && touchable_element_area_) {
+      delegate_->SetTouchableElementArea(*touchable_element_area_);
+
+      // The touchable element and overlays are cleared by calling
+      // ScriptExecutor::CleanUpAfterPrompt
+    }
+  }
+  external::Action action;
+  *action.mutable_info() = external_action.info();
+  ui_delegate_->ExecuteExternalAction(
+      action, is_interrupt_executor_, std::move(start_dom_checks_callback),
+      base::BindOnce(&ScriptExecutor::OnExternalActionFinished,
+                     weak_ptr_factory_.GetWeakPtr(), external_action, prompt,
+                     std::move(end_action_callback)));
+}
+
+void ScriptExecutor::OnExternalActionFinished(
+    const ExternalActionProto& external_action,
+    const bool prompt,
+    base::OnceCallback<void(const external::Result& result)>
+        end_action_callback,
+    const external::Result& result) {
+  if (prompt) {
+    CleanUpAfterPrompt(external_action.show_touchable_area());
+  }
+  std::move(end_action_callback).Run(result);
+}
+
+bool ScriptExecutor::MustUseBackendData() const {
+  return delegate_->MustUseBackendData();
+}
+
+absl::optional<std::string> ScriptExecutor::GetIntent() const {
+  return GetMergedTriggerContext().GetScriptParameters().GetIntent();
+}
+
+TriggerContext ScriptExecutor::GetMergedTriggerContext() const {
+  return TriggerContext(
+      {delegate_->GetTriggerContext(), additional_context_.get()});
+}
+
+const std::string ScriptExecutor::GetLocale() const {
+  return delegate_->GetLocale();
+}
+
+void ScriptExecutor::ReportProgress(const std::string& payload,
+                                    base::OnceCallback<void(bool)> callback) {
+  auto* service = delegate_->GetService();
+  DCHECK(service);
+  service->ReportProgress(
+      report_token_, payload,
+      base::BindOnce(&ScriptExecutor::OnReportProgress,
+                     weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+}
+
+void ScriptExecutor::OnReportProgress(
+    base::OnceCallback<void(bool)> callback,
+    int http_status,
+    const std::string& response,
+    const ServiceRequestSender::ResponseInfo& response_info) {
+  std::move(callback).Run(http_status == net::HTTP_OK);
 }
 
 }  // namespace autofill_assistant

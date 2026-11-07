@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,7 +48,7 @@ class StreamingUtf8ValidatorThoroughTest : public ::testing::Test {
     int32_t char_index = 0;
 
     while (char_index < src_len) {
-      int32_t code_point;
+      base_icu::UChar32 code_point;
       U8_NEXT(src, char_index, src_len, code_point);
       if (!base::IsValidCodepoint(code_point))
         return false;

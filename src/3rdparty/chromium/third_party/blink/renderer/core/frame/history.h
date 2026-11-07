@@ -60,13 +60,13 @@ class CORE_EXPORT History final : public ScriptWrappable,
   void forward(ScriptState*, ExceptionState&);
   void go(ScriptState*, int delta, ExceptionState&);
 
-  void pushState(v8::Isolate* isolate,
+  void pushState(ScriptState*,
                  const ScriptValue& data,
                  const String& title,
                  const String& url,
                  ExceptionState&);
 
-  void replaceState(v8::Isolate* isolate,
+  void replaceState(ScriptState*,
                     const ScriptValue& data,
                     const String& title,
                     const String& url,
@@ -86,6 +86,7 @@ class CORE_EXPORT History final : public ScriptWrappable,
                         const String& title,
                         const String& url,
                         WebFrameLoadType,
+                        ScriptState*,
                         ExceptionState&);
   SerializedScriptValue* StateInternal() const;
   mojom::blink::ScrollRestorationType ScrollRestorationInternal() const;

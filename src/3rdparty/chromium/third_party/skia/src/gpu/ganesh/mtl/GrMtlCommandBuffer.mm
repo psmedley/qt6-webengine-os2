@@ -26,7 +26,18 @@ sk_sp<GrMtlCommandBuffer> GrMtlCommandBuffer::Make(id<MTLCommandQueue> queue) {
         NSLog(@"GrMtlCommandBuffer: WARNING: Creating MTLCommandBuffer while in background.");
     }
 #endif
-    id<MTLCommandBuffer> mtlCommandBuffer = [queue commandBuffer];
+    id<MTLCommandBuffer> mtlCommandBuffer;
+#if GR_METAL_SDK_VERSION >= 230
+    if (@available(macOS 11.0, iOS 14.0, *)) {
+        MTLCommandBufferDescriptor* desc = [[MTLCommandBufferDescriptor alloc] init];
+        desc.errorOptions = MTLCommandBufferErrorOptionEncoderExecutionStatus;
+        mtlCommandBuffer = [queue commandBufferWithDescriptor:desc];
+    } else {
+        mtlCommandBuffer = [queue commandBuffer];
+    }
+#else
+    mtlCommandBuffer = [queue commandBuffer];
+#endif
     if (nil == mtlCommandBuffer) {
         return nullptr;
     }
@@ -187,7 +198,7 @@ GrMtlRenderCommandEncoder* GrMtlCommandBuffer::getRenderCommandEncoder(
 
 bool GrMtlCommandBuffer::commit(bool waitUntilCompleted) {
     this->endAllEncoding();
-    if (fCmdBuffer.status != MTLCommandBufferStatusNotEnqueued) {
+    if ([fCmdBuffer status] != MTLCommandBufferStatusNotEnqueued) {
         NSLog(@"GrMtlCommandBuffer: Tried to commit command buffer while in invalid state.\n");
         return false;
     }
@@ -200,19 +211,22 @@ bool GrMtlCommandBuffer::commit(bool waitUntilCompleted) {
     [fCmdBuffer commit];
     if (waitUntilCompleted) {
         this->waitUntilCompleted();
-    }
-
-    if (fCmdBuffer.status == MTLCommandBufferStatusError) {
-#ifdef SK_DEBUG
-        NSString* description = [[fCmdBuffer error] localizedDescription];
-        const char* errorString = [description UTF8String];
-        SkDebugf("Error submitting command buffer: %s\n", errorString);
-#else
-        SkDebugf("Error submitting command buffer\n");
+#if defined(SK_BUILD_FOR_IOS) && defined(SK_METAL_WAIT_UNTIL_SCHEDULED)
+    // If iOS goes into the background we need to make sure all command buffers are scheduled first.
+    // We don't have a way of detecting background transition so this guarantees it.
+    } else {
+        [fCmdBuffer waitUntilScheduled];
 #endif
     }
 
-    return (fCmdBuffer.status != MTLCommandBufferStatusError);
+    if ([fCmdBuffer status] == MTLCommandBufferStatusError) {
+        SkDebugf("Error submitting command buffer.\n");
+        if (NSError* error = [fCmdBuffer error]) {
+            NSLog(@"%@", error);
+        }
+    }
+
+    return ([fCmdBuffer status] != MTLCommandBufferStatusError);
 }
 
 void GrMtlCommandBuffer::endAllEncoding() {

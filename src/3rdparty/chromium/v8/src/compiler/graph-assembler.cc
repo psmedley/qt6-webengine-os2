@@ -4,15 +4,13 @@
 
 #include "src/compiler/graph-assembler.h"
 
-#include "src/codegen/code-factory.h"
+#include "src/codegen/callable.h"
 #include "src/compiler/access-builder.h"
 #include "src/compiler/graph-reducer.h"
 #include "src/compiler/linkage.h"
-#include "src/compiler/schedule.h"
 // For TNode types.
 #include "src/objects/heap-number.h"
 #include "src/objects/oddball.h"
-#include "src/objects/smi.h"
 #include "src/objects/string.h"
 
 namespace v8 {
@@ -218,6 +216,10 @@ Node* JSGraphAssembler::Allocate(AllocationType allocation, Node* size) {
                        effect(), control()));
 }
 
+TNode<Map> JSGraphAssembler::LoadMap(TNode<HeapObject> object) {
+  return TNode<Map>::UncheckedCast(LoadField(AccessBuilder::ForMap(), object));
+}
+
 Node* JSGraphAssembler::LoadField(FieldAccess const& access, Node* object) {
   Node* value = AddNode(graph()->NewNode(simplified()->LoadField(access),
                                          object, effect(), control()));
@@ -367,14 +369,14 @@ TNode<Object> JSGraphAssembler::ConvertTaggedHoleToUndefined(
 
 TNode<FixedArrayBase> JSGraphAssembler::MaybeGrowFastElements(
     ElementsKind kind, const FeedbackSource& feedback, TNode<JSArray> array,
-    TNode<FixedArrayBase> elements, TNode<Number> new_length,
+    TNode<FixedArrayBase> elements, TNode<Number> index_needed,
     TNode<Number> old_length) {
   GrowFastElementsMode mode = IsDoubleElementsKind(kind)
                                   ? GrowFastElementsMode::kDoubleElements
                                   : GrowFastElementsMode::kSmiOrObjectElements;
   return AddNode<FixedArrayBase>(graph()->NewNode(
       simplified()->MaybeGrowFastElements(mode, feedback), array, elements,
-      new_length, old_length, effect(), control()));
+      index_needed, old_length, effect(), control()));
 }
 
 Node* JSGraphAssembler::StringCharCodeAt(TNode<String> string,
@@ -473,9 +475,9 @@ Node* GraphAssembler::Retain(Node* buffer) {
   return AddNode(graph()->NewNode(common()->Retain(), buffer, effect()));
 }
 
-Node* GraphAssembler::UnsafePointerAdd(Node* base, Node* external) {
-  return AddNode(graph()->NewNode(machine()->UnsafePointerAdd(), base, external,
-                                  effect(), control()));
+Node* GraphAssembler::IntPtrAdd(Node* a, Node* b) {
+  return AddNode(graph()->NewNode(
+      machine()->Is64() ? machine()->Int64Add() : machine()->Int32Add(), a, b));
 }
 
 TNode<Number> JSGraphAssembler::PlainPrimitiveToNumber(TNode<Object> value) {

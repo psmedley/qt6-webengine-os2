@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -123,15 +123,17 @@ void RenderMessageFilter::GenerateFrameRoutingID(
   int32_t routing_id = render_widget_helper_->GetNextRoutingID();
   auto frame_token = blink::LocalFrameToken();
   auto devtools_frame_token = base::UnguessableToken::Create();
-  render_widget_helper_->StoreNextFrameRoutingID(routing_id, frame_token,
-                                                 devtools_frame_token);
-  std::move(callback).Run(routing_id, frame_token, devtools_frame_token);
+  auto document_token = blink::DocumentToken();
+  render_widget_helper_->StoreNextFrameRoutingID(
+      routing_id, frame_token, devtools_frame_token, document_token);
+  std::move(callback).Run(routing_id, frame_token, devtools_frame_token,
+                          document_token);
 }
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-void RenderMessageFilter::SetThreadPriorityOnFileThread(
+void RenderMessageFilter::SetThreadTypeOnWorkerThread(
     base::PlatformThreadId ns_tid,
-    base::ThreadPriority priority) {
+    base::ThreadType thread_type) {
   bool ns_pid_supported = false;
   pid_t peer_tid = base::FindThreadID(peer_pid(), ns_tid, &ns_pid_supported);
   if (peer_tid == -1) {
@@ -145,20 +147,20 @@ void RenderMessageFilter::SetThreadPriorityOnFileThread(
     return;
   }
 
-  base::PlatformThread::SetThreadPriority(peer_pid(), peer_tid, priority);
+  base::PlatformThread::SetThreadType(peer_pid(), peer_tid, thread_type);
 }
 #endif
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-void RenderMessageFilter::SetThreadPriority(int32_t ns_tid,
-                                            base::ThreadPriority priority) {
+void RenderMessageFilter::SetThreadType(int32_t ns_tid,
+                                        base::ThreadType thread_type) {
   constexpr base::TaskTraits kTraits = {
       base::MayBlock(), base::TaskPriority::USER_BLOCKING,
       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN};
   base::ThreadPool::PostTask(
       FROM_HERE, kTraits,
-      base::BindOnce(&RenderMessageFilter::SetThreadPriorityOnFileThread, this,
-                     static_cast<base::PlatformThreadId>(ns_tid), priority));
+      base::BindOnce(&RenderMessageFilter::SetThreadTypeOnWorkerThread, this,
+                     static_cast<base::PlatformThreadId>(ns_tid), thread_type));
 }
 #endif
 

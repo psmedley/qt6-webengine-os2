@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/values.h"
@@ -47,6 +48,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/print_preview_resources.h"
 #include "chrome/grit/print_preview_resources_map.h"
+#include "components/device_event_log/device_event_log.h"
 #include "components/prefs/pref_service.h"
 #include "components/printing/browser/print_composite_client.h"
 #include "components/printing/browser/print_manager_utils.h"
@@ -102,21 +104,21 @@ constexpr char kInvalidPageNumberForDidPreviewPage[] =
     "Invalid page number for DidPreviewPage";
 constexpr char kInvalidPageCountForMetafileReadyForPrinting[] =
     "Invalid page count for MetafileReadyForPrinting";
+constexpr char kInvalidArgsForPrinterSettingsInvalid[] =
+    "Invalid details for PrinterSettingsInvalid";
 
 PrintPreviewUI::TestDelegate* g_test_delegate = nullptr;
 
 void StopWorker(int document_cookie) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (document_cookie <= 0)
     return;
   scoped_refptr<PrintQueriesQueue> queue =
       g_browser_process->print_job_manager()->queue();
   std::unique_ptr<PrinterQuery> printer_query =
       queue->PopPrinterQuery(document_cookie);
-  if (printer_query) {
-    content::GetIOThreadTaskRunner({})->PostTask(
-        FROM_HERE,
-        base::BindOnce(&PrinterQuery::StopWorker, std::move(printer_query)));
-  }
+  if (printer_query)
+    printer_query->StopWorker();
 }
 
 bool IsValidPageNumber(uint32_t page_number, uint32_t page_count) {
@@ -333,12 +335,12 @@ void AddPrintPreviewStrings(content::WebUIDataSource* source) {
 #endif
 
   // Register strings for the PDF viewer, so that $i18n{} replacements work.
-  base::Value pdf_strings(base::Value::Type::DICTIONARY);
+  base::Value::Dict pdf_strings;
   pdf_extension_util::AddStrings(
       pdf_extension_util::PdfViewerContext::kPrintPreview, &pdf_strings);
   pdf_extension_util::AddAdditionalData(/*enable_annotations=*/false,
                                         &pdf_strings);
-  source->AddLocalizedStrings(pdf_strings.GetDict());
+  source->AddLocalizedStrings(pdf_strings);
 }
 
 void AddPrintPreviewFlags(content::WebUIDataSource* source, Profile* profile) {
@@ -401,6 +403,8 @@ PrintPreviewHandler* CreatePrintPreviewHandlers(content::WebUI* web_ui) {
 }
 
 }  // namespace
+
+WEB_UI_CONTROLLER_TYPE_IMPL(PrintPreviewUI)
 
 PrintPreviewUI::PrintPreviewUI(content::WebUI* web_ui,
                                std::unique_ptr<PrintPreviewHandler> handler)
@@ -722,8 +726,11 @@ void PrintPreviewUI::SetInitialParams(
     const mojom::RequestPrintPreviewParams& params) {
   if (!print_preview_dialog || !print_preview_dialog->GetWebUI())
     return;
-  PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
-      print_preview_dialog->GetWebUI()->GetController());
+
+  PrintPreviewUI* print_preview_ui = print_preview_dialog->GetWebUI()
+                                         ->GetController()
+                                         ->GetAs<PrintPreviewUI>();
+  CHECK(print_preview_ui);
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   print_preview_ui->source_is_arc_ = params.is_from_arc;
 #endif
@@ -1074,7 +1081,14 @@ void PrintPreviewUI::PrintPreviewCancelled(int32_t document_cookie,
 }
 
 void PrintPreviewUI::PrinterSettingsInvalid(int32_t document_cookie,
-                                            int32_t request_id) {
+                                            int32_t request_id,
+                                            const std::string& details) {
+  if (!base::IsStringASCII(details)) {
+    receiver_.ReportBadMessage(kInvalidArgsForPrinterSettingsInvalid);
+    return;
+  }
+  if (!details.empty())
+    PRINTER_LOG(ERROR) << "Printer settings invalid: " << details;
   StopWorker(document_cookie);
   if (ShouldCancelRequest(id_, request_id))
     return;

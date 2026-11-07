@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,12 @@
 #include "base/check_op.h"
 #include "base/containers/contains.h"
 #include "base/containers/queue.h"
+#include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
+#include "components/viz/common/features.h"
 #include "components/viz/common/surfaces/subtree_capture_id.h"
 #include "components/viz/common/surfaces/video_capture_target.h"
 #include "components/viz/service/display/shared_bitmap_manager.h"
@@ -70,7 +72,9 @@ FrameSinkManagerImpl::FrameSinkManagerImpl(const InitParams& params)
     : shared_bitmap_manager_(params.shared_bitmap_manager),
       output_surface_provider_(params.output_surface_provider),
       gmb_context_provider_(params.gmb_context_provider),
-      surface_manager_(this, params.activation_deadline_in_frames),
+      surface_manager_(this,
+                       params.activation_deadline_in_frames,
+                       params.max_uncommitted_frames),
       hit_test_manager_(surface_manager()),
       restart_id_(params.restart_id),
       run_all_compositor_stages_before_draw_(
@@ -280,7 +284,7 @@ void FrameSinkManagerImpl::UnregisterFrameSinkHierarchy(
   }
 
   auto iter = frame_sink_source_map_.find(parent_frame_sink_id);
-  DCHECK(iter != frame_sink_source_map_.end());
+  CHECK(iter != frame_sink_source_map_.end());
 
   // Remove |child_frame_sink_id| from parents list of children.
   auto& mapping = iter->second;
@@ -339,6 +343,11 @@ void FrameSinkManagerImpl::EvictSurfaces(
     if (root_it != root_sink_map_.end())
       root_it->second->DidEvictSurface(surface_id);
   }
+
+  // Trigger garbage collection immediately, otherwise the surface may not be
+  // evicted for a long time (e.g. not before a frame is produced).
+  if (base::FeatureList::IsEnabled(features::kEagerSurfaceGarbageCollection))
+    surface_manager_.GarbageCollectSurfaces();
 }
 
 void FrameSinkManagerImpl::RequestCopyOfOutput(
@@ -414,6 +423,11 @@ void FrameSinkManagerImpl::RegisterCompositorFrameSinkSupport(
 
   for (auto& observer : observer_list_)
     observer.OnCreatedCompositorFrameSink(frame_sink_id, support->is_root());
+
+  if (global_throttle_interval_) {
+    UpdateThrottlingRecursively(frame_sink_id,
+                                global_throttle_interval_.value());
+  }
 }
 
 void FrameSinkManagerImpl::UnregisterCompositorFrameSinkSupport(
@@ -676,6 +690,8 @@ void FrameSinkManagerImpl::OnCaptureStarted(const FrameSinkId& id) {
   if (captured_frame_sink_ids_.insert(id).second) {
     ClearThrottling(id);
   }
+  for (auto& observer : observer_list_)
+    observer.OnCaptureStarted(id);
 }
 
 void FrameSinkManagerImpl::OnCaptureStopped(const FrameSinkId& id) {
@@ -733,16 +749,54 @@ void FrameSinkManagerImpl::Throttle(const std::vector<FrameSinkId>& ids,
   UpdateThrottling();
 }
 
+void FrameSinkManagerImpl::StartThrottlingAllFrameSinks(
+    base::TimeDelta interval) {
+  // Floor the requested interval to the nearest 10th of a millisecond. This is
+  // because the precision of timing between frames is in microseconds, which
+  // can result in error accumulation over several throttled frames.
+  //
+  // For instance, on a 60Hz display, the first frame is produced at 0.016666
+  // seconds, and the second at (0.016666 + 0.016666 = 0.033332) seconds.
+  // base::Hertz(30) is 0.033333 seconds, so the second frame is considered to
+  // have been produced too fast, and is therefore throttled. This results in a
+  // 20Hz refresh rate instead of the desired 30Hz.
+  //
+  // Flooring at the nearest 10th of a millisecond produces correct throttling
+  // results for frame rates up to 960Hz, after which either flooring to
+  // milliseconds or a more precise between-frames measurement is required.
+  global_throttle_interval_ = interval.FloorToMultiple(base::Microseconds(100));
+  UpdateThrottling();
+}
+
+void FrameSinkManagerImpl::StopThrottlingAllFrameSinks() {
+  global_throttle_interval_ = absl::nullopt;
+  UpdateThrottling();
+}
+
 void FrameSinkManagerImpl::UpdateThrottling() {
   // Clear previous throttling effect on all frame sinks.
   for (auto& support_map_item : support_map_) {
     support_map_item.second->ThrottleBeginFrame(base::TimeDelta());
   }
-  if (throttle_interval_.is_zero())
+  if (throttle_interval_.is_zero() &&
+      (!global_throttle_interval_ ||
+       global_throttle_interval_.value().is_zero()))
     return;
 
-  for (const auto& id : frame_sink_ids_to_throttle_) {
-    UpdateThrottlingRecursively(id, throttle_interval_);
+  if (global_throttle_interval_) {
+    for (const auto& support : support_map_) {
+      support.second->ThrottleBeginFrame(global_throttle_interval_.value());
+    }
+  }
+
+  // If the per-frame sink throttle interval is more aggressive than the global
+  // throttling interval, apply it to those frame sinks effectively always
+  // throttling a frame sink as much as possible.
+  if (!global_throttle_interval_ ||
+      throttle_interval_ > global_throttle_interval_) {
+    for (const auto& id : frame_sink_ids_to_throttle_) {
+      UpdateThrottlingRecursively(id, throttle_interval_);
+    }
   }
   // Clear throttling on frame sinks currently being captured.
   for (const auto& id : captured_frame_sink_ids_) {

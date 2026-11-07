@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,7 +57,7 @@ class PresentationServiceImplTest : public RenderViewHostImplTestHarness {
     NavigateAndCommit(GURL("about:blank"));
 
     EXPECT_CALL(mock_delegate_, AddObserver(_, _, _)).Times(1);
-    TestRenderFrameHost* render_frame_host = contents()->GetMainFrame();
+    TestRenderFrameHost* render_frame_host = contents()->GetPrimaryMainFrame();
     render_frame_host->InitializeRenderFrameIfNeeded();
     service_impl_.reset(new PresentationServiceImpl(
         render_frame_host, contents(), &mock_delegate_, nullptr));

@@ -1,23 +1,23 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {assert, assertNotReached} from 'chrome://resources/js/assert.m.js';
+import {assert, assertNotReached} from 'chrome://resources/js/assert_ts.js';
 
-import {App} from './app_management.mojom-webui.js';
+import {App, PermissionType} from './app_management.mojom-webui.js';
 import {BrowserProxy} from './browser_proxy.js';
 import {AppManagementUserAction, AppType, OptionalBool} from './constants.js';
-import {PermissionType, PermissionTypeIndex} from './permission_constants.js';
+import {PermissionTypeIndex} from './permission_constants.js';
 import {isPermissionEnabled} from './permission_util.js';
 
 /**
  * @fileoverview Utility functions for the App Management page.
  */
 
-type AppManagementPageState = {
-  apps: Record<string, App>,
-  selectedAppId: string|null,
-};
+interface AppManagementPageState {
+  apps: Record<string, App>;
+  selectedAppId: string|null;
+}
 
 export function createEmptyState(): AppManagementPageState {
   return {
@@ -26,7 +26,7 @@ export function createEmptyState(): AppManagementPageState {
   };
 }
 
-export function createInitialState(apps: Array<App>): AppManagementPageState {
+export function createInitialState(apps: App[]): AppManagementPageState {
   const initialState = createEmptyState();
 
   for (const app of apps) {
@@ -78,7 +78,6 @@ export function toggleOptionalBool(bool: OptionalBool): OptionalBool {
       return OptionalBool.kFalse;
     default:
       assertNotReached();
-      return OptionalBool.kFalse;
   }
 }
 
@@ -90,12 +89,10 @@ export function convertOptionalBoolToBool(optionalBool: OptionalBool): boolean {
       return false;
     default:
       assertNotReached();
-      return false;
   }
 }
 
-export function getUserActionHistogramNameForAppType_(appType: AppType):
-    string {
+function getUserActionHistogramNameForAppType(appType: AppType): string {
   switch (appType) {
     case AppType.kArc:
       return 'AppManagement.AppDetailViews.ArcApp';
@@ -113,13 +110,12 @@ export function getUserActionHistogramNameForAppType_(appType: AppType):
       return 'AppManagement.AppDetailViews.BorealisApp';
     default:
       assertNotReached();
-      return '';
   }
 }
 
 export function recordAppManagementUserAction(
     appType: AppType, userAction: AppManagementUserAction) {
-  const histogram = getUserActionHistogramNameForAppType_(appType);
+  const histogram = getUserActionHistogramNameForAppType(appType);
   const enumLength = Object.keys(AppManagementUserAction).length;
   BrowserProxy.getInstance().recordEnumerationValue(
       histogram, userAction, enumLength);

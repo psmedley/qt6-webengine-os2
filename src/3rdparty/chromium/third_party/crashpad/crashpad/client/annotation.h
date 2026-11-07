@@ -1,4 +1,4 @@
-// Copyright 2017 The Crashpad Authors. All rights reserved.
+// Copyright 2017 The Crashpad Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -73,7 +73,8 @@ class AnnotationList;
 class Annotation {
  public:
   //! \brief The maximum length of an annotation’s name, in bytes.
-  static constexpr size_t kNameMaxLength = 64;
+  //!    Matches the behavior of Breakpad's SimpleStringDictionary.
+  static constexpr size_t kNameMaxLength = 256;
 
   //! \brief The maximum size of an annotation’s value, in bytes.
   static constexpr size_t kValueMaxSize = 5 * 4096;

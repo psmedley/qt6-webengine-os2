@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,6 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/bindings/core/v8/module_record.h"
-#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -36,6 +35,7 @@
 #include "third_party/blink/renderer/modules/webaudio/offline_audio_worklet_thread.h"
 #include "third_party/blink/renderer/modules/webaudio/realtime_audio_worklet_thread.h"
 #include "third_party/blink/renderer/modules/webaudio/semi_realtime_audio_worklet_thread.h"
+#include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
@@ -73,7 +73,7 @@ class AudioWorkletThreadTest : public PageTestBase, public ModuleTestBase {
     return thread;
   }
 
-  // Attempts to run some simple script for |thread|.
+  // Attempts to run some simple script for `thread`.
   void CheckWorkletCanExecuteScript(WorkerThread* thread) {
     base::WaitableEvent wait_event;
     PostCrossThreadTask(
@@ -100,7 +100,6 @@ class AudioWorkletThreadTest : public PageTestBase, public ModuleTestBase {
             window->GetReferrerPolicy(), window->GetSecurityOrigin(),
             window->IsSecureContext(), window->GetHttpsState(),
             nullptr /* worker_clients */, nullptr /* content_settings_client */,
-            window->AddressSpace(),
             OriginTrialContext::GetInheritedTrialFeatures(window).get(),
             base::UnguessableToken::Create(), nullptr /* worker_settings */,
             mojom::blink::V8CacheOptions::kDefault,
@@ -129,7 +128,7 @@ class AudioWorkletThreadTest : public PageTestBase, public ModuleTestBase {
     ScriptEvaluationResult result =
         JSModuleScript::CreateForTest(Modulator::From(script_state), module,
                                       js_url)
-            ->RunScriptAndReturnValue();
+            ->RunScriptOnScriptStateAndReturnValue(script_state);
     EXPECT_EQ(result.GetResultType(),
               ScriptEvaluationResult::ResultType::kSuccess);
     wait_event->Signal();
@@ -309,27 +308,27 @@ struct ThreadPriorityTestParam {
   const bool has_realtime_constraint;
   const bool is_top_level_frame;
   const bool is_enabled_by_finch;
-  const base::ThreadPriority expected_priority;
+  const base::ThreadPriorityForTest expected_priority;
 };
 
 constexpr ThreadPriorityTestParam kThreadPriorityTestParams[] = {
     // RT thread enabled by Finch.
-    {true, true, true, base::ThreadPriority::REALTIME_AUDIO},
+    {true, true, true, base::ThreadPriorityForTest::kRealtimeAudio},
 
     // RT thread disabled by Finch.
-    {true, true, false, base::ThreadPriority::NORMAL},
+    {true, true, false, base::ThreadPriorityForTest::kNormal},
 
     // Non-main frame, RT thread enabled by Finch.
-    {true, false, true, base::ThreadPriority::DISPLAY},
+    {true, false, true, base::ThreadPriorityForTest::kDisplay},
 
     // Non-main frame, RT thread disabled by Finch.
-    {true, false, false, base::ThreadPriority::NORMAL},
+    {true, false, false, base::ThreadPriorityForTest::kNormal},
 
     // The OfflineAudioContext always uses a NORMAL priority thread.
-    {false, true, true, base::ThreadPriority::NORMAL},
-    {false, true, false, base::ThreadPriority::NORMAL},
-    {false, false, true, base::ThreadPriority::NORMAL},
-    {false, false, false, base::ThreadPriority::NORMAL},
+    {false, true, true, base::ThreadPriorityForTest::kNormal},
+    {false, true, false, base::ThreadPriorityForTest::kNormal},
+    {false, false, true, base::ThreadPriorityForTest::kNormal},
+    {false, false, false, base::ThreadPriorityForTest::kNormal},
 };
 
 class AudioWorkletThreadPriorityTest
@@ -337,8 +336,8 @@ class AudioWorkletThreadPriorityTest
       public testing::WithParamInterface<ThreadPriorityTestParam> {
  public:
   void InitWithRealtimePrioritySettings(bool is_enabled_by_finch) {
-    std::vector<base::Feature> enabled;
-    std::vector<base::Feature> disabled;
+    std::vector<base::test::FeatureRef> enabled;
+    std::vector<base::test::FeatureRef> disabled;
     if (is_enabled_by_finch) {
       enabled.push_back(features::kAudioWorkletThreadRealtimePriority);
     } else {
@@ -347,9 +346,10 @@ class AudioWorkletThreadPriorityTest
     feature_list_.InitWithFeatures(enabled, disabled);
   }
 
-  void CreateCheckThreadPriority(bool has_realtime_constraint,
-                                 bool is_top_level_frame,
-                                 base::ThreadPriority expected_priority) {
+  void CreateCheckThreadPriority(
+      bool has_realtime_constraint,
+      bool is_top_level_frame,
+      base::ThreadPriorityForTest expected_priority) {
     std::unique_ptr<WorkerThread> audio_worklet_thread =
         CreateAudioWorkletThread(has_realtime_constraint, is_top_level_frame);
     WorkerThread* thread = audio_worklet_thread.get();
@@ -371,18 +371,18 @@ class AudioWorkletThreadPriorityTest
  private:
   void CheckThreadPriorityOnWorkerThread(
       WorkerThread* thread,
-      base::ThreadPriority expected_priority,
+      base::ThreadPriorityForTest expected_priority,
       base::WaitableEvent* wait_event) {
     ASSERT_TRUE(thread->IsCurrentThread());
-    base::ThreadPriority actual_priority =
-        base::PlatformThread::GetCurrentThreadPriority();
+    base::ThreadPriorityForTest actual_priority =
+        base::PlatformThread::GetCurrentThreadPriorityForTest();
 
     // TODO(crbug.com/1022888): The worklet thread priority is always NORMAL
     // on OS_LINUX and OS_CHROMEOS regardless of the thread priority setting.
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-    if (expected_priority == base::ThreadPriority::REALTIME_AUDIO ||
-        expected_priority == base::ThreadPriority::DISPLAY) {
-      EXPECT_EQ(actual_priority, base::ThreadPriority::NORMAL);
+    if (expected_priority == base::ThreadPriorityForTest::kRealtimeAudio ||
+        expected_priority == base::ThreadPriorityForTest::kDisplay) {
+      EXPECT_EQ(actual_priority, base::ThreadPriorityForTest::kNormal);
     } else {
       EXPECT_EQ(actual_priority, expected_priority);
     }

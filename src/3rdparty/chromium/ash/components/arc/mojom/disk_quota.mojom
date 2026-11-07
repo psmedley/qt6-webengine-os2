@@ -1,12 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// Next MinVersion: 2
+// Next MinVersion: 3
 
 module arc.mojom;
 
-// Next Method ID: 3
+struct DiskSpace {
+  uint64 space_in_bytes;
+};
+
+// Next Method ID: 6
+// Deprecated method ID: 4
 interface DiskQuotaHost {
   // Whether cryptohome supports quota-based stats.
   IsQuotaSupported@0() => (bool supported);
@@ -21,11 +26,8 @@ interface DiskQuotaHost {
   [MinVersion=1] GetCurrentSpaceForProjectId@3(uint32 project_id) =>
       (int64 cur_space);
 
-  // Set a project ID on a file path.
-  // Host is supposed to convert the given Android file path to the
-  // corresponding path in Chrome OS file system.
-  [MinVersion=1] SetProjectId@4(uint32 project_id, string android_file_path) =>
-      (bool success);
+  // Get free disk space in the stateful partition.
+  [MinVersion=2] GetFreeDiskSpace@5() => (DiskSpace? free_space);
 };
 
 // Next Method ID: 1

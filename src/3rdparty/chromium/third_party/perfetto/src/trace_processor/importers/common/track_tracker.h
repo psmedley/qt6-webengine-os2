@@ -17,6 +17,7 @@
 #ifndef SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_TRACK_TRACKER_H_
 #define SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_TRACK_TRACKER_H_
 
+#include "src/trace_processor/importers/common/args_tracker.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 
@@ -26,6 +27,8 @@ namespace trace_processor {
 // Tracks and stores tracks based on track types, ids and scopes.
 class TrackTracker {
  public:
+  using SetArgsCallback = std::function<void(ArgsTracker::BoundInserter&)>;
+
   explicit TrackTracker(TraceProcessorContext*);
 
   // Interns a thread track into the storage.
@@ -65,6 +68,7 @@ class TrackTracker {
 
   // Interns a global counter track into the storage.
   TrackId InternGlobalCounterTrack(StringId name,
+                                   SetArgsCallback = {},
                                    StringId unit = kNullStringId,
                                    StringId description = kNullStringId);
 
@@ -88,6 +92,22 @@ class TrackTracker {
 
   // Interns a counter track associated with a GPU into the storage.
   TrackId InternGpuCounterTrack(StringId name, uint32_t gpu_id);
+
+  // Interns energy counter track associated with a
+  // Energy breakdown into the storage.
+  TrackId InternEnergyCounterTrack(StringId name,
+                                   int32_t consumer_id,
+                                   StringId consumer_type,
+                                   int32_t ordinal);
+  // Interns a per process energy counter track associated with a
+  // Energy into the storage.
+  TrackId InternUidCounterTrack(StringId name, int32_t uid);
+
+  // Interns a per process energy consumer counter track associated with a
+  // Energy Uid into the storage.
+  TrackId InternEnergyPerUidCounterTrack(StringId name,
+                                         int32_t consumer_id,
+                                         int32_t uid);
 
   // Creates a counter track associated with a GPU into the storage.
   TrackId CreateGpuCounterTrack(StringId name,
@@ -153,6 +173,10 @@ class TrackTracker {
   std::map<std::pair<StringId, int32_t>, TrackId> irq_counter_tracks_;
   std::map<std::pair<StringId, int32_t>, TrackId> softirq_counter_tracks_;
   std::map<std::pair<StringId, uint32_t>, TrackId> gpu_counter_tracks_;
+  std::map<std::pair<StringId, int32_t>, TrackId> energy_counter_tracks_;
+  std::map<std::pair<StringId, int32_t>, TrackId> uid_counter_tracks_;
+  std::map<std::pair<StringId, int32_t>, TrackId>
+      energy_per_uid_counter_tracks_;
 
   base::Optional<TrackId> chrome_global_instant_track_id_;
   base::Optional<TrackId> trigger_track_id_;

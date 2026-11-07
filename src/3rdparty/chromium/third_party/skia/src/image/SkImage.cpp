@@ -43,6 +43,11 @@
 #include "src/image/SkImage_Gpu.h"
 #endif
 
+#ifdef SK_GRAPHITE_ENABLED
+#include "src/gpu/graphite/Image_Graphite.h"
+#include "src/gpu/graphite/Log.h"
+#endif
+
 SkImage::SkImage(const SkImageInfo& info, uint32_t uniqueID)
         : fInfo(info)
         , fUniqueID(kNeedNewImageUniqueID == uniqueID ? SkNextID::ImageID() : uniqueID) {
@@ -71,13 +76,26 @@ bool SkImage::readPixels(const SkImageInfo& dstInfo, void* dstPixels,
 }
 #endif
 
+void SkImage::asyncReadPixels(const SkImageInfo& info,
+                              const SkIRect& srcRect,
+                              ReadPixelsCallback callback,
+                              ReadPixelsContext context) const {
+    if (!SkIRect::MakeSize(this->dimensions()).contains(srcRect) ||
+        !SkImageInfoIsValid(info)) {
+        callback(context, nullptr);
+        return;
+    }
+    as_IB(this)->onAsyncReadPixels(
+            info, srcRect, callback, context);
+}
+
 void SkImage::asyncRescaleAndReadPixels(const SkImageInfo& info,
                                         const SkIRect& srcRect,
                                         RescaleGamma rescaleGamma,
                                         RescaleMode rescaleMode,
                                         ReadPixelsCallback callback,
                                         ReadPixelsContext context) const {
-    if (!SkIRect::MakeWH(this->width(), this->height()).contains(srcRect) ||
+    if (!SkIRect::MakeSize(this->dimensions()).contains(srcRect) ||
         !SkImageInfoIsValid(info)) {
         callback(context, nullptr);
         return;
@@ -94,7 +112,7 @@ void SkImage::asyncRescaleAndReadPixelsYUV420(SkYUVColorSpace yuvColorSpace,
                                               RescaleMode rescaleMode,
                                               ReadPixelsCallback callback,
                                               ReadPixelsContext context) const {
-    if (!SkIRect::MakeWH(this->width(), this->height()).contains(srcRect) || dstSize.isZero() ||
+    if (!SkIRect::MakeSize(this->dimensions()).contains(srcRect) || dstSize.isZero() ||
         (dstSize.width() & 0b1) || (dstSize.height() & 0b1)) {
         callback(context, nullptr);
         return;
@@ -270,7 +288,7 @@ SkImage_Base::~SkImage_Base() {
 }
 
 void SkImage_Base::onAsyncRescaleAndReadPixels(const SkImageInfo& info,
-                                               const SkIRect& origSrcRect,
+                                               SkIRect origSrcRect,
                                                RescaleGamma rescaleGamma,
                                                RescaleMode rescaleMode,
                                                ReadPixelsCallback callback,
@@ -297,8 +315,8 @@ void SkImage_Base::onAsyncRescaleAndReadPixels(const SkImageInfo& info,
 
 void SkImage_Base::onAsyncRescaleAndReadPixelsYUV420(SkYUVColorSpace,
                                                      sk_sp<SkColorSpace> dstColorSpace,
-                                                     const SkIRect& srcRect,
-                                                     const SkISize& dstSize,
+                                                     SkIRect srcRect,
+                                                     SkISize dstSize,
                                                      RescaleGamma,
                                                      RescaleMode,
                                                      ReadPixelsCallback callback,
@@ -389,10 +407,20 @@ std::unique_ptr<GrFragmentProcessor> SkImage_Base::MakeFragmentProcessorFromView
                                      GrBicubicEffect::Direction::kXY,
                                      *rContext->priv().caps());
     }
-    if (view.proxy()->asTextureProxy()->mipmapped() == GrMipmapped::kNo) {
+    if (sampling.isAniso()) {
+        if (!rContext->priv().caps()->anisoSupport()) {
+            // Fallback to linear
+            sampling = SkSamplingPriv::AnisoFallback(view.mipmapped() == GrMipmapped::kYes);
+        }
+    } else if (view.mipmapped() == GrMipmapped::kNo) {
         sampling = SkSamplingOptions(sampling.filter);
     }
-    GrSamplerState sampler(wmx, wmy, sampling.filter, sampling.mipmap);
+    GrSamplerState sampler;
+    if (sampling.isAniso()) {
+        sampler = GrSamplerState::Aniso(wmx, wmy, sampling.maxAniso, view.mipmapped());
+    } else {
+        sampler = GrSamplerState(wmx, wmy, sampling.filter, sampling.mipmap);
+    }
     if (subset) {
         if (domain) {
             return GrTextureEffect::MakeSubset(std::move(view),
@@ -458,15 +486,30 @@ GrBackendTexture SkImage_Base::onGetBackendTexture(bool flushPendingGrContextIO,
 
 #ifdef SK_GRAPHITE_ENABLED
 std::tuple<skgpu::graphite::TextureProxyView, SkColorType> SkImage_Base::asView(
-        skgpu::graphite::Recorder* recorder, skgpu::graphite::Mipmapped mipmapped,
-        SkBudgeted budgeted) const {
+        skgpu::graphite::Recorder* recorder,
+        skgpu::graphite::Mipmapped mipmapped) const {
     if (!recorder) {
         return {};
     }
+
+    if (!as_IB(this)->isGraphiteBacked()) {
+        return {};
+    }
+
+    auto image = reinterpret_cast<const skgpu::graphite::Image*>(this);
+
     if (this->dimensions().area() <= 1) {
         mipmapped = skgpu::graphite::Mipmapped::kNo;
     }
-    return this->onAsView(recorder, mipmapped, budgeted);
+
+    if (mipmapped == skgpu::graphite::Mipmapped::kYes &&
+        image->textureProxyView().proxy()->mipmapped() != skgpu::graphite::Mipmapped::kYes) {
+        SKGPU_LOG_W("Graphite does not auto-generate mipmap levels");
+        return {};
+    }
+
+    SkColorType ct = this->colorType();
+    return { image->textureProxyView(), ct };
 }
 #endif // SK_GRAPHITE_ENABLED
 
@@ -527,10 +570,11 @@ bool SkImage_Base::onAsLegacyBitmap(GrDirectContext* dContext, SkBitmap* bitmap)
 
 sk_sp<SkImage> SkImage::MakeFromPicture(sk_sp<SkPicture> picture, const SkISize& dimensions,
                                         const SkMatrix* matrix, const SkPaint* paint,
-                                        BitDepth bitDepth, sk_sp<SkColorSpace> colorSpace) {
+                                        BitDepth bitDepth, sk_sp<SkColorSpace> colorSpace,
+                                        SkSurfaceProps props) {
     return MakeFromGenerator(SkImageGenerator::MakeFromPicture(dimensions, std::move(picture),
                                                                matrix, paint, bitDepth,
-                                                               std::move(colorSpace)));
+                                                               std::move(colorSpace), props));
 }
 
 sk_sp<SkImage> SkImage::makeWithFilter(GrRecordingContext* rContext, const SkImageFilter* filter,

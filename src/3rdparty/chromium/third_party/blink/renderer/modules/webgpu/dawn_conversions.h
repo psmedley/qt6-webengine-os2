@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,9 +22,9 @@
 namespace blink {
 
 class GPUColorDict;
-class GPUProgrammableStage;
 class GPUImageCopyTexture;
 class GPUImageDataLayout;
+class V8UnionGPUAutoLayoutModeOrGPUPipelineLayout;
 
 // These conversions are used multiple times and are declared here. Conversions
 // used only once, for example for object construction, are defined
@@ -36,12 +36,11 @@ WGPUExtent3D AsDawnType(const V8GPUExtent3D* webgpu_extent);
 WGPUOrigin3D AsDawnType(const V8GPUOrigin3D* webgpu_extent);
 WGPUImageCopyTexture AsDawnType(const GPUImageCopyTexture* webgpu_view);
 WGPUTextureFormat AsDawnType(SkColorType color_type);
+WGPUPipelineLayout AsDawnType(
+    V8UnionGPUAutoLayoutModeOrGPUPipelineLayout* webgpu_layout);
 
 const char* ValidateTextureDataLayout(const GPUImageDataLayout* webgpu_layout,
                                       WGPUTextureDataLayout* layout);
-using OwnedProgrammableStageDescriptor =
-    std::tuple<WGPUProgrammableStageDescriptor, std::unique_ptr<char[]>>;
-OwnedProgrammableStageDescriptor AsDawnType(const GPUProgrammableStage*);
 
 // WebGPU objects are converted to Dawn objects by getting the opaque handle
 // which can be passed to Dawn.
@@ -83,7 +82,7 @@ std::unique_ptr<DawnEnum[]> AsDawnEnum(const Vector<WebGPUEnum>& webgpu_enums) {
   // separate memory allocation here.
   std::unique_ptr<DawnEnum[]> dawn_enums(new DawnEnum[count]);
   for (wtf_size_t i = 0; i < count; ++i) {
-    dawn_enums[i] = AsDawnEnum<DawnEnum>(webgpu_enums[i]);
+    dawn_enums[i] = AsDawnEnum(webgpu_enums[i]);
   }
   return dawn_enums;
 }
@@ -99,7 +98,7 @@ std::unique_ptr<DawnEnum[]> AsDawnEnum(
   std::unique_ptr<DawnEnum[]> dawn_enums = std::make_unique<DawnEnum[]>(count);
   for (wtf_size_t i = 0; i < count; ++i) {
     if (webgpu_enums[i].has_value()) {
-      dawn_enums[i] = AsDawnEnum<DawnEnum>(webgpu_enums[i].value());
+      dawn_enums[i] = AsDawnEnum(webgpu_enums[i].value());
     } else {
       // Undefined is always 0
       dawn_enums[i] = static_cast<DawnEnum>(0);

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -357,10 +357,7 @@ HRESULT TSFTextStore::GetTextExt(TsViewCookie view_cookie,
           tmp_rect.set_width(0);
           result_rect = gfx::Rect(tmp_rect);
         } else {
-          // PPAPI flash does not support GetCompositionCharacterBounds. We need
-          // to call GetCaretBounds instead to get correct text bounds info.
-          // TODO(https://crbug.com/963706): Remove this hack.
-          result_rect = gfx::Rect(text_input_client_->GetCaretBounds());
+          return TS_E_NOLAYOUT;
         }
       } else if (text_input_client_->GetCompositionCharacterBounds(
                      start_pos - 1, &tmp_rect)) {
@@ -390,19 +387,9 @@ HRESULT TSFTextStore::GetTextExt(TsViewCookie view_cookie,
           // first character bounds instead of returning TS_E_NOLAYOUT.
         }
       } else {
-        // PPAPI flash does not support GetCompositionCharacterBounds. We need
-        // to call GetCaretBounds instead to get correct text bounds info.
-        // TODO(https://crbug.com/963706): Remove this hack.
-        if (start_pos == 0) {
-          result_rect = gfx::Rect(text_input_client_->GetCaretBounds());
-        } else {
-          return TS_E_NOLAYOUT;
-        }
+        return TS_E_NOLAYOUT;
       }
     } else {
-      // Caret Bounds may be incorrect if focus is in flash control and
-      // |start_pos| is not equal to |end_pos|. In this case, it's better to
-      // return previous caret rectangle instead.
       result_rect = gfx::Rect(text_input_client_->GetCaretBounds());
     }
   }
@@ -484,8 +471,8 @@ HRESULT TSFTextStore::InsertTextAtSelection(DWORD flags,
       LONG old_delta = (LONG)replace_text_range_.start() -
                        (LONG)replace_text_range_.end() + replace_text_size_;
       LONG new_delta = start_pos - end_pos + text_buffer_size;
-      replace_text_range_.set_start(
-          std::min((uint32_t)start_pos, replace_text_range_.start()));
+      replace_text_range_.set_start(std::min(static_cast<size_t>(start_pos),
+                                             replace_text_range_.start()));
       // New replacement text ends after previous replacement text. We need to
       // use the new end after adjusting with previous delta.
       if ((uint32_t)end_pos >=
@@ -963,8 +950,8 @@ void TSFTextStore::DispatchKeyEvent(ui::EventType type,
                                     lparam};
   ui::KeyEvent key_event = KeyEventFromMSG(key_event_MSG);
 
-  if (input_method_delegate_) {
-    input_method_delegate_->DispatchKeyEventPostIME(&key_event);
+  if (ime_key_event_dispatcher_) {
+    ime_key_event_dispatcher_->DispatchKeyEventPostIME(&key_event);
   }
 }
 
@@ -1330,13 +1317,13 @@ void TSFTextStore::RemoveFocusedTextInputClient(
   }
 }
 
-void TSFTextStore::SetInputMethodDelegate(
-    internal::InputMethodDelegate* delegate) {
-  input_method_delegate_ = delegate;
+void TSFTextStore::SetImeKeyEventDispatcher(
+    ImeKeyEventDispatcher* ime_key_event_dispatcher) {
+  ime_key_event_dispatcher_ = ime_key_event_dispatcher;
 }
 
-void TSFTextStore::RemoveInputMethodDelegate() {
-  input_method_delegate_ = nullptr;
+void TSFTextStore::RemoveImeKeyEventDispatcher() {
+  ime_key_event_dispatcher_ = nullptr;
 }
 
 bool TSFTextStore::CancelComposition() {

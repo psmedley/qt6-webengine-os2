@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,14 +58,11 @@ class PPAPI_PROXY_EXPORT PpapiCommandBufferProxy : public gpu::CommandBuffer,
       gpu::TransferBufferAllocationOption option =
           gpu::TransferBufferAllocationOption::kLoseContextOnOOM) override;
   void DestroyTransferBuffer(int32_t id) override;
+  void ForceLostContext(gpu::error::ContextLostReason reason) override;
 
   // gpu::GpuControl implementation:
   void SetGpuControlClient(gpu::GpuControlClient*) override;
   const gpu::Capabilities& GetCapabilities() const override;
-  int32_t CreateImage(ClientBuffer buffer,
-                      size_t width,
-                      size_t height) override;
-  void DestroyImage(int32_t id) override;
   void SignalQuery(uint32_t query, base::OnceClosure callback) override;
   void CreateGpuFence(uint32_t gpu_fence_id, ClientGpuFence source) override;
   void GetGpuFence(uint32_t gpu_fence_id,
@@ -82,7 +79,6 @@ class PPAPI_PROXY_EXPORT PpapiCommandBufferProxy : public gpu::CommandBuffer,
                        base::OnceClosure callback) override;
   void WaitSyncToken(const gpu::SyncToken& sync_token) override;
   bool CanWaitUnverifiedSyncToken(const gpu::SyncToken& sync_token) override;
-  void SetDisplayTransform(gfx::OverlayTransform transform) override;
 
  private:
   bool Send(IPC::Message* msg);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,11 @@
 #include "base/command_line.h"
 #include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
-#include "components/cdm/renderer/external_clear_key_key_system_properties.h"
+#include "components/cdm/renderer/external_clear_key_key_system_info.h"
+#include "components/network_hints/renderer/web_prescient_networking_impl.h"
 #include "components/web_cache/renderer/web_cache_impl.h"
 #include "content/public/test/test_service.mojom.h"
+#include "content/shell/common/main_frame_counter_test_impl.h"
 #include "content/shell/common/power_monitor_test_impl.h"
 #include "content/shell/common/shell_switches.h"
 #include "content/shell/renderer/shell_render_frame_observer.h"
@@ -80,7 +82,10 @@ class TestRendererServiceImpl : public mojom::TestService {
   }
 
   void DoCrashImmediately(DoCrashImmediatelyCallback callback) override {
-    NOTREACHED();
+    // This intentionally crashes the process and needs to be fatal regardless
+    // of DCHECK level. It's intended to get called. This is unlike the other
+    // NOTREACHED()s which are not expected to get called at all.
+    CHECK(false);
   }
 
   void CreateFolder(CreateFolderCallback callback) override { NOTREACHED(); }
@@ -133,14 +138,19 @@ void ShellContentRendererClient::RenderThreadStarted() {
 
 void ShellContentRendererClient::ExposeInterfacesToBrowser(
     mojo::BinderMap* binders) {
-  binders->Add(base::BindRepeating(&CreateRendererTestService),
-               base::ThreadTaskRunnerHandle::Get());
-  binders->Add(
+  binders->Add<mojom::TestService>(
+      base::BindRepeating(&CreateRendererTestService),
+      base::ThreadTaskRunnerHandle::Get());
+  binders->Add<mojom::PowerMonitorTest>(
       base::BindRepeating(&PowerMonitorTestImpl::MakeSelfOwnedReceiver),
       base::ThreadTaskRunnerHandle::Get());
-  binders->Add(base::BindRepeating(&web_cache::WebCacheImpl::BindReceiver,
-                                   base::Unretained(web_cache_impl_.get())),
-               base::ThreadTaskRunnerHandle::Get());
+  binders->Add<mojom::MainFrameCounterTest>(
+      base::BindRepeating(&MainFrameCounterTestImpl::Bind),
+      base::ThreadTaskRunnerHandle::Get());
+  binders->Add<web_cache::mojom::WebCache>(
+      base::BindRepeating(&web_cache::WebCacheImpl::BindReceiver,
+                          base::Unretained(web_cache_impl_.get())),
+      base::ThreadTaskRunnerHandle::Get());
 }
 
 void ShellContentRendererClient::RenderFrameCreated(RenderFrame* render_frame) {
@@ -194,11 +204,18 @@ void ShellContentRendererClient::DidInitializeWorkerContextOnWorkerThread(
 #if BUILDFLAG(ENABLE_MOJO_CDM)
 void ShellContentRendererClient::GetSupportedKeySystems(
     media::GetSupportedKeySystemsCB cb) {
-  media::KeySystemPropertiesVector key_systems;
+  media::KeySystemInfoVector key_systems;
   if (base::FeatureList::IsEnabled(media::kExternalClearKeyForTesting))
     key_systems.push_back(std::make_unique<cdm::ExternalClearKeyProperties>());
   std::move(cb).Run(std::move(key_systems));
 }
 #endif
+
+std::unique_ptr<blink::WebPrescientNetworking>
+ShellContentRendererClient::CreatePrescientNetworking(
+    RenderFrame* render_frame) {
+  return std::make_unique<network_hints::WebPrescientNetworkingImpl>(
+      render_frame);
+}
 
 }  // namespace content

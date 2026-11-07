@@ -69,6 +69,7 @@
 
       s['heightMultiplier'] = s['heightMultiplier'] || 0;
       s['maxLines'] = s['maxLines'] || 0;
+      s['replaceTabCharacters'] = s['replaceTabCharacters'] || false;
       s['strutStyle'] = strutStyle(s['strutStyle']);
       s['textAlign'] = s['textAlign'] || CanvasKit.TextAlign.Start;
       s['textDirection'] = s['textDirection'] || CanvasKit.TextDirection.LTR;
@@ -246,6 +247,19 @@
         textStyle['_fontFeatureNamesPtr'] = nullptr;
         textStyle['_fontFeatureValuesPtr'] = nullptr;
       }
+
+      if (Array.isArray(textStyle['fontVariations']) && textStyle['fontVariations'].length) {
+        var fontVariations = textStyle['fontVariations'];
+        var fontVariationAxes = fontVariations.map(function (s) { return s['axis']; });
+        var fontVariationValues = fontVariations.map(function (s) { return s['value']; });
+        textStyle['_fontVariationLen'] = fontVariations.length;
+        textStyle['_fontVariationAxesPtr'] = naiveCopyStrArray(fontVariationAxes);
+        textStyle['_fontVariationValuesPtr'] = copy1dArray(fontVariationValues, 'HEAPF32');
+      } else {
+        textStyle['_fontVariationLen'] = 0;
+        textStyle['_fontVariationAxesPtr'] = nullptr;
+        textStyle['_fontVariationValuesPtr'] = nullptr;
+      }
     }
 
     function freeArrays(textStyle) {
@@ -306,6 +320,25 @@
       baseline = baseline || CanvasKit.TextBaseline.Alphabetic;
       offset = offset || 0;
       this._addPlaceholder(width, height, alignment, baseline, offset);
+    };
+
+    CanvasKit.ParagraphBuilder.prototype.buildWithClientInfo =
+          function(bidiRegions, words, graphemeBreaks, lineBreaks) {
+
+      var bPtr = copy1dArray(bidiRegions, 'HEAPU32');
+      var wPtr = copy1dArray(words, 'HEAPU32');
+      var gPtr = copy1dArray(graphemeBreaks, 'HEAPU32');
+      var lPtr = copy1dArray(lineBreaks, 'HEAPU32');
+      var para = this._buildWithClientInfo(
+                          bPtr, bidiRegions && bidiRegions.length || 0,
+                          wPtr, words && words.length || 0,
+                          gPtr, graphemeBreaks && graphemeBreaks.length || 0,
+                          lPtr, lineBreaks && lineBreaks.length || 0);
+      freeArraysThatAreNotMallocedByUsers(bPtr,     bidiRegions);
+      freeArraysThatAreNotMallocedByUsers(wPtr,     words);
+      freeArraysThatAreNotMallocedByUsers(gPtr,     graphemeBreaks);
+      freeArraysThatAreNotMallocedByUsers(lPtr,     lineBreaks);
+      return para;
     };
 });
 }(Module)); // When this file is loaded in, the high level object is "Module";

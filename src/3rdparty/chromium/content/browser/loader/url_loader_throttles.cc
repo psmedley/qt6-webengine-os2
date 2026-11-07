@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,13 @@
 #include "components/variations/net/variations_url_loader_throttle.h"
 #include "content/browser/client_hints/client_hints.h"
 #include "content/browser/client_hints/critical_client_hints_throttle.h"
+#include "content/browser/origin_trials/critical_origin_trials_throttle.h"
+#include "content/browser/reduce_accept_language/reduce_accept_language_throttle.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/client_hints_controller_delegate.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/origin_trials_controller_delegate.h"
+#include "content/public/browser/reduce_accept_language_controller_delegate.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "net/base/load_flags.h"
@@ -55,6 +59,34 @@ CreateContentBrowserURLLoaderThrottles(
     throttles.push_back(std::make_unique<CriticalClientHintsThrottle>(
         browser_context, client_hint_delegate, frame_tree_node_id));
   }
+
+  // Creating a throttle only for outermost main frames to persist the reduced
+  // accept language for an origin and to restart requests if needed, due to
+  // language negotiation.
+  if (base::FeatureList::IsEnabled(network::features::kReduceAcceptLanguage)) {
+    ReduceAcceptLanguageControllerDelegate* reduce_accept_lang_delegate =
+        browser_context->GetReduceAcceptLanguageControllerDelegate();
+    if (request.is_outermost_main_frame && reduce_accept_lang_delegate) {
+      throttles.push_back(std::make_unique<ReduceAcceptLanguageThrottle>(
+          *reduce_accept_lang_delegate));
+    }
+  }
+
+  if (base::FeatureList::IsEnabled(features::kPersistentOriginTrials)) {
+    OriginTrialsControllerDelegate* origin_trials_delegate =
+        browser_context->GetOriginTrialsControllerDelegate();
+    // Critical Origin Trials may restart the network request, so only allow on
+    // safe methods, since the origin trials in question may change request
+    // headers or other aspects of the network request. We want to avoid servers
+    // making any changes twice as a result of the duplicate request, and if
+    // headers are changed, any idempotent method is still allowed to make
+    // further changes to server state.
+    if (net::HttpUtil::IsMethodSafe(request.method) && origin_trials_delegate) {
+      throttles.push_back(std::make_unique<CriticalOriginTrialsThrottle>(
+          *origin_trials_delegate));
+    }
+  }
+
   return throttles;
 }
 

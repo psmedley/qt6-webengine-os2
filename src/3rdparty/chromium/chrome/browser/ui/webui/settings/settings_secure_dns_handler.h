@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,7 @@ class SecureDnsHandler : public SettingsPageUIHandler {
   // as a dictionary with the following keys: "name" (the text to display in the
   // UI), "value" (the DoH template for this provider), and "policy" (the URL of
   // the provider's privacy policy).
-  base::Value GetSecureDnsResolverList();
+  base::Value::List GetSecureDnsResolverList();
 
   void SetNetworkContextForTesting(
       network::mojom::NetworkContext* network_context);

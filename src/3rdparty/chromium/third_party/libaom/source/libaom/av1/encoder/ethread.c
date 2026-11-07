@@ -708,6 +708,7 @@ void av1_init_tile_thread_data(AV1_PRIMARY *ppi, int is_first_pass) {
 
   int num_workers = p_mt_info->num_workers;
   int num_enc_workers = av1_get_num_mod_workers_for_alloc(p_mt_info, MOD_ENC);
+  assert(num_enc_workers <= num_workers);
   for (int i = num_workers - 1; i >= 0; i--) {
     EncWorkerData *const thread_data = &p_mt_info->tile_thr_data[i];
 
@@ -817,11 +818,16 @@ void av1_init_tile_thread_data(AV1_PRIMARY *ppi, int is_first_pass) {
       }
     }
   }
+
+  // Record the number of workers in encode stage multi-threading for which
+  // allocation is done.
+  p_mt_info->prev_num_enc_workers = num_enc_workers;
 }
 
 void av1_create_workers(AV1_PRIMARY *ppi, int num_workers) {
   PrimaryMultiThreadInfo *const p_mt_info = &ppi->p_mt_info;
   const AVxWorkerInterface *const winterface = aom_get_worker_interface();
+  assert(p_mt_info->num_workers == 0);
 
   AOM_CHECK_MEM_ERROR(&ppi->error, p_mt_info->workers,
                       aom_malloc(num_workers * sizeof(*p_mt_info->workers)));
@@ -850,6 +856,17 @@ void av1_create_workers(AV1_PRIMARY *ppi, int num_workers) {
     winterface->sync(worker);
 
     ++p_mt_info->num_workers;
+  }
+}
+
+// This function will change the state and free the mutex of corresponding
+// workers and terminate the object. The object can not be re-used unless a call
+// to reset() is made.
+void av1_terminate_workers(AV1_PRIMARY *ppi) {
+  PrimaryMultiThreadInfo *const p_mt_info = &ppi->p_mt_info;
+  for (int t = 0; t < p_mt_info->num_workers; ++t) {
+    AVxWorker *const worker = &p_mt_info->workers[t];
+    aom_get_worker_interface()->end(worker);
   }
 }
 

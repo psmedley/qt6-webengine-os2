@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -331,6 +331,8 @@ class MOJO_SYSTEM_IMPL_EXPORT Core {
       const MojoSetDefaultProcessErrorHandlerOptions* options);
 
   void GetActiveHandlesForTest(std::vector<MojoHandle>* handles);
+
+  static void set_avoid_random_pipe_id(bool avoid_random_pipe_id);
 
  private:
   // Used to pass ownership of our NodeController over to the IO thread in the

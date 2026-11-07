@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,6 +50,9 @@ class MultiDeviceSetupDialog : public SystemWebDialogDelegate {
  private:
   static MultiDeviceSetupDialog* current_instance_;
   static gfx::NativeWindow containing_window_;
+
+  // SystemWebDialogDelegate:
+  void AdjustWidgetInitParams(views::Widget::InitParams* params) override;
 
   // List of callbacks that have registered themselves to be invoked once this
   // dialog is closed.

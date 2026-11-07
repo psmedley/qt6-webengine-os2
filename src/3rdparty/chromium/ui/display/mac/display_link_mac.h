@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -95,9 +95,6 @@ class DISPLAY_EXPORT DisplayLinkMac
   base::TimeTicks recalculate_time_;
 
   std::vector<VSyncUpdatedCallback> vsync_updated_callbacks_;
-
-  // TODO(sky): temporary, will remove after doing some analysis.
-  const bool force_60hz_;
 };
 
 }  // namespace ui

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,6 +134,14 @@ enum FormEvent {
   FORM_EVENT_CREDIT_CARD_SEAMLESS_FILLABLE_OPTIONAL_NAME_AND_CVC_MISSING = 53,
   FORM_EVENT_CREDIT_CARD_SEAMLESS_FILLABLE_FULL_FILL_BUT_EXPDATE_MISSING = 54,
   FORM_EVENT_CREDIT_CARD_SEAMLESS_FILLABLE_PARTIAL_FILL = 55,
+
+  // Metric logged when a local card with a matching deduplicated server
+  // suggestion was filled.
+  FORM_EVENT_LOCAL_SUGGESTION_FILLED_FOR_AN_EXISTING_SERVER_CARD_ONCE = 56,
+
+  // A field of the form was cleared by Javascript within kLimitBeforeRefill
+  // after being autofilled. Recorded once per form.
+  FORM_EVENT_AUTOFILLED_FIELD_CLEARED_BY_JAVASCRIPT_AFTER_FILL_ONCE = 57,
 
   NUM_FORM_EVENTS,
 };

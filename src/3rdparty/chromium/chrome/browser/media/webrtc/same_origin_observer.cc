@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@ SameOriginObserver::SameOriginObserver(
       on_same_origin_state_changed_(on_same_origin_state_changed) {
   DCHECK(observed_contents);
   is_same_origin_ = reference_origin_.IsSameOriginWith(
-      observed_contents->GetMainFrame()->GetLastCommittedOrigin());
+      observed_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin());
 }
 
 SameOriginObserver::~SameOriginObserver() = default;

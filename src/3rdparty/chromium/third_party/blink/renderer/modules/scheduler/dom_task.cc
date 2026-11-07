@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,10 @@
 
 #include "base/check_op.h"
 #include "base/metrics/histogram_macros.h"
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_scheduler_post_task_callback.h"
@@ -68,12 +70,12 @@ DOMTask::DOMTask(ScriptPromiseResolver* resolver,
 
   if (signal_) {
     signal_->AddAlgorithm(
-        WTF::Bind(&DOMTask::OnAbort, WrapWeakPersistent(this)));
+        WTF::BindOnce(&DOMTask::OnAbort, WrapWeakPersistent(this)));
   }
 
   task_handle_ = PostDelayedCancellableTask(
       task_queue_->GetTaskRunner(), FROM_HERE,
-      WTF::Bind(&DOMTask::Invoke, WrapPersistent(this)), delay);
+      WTF::BindOnce(&DOMTask::Invoke, WrapPersistent(this)), delay);
 
   ScriptState* script_state =
       callback_->CallbackRelevantScriptStateOrReportError("DOMTask", "Create");
@@ -162,13 +164,15 @@ void DOMTask::OnAbort() {
     return;
   }
 
-  // switch to the resolver's context to let DOMException pick up the resolver's
-  // JS stack
+  // Switch to the resolver's context to let DOMException pick up the resolver's
+  // JS stack.
   ScriptState::Scope script_state_scope(resolver_script_state);
 
   // TODO(crbug.com/1293949): Add an error message.
-  resolver_->Reject(V8ThrowDOMException::CreateOrDie(
-      resolver_script_state->GetIsolate(), DOMExceptionCode::kAbortError, ""));
+  resolver_->Reject(
+      ToV8Traits<IDLAny>::ToV8(resolver_script_state,
+                               signal_->reason(resolver_script_state))
+          .ToLocalChecked());
 }
 
 void DOMTask::RecordTaskStartMetrics() {

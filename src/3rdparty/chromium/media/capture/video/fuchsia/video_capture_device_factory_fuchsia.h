@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,6 +47,8 @@ class CAPTURE_EXPORT VideoCaptureDeviceFactoryFuchsia
 
   std::vector<VideoCaptureDeviceInfo> MakeDevicesInfo();
   void MaybeResolvePendingDeviceInfoCallbacks();
+
+  bool received_initial_list_ = false;
 
   fuchsia::camera3::DeviceWatcherPtr device_watcher_;
 

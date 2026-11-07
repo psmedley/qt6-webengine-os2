@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -237,6 +237,18 @@ void ServiceWorkerMetrics::RecordStartInstalledWorkerStatus(
   }
 }
 
+void ServiceWorkerMetrics::RecordRunAfterStartWorkerStatus(
+    EmbeddedWorkerStatus running_status,
+    EventType purpose) {
+  UMA_HISTOGRAM_ENUMERATION("ServiceWorker.MaybeStartWorker.RunningStatus",
+                            running_status);
+  base::UmaHistogramEnumeration(
+      base::StrCat({"ServiceWorker.MaybeStartWorker.RunningStatusByPurpose",
+                    EventTypeToSuffix(purpose)}),
+      running_status);
+  UMA_HISTOGRAM_ENUMERATION("ServiceWorker.MaybeStartWorker.Purpose", purpose);
+}
+
 void ServiceWorkerMetrics::RecordStartWorkerTime(base::TimeDelta time,
                                                  bool is_installed,
                                                  StartSituation start_situation,
@@ -251,6 +263,10 @@ void ServiceWorkerMetrics::RecordStartWorkerTime(base::TimeDelta time,
         base::StrCat({"ServiceWorker.StartWorker.Time",
                       StartSituationToDeprecatedSuffix(start_situation),
                       EventTypeToSuffix(purpose)}),
+        time);
+    base::UmaHistogramMediumTimes(
+        base::StrCat(
+            {"ServiceWorker.StartWorker.Time_Any", EventTypeToSuffix(purpose)}),
         time);
   } else {
     UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.StartNewWorker.Time", time);
@@ -365,7 +381,7 @@ void ServiceWorkerMetrics::RecordEventDuration(EventType event,
       UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.AbortPaymentEvent.Time", time);
       break;
     case EventType::COOKIE_CHANGE:
-      UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.CookieChangeEvent.Time", time);
+      // Do nothing: the histogram has been removed.
       break;
     case EventType::PERIODIC_SYNC:
       UMA_HISTOGRAM_MEDIUM_TIMES(

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/ozone/platform/wayland/common/wayland_object.h"
 #include "ui/ozone/platform/wayland/common/wayland_util.h"
@@ -45,7 +46,7 @@ void WaylandDataDevice::StartDrag(const WaylandDataSource& data_source,
                             origin_window.root_surface()->surface(),
                             icon_surface, serial);
   drag_delegate_->DrawIcon();
-  connection()->ScheduleFlush();
+  connection()->Flush();
 }
 
 void WaylandDataDevice::ResetDragDelegate() {
@@ -77,7 +78,7 @@ void WaylandDataDevice::SetSelectionSource(WaylandDataSource* source,
                                            uint32_t serial) {
   auto* data_source = source ? source->data_source() : nullptr;
   wl_data_device_set_selection(data_device_.get(), data_source, serial);
-  connection()->ScheduleFlush();
+  connection()->Flush();
 }
 
 void WaylandDataDevice::ReadDragDataFromFD(base::ScopedFD fd,
@@ -135,10 +136,11 @@ void WaylandDataDevice::OnEnter(void* data,
   DCHECK(self->new_offer_);
   self->drag_delegate_->OnDragOffer(std::move(self->new_offer_));
 
-  gfx::PointF point(wl_fixed_to_double(x), wl_fixed_to_double(y));
+  gfx::PointF point = self->connection()->MaybeConvertLocation(
+      gfx::PointF(wl_fixed_to_double(x), wl_fixed_to_double(y)), window);
   self->drag_delegate_->OnDragEnter(window, point, serial);
 
-  self->connection()->ScheduleFlush();
+  self->connection()->Flush();
 }
 
 void WaylandDataDevice::OnMotion(void* data,
@@ -148,7 +150,9 @@ void WaylandDataDevice::OnMotion(void* data,
                                  wl_fixed_t y) {
   auto* self = static_cast<WaylandDataDevice*>(data);
   if (self->drag_delegate_) {
-    gfx::PointF point(wl_fixed_to_double(x), wl_fixed_to_double(y));
+    gfx::PointF point = self->connection()->MaybeConvertLocation(
+        gfx::PointF(wl_fixed_to_double(x), wl_fixed_to_double(y)),
+        self->drag_delegate_->GetDragTarget());
     self->drag_delegate_->OnDragMotion(point);
   }
 }
@@ -157,7 +161,7 @@ void WaylandDataDevice::OnDrop(void* data, wl_data_device* data_device) {
   auto* self = static_cast<WaylandDataDevice*>(data);
   if (self->drag_delegate_) {
     self->drag_delegate_->OnDragDrop();
-    self->connection()->ScheduleFlush();
+    self->connection()->Flush();
   }
 
   // There are buggy Exo versions, which send 'drop' event (even for
@@ -174,7 +178,7 @@ void WaylandDataDevice::OnLeave(void* data, wl_data_device* data_device) {
   auto* self = static_cast<WaylandDataDevice*>(data);
   if (self->drag_delegate_) {
     self->drag_delegate_->OnDragLeave();
-    self->connection()->ScheduleFlush();
+    self->connection()->Flush();
   }
   self->ResetDragDelegateIfNeeded();
 }

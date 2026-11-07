@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -78,8 +78,6 @@ WebInputEventResult MouseWheelEventManager::HandleWheelEvent(
 
   if ((event.phase & kWheelEventPhaseNoEventMask) ||
       (event.momentum_phase & kWheelEventPhaseNoEventMask)) {
-    // Filter wheel events with zero deltas and reset the wheel_target_ node.
-    DCHECK(!event.delta_x && !event.delta_y);
     return WebInputEventResult::kNotHandled;
   }
 

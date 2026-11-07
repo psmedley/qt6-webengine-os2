@@ -34,8 +34,10 @@
 #include "third_party/blink/public/platform/modules/webrtc/webrtc_logging.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
+#include "third_party/blink/renderer/platform/mediastream/media_constraints.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
 #include "third_party/blink/renderer/platform/mediastream/webaudio_destination_consumer.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
 
@@ -196,8 +198,8 @@ void MediaStreamSource::SetReadyState(ReadyState ready_state) {
     // until the callback is executed.
     Vector<base::OnceClosure> observer_callbacks;
     for (const auto& it : observers_) {
-      observer_callbacks.push_back(WTF::Bind(&Observer::SourceChangedState,
-                                             WrapWeakPersistent(it.Get())));
+      observer_callbacks.push_back(WTF::BindOnce(&Observer::SourceChangedState,
+                                                 WrapWeakPersistent(it.Get())));
     }
     for (auto& observer_callback : observer_callbacks) {
       std::move(observer_callback).Run();
@@ -323,8 +325,7 @@ void MediaStreamSource::OnDeviceCaptureHandleChange(
 
   // Observers may dispatch events which create and add new Observers;
   // take a snapshot so as to safely iterate.
-  HeapVector<Member<Observer>> observers;
-  CopyToVector(observers_, observers);
+  HeapVector<Member<Observer>> observers(observers_);
   for (auto observer : observers) {
     observer->SourceChangedCaptureHandle();
   }
@@ -340,7 +341,6 @@ void MediaStreamSource::Dispose() {
     audio_consumer_.reset();
   }
   platform_source_.reset();
-  constraints_.Reset();
 }
 
 }  // namespace blink

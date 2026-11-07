@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -135,13 +135,15 @@ source_set("headers") {
     "fetch/fetch_api_request_headers_map.h",
     "fetch/fetch_api_request_headers_mojom_traits.h",
     "forcedark/forcedark_switches.h",
-    "frame/event_page_show_persisted.h",
+    "frame/fenced_frame_permissions_policies.h",
     "frame/fenced_frame_sandbox_flags.h",
     "frame/frame_ad_evidence.h",
     "frame/frame_owner_element_type.h",
+    "frame/frame_owner_element_type_mojom_traits.h",
     "frame/frame_policy.h",
     "frame/frame_visual_properties.h",
     "frame/from_ad_state.h",
+    "frame/fullscreen_request_token.h",
     "frame/payment_request_token.h",
     "frame/transient_allow_fullscreen.h",
     "frame/user_activation_state.h",
@@ -170,6 +172,8 @@ source_set("headers") {
     "input/web_touch_event.h",
     "input/web_touch_point.h",
     "interest_group/ad_auction_constants.h",
+    "interest_group/auction_config.h",
+    "interest_group/auction_config_mojom_traits.h",
     "interest_group/interest_group.h",
     "interest_group/interest_group_mojom_traits.h",
     "link_to_text/link_to_text_mojom_traits.h",
@@ -236,7 +240,6 @@ source_set("headers") {
     "page/drag_mojom_traits.h",
     "page/drag_operation.h",
     "page/launching_process_state.h",
-    "page/page_lifecycle_state_updater.h",
     "page/page_zoom.h",
     "page_state/page_state.h",
     "page_state/page_state_serialization.h",
@@ -246,12 +249,13 @@ source_set("headers") {
     "permissions_policy/document_policy.h",
     "permissions_policy/document_policy_features.h",
     "permissions_policy/permissions_policy.h",
+    "permissions_policy/permissions_policy_declaration.h",
     "permissions_policy/permissions_policy_features.h",
-    "permissions_policy/permissions_policy_forward.h",
     "permissions_policy/policy_helper_public.h",
     "permissions_policy/policy_value.h",
     "renderer_preferences/renderer_preferences.h",
     "responsiveness_metrics/user_interaction_latency.h",
+    "scheduler/task_attribution_id.h",
     "scheduler/web_scheduler_tracked_feature.h",
     "scheme_registry.h",
     "security/address_space_feature.h",
@@ -296,6 +300,7 @@ source_set("headers") {
     "//services/network/public/cpp:cpp",
     "//skia",
     "//skia/public/mojom:shared_typemap_traits",
+    "//third_party/blink/public:runtime_features_for_public",
     "//third_party/blink/public/common/privacy_budget",
     "//third_party/blink/public/common/tokens:tokens_headers",
     "//third_party/blink/public/mojom:mobile_metrics_shared_cpp_sources",
@@ -364,8 +369,12 @@ if (is_android) {
   java_cpp_features("java_features_srcjar") {
     # External code should depend on ":common_java" instead.
     visibility = [ ":*" ]
-    sources = [ "//third_party/blink/common/features.cc" ]
+    sources = [
+      "$root_gen_dir/third_party/blink/common/features_generated.cc",
+      "//third_party/blink/common/features.cc",
+    ]
     template = "//third_party/blink/public/common/android/java_templates/BlinkFeatures.java.tmpl"
+    deps = [ "//third_party/blink/common:make_generated_features" ]
   }
 
   android_library("common_java") {

@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,6 @@
 
 #if BUILDFLAG(IS_ANDROID)
 #include "base/android/scoped_hardware_buffer_handle.h"
-#include "ui/gfx/geometry/size.h"
 #endif
 
 namespace gfx {
@@ -105,17 +104,18 @@ class COMPONENT_EXPORT(VULKAN) VulkanImplementation {
   // Returns true if the GpuMemoryBuffer of the specified type can be imported
   // into VkImage using CreateImageFromGpuMemoryHandle().
   virtual bool CanImportGpuMemoryBuffer(
+      VulkanDeviceQueue* device_queue,
       gfx::GpuMemoryBufferType memory_buffer_type) = 0;
 
-  // Creates a VkImage from a GpuMemoryBuffer. If successful it initializes
-  // |vk_image|, |vk_image_info|, |vk_device_memory| and |mem_allocation_size|.
-  // Implementation must verify that the specified |size| fits in the size
-  // specified when |gmb_handle| was allocated.
+  // Creates a VkImage from a GpuMemoryBuffer. Implementation must verify that
+  // the specified |size| fits in the size specified when |gmb_handle| was
+  // allocated.
   virtual std::unique_ptr<VulkanImage> CreateImageFromGpuMemoryHandle(
       VulkanDeviceQueue* device_queue,
       gfx::GpuMemoryBufferHandle gmb_handle,
       gfx::Size size,
-      VkFormat vk_formae) = 0;
+      VkFormat vk_format,
+      const gfx::ColorSpace& color_space) = 0;
 
 #if BUILDFLAG(IS_ANDROID)
   // Get the sampler ycbcr conversion information from the AHB.
@@ -155,7 +155,8 @@ std::unique_ptr<VulkanDeviceQueue> CreateVulkanDeviceQueue(
     VulkanImplementation* vulkan_implementation,
     uint32_t option,
     const GPUInfo* gpu_info = nullptr,
-    uint32_t heap_memory_limit = 0);
+    uint32_t heap_memory_limit = 0,
+    const bool is_thread_safe = false);
 
 }  // namespace gpu
 

@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import os
 import subprocess
 import sys
@@ -29,7 +31,7 @@ class Result:
         self.stack = stack
 
     def __repr__(self):
-        return "<%s.%s %s>" % (self.__module__, self.__class__.__name__, self.status)
+        return f"<{self.__module__}.{self.__class__.__name__} {self.status}>"
 
 
 class SubtestResult:
@@ -44,7 +46,7 @@ class SubtestResult:
         self.known_intermittent = known_intermittent if known_intermittent is not None else []
 
     def __repr__(self):
-        return "<%s.%s %s %s>" % (self.__module__, self.__class__.__name__, self.name, self.status)
+        return f"<{self.__module__}.{self.__class__.__name__} {self.name} {self.status}>"
 
 
 class TestharnessResult(Result):
@@ -89,7 +91,6 @@ class RunInfo(Dict[str, Any]):
                  browser_channel=None,
                  verify=None,
                  extras=None,
-                 enable_webrender=False,
                  device_serials=None,
                  adb_binary=None):
         import mozinfo
@@ -124,8 +125,6 @@ class RunInfo(Dict[str, Any]):
             self.update(extras)
         if "headless" not in self:
             self["headless"] = False
-
-        self["webrender"] = enable_webrender
 
         if adb_binary:
             self["adb_binary"] = adb_binary
@@ -209,12 +208,13 @@ class Test:
     result_cls = None  # type: ClassVar[Type[Result]]
     subtest_result_cls = None  # type: ClassVar[Type[SubtestResult]]
     test_type = None  # type: ClassVar[str]
+    pac = None
 
     default_timeout = 10  # seconds
     long_timeout = 60  # seconds
 
     def __init__(self, url_base, tests_root, url, inherit_metadata, test_metadata,
-                 timeout=None, path=None, protocol="http", subdomain=False):
+                 timeout=None, path=None, protocol="http", subdomain=False, pac=None):
         self.url_base = url_base
         self.tests_root = tests_root
         self.url = url
@@ -226,6 +226,9 @@ class Test:
         self.environment = {"url_base": url_base,
                             "protocol": protocol,
                             "prefs": self.prefs}
+
+        if pac is not None:
+            self.environment["pac"] = urljoin(self.url, pac)
 
     def __eq__(self, other):
         if not isinstance(other, Test):
@@ -446,7 +449,7 @@ class Test:
             return False
 
     def __repr__(self):
-        return "<%s.%s %s>" % (self.__module__, self.__class__.__name__, self.id)
+        return f"<{self.__module__}.{self.__class__.__name__} {self.id}>"
 
 
 class TestharnessTest(Test):
@@ -456,9 +459,9 @@ class TestharnessTest(Test):
 
     def __init__(self, url_base, tests_root, url, inherit_metadata, test_metadata,
                  timeout=None, path=None, protocol="http", testdriver=False,
-                 jsshell=False, scripts=None, subdomain=False):
+                 jsshell=False, scripts=None, subdomain=False, pac=None):
         Test.__init__(self, url_base, tests_root, url, inherit_metadata, test_metadata, timeout,
-                      path, protocol, subdomain)
+                      path, protocol, subdomain, pac)
 
         self.testdriver = testdriver
         self.jsshell = jsshell
@@ -467,6 +470,7 @@ class TestharnessTest(Test):
     @classmethod
     def from_manifest(cls, manifest_file, manifest_item, inherit_metadata, test_metadata):
         timeout = cls.long_timeout if manifest_item.timeout == "long" else cls.default_timeout
+        pac = manifest_item.pac
         testdriver = manifest_item.testdriver if hasattr(manifest_item, "testdriver") else False
         jsshell = manifest_item.jsshell if hasattr(manifest_item, "jsshell") else False
         script_metadata = manifest_item.script_metadata or []
@@ -478,6 +482,7 @@ class TestharnessTest(Test):
                    inherit_metadata,
                    test_metadata,
                    timeout=timeout,
+                   pac=pac,
                    path=os.path.join(manifest_file.tests_root, manifest_item.path),
                    protocol=server_protocol(manifest_item),
                    testdriver=testdriver,

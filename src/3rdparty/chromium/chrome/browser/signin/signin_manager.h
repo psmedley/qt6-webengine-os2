@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
@@ -16,6 +15,10 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_member.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "components/account_manager_core/account_manager_facade.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
 namespace base {
 class FilePath;
@@ -27,12 +30,26 @@ class ConsistencyCookieManager;
 }
 
 class AccountProfileMapper;
-class WebSigninHelperLacros;
+class SigninHelperLacros;
 class SigninClient;
 struct CoreAccountId;
 #endif
 
 class PrefService;
+
+// See `SigninManager::CreateAccountSelectionInProgressHandle()`.
+class AccountSelectionInProgressHandle {
+ public:
+  AccountSelectionInProgressHandle(const AccountSelectionInProgressHandle&) =
+      delete;
+  AccountSelectionInProgressHandle& operator=(
+      const AccountSelectionInProgressHandle&) = delete;
+
+  virtual ~AccountSelectionInProgressHandle() = default;
+
+ protected:
+  AccountSelectionInProgressHandle() = default;
+};
 
 class SigninManager : public KeyedService,
                       public signin::IdentityManager::Observer {
@@ -46,13 +63,19 @@ class SigninManager : public KeyedService,
   SigninManager& operator=(const SigninManager&) = delete;
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-  void StartWebSigninFlow(
+  void StartLacrosSigninFlow(
       const base::FilePath& profile_path,
       AccountProfileMapper* account_profile_mapper,
       signin::ConsistencyCookieManager* consistency_cookie_manager,
+      account_manager::AccountManagerFacade::AccountAdditionSource source,
       base::OnceCallback<void(const CoreAccountId&)> on_completion_callback =
           base::DoNothing());
 #endif
+
+  // Returns a scoped handle that prevents `SigninManager` from changing the
+  // unconsented primary account.
+  virtual std::unique_ptr<AccountSelectionInProgressHandle>
+  CreateAccountSelectionInProgressHandle();
 
  private:
   // Updates the cached version of unconsented primary account and notifies the
@@ -73,12 +96,18 @@ class SigninManager : public KeyedService,
   // valid UPA.
   CoreAccountInfo ComputeUnconsentedPrimaryAccountInfo() const;
 
+  // Checks wheter |account| is a valid account that can be used as an
+  // unconsented primary account.
+  bool IsValidUnconsentedPrimaryAccount(const CoreAccountInfo& account) const;
+
   // KeyedService implementation.
   void Shutdown() override;
 
   // signin::IdentityManager::Observer implementation.
+#if !BUILDFLAG(IS_CHROMEOS_LACROS)
   void OnPrimaryAccountChanged(
       const signin::PrimaryAccountChangeEvent& event_details) override;
+#endif  // !BUILDFLAG(IS_CHROMEOS_LACROS)
   void OnEndBatchOfRefreshTokenStateChanges() override;
   void OnRefreshTokensLoaded() override;
   void OnAccountsInCookieUpdated(
@@ -91,8 +120,10 @@ class SigninManager : public KeyedService,
 
   void OnSigninAllowedPrefChanged();
 
+  void OnAccountSelectionInProgressHandleDestroyed();
+
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-  void OnWebSigninHelperLacrosComplete(
+  void OnSigninHelperLacrosComplete(
       base::OnceCallback<void(const CoreAccountId&)> on_completion_callback,
       const CoreAccountId& account_id);
 #endif
@@ -106,8 +137,13 @@ class SigninManager : public KeyedService,
   // Helper object to listen for changes to the signin allowed preference.
   BooleanPrefMember signin_allowed_;
 
+  // The number of handles currently active, that indicates the number of UIs
+  // currently manipulating the unconsented primary account.
+  // We should not reset the UPA while it's not `0`.
+  int live_account_selection_handles_count_ = 0;
+
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-  std::unique_ptr<WebSigninHelperLacros> web_signin_helper_lacros_;
+  std::unique_ptr<SigninHelperLacros> signin_helper_lacros_;
   // Whether this is the main profile for which the primary account is
   // the account used to signin to the device aka initial primary account.
   bool is_main_profile_ = false;

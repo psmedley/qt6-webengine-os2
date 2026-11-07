@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -199,12 +199,10 @@ class SimulatedExtensionsContainer : public SimulatedToolbarElement {
     }
   }
 
-  void MoveIcon(int from, int to) {
-    DCHECK_GE(from, 0);
-    DCHECK_GE(to, 0);
+  void MoveIcon(size_t from, size_t to) {
     DCHECK_NE(from, to);
-    DCHECK_LT(from, static_cast<int>(children().size()) - 1);
-    DCHECK_LT(to, static_cast<int>(children().size()) - 1);
+    DCHECK_LT(from, children().size() - 1);
+    DCHECK_LT(to, children().size() - 1);
     ReorderChildView(children()[from], to);
   }
 

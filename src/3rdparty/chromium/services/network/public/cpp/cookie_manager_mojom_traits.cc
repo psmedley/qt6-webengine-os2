@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "mojo/public/cpp/base/time_mojom_traits.h"
 #include "net/cookies/cookie_constants.h"
 #include "net/cookies/cookie_options.h"
-#include "net/cookies/same_party_context.h"
+#include "services/network/public/mojom/cookie_manager.mojom-shared.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
 
 namespace mojo {
@@ -461,35 +461,6 @@ bool StructTraits<network::mojom::CookieSameSiteContextDataView,
   return true;
 }
 
-bool EnumTraits<network::mojom::SamePartyCookieContextType,
-                net::SamePartyContext::Type>::
-    FromMojom(network::mojom::SamePartyCookieContextType context_type,
-              net::SamePartyContext::Type* out) {
-  switch (context_type) {
-    case network::mojom::SamePartyCookieContextType::kCrossParty:
-      *out = net::SamePartyContext::Type::kCrossParty;
-      return true;
-    case network::mojom::SamePartyCookieContextType::kSameParty:
-      *out = net::SamePartyContext::Type::kSameParty;
-      return true;
-  }
-  return false;
-}
-
-network::mojom::SamePartyCookieContextType
-EnumTraits<network::mojom::SamePartyCookieContextType,
-           net::SamePartyContext::Type>::ToMojom(net::SamePartyContext::Type
-                                                     context_type) {
-  switch (context_type) {
-    case net::SamePartyContext::Type::kCrossParty:
-      return network::mojom::SamePartyCookieContextType::kCrossParty;
-    case net::SamePartyContext::Type::kSameParty:
-      return network::mojom::SamePartyCookieContextType::kSameParty;
-  }
-  NOTREACHED();
-  return network::mojom::SamePartyCookieContextType::kCrossParty;
-}
-
 bool StructTraits<network::mojom::CookieOptionsDataView, net::CookieOptions>::
     Read(network::mojom::CookieOptionsDataView mojo_options,
          net::CookieOptions* cookie_options) {
@@ -597,6 +568,7 @@ bool StructTraits<
   base::Time creation_time;
   base::Time expiry_time;
   base::Time last_access_time;
+  base::Time last_update_time;
   if (!cookie.ReadCreation(&creation_time))
     return false;
 
@@ -604,6 +576,9 @@ bool StructTraits<
     return false;
 
   if (!cookie.ReadLastAccess(&last_access_time))
+    return false;
+
+  if (!cookie.ReadLastUpdate(&last_update_time))
     return false;
 
   net::CookieSameSite site_restrictions;
@@ -625,9 +600,9 @@ bool StructTraits<
   auto cc = net::CanonicalCookie::FromStorage(
       std::move(name), std::move(value), std::move(domain), std::move(path),
       std::move(creation_time), std::move(expiry_time),
-      std::move(last_access_time), cookie.secure(), cookie.httponly(),
-      site_restrictions, priority, cookie.same_party(), partition_key,
-      source_scheme, cookie.source_port());
+      std::move(last_access_time), std::move(last_update_time), cookie.secure(),
+      cookie.httponly(), site_restrictions, priority, cookie.same_party(),
+      partition_key, source_scheme, cookie.source_port());
   if (!cc)
     return false;
   *out = *cc;
@@ -705,27 +680,6 @@ bool StructTraits<
     return false;
 
   *out = net::CookieChangeInfo(cookie, access_result, cause);
-  return true;
-}
-
-bool StructTraits<network::mojom::SamePartyContextDataView,
-                  net::SamePartyContext>::
-    Read(network::mojom::SamePartyContextDataView context,
-         net::SamePartyContext* out) {
-  net::SamePartyContext::Type context_type;
-  if (!context.ReadContextType(&context_type))
-    return false;
-
-  net::SamePartyContext::Type ancestors_for_metrics_only;
-  if (!context.ReadAncestorsForMetricsOnly(&ancestors_for_metrics_only))
-    return false;
-
-  net::SamePartyContext::Type top_resource_for_metrics_only;
-  if (!context.ReadTopResourceForMetricsOnly(&top_resource_for_metrics_only))
-    return false;
-
-  *out = net::SamePartyContext(context_type, ancestors_for_metrics_only,
-                               top_resource_for_metrics_only);
   return true;
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -127,14 +127,16 @@ class MockChromeClientForOrientationLockDelegate final
   void EnterFullscreen(LocalFrame& frame,
                        const FullscreenOptions*,
                        FullscreenRequestType) override {
-    Thread::Current()->GetTaskRunner()->PostTask(
-        FROM_HERE,
-        WTF::Bind(DidEnterFullscreen, WrapPersistent(frame.GetDocument())));
+    frame.GetTaskRunner(TaskType::kInternalNavigationAssociated)
+        ->PostTask(FROM_HERE,
+                   WTF::BindOnce(DidEnterFullscreen,
+                                 WrapPersistent(frame.GetDocument())));
   }
   void ExitFullscreen(LocalFrame& frame) override {
-    Thread::Current()->GetTaskRunner()->PostTask(
-        FROM_HERE,
-        WTF::Bind(DidExitFullscreen, WrapPersistent(frame.GetDocument())));
+    frame.GetTaskRunner(TaskType::kInternalNavigationAssociated)
+        ->PostTask(FROM_HERE,
+                   WTF::BindOnce(DidExitFullscreen,
+                                 WrapPersistent(frame.GetDocument())));
   }
 
   const display::ScreenInfo& GetScreenInfo(LocalFrame&) const override {

@@ -1,10 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_LAYOUT_RESULT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_LAYOUT_RESULT_H_
 
+#include "base/check_op.h"
 #include "base/dcheck_is_on.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
@@ -23,6 +24,7 @@
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_fragment.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/platform/wtf/bit_field.h"
+#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -50,12 +52,20 @@ class CORE_EXPORT NGLayoutResult final
     kNeedsRelayoutWithNoForcedTruncateAtLineClamp = 4,
     kDisableFragmentation = 5,
     kNeedsRelayoutWithNoChildScrollbarChanges = 6,
-    kNeedsRelayoutWithRowCrossSizeChanges = 7,
+    kAlgorithmSpecific1 = 7,  // Save bits by using the same value for mutually
+                              // exclusive results.
+    kNeedsRelayoutWithRowCrossSizeChanges = kAlgorithmSpecific1,
+    kNeedsRelayoutAsLastTableBox = kAlgorithmSpecific1,
     // When adding new values, make sure the bit size of |Bitfields::status| is
     // large enough to store.
   };
 
-  // Creates a copy of |other| but uses the "post-layout" fragments to ensure
+  // Make a shallow clone of the result. The fragment is cloned. Fragment
+  // *items* are also cloned, but child fragments are not. Apart from that it's
+  // truly shallow. Pinky promise.
+  static const NGLayoutResult* Clone(const NGLayoutResult&);
+
+  // Same as Clone(), but uses the "post-layout" fragments to ensure
   // fragment-tree consistency.
   static const NGLayoutResult* CloneWithPostLayoutFragments(
       const NGLayoutResult& other,
@@ -264,9 +274,9 @@ class CORE_EXPORT NGLayoutResult final
     return data ? data->clearance_after_line : LayoutUnit();
   }
 
-  LayoutUnit MinimalSpaceShortage() const {
+  absl::optional<LayoutUnit> MinimalSpaceShortage() const {
     if (!HasRareData() || rare_data_->minimal_space_shortage == kIndefiniteSize)
-      return LayoutUnit::Max();
+      return absl::nullopt;
     return rare_data_->minimal_space_shortage;
   }
 
@@ -368,6 +378,18 @@ class CORE_EXPORT NGLayoutResult final
     return static_cast<EBreakBetween>(bitfields_.final_break_after);
   }
 
+  // Return the start page value.
+  // See https://www.w3.org/TR/css-page-3/#using-named-pages
+  AtomicString StartPageName() const {
+    return HasRareData() ? rare_data_->start_page_name : AtomicString();
+  }
+
+  // Return the end page value.
+  // See https://www.w3.org/TR/css-page-3/#using-named-pages
+  AtomicString EndPageName() const {
+    return HasRareData() ? rare_data_->end_page_name : AtomicString();
+  }
+
   // Return true if the fragment broke because a forced break before a child.
   bool HasForcedBreak() const { return bitfields_.has_forced_break; }
 
@@ -412,11 +434,21 @@ class CORE_EXPORT NGLayoutResult final
     return bitfields_.subtree_modified_margin_strut;
   }
 
+  // Returns true if we can't apply the simplified layout algorithm to the
+  // box with this layout result.
+  bool DisableSimplifiedLayout() const {
+    return bitfields_.disable_simplified_layout;
+  }
+
+  // Returns true if the fragment got truncated because it reached the
+  // fragmentation line. This typically means that we cannot re-use (cache-hit)
+  // this fragment if the fragmentation line moves.
+  bool IsTruncatedByFragmentationLine() const {
+    return bitfields_.is_truncated_by_fragmentation_line;
+  }
+
   // Returns the space which generated this object for caching purposes.
   const NGConstraintSpace& GetConstraintSpaceForCaching() const {
-#if DCHECK_IS_ON()
-    DCHECK(has_valid_space_);
-#endif
     return space_;
   }
 
@@ -484,7 +516,8 @@ class CORE_EXPORT NGLayoutResult final
 
 #if DCHECK_IS_ON()
   void CheckSameForSimplifiedLayout(const NGLayoutResult&,
-                                    bool check_same_block_size = true) const;
+                                    bool check_same_block_size = true,
+                                    bool check_no_fragmentation = true) const;
 #endif
 
   using NGContainerFragmentBuilderPassKey =
@@ -598,7 +631,8 @@ class CORE_EXPORT NGLayoutResult final
     }
 
     DataUnionType data_union_type() const {
-      return static_cast<DataUnionType>(bit_field.get<DataUnionTypeValue>());
+      return static_cast<DataUnionType>(
+          bit_field.get_concurrently<DataUnionTypeValue>());
     }
 
     void set_data_union_type(DataUnionType data_type) {
@@ -667,13 +701,16 @@ class CORE_EXPORT NGLayoutResult final
       SetBfcBlockOffset(bfc_block_offset);
     }
     RareData(const RareData& rare_data)
-        : bfc_line_offset(rare_data.bfc_line_offset),
+        : start_page_name(rare_data.start_page_name),
+          end_page_name(rare_data.end_page_name),
+          bfc_line_offset(rare_data.bfc_line_offset),
           early_break(rare_data.early_break),
           oof_positioned_offset(rare_data.oof_positioned_offset),
           end_margin_strut(rare_data.end_margin_strut),
           // This will initialize "both" members of the union.
           tallest_unbreakable_block_size(
               rare_data.tallest_unbreakable_block_size),
+          block_size_for_fragmentation(rare_data.block_size_for_fragmentation),
           exclusion_space(rare_data.exclusion_space),
           custom_layout_data(rare_data.custom_layout_data),
           annotation_overflow(rare_data.annotation_overflow),
@@ -761,6 +798,9 @@ class CORE_EXPORT NGLayoutResult final
 
     void Trace(Visitor* visitor) const;
 
+    AtomicString start_page_name;
+    AtomicString end_page_name;
+
     LayoutUnit bfc_line_offset;
 
     Member<const NGEarlyBreak> early_break;
@@ -847,7 +887,9 @@ class CORE_EXPORT NGLayoutResult final
           subtree_modified_margin_strut(subtree_modified_margin_strut),
           initial_break_before(static_cast<unsigned>(EBreakBetween::kAuto)),
           final_break_after(static_cast<unsigned>(EBreakBetween::kAuto)),
-          status(static_cast<unsigned>(kSuccess)) {}
+          status(static_cast<unsigned>(kSuccess)),
+          disable_simplified_layout(false),
+          is_truncated_by_fragmentation_line(false) {}
 
     unsigned has_rare_data_exclusion_space : 1;
     unsigned has_oof_positioned_offset : 1;
@@ -873,10 +915,11 @@ class CORE_EXPORT NGLayoutResult final
     unsigned final_break_after : 4;     // EBreakBetween
 
     unsigned status : 3;  // EStatus
+    unsigned disable_simplified_layout : 1;
+    unsigned is_truncated_by_fragmentation_line : 1;
   };
 
-  // The constraint space which generated this layout result, may not be valid
-  // as indicated by |has_valid_space_|.
+  // The constraint space which generated this layout result.
   const NGConstraintSpace space_;
 
   Member<const NGPhysicalFragment> physical_fragment_;
@@ -900,10 +943,6 @@ class CORE_EXPORT NGLayoutResult final
 
   LayoutUnit intrinsic_block_size_;
   Bitfields bitfields_;
-
-#if DCHECK_IS_ON()
-  bool has_valid_space_ = false;
-#endif
 };
 
 }  // namespace blink

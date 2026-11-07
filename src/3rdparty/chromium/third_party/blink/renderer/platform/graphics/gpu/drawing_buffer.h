@@ -35,6 +35,7 @@
 #include <memory>
 
 #include "base/containers/span.h"
+#include "base/functional/function_ref.h"
 #include "cc/layers/texture_layer_client.h"
 #include "cc/resources/cross_thread_shared_bitmap.h"
 #include "cc/resources/shared_bitmap_id_registrar.h"
@@ -72,7 +73,7 @@ namespace gpu {
 namespace gles2 {
 class GLES2Interface;
 }
-}
+}  // namespace gpu
 
 namespace blink {
 class CanvasResource;
@@ -86,7 +87,6 @@ class WebGraphicsContext3DProviderWrapper;
 // publish its rendering results to a cc::Layer for compositing.
 class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
                                       public RefCounted<DrawingBuffer> {
-
  public:
   class Client {
    public:
@@ -136,6 +136,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
       bool want_depth_buffer,
       bool want_stencil_buffer,
       bool want_antialiasing,
+      bool desynchronized,
       PreserveDrawingBuffer,
       WebGLVersion,
       ChromiumImageUsage,
@@ -210,12 +211,8 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   // have not yet been resolved.
   bool MarkContentsChanged();
 
-  // Maintenance of auto-clearing of color/depth/stencil buffers. The
-  // Reset method is present to keep calling code simpler, so it
-  // doesn't have to know which buffers were allocated.
-  void ResetBuffersToAutoClear();
-  void SetBuffersToAutoClear(GLbitfield bitmask);
-  GLbitfield GetBuffersToAutoClear() const;
+  void SetBufferClearNeeded(bool);
+  bool BufferClearNeeded() const;
 
   void SetIsInHiddenPage(bool);
   void SetFilterQuality(cc::PaintFlags::FilterQuality);
@@ -284,12 +281,12 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
                              const gfx::Rect& src_sub_rectangle,
                              SourceDrawingBuffer src_buffer);
 
-  void CopyToVideoFrame(
+  bool CopyToVideoFrame(
       WebGraphicsContext3DVideoFramePool* frame_pool,
       SourceDrawingBuffer src_buffer,
       bool src_origin_is_top_left,
       const gfx::ColorSpace& dst_color_space,
-      WebGraphicsContext3DVideoFramePool::FrameReadyCallback& callback);
+      WebGraphicsContext3DVideoFramePool::FrameReadyCallback callback);
 
   sk_sp<SkData> PaintRenderingResultsToDataArray(SourceDrawingBuffer);
 
@@ -339,6 +336,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   DrawingBuffer(std::unique_ptr<WebGraphicsContext3DProvider>,
                 const Platform::GraphicsInfo& graphics_info,
                 bool using_swap_chain,
+                bool desynchronized,
                 std::unique_ptr<Extensions3DUtil>,
                 Client*,
                 bool discard_framebuffer_supported,
@@ -357,12 +355,16 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   bool Initialize(const gfx::Size&, bool use_multisampling);
 
   struct RegisteredBitmap {
-    scoped_refptr<cc::CrossThreadSharedBitmap> bitmap;
-    cc::SharedBitmapIdRegistration registration;
+    RegisteredBitmap(scoped_refptr<cc::CrossThreadSharedBitmap> bitmap,
+                     cc::SharedBitmapIdRegistration registration)
+        : bitmap(std::move(bitmap)), registration(std::move(registration)) {}
 
     // Explicitly move-only.
     RegisteredBitmap(RegisteredBitmap&&) = default;
     RegisteredBitmap& operator=(RegisteredBitmap&&) = default;
+
+    scoped_refptr<cc::CrossThreadSharedBitmap> bitmap;
+    cc::SharedBitmapIdRegistration registration;
   };
   // Shared memory bitmaps that were released by the compositor and can be used
   // again by this DrawingBuffer.
@@ -455,10 +457,13 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
     gpu::SyncToken receive_sync_token;
   };
 
-  template <typename CopyFunction>
+  using CopyFunctionRef = base::FunctionRef<bool(const gpu::MailboxHolder&,
+                                                 viz::ResourceFormat,
+                                                 const gfx::Size&,
+                                                 const gfx::ColorSpace&)>;
   bool CopyToPlatformInternal(gpu::InterfaceBase* dst_interface,
                               SourceDrawingBuffer src_buffer,
-                              const CopyFunction& copy_function);
+                              CopyFunctionRef copy_function);
 
   enum ClearOption { kClearOnlyMultisampledFBO, kClearAllFBOs };
 
@@ -512,8 +517,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   static void NotifyMailboxReleasedGpu(scoped_refptr<ColorBuffer>,
                                        const gpu::SyncToken&,
                                        bool lost_resource);
-  void MailboxReleasedGpu(scoped_refptr<ColorBuffer>,
-                          bool lost_resource);
+  void MailboxReleasedGpu(scoped_refptr<ColorBuffer>, bool lost_resource);
   void MailboxReleasedSoftware(RegisteredBitmap,
                                const gpu::SyncToken&,
                                bool lost_resource);
@@ -657,11 +661,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   // True if resolveIfNeeded() has been called since the last time
   // markContentsChanged() had been called.
   bool contents_change_resolved_ = false;
-
-  // A bitmask of GL buffer bits (GL_COLOR_BUFFER_BIT,
-  // GL_DEPTH_BUFFER_BIT, GL_STENCIL_BUFFER_BIT) which need to be
-  // auto-cleared.
-  GLbitfield buffers_to_auto_clear_ = 0;
+  bool buffer_clear_needed_ = false;
 
   // Whether the client wants a depth or stencil buffer.
   const bool want_depth_;

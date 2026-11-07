@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -195,6 +195,14 @@ TextOffsetMapping::InlineContents CreateInlineContentsFromBlockFlow(
       break;
     }
     if (layout_object->IsBlockInInline()) {
+      if (target.IsDescendantOf(layout_object)) {
+        // Note: We reach here when `target` is `position:absolute` or
+        // `position:fixed`, aka `IsOutOfFlowPositioned()`, because
+        // `LayoutObject::ContainingBlock()` handles them specially.
+        // See http://crbug.com/1324970
+        last = first;
+        break;
+      }
       block_in_inline_before = layout_object;
       first = last = nullptr;
     }

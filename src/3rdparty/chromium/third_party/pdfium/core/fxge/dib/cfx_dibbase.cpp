@@ -6,12 +6,14 @@
 
 #include "core/fxge/dib/cfx_dibbase.h"
 
+#include <stdint.h>
 #include <string.h>
 
 #include <algorithm>
 #include <utility>
 #include <vector>
 
+#include "core/fxcrt/data_vector.h"
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_memory.h"
 #include "core/fxcrt/fx_safe_types.h"
@@ -23,7 +25,6 @@
 #include "core/fxge/dib/cfx_imagetransformer.h"
 #include "third_party/base/check.h"
 #include "third_party/base/check_op.h"
-#include "third_party/base/cxx17_backports.h"
 #include "third_party/base/notreached.h"
 #include "third_party/base/span.h"
 
@@ -180,7 +181,7 @@ void ConvertBuffer_8bppPlt2Gray(uint8_t* dest_buf,
                                 int src_top) {
   pdfium::span<const uint32_t> src_palette = pSrcBitmap->GetPaletteSpan();
   uint8_t gray[256];
-  for (size_t i = 0; i < pdfium::size(gray); ++i) {
+  for (size_t i = 0; i < std::size(gray); ++i) {
     gray[i] = FXRGB2GRAY(FXARGB_R(src_palette[i]), FXARGB_G(src_palette[i]),
                          FXARGB_B(src_palette[i]));
   }
@@ -853,7 +854,6 @@ bool CFX_DIBBase::GetOverlapRect(int& dest_left,
 }
 
 void CFX_DIBBase::SetPalette(pdfium::span<const uint32_t> src_palette) {
-  static const uint32_t kPaletteSize = 256;
   if (src_palette.empty() || GetBPP() > 8) {
     m_palette.clear();
     return;
@@ -1036,7 +1036,7 @@ RetainPtr<CFX_DIBitmap> CFX_DIBBase::ConvertTo(FXDIB_Format dest_format) const {
   }
 
   RetainPtr<const CFX_DIBBase> holder(this);
-  std::vector<uint32_t, FxAllocAllocator<uint32_t>> pal_8bpp;
+  DataVector<uint32_t> pal_8bpp;
   if (!ConvertBuffer(dest_format, pClone->GetBuffer(), pClone->GetPitch(),
                      m_Width, m_Height, holder, 0, 0, &pal_8bpp)) {
     return nullptr;
@@ -1178,16 +1178,15 @@ RetainPtr<CFX_DIBitmap> CFX_DIBBase::StretchTo(
 }
 
 // static
-bool CFX_DIBBase::ConvertBuffer(
-    FXDIB_Format dest_format,
-    uint8_t* dest_buf,
-    int dest_pitch,
-    int width,
-    int height,
-    const RetainPtr<const CFX_DIBBase>& pSrcBitmap,
-    int src_left,
-    int src_top,
-    std::vector<uint32_t, FxAllocAllocator<uint32_t>>* pal) {
+bool CFX_DIBBase::ConvertBuffer(FXDIB_Format dest_format,
+                                uint8_t* dest_buf,
+                                int dest_pitch,
+                                int width,
+                                int height,
+                                const RetainPtr<const CFX_DIBBase>& pSrcBitmap,
+                                int src_left,
+                                int src_top,
+                                DataVector<uint32_t>* pal) {
   FXDIB_Format src_format = pSrcBitmap->GetFormat();
   const int bpp = GetBppFromFormat(src_format);
   switch (dest_format) {

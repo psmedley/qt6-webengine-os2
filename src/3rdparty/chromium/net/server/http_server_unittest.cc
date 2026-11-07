@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -178,11 +178,11 @@ struct ReceivedRequest {
 class HttpServerTest : public TestWithTaskEnvironment,
                        public HttpServer::Delegate {
  public:
-  HttpServerTest() : quit_on_close_connection_(-1) {}
+  HttpServerTest() = default;
 
   void SetUp() override {
-    std::unique_ptr<ServerSocket> server_socket(
-        new TCPServerSocket(nullptr, NetLogSource()));
+    auto server_socket =
+        std::make_unique<TCPServerSocket>(nullptr, NetLogSource());
     server_socket->ListenWithAddressAndPort("127.0.0.1", 0, 1);
     server_ = std::make_unique<HttpServer>(std::move(server_socket), this);
     ASSERT_THAT(server_->GetLocalAddress(&server_address_), IsOk());
@@ -276,7 +276,7 @@ class HttpServerTest : public TestWithTaskEnvironment,
  private:
   base::test::RepeatingTestFuture<ReceivedRequest> received_requests_;
   std::unique_ptr<base::RunLoop> quit_on_create_loop_;
-  int quit_on_close_connection_;
+  int quit_on_close_connection_ = -1;
 };
 
 namespace {
@@ -943,10 +943,12 @@ TEST_F(HttpServerTest, WrongProtocolRequest) {
 
 class MockStreamSocket : public StreamSocket {
  public:
-  MockStreamSocket() : connected_(true), read_buf_(nullptr), read_buf_len_(0) {}
+  MockStreamSocket() = default;
 
   MockStreamSocket(const MockStreamSocket&) = delete;
   MockStreamSocket& operator=(const MockStreamSocket&) = delete;
+
+  ~MockStreamSocket() override = default;
 
   // StreamSocket
   int Connect(CompletionOnceCallback callback) override {
@@ -973,11 +975,6 @@ class MockStreamSocket : public StreamSocket {
   bool WasAlpnNegotiated() const override { return false; }
   NextProto GetNegotiatedProtocol() const override { return kProtoUnknown; }
   bool GetSSLInfo(SSLInfo* ssl_info) override { return false; }
-  void GetConnectionAttempts(ConnectionAttempts* out) const override {
-    out->clear();
-  }
-  void ClearConnectionAttempts() override {}
-  void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
   int64_t GetTotalReceivedBytes() const override {
     NOTIMPLEMENTED();
     return 0;
@@ -1030,28 +1027,27 @@ class MockStreamSocket : public StreamSocket {
   }
 
  private:
-  ~MockStreamSocket() override = default;
-
-  bool connected_;
+  bool connected_ = true;
   scoped_refptr<IOBuffer> read_buf_;
-  int read_buf_len_;
+  int read_buf_len_ = 0;
   CompletionOnceCallback read_callback_;
   std::string pending_read_data_;
   NetLogWithSource net_log_;
 };
 
 TEST_F(HttpServerTest, RequestWithBodySplitAcrossPackets) {
-  MockStreamSocket* socket = new MockStreamSocket();
-  HandleAcceptResult(base::WrapUnique<StreamSocket>(socket));
+  auto socket = std::make_unique<MockStreamSocket>();
+  auto* socket_ptr = socket.get();
+  HandleAcceptResult(std::move(socket));
   std::string body("body");
   std::string request_text = base::StringPrintf(
       "GET /test HTTP/1.1\r\n"
       "SomeHeader: 1\r\n"
       "Content-Length: %" PRIuS "\r\n\r\n%s",
       body.length(), body.c_str());
-  socket->DidRead(request_text.c_str(), request_text.length() - 2);
+  socket_ptr->DidRead(request_text.c_str(), request_text.length() - 2);
   ASSERT_FALSE(HasRequest());
-  socket->DidRead(request_text.c_str() + request_text.length() - 2, 2);
+  socket_ptr->DidRead(request_text.c_str() + request_text.length() - 2, 2);
   ASSERT_TRUE(HasRequest());
   ASSERT_EQ(body, WaitForRequest().info.data);
 }

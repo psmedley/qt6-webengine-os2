@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,10 +15,10 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "chrome/browser/history_clusters/history_clusters_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/ui_features.h"
+#include "chrome/browser/ui/webui/cr_components/history_clusters/history_clusters_util.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/browser/ui/webui/history/browsing_history_handler.h"
 #include "chrome/browser/ui/webui/history/foreign_session_handler.h"
@@ -39,7 +39,6 @@
 #include "components/history_clusters/core/config.h"
 #include "components/history_clusters/core/features.h"
 #include "components/history_clusters/core/history_clusters_prefs.h"
-#include "components/history_clusters/core/history_clusters_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/public/base/signin_pref_names.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
@@ -51,10 +50,6 @@
 #include "ui/base/webui/web_ui_util.h"
 
 namespace {
-
-constexpr char kIsHistoryClustersVisibleKey[] = "isHistoryClustersVisible";
-constexpr char kIsHistoryClustersVisibleManagedByPolicyKey[] =
-    "isHistoryClustersVisibleManagedByPolicy";
 
 constexpr char kIsUserSignedInKey[] = "isUserSignedIn";
 
@@ -104,9 +99,9 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
       {"searchPrompt", IDS_HISTORY_SEARCH_PROMPT},
       {"searchResult", IDS_HISTORY_SEARCH_RESULT},
       {"searchResults", IDS_HISTORY_SEARCH_RESULTS},
-      {"signInButton", IDS_HISTORY_SIGN_IN_BUTTON},
-      {"signInPromo", IDS_HISTORY_SIGN_IN_PROMO},
-      {"signInPromoDesc", IDS_HISTORY_SIGN_IN_PROMO_DESC},
+      {"turnOnSyncButton", IDS_HISTORY_TURN_ON_SYNC_BUTTON},
+      {"turnOnSyncPromo", IDS_HISTORY_TURN_ON_SYNC_PROMO},
+      {"turnOnSyncPromoDesc", IDS_HISTORY_TURN_ON_SYNC_PROMO_DESC},
       {"title", IDS_HISTORY_TITLE},
   };
   source->AddLocalizedStrings(kStrings);
@@ -130,35 +125,7 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
   source->AddBoolean(kIsUserSignedInKey, IsUserSignedIn(profile));
 
   // History clusters
-  auto* history_clusters_service =
-      HistoryClustersServiceFactory::GetForBrowserContext(profile);
-  source->AddBoolean("isHistoryClustersEnabled",
-                     history_clusters_service &&
-                         history_clusters_service->IsJourneysEnabled());
-  source->AddBoolean(
-      kIsHistoryClustersVisibleKey,
-      profile->GetPrefs()->GetBoolean(history_clusters::prefs::kVisible));
-  source->AddBoolean(kIsHistoryClustersVisibleManagedByPolicyKey,
-                     profile->GetPrefs()->IsManagedPreference(
-                         history_clusters::prefs::kVisible));
-  source->AddBoolean("isHistoryClustersDebug",
-                     history_clusters::GetConfig().user_visible_debug);
-
-  static constexpr webui::LocalizedString kHistoryClustersStrings[] = {
-      {"disableHistoryClusters", IDS_HISTORY_CLUSTERS_DISABLE_MENU_ITEM_LABEL},
-      {"enableHistoryClusters", IDS_HISTORY_CLUSTERS_ENABLE_MENU_ITEM_LABEL},
-      {"historyClustersTabLabel", IDS_HISTORY_CLUSTERS_JOURNEYS_TAB_LABEL},
-      {"historyListTabLabel", IDS_HISTORY_CLUSTERS_LIST_TAB_LABEL},
-      {"loadMoreButtonLabel", IDS_HISTORY_CLUSTERS_LOAD_MORE_BUTTON_LABEL},
-      {"openAllInTabGroup", IDS_HISTORY_CLUSTERS_OPEN_ALL_IN_TABGROUP},
-      {"relatedSearchesHeader", IDS_HISTORY_CLUSTERS_RELATED_SEARCHES_HEADER},
-      {"removeAllFromHistory", IDS_HISTORY_CLUSTERS_REMOVE_ALL_ITEMS},
-      {"removeFromHistoryToast", IDS_HISTORY_CLUSTERS_REMOVE_ITEM_TOAST},
-      {"savedInTabGroup", IDS_HISTORY_CLUSTERS_SAVED_IN_TABGROUP_LABEL},
-      {"toggleButtonLabelLess", IDS_HISTORY_CLUSTERS_SHOW_LESS_BUTTON_LABEL},
-      {"toggleButtonLabelMore", IDS_HISTORY_CLUSTERS_SHOW_MORE_BUTTON_LABEL},
-  };
-  source->AddLocalizedStrings(kHistoryClustersStrings);
+  HistoryClustersUtil::PopulateSource(source, profile, /*in_side_panel=*/false);
 
   webui::SetupWebUIDataSource(
       source, base::make_span(kHistoryResources, kHistoryResourcesSize),

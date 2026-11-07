@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,9 @@ class DummyFontFaceSource : public CSSFontFaceSource {
       const FontDescription&,
       const FontSelectionCapabilities&) override {
     return SimpleFontData::Create(FontPlatformData(
-        SkTypeface::MakeDefault(), std::string(), 0, false, false));
+        SkTypeface::MakeDefault(), /* name */ std::string(),
+        /* text_size */ 0, /* synthetic_bold */ false,
+        /* synthetic_italic */ false, TextRenderingMode::kAutoTextRendering));
   }
 
   DummyFontFaceSource() = default;

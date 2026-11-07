@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 
 #include <stdint.h>
 #include <memory>
-#include <random>
 #include <vector>
 
 #include "base/memory/raw_ptr.h"
+#include "base/rand_util.h"
 #include "base/time/time.h"
 #include "cc/raster/raster_buffer_provider.h"
 #include "cc/raster/raster_query_queue.h"
@@ -145,10 +145,11 @@ class CC_EXPORT GpuRasterBufferProvider : public RasterBufferProvider {
 
   const raw_ptr<RasterQueryQueue> pending_raster_queries_;
 
+  const double raster_metric_probability_;
   // Accessed with the worker context lock acquired.
-  std::mt19937 random_generator_;
-  std::bernoulli_distribution bernoulli_distribution_;
+  base::MetricsSubSampler metrics_subsampler_;
   const bool is_using_raw_draw_;
+  const bool is_using_dmsaa_;
 };
 
 }  // namespace cc

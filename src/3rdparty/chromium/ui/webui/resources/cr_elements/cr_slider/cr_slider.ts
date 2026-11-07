@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,16 @@
  * a continuous or discrete range of numbers.
  */
 import '../../js/cr.m.js';
-import '../hidden_style_css.m.js';
-import '../shared_vars_css.m.js';
+import '../cr_hidden_style.css.js';
+import '../cr_shared_vars.css.js';
 
 import {PaperRippleBehavior} from '//resources/polymer/v3_0/paper-behaviors/paper-ripple-behavior.js';
-import {Debouncer, html, microTask, mixinBehaviors, PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {Debouncer, microTask, mixinBehaviors, PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {assert} from '../../js/assert_ts.js';
-import {EventTracker} from '../../js/event_tracker.m.js';
+import {EventTracker} from '../../js/event_tracker.js';
+
+import {getTemplate} from './cr_slider.html.js';
 
 /**
  * The |value| is the corresponding value that the current slider tick is
@@ -23,11 +25,11 @@ import {EventTracker} from '../../js/event_tracker.m.js';
  * aria-valuemax, and aria-valuenow, and is optional. If missing, |value| will
  * be used instead.
  */
-export type SliderTick = {
-  value: number,
-  label: string,
-  ariaValue?: number,
-};
+export interface SliderTick {
+  value: number;
+  label: string;
+  ariaValue?: number;
+}
 
 function clamp(min: number, max: number, value: number): number {
   return Math.min(max, Math.max(min, value));
@@ -66,6 +68,10 @@ export interface CrSliderElement {
 export class CrSliderElement extends CrSliderElementBase {
   static get is() {
     return 'cr-slider';
+  }
+
+  static get template() {
+    return getTemplate();
   }
 
   static get properties() {
@@ -188,7 +194,7 @@ export class CrSliderElement extends CrSliderElementBase {
   min: number;
   noKeybindings: boolean;
   snaps: boolean;
-  ticks: Array<SliderTick>|Array<number>;
+  ticks: SliderTick[]|number[];
   value: number;
 
   private disabled_: boolean;
@@ -200,6 +206,8 @@ export class CrSliderElement extends CrSliderElementBase {
   private deltaKeyMap_: Map<string, number>|null = null;
   private draggingEventTracker_: EventTracker|null = null;
   private debouncer_: Debouncer;
+
+  /* eslint-disable-next-line @typescript-eslint/naming-convention */
   override _rippleContainer: Element;
 
   override ready() {
@@ -453,6 +461,8 @@ export class CrSliderElement extends CrSliderElementBase {
     }
   }
 
+  // Overridden from PaperRippleBehavior
+  /* eslint-disable-next-line @typescript-eslint/naming-convention */
   override _createRipple() {
     this._rippleContainer = this.$.knob;
     const ripple = super._createRipple();
@@ -460,10 +470,6 @@ export class CrSliderElement extends CrSliderElementBase {
     ripple.setAttribute('recenters', '');
     ripple.classList.add('circle', 'toggle-ink');
     return ripple;
-  }
-
-  static get template() {
-    return html`{__html_template__}`;
   }
 }
 

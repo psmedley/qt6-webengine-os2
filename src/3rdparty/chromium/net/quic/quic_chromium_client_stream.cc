@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,12 +45,7 @@ class ScopedBoolSaver {
 }  // namespace
 
 QuicChromiumClientStream::Handle::Handle(QuicChromiumClientStream* stream)
-    : stream_(stream),
-      may_invoke_callbacks_(true),
-      read_headers_buffer_(nullptr),
-      read_body_buffer_len_(0),
-      net_error_(ERR_UNEXPECTED),
-      net_log_(stream->net_log()) {
+    : stream_(stream), net_log_(stream->net_log()) {
   SaveState();
 }
 
@@ -78,6 +73,9 @@ void QuicChromiumClientStream::Handle::OnEarlyHintsAvailable() {
 }
 
 void QuicChromiumClientStream::Handle::OnInitialHeadersAvailable() {
+  if (headers_received_start_time_.is_null())
+    headers_received_start_time_ = base::TimeTicks::Now();
+
   if (!read_headers_callback_)
     return;  // Wait for ReadInitialHeaders to be called.
 
@@ -103,6 +101,11 @@ void QuicChromiumClientStream::Handle::OnTrailingHeadersAvailable() {
 void QuicChromiumClientStream::Handle::OnDataAvailable() {
   if (!read_body_callback_)
     return;  // Wait for ReadBody to be called.
+
+  // TODO(https://crbug.com/1335423): Change to DCHECK() or remove after bug is
+  // fixed.
+  CHECK(read_body_buffer_);
+  CHECK_GT(read_body_buffer_len_, 0);
 
   int rv = stream_->Read(read_body_buffer_, read_body_buffer_len_);
   if (rv == ERR_IO_PENDING)
@@ -204,9 +207,18 @@ int QuicChromiumClientStream::Handle::ReadBody(
   if (!stream_)
     return net_error_;
 
+  if (stream_->read_side_closed()) {
+    return OK;
+  }
+
   int rv = stream_->Read(buffer, buffer_len);
   if (rv != ERR_IO_PENDING)
     return rv;
+
+  // TODO(https://crbug.com/1335423): Change to DCHECK() or remove after bug is
+  // fixed.
+  CHECK(buffer);
+  CHECK_GT(buffer_len, 0);
 
   SetCallback(std::move(callback), &read_body_callback_);
   read_body_buffer_ = buffer;
@@ -449,15 +461,8 @@ QuicChromiumClientStream::QuicChromiumClientStream(
     const NetworkTrafficAnnotationTag& traffic_annotation)
     : quic::QuicSpdyStream(id, session, type),
       net_log_(net_log),
-      handle_(nullptr),
-      initial_headers_sent_(false),
       session_(session),
-      quic_version_(session->connection()->transport_version()),
-      can_migrate_to_cellular_network_(true),
-      initial_headers_arrived_(false),
-      headers_delivered_(false),
-      initial_headers_frame_len_(0),
-      trailing_headers_frame_len_(0) {}
+      quic_version_(session->connection()->transport_version()) {}
 
 QuicChromiumClientStream::QuicChromiumClientStream(
     quic::PendingStream* pending,
@@ -466,15 +471,8 @@ QuicChromiumClientStream::QuicChromiumClientStream(
     const NetworkTrafficAnnotationTag& traffic_annotation)
     : quic::QuicSpdyStream(pending, session),
       net_log_(net_log),
-      handle_(nullptr),
-      initial_headers_sent_(false),
       session_(session),
-      quic_version_(session->connection()->transport_version()),
-      can_migrate_to_cellular_network_(true),
-      initial_headers_arrived_(false),
-      headers_delivered_(false),
-      initial_headers_frame_len_(0),
-      trailing_headers_frame_len_(0) {}
+      quic_version_(session->connection()->transport_version()) {}
 
 QuicChromiumClientStream::~QuicChromiumClientStream() {
   if (handle_)
@@ -684,6 +682,11 @@ void QuicChromiumClientStream::OnError(int error) {
 }
 
 int QuicChromiumClientStream::Read(IOBuffer* buf, int buf_len) {
+  // TODO(https://crbug.com/1335423): Change to DCHECK() or remove after bug
+  // is fixed.
+  CHECK_GT(buf_len, 0);
+  CHECK(buf->data());
+
   if (IsDoneReading())
     return 0;  // EOF
 

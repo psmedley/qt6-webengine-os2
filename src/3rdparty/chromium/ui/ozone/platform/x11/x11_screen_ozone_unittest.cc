@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -182,7 +182,7 @@ TEST_F(X11ScreenOzoneTest, GetDisplayForWidgetTwoDisplays) {
   EXPECT_EQ(*display_2, screen()->GetDisplayForAcceleratedWidget(widget));
 
   EXPECT_CALL(delegate, OnBoundsChanged(_)).Times(1);
-  window->SetBounds(
+  window->SetBoundsInPixels(
       gfx::Rect(kPrimaryDisplayBounds.width() - 250, 0, 400, 300));
   EXPECT_EQ(primary_display(),
             screen()->GetDisplayForAcceleratedWidget(widget));

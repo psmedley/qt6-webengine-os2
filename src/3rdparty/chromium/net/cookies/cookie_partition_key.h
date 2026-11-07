@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -92,9 +92,13 @@ class NET_EXPORT CookiePartitionKey {
     return absl::make_optional(CookiePartitionKey(true));
   }
 
-  // Temporary method, used to mark the places where we need to supply the
-  // cookie partition key to CanonicalCookie::Create.
-  static absl::optional<CookiePartitionKey> Todo() { return absl::nullopt; }
+  // Create a new CookiePartitionKey from the components of a StorageKey.
+  // Forwards to FromWire, but unlike that method in this one the optional nonce
+  // argument has no default. It also checks that cookie partitioning is enabled
+  // before returning a valid key, which FromWire does not check.
+  static absl::optional<CookiePartitionKey> FromStorageKeyComponents(
+      const SchemefulSite& top_level_site,
+      const absl::optional<base::UnguessableToken>& nonce);
 
   const SchemefulSite& site() const { return site_; }
 

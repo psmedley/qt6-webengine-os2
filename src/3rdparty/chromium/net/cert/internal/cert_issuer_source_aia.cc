@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 #include "base/logging.h"
 #include "base/strings/string_piece.h"
 #include "net/cert/cert_net_fetcher.h"
-#include "net/cert/internal/cert_errors.h"
 #include "net/cert/pem.h"
+#include "net/cert/pki/cert_errors.h"
 #include "net/cert/x509_util.h"
 #include "url/gurl.h"
 
@@ -177,7 +177,7 @@ void CertIssuerSourceAia::AsyncGetIssuersOf(const ParsedCertificate* cert,
 
   std::vector<GURL> urls;
   for (const auto& uri : cert->ca_issuers_uris()) {
-    GURL url(uri);
+    GURL url(base::StringPiece(uri.data(), uri.size()));
     if (url.is_valid()) {
       // TODO(mattm): do the kMaxFetchesPerCert check only on the number of
       // supported URL schemes, not all the URLs.
@@ -195,7 +195,7 @@ void CertIssuerSourceAia::AsyncGetIssuersOf(const ParsedCertificate* cert,
   if (urls.empty())
     return;
 
-  std::unique_ptr<AiaRequest> aia_request(new AiaRequest());
+  auto aia_request = std::make_unique<AiaRequest>();
 
   for (const auto& url : urls) {
     // TODO(mattm): add synchronous failure mode to FetchCaIssuers interface so

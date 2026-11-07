@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -76,8 +76,7 @@ class ExtensionFunctionDispatcher
   // Dispatches a request and the response is sent in |callback| that is a reply
   // of mojom::LocalFrameHost::Request.
   void Dispatch(mojom::RequestParamsPtr params,
-                content::RenderFrameHost* render_frame_host,
-                int render_process_id,
+                content::RenderFrameHost& frame,
                 mojom::LocalFrameHost::RequestCallback callback);
 
   // Message handlers.
@@ -139,7 +138,6 @@ class ExtensionFunctionDispatcher
       const GURL* rfh_url,
       const ProcessMap& process_map,
       ExtensionAPI* api,
-      void* profile_id,
       ExtensionFunction::ResponseCallback callback);
 
   void DispatchWithCallbackInternal(

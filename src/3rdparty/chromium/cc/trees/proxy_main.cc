@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,8 @@ ProxyMain::ProxyMain(LayerTreeHost* layer_tree_host,
       final_pipeline_stage_(NO_PIPELINE_STAGE),
       deferred_final_pipeline_stage_(NO_PIPELINE_STAGE),
       started_(false),
-      defer_main_frame_update_(false) {
+      defer_main_frame_update_(false),
+      pause_rendering_(false) {
   TRACE_EVENT0("cc", "ProxyMain::ProxyMain");
   DCHECK(task_runner_provider_);
   DCHECK(IsMainThread());
@@ -129,13 +130,20 @@ void ProxyMain::BeginMainFrame(
     std::unique_ptr<BeginMainFrameAndCommitState> begin_main_frame_state) {
   DCHECK(IsMainThread());
   DCHECK_EQ(NO_PIPELINE_STAGE, current_pipeline_stage_);
-  DCHECK(!layer_tree_host_->in_commit());
 
+  {
+    TRACE_EVENT_WITH_FLOW0(
+        "viz,benchmark", "MainFrame.BeginMainFrameOnMain",
+        TRACE_ID_LOCAL(begin_main_frame_state->trace_id),
+        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT);
+  }
   base::TimeTicks begin_main_frame_start_time = base::TimeTicks::Now();
 
+  const viz::BeginFrameArgs& frame_args =
+      begin_main_frame_state->begin_frame_args;
   benchmark_instrumentation::ScopedBeginFrameTask begin_frame_task(
       benchmark_instrumentation::kDoBeginFrame,
-      begin_main_frame_state->begin_frame_args.frame_id.sequence_number);
+      frame_args.frame_id.sequence_number);
 
   // This needs to run unconditionally, so do it before any early-returns.
   if (layer_tree_host_->scheduling_client())
@@ -147,15 +155,16 @@ void ProxyMain::BeginMainFrame(
   layer_tree_host_->ImageDecodesFinished(
       std::move(begin_main_frame_state->completed_image_decode_requests));
 
-  layer_tree_host_->NotifyTransitionRequestsFinished(std::move(
-      begin_main_frame_state->finished_transition_request_sequence_ids));
-
   // Visibility check needs to happen before setting
   // max_requested_pipeline_stage_. Otherwise a requested commit could get lost
   // after tab becomes visible again.
   if (!layer_tree_host_->IsVisible()) {
     TRACE_EVENT_INSTANT0("cc", "EarlyOut_NotVisible", TRACE_EVENT_SCOPE_THREAD);
 
+    TRACE_EVENT_WITH_FLOW1(
+        "viz,benchmark", "MainFrame.BeginMainFrameAbortedOnMain",
+        TRACE_ID_LOCAL(begin_main_frame_state->trace_id),
+        TRACE_EVENT_FLAG_FLOW_IN, "reason", "ABORTED_NOT_VISIBLE");
     // In this case, since the commit is deferred to a later time, gathered
     // events metrics are not discarded so that they can be reported if the
     // commit happens in the future.
@@ -177,9 +186,14 @@ void ProxyMain::BeginMainFrame(
   max_requested_pipeline_stage_ = NO_PIPELINE_STAGE;
 
   // If main frame updates and commits are deferred, skip the entire pipeline.
-  if (defer_main_frame_update_) {
+  if (defer_main_frame_update_ || pause_rendering_) {
     TRACE_EVENT_INSTANT0("cc", "EarlyOut_DeferCommit",
                          TRACE_EVENT_SCOPE_THREAD);
+    TRACE_EVENT_WITH_FLOW1("viz,benchmark",
+                           "MainFrame.BeginMainFrameAbortedOnMain",
+                           TRACE_ID_LOCAL(begin_main_frame_state->trace_id),
+                           TRACE_EVENT_FLAG_FLOW_IN, "reason",
+                           "ABORTED_DEFERRED_MAIN_FRAME_UPDATE");
     // In this case, since the commit is deferred to a later time, gathered
     // events metrics are not discarded so that they can be reported if the
     // commit happens in the future.
@@ -215,10 +229,9 @@ void ProxyMain::BeginMainFrame(
     StopDeferringCommits(ReasonToTimeoutTrigger(*paint_holding_reason_));
     commit_timeout = true;
   }
-  bool skip_commit = IsDeferringCommits();
-  bool scroll_and_viewport_changes_synced = false;
 
-  if (!skip_commit) {
+  bool scroll_and_viewport_changes_synced = false;
+  if (!IsDeferringCommits()) {
     // Synchronizes scroll offsets and page scale deltas (for pinch zoom) from
     // the compositor thread to the main thread for both cc and and its client
     // (e.g. Blink). Do not do this if we explicitly plan to not commit the
@@ -243,12 +256,16 @@ void ProxyMain::BeginMainFrame(
 
   // See LayerTreeHostClient::BeginMainFrame for more documentation on
   // what this does.
-  layer_tree_host_->BeginMainFrame(begin_main_frame_state->begin_frame_args);
+  layer_tree_host_->BeginMainFrame(frame_args);
 
   // Updates cc animations on the main-thread. This is necessary in order
   // to track animation states such that they are cleaned up properly.
-  layer_tree_host_->AnimateLayers(
-      begin_main_frame_state->begin_frame_args.frame_time);
+  layer_tree_host_->AnimateLayers(frame_args.frame_time);
+
+  // If NonBlockingCommit is enabled, and the previous BeginMainFrame has not
+  // yet completed commit on the impl thread, then the above call to
+  // AnimateLayers should have blocked until the previous commit finished.
+  DCHECK(!layer_tree_host_->in_commit());
 
   // Recreates all UI resources if the compositor thread evicted UI resources
   // because it became invisible or there was a lost context when the compositor
@@ -261,21 +278,27 @@ void ProxyMain::BeginMainFrame(
   layer_tree_host_->RequestMainFrameUpdate(true /* report_cc_metrics */);
 
   // At this point the main frame may have deferred main frame updates to
-  // avoid committing right now, or we may be deferring commits but not
-  // deferring main frame updates. Either may have changed the status
-  // of the defer... flags, so re-evaluate skip_commit.
+  // avoid committing right now, or may have allowed commits to go through. So
+  // evaluate this flag now.
+  bool skip_commit = layer_tree_host_->GetSettings()
+                         .skip_commits_if_not_synchronizing_compositor_state &&
+                     !scroll_and_viewport_changes_synced;
   skip_commit |= defer_main_frame_update_ || IsDeferringCommits();
 
   // When we don't need to produce a CompositorFrame, there's also no need to
   // commit our updates. We still need to run layout and paint though, as it can
   // have side effects on page loading behavior.
-  skip_commit |= begin_main_frame_state->begin_frame_args.animate_only;
+  skip_commit |= frame_args.animate_only;
 
   if (skip_commit) {
     current_pipeline_stage_ = NO_PIPELINE_STAGE;
     layer_tree_host_->DidBeginMainFrame();
     TRACE_EVENT_INSTANT0("cc", "EarlyOut_DeferCommit_InsideBeginMainFrame",
                          TRACE_EVENT_SCOPE_THREAD);
+    TRACE_EVENT_WITH_FLOW1(
+        "viz,benchmark", "MainFrame.BeginMainFrameAbortedOnMain",
+        TRACE_ID_LOCAL(begin_main_frame_state->trace_id),
+        TRACE_EVENT_FLAG_FLOW_IN, "reason", "ABORTED_DEFERRED_COMMIT");
     layer_tree_host_->RecordEndOfFrameMetrics(
         begin_main_frame_start_time,
         begin_main_frame_state->active_sequence_trackers);
@@ -324,8 +347,7 @@ void ProxyMain::BeginMainFrame(
     final_pipeline_stage_ = COMMIT_PIPELINE_STAGE;
 
   commit_trace_ = std::make_unique<devtools_instrumentation::ScopedCommitTrace>(
-      layer_tree_host_->GetId(),
-      begin_main_frame_state->begin_frame_args.frame_id.sequence_number);
+      layer_tree_host_->GetId(), frame_args.frame_id.sequence_number);
 
   auto completion_event_ptr = std::make_unique<CompletionEvent>(
       base::WaitableEvent::ResetPolicy::MANUAL);
@@ -336,6 +358,12 @@ void ProxyMain::BeginMainFrame(
   std::unique_ptr<CommitState> commit_state = layer_tree_host_->WillCommit(
       std::move(completion_event_ptr), has_updates);
   DCHECK_EQ(has_updates, (bool)commit_state.get());
+  if (commit_state.get()) {
+    commit_state->trace_id =
+        (0x1llu << 52) |  // Signature bit chosen at random to avoid collisions
+        (frame_args.frame_id.source_id << 32) |
+        (commit_state->source_frame_number & 0xffffffff);
+  }
   current_pipeline_stage_ = COMMIT_PIPELINE_STAGE;
 
   if (!has_updates) {
@@ -344,6 +372,10 @@ void ProxyMain::BeginMainFrame(
     layer_tree_host_->DidBeginMainFrame();
     TRACE_EVENT_INSTANT0("cc,raf_investigation", "EarlyOut_NoUpdates",
                          TRACE_EVENT_SCOPE_THREAD);
+    TRACE_EVENT_WITH_FLOW1(
+        "viz,benchmark", "MainFrame.BeginMainFrameAbortedOnMain",
+        TRACE_ID_LOCAL(begin_main_frame_state->trace_id),
+        TRACE_EVENT_FLAG_FLOW_IN, "reason", "FINISHED_NO_UPDATES");
     std::vector<std::unique_ptr<SwapPromise>> swap_promises =
         layer_tree_host_->GetSwapPromiseManager()->TakeSwapPromises();
 
@@ -383,6 +415,15 @@ void ProxyMain::BeginMainFrame(
   CommitTimestamps commit_timestamps;
   bool blocking = !base::FeatureList::IsEnabled(features::kNonBlockingCommit);
   {
+    TRACE_EVENT_WITH_FLOW0("viz,benchmark",
+                           "MainFrame.NotifyReadyToCommitOnMain",
+                           TRACE_ID_LOCAL(begin_main_frame_state->trace_id),
+                           TRACE_EVENT_FLAG_FLOW_IN);
+    TRACE_EVENT_WITH_FLOW0(
+        "viz,benchmark", "MainFrame.NotifyReadyToCommitOnMain",
+        TRACE_ID_LOCAL(commit_state->trace_id), TRACE_EVENT_FLAG_FLOW_OUT);
+  }
+  {
     TRACE_EVENT0("cc,raf_investigation", "ProxyMain::BeginMainFrame::commit");
 
     absl::optional<DebugScopedSetMainThreadBlocked> main_thread_blocked;
@@ -390,13 +431,13 @@ void ProxyMain::BeginMainFrame(
       main_thread_blocked.emplace(task_runner_provider_);
 
     ImplThreadTaskRunner()->PostTask(
-        FROM_HERE, base::BindOnce(&ProxyImpl::NotifyReadyToCommitOnImpl,
-                                  base::Unretained(proxy_impl_.get()),
-                                  completion_event, std::move(commit_state),
-                                  &unsafe_state, begin_main_frame_start_time,
-                                  begin_main_frame_state->begin_frame_args,
-                                  blocking ? &commit_timestamps : nullptr,
-                                  commit_timeout));
+        FROM_HERE,
+        base::BindOnce(
+            &ProxyImpl::NotifyReadyToCommitOnImpl,
+            base::Unretained(proxy_impl_.get()), completion_event,
+            std::move(commit_state), &unsafe_state, begin_main_frame_start_time,
+            frame_args, scroll_and_viewport_changes_synced,
+            blocking ? &commit_timestamps : nullptr, commit_timeout));
     if (blocking)
       layer_tree_host_->WaitForProtectedSequenceCompletion();
   }
@@ -440,6 +481,15 @@ void ProxyMain::DidObserveFirstScrollDelay(
     base::TimeTicks first_scroll_timestamp) {
   layer_tree_host_->DidObserveFirstScrollDelay(first_scroll_delay,
                                                first_scroll_timestamp);
+}
+
+void ProxyMain::ReportEventLatency(
+    std::vector<EventLatencyTracker::LatencyData> latencies) {
+  layer_tree_host_->ReportEventLatency(std::move(latencies));
+}
+
+void ProxyMain::NotifyTransitionRequestFinished(uint32_t sequence_id) {
+  layer_tree_host_->NotifyTransitionRequestsFinished({sequence_id});
 }
 
 bool ProxyMain::IsStarted() const {
@@ -542,9 +592,32 @@ void ProxyMain::SetDeferMainFrameUpdate(bool defer_main_frame_update) {
 
   // The impl thread needs to know that it should not issue BeginMainFrame.
   ImplThreadTaskRunner()->PostTask(
-      FROM_HERE, base::BindOnce(&ProxyImpl::SetDeferBeginMainFrameOnImpl,
+      FROM_HERE, base::BindOnce(&ProxyImpl::SetDeferBeginMainFrameFromMain,
                                 base::Unretained(proxy_impl_.get()),
                                 defer_main_frame_update));
+}
+
+void ProxyMain::SetPauseRendering(bool pause_rendering) {
+  DCHECK(IsMainThread());
+  if (pause_rendering_ == pause_rendering)
+    return;
+
+  pause_rendering_ = pause_rendering;
+  if (pause_rendering_) {
+    TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("cc", "ProxyMain::SetPauseRendering",
+                                      TRACE_ID_LOCAL(this));
+  } else {
+    TRACE_EVENT_NESTABLE_ASYNC_END0("cc", "ProxyMain::SetPauseRendering",
+                                    TRACE_ID_LOCAL(this));
+  }
+
+  layer_tree_host_->OnPauseRenderingChanged(pause_rendering_);
+
+  // The impl thread needs to know that it should not issue BeginFrames.
+  ImplThreadTaskRunner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&ProxyImpl::SetPauseRendering,
+                     base::Unretained(proxy_impl_.get()), pause_rendering_));
 }
 
 bool ProxyMain::StartDeferringCommits(base::TimeDelta timeout,
@@ -563,7 +636,7 @@ bool ProxyMain::StartDeferringCommits(base::TimeDelta timeout,
   commits_restart_time_ = base::TimeTicks::Now() + timeout;
 
   // Notify dependent systems that the deferral status has changed.
-  layer_tree_host_->OnDeferCommitsChanged(true, reason);
+  layer_tree_host_->OnDeferCommitsChanged(true, reason, absl::nullopt);
   return true;
 }
 
@@ -578,7 +651,7 @@ void ProxyMain::StopDeferringCommits(PaintHoldingCommitTrigger trigger) {
                                   TRACE_ID_LOCAL(this));
 
   // Notify depended systems that the deferral status has changed.
-  layer_tree_host_->OnDeferCommitsChanged(false, reason);
+  layer_tree_host_->OnDeferCommitsChanged(false, reason, trigger);
 }
 
 bool ProxyMain::IsDeferringCommits() const {
@@ -760,17 +833,9 @@ void ProxyMain::SetRenderFrameObserver(
                      base::Unretained(proxy_impl_.get()), std::move(observer)));
 }
 
-void ProxyMain::SetEnableFrameRateThrottling(
-    bool enable_frame_rate_throttling) {
-  ImplThreadTaskRunner()->PostTask(
-      FROM_HERE, base::BindOnce(&ProxyImpl::SetEnableFrameRateThrottling,
-                                base::Unretained(proxy_impl_.get()),
-                                enable_frame_rate_throttling));
-}
-
-uint32_t ProxyMain::GetAverageThroughput() const {
+double ProxyMain::GetPercentDroppedFrames() const {
   NOTIMPLEMENTED();
-  return 0u;
+  return 0.0;
 }
 
 }  // namespace cc

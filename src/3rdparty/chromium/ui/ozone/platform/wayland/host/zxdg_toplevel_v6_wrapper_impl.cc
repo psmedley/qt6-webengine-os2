@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,6 +63,8 @@ bool ZXDGToplevelV6WrapperImpl::Initialize() {
     LOG(ERROR) << "Failed to create zxdg_toplevel";
     return false;
   }
+  connection_->wayland_window_manager()->NotifyWindowRoleAssigned(
+      wayland_window_);
   zxdg_toplevel_v6_add_listener(zxdg_toplevel_v6_.get(),
                                 &zxdg_toplevel_v6_listener, this);
 
@@ -163,15 +165,16 @@ void ZXDGToplevelV6WrapperImpl::ConfigureTopLevel(
   auto* surface = static_cast<ZXDGToplevelV6WrapperImpl*>(data);
   DCHECK(surface);
 
-  bool is_maximized =
-      CheckIfWlArrayHasValue(states, ZXDG_TOPLEVEL_V6_STATE_MAXIMIZED);
-  bool is_fullscreen =
-      CheckIfWlArrayHasValue(states, ZXDG_TOPLEVEL_V6_STATE_FULLSCREEN);
-  bool is_activated =
-      CheckIfWlArrayHasValue(states, ZXDG_TOPLEVEL_V6_STATE_ACTIVATED);
-
   surface->wayland_window_->HandleToplevelConfigure(
-      width, height, is_maximized, is_fullscreen, is_activated);
+      width, height,
+      {
+          .is_maximized =
+              CheckIfWlArrayHasValue(states, ZXDG_TOPLEVEL_V6_STATE_MAXIMIZED),
+          .is_fullscreen =
+              CheckIfWlArrayHasValue(states, ZXDG_TOPLEVEL_V6_STATE_FULLSCREEN),
+          .is_activated =
+              CheckIfWlArrayHasValue(states, ZXDG_TOPLEVEL_V6_STATE_ACTIVATED),
+      });
 }
 
 // static
@@ -196,5 +199,32 @@ void ZXDGToplevelV6WrapperImpl::Unlock() {}
 void ZXDGToplevelV6WrapperImpl::RequestWindowBounds(const gfx::Rect& bounds) {
   NOTREACHED();
 }
+
+void ZXDGToplevelV6WrapperImpl::SetRestoreInfo(int32_t, int32_t) {}
+
+void ZXDGToplevelV6WrapperImpl::SetRestoreInfoWithWindowIdSource(
+    int32_t,
+    const std::string&) {}
+
+void ZXDGToplevelV6WrapperImpl::SetSystemModal(bool modal) {
+  NOTREACHED();
+}
+
+bool ZXDGToplevelV6WrapperImpl::SupportsScreenCoordinates() const {
+  return false;
+}
+
+void ZXDGToplevelV6WrapperImpl::EnableScreenCoordinates() {}
+
+void ZXDGToplevelV6WrapperImpl::SetFloat() {}
+
+void ZXDGToplevelV6WrapperImpl::UnSetFloat() {}
+
+void ZXDGToplevelV6WrapperImpl::SetZOrder(ZOrderLevel z_order) {}
+bool ZXDGToplevelV6WrapperImpl::SupportsActivation() {
+  return false;
+}
+void ZXDGToplevelV6WrapperImpl::Activate() {}
+void ZXDGToplevelV6WrapperImpl::Deactivate() {}
 
 }  // namespace ui

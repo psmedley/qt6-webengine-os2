@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,15 @@
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/containers/flat_map.h"
+#include "base/debug/crash_logging.h"
+#include "base/debug/dump_without_crashing.h"
 #include "content/browser/renderer_host/navigation_controller_impl.h"
 #include "content/browser/renderer_host/navigation_entry_impl.h"
 #include "content/public/android/content_jni_headers/NavigationControllerImpl_jni.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/ssl_host_state_delegate.h"
 #include "content/public/common/referrer.h"
 #include "content/public/common/resource_request_body_android.h"
@@ -193,6 +198,8 @@ void NavigationControllerAndroid::ContinuePendingReload(
 void NavigationControllerAndroid::Reload(JNIEnv* env,
                                          const JavaParamRef<jobject>& obj,
                                          jboolean check_for_repost) {
+  SCOPED_CRASH_KEY_BOOL("nav_reentrancy_caller2", "Reload_check",
+                        (bool)check_for_repost);
   navigation_controller_->Reload(ReloadType::NORMAL, check_for_repost);
 }
 
@@ -200,6 +207,8 @@ void NavigationControllerAndroid::ReloadBypassingCache(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
     jboolean check_for_repost) {
+  SCOPED_CRASH_KEY_BOOL("nav_reentrancy_caller2", "ReloadB_check",
+                        (bool)check_for_repost);
   navigation_controller_->Reload(ReloadType::BYPASSING_CACHE, check_for_repost);
 }
 
@@ -228,7 +237,8 @@ void NavigationControllerAndroid::GoToNavigationIndex(
   navigation_controller_->GoToIndex(index);
 }
 
-void NavigationControllerAndroid::LoadUrl(
+base::android::ScopedJavaGlobalRef<jobject>
+NavigationControllerAndroid::LoadUrl(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
     const JavaParamRef<jstring>& url,
@@ -248,11 +258,14 @@ void NavigationControllerAndroid::LoadUrl(
     const JavaParamRef<jobject>& j_initiator_origin,
     jboolean has_user_gesture,
     jboolean should_clear_history_list,
-    jlong input_start) {
+    jlong input_start,
+    jlong navigation_ui_data_ptr) {
   DCHECK(url);
   NavigationController::LoadURLParams params(
       GURL(ConvertJavaStringToUTF8(env, url)));
-
+  // Wrap the raw pointer in case on an early return.
+  std::unique_ptr<NavigationUIData> navigation_ui_data = base::WrapUnique(
+      reinterpret_cast<NavigationUIData*>(navigation_ui_data_ptr));
   params.load_type =
       static_cast<NavigationController::LoadURLType>(load_url_type);
   params.transition_type = ui::PageTransitionFromInt(transition_type);
@@ -311,7 +324,17 @@ void NavigationControllerAndroid::LoadUrl(
   if (input_start != 0)
     params.input_start = base::TimeTicks::FromUptimeMillis(input_start);
 
-  navigation_controller_->LoadURLWithParams(params);
+  params.navigation_ui_data = std::move(navigation_ui_data);
+
+  base::WeakPtr<NavigationHandle> handle =
+      navigation_controller_->LoadURLWithParams(params);
+
+  if (!handle) {
+    return nullptr;
+  }
+
+  return base::android::ScopedJavaGlobalRef<jobject>(
+      handle->GetJavaNavigationHandle());
 }
 
 void NavigationControllerAndroid::ClearHistory(
@@ -377,10 +400,41 @@ void NavigationControllerAndroid::SetUseDesktopUserAgent(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
     jboolean enabled,
-    jboolean reload_on_state_change) {
+    jboolean reload_on_state_change,
+    jint source) {
+  SCOPED_CRASH_KEY_BOOL("nav_reentrancy_caller2", "SetUA_enabled",
+                        (bool)enabled);
   if (GetUseDesktopUserAgent(env, obj) == enabled)
     return;
 
+  if (navigation_controller_->in_navigate_to_pending_entry() &&
+      reload_on_state_change) {
+    // Sometimes it's possible to call this function in response to a
+    // navigation to a pending entry. In this case, we should avoid triggering
+    // another navigation synchronously, as it will crash due to navigation
+    // re-entrancy checks. To do that, post a task to update the UA and
+    // reload asynchronously.
+    // TODO(https://crbug.com/1327907): Figure out the case that leads to this
+    // situation and avoid calling this function entirely in that case. For now,
+    // do a do a DumpWithoutCrashing so that we can investigate.
+    GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            &NavigationControllerAndroid::SetUseDesktopUserAgentInternal,
+            weak_factory_.GetWeakPtr(), enabled, reload_on_state_change));
+    LOG(WARNING) << "NavigationControllerAndroid::SetUseDesktopUserAgent "
+                 << "triggers re-entrant navigation, override: "
+                 << (bool)enabled << ", source: " << (int)source;
+    SCOPED_CRASH_KEY_NUMBER("SetUseDesktopUserAgent", "caller", (int)source);
+    base::debug::DumpWithoutCrashing();
+  } else {
+    SetUseDesktopUserAgentInternal(enabled, reload_on_state_change);
+  }
+}
+
+void NavigationControllerAndroid::SetUseDesktopUserAgentInternal(
+    bool enabled,
+    bool reload_on_state_change) {
   // Make sure the navigation entry actually exists.
   NavigationEntry* entry = navigation_controller_->GetLastCommittedEntry();
   if (!entry)

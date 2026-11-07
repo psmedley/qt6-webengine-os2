@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -459,6 +459,7 @@ bool DataPipeConsumerDispatcher::InitializeNoLock() {
   if (!ring_buffer_mapping_.IsValid()) {
     DLOG(ERROR) << "Failed to map shared buffer.";
     shared_ring_buffer_ = base::UnsafeSharedMemoryRegion();
+    is_closed_ = true;
     return false;
   }
 

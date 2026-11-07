@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "build/build_config.h"
+#include "components/cast_streaming/renderer/public/resource_provider.h"
 #include "content/public/common/content_switches.h"
 #include "media/base/demuxer.h"
 #include "media/base/renderer_factory.h"
@@ -104,7 +105,6 @@ ContentRendererClient::GetProtocolHandlerSecurityLevel() {
 #if BUILDFLAG(IS_ANDROID)
 bool ContentRendererClient::HandleNavigation(
     RenderFrame* render_frame,
-    bool render_view_was_created_by_renderer,
     blink::WebFrame* frame,
     const blink::WebURLRequest& request,
     blink::WebNavigationType type,
@@ -174,11 +174,11 @@ bool ContentRendererClient::IsSupportedVideoType(const media::VideoType& type) {
 bool ContentRendererClient::IsSupportedBitstreamAudioCodec(
     media::AudioCodec codec) {
   switch (codec) {
-#if BUILDFLAG(USE_PROPRIETARY_CODECS) && BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
+#if BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
     case media::AudioCodec::kDTS:
     case media::AudioCodec::kDTSXP2:
       return true;
-#endif
+#endif  // BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
     default:
       return false;
   }
@@ -238,7 +238,8 @@ blink::WebFrame* ContentRendererClient::FindFrame(
   return nullptr;
 }
 
-bool ContentRendererClient::IsSafeRedirectTarget(const GURL& url) {
+bool ContentRendererClient::IsSafeRedirectTarget(const GURL& from_url,
+                                                 const GURL& to_url) {
   return true;
 }
 
@@ -261,6 +262,11 @@ ContentRendererClient::GetBaseRendererFactory(
     media::DecoderFactory* decoder_factory,
     base::RepeatingCallback<media::GpuVideoAcceleratorFactories*()>
         get_gpu_factories_cb) {
+  return nullptr;
+}
+
+std::unique_ptr<cast_streaming::ResourceProvider>
+ContentRendererClient::CreateCastStreamingResourceProvider() {
   return nullptr;
 }
 

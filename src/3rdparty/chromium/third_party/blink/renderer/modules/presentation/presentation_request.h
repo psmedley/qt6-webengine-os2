@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 namespace blink {
 
 class ExceptionState;
+class V8UnionPresentationSourceOrUSVString;
 
 // Implements the PresentationRequest interface from the Presentation API from
 // which websites can start or join presentation connections.
@@ -33,9 +34,10 @@ class MODULES_EXPORT PresentationRequest final
   static PresentationRequest* Create(ExecutionContext*,
                                      const String& url,
                                      ExceptionState&);
-  static PresentationRequest* Create(ExecutionContext*,
-                                     const Vector<String>& urls,
-                                     ExceptionState&);
+  static PresentationRequest* Create(
+      ExecutionContext*,
+      const HeapVector<Member<V8UnionPresentationSourceOrUSVString>>& sources,
+      ExceptionState&);
 
   // EventTarget implementation.
   const AtomicString& InterfaceName() const override;

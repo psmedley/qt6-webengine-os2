@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,7 @@ bool FrameView::CanThrottleRenderingForPropagation() const {
   if (CanThrottleRendering())
     return true;
   Frame& frame = GetFrame();
-  if (!frame.IsCrossOriginToMainFrame())
+  if (!frame.IsCrossOriginToNearestMainFrame())
     return false;
   if (frame.IsLocalFrame() && To<LocalFrame>(frame).IsHidden())
     return true;
@@ -81,6 +81,9 @@ void FrameView::UpdateViewportIntersection(unsigned flags,
       occlusion_state ==
           mojom::blink::FrameOcclusionState::kGuaranteedNotOccluded &&
       parent_lifecycle_state >= DocumentLifecycle::kPrePaintClean;
+  if (!should_compute_occlusion) {
+    occlusion_state = mojom::blink::FrameOcclusionState::kUnknown;
+  }
 
   LayoutEmbeddedContent* owner_layout_object =
       owner_element->GetLayoutEmbeddedContent();
@@ -192,6 +195,11 @@ void FrameView::UpdateViewportIntersection(unsigned flags,
 
     TransformState child_frame_to_root_frame(
         TransformState::kUnapplyInverseTransformDirection);
+    // TODO: Should this be IsOutermostMainFrame()?
+    if (owner_document.GetFrame()->LocalFrameRoot().IsMainFrame()) {
+      child_frame_to_root_frame.Move(PhysicalOffset::FromPointFRound(
+          gfx::PointF(frame.GetOutermostMainFrameScrollPosition())));
+    }
     if (owner_layout_object) {
       owner_layout_object->MapAncestorToLocal(
           nullptr, child_frame_to_root_frame,
@@ -216,8 +224,8 @@ void FrameView::UpdateViewportIntersection(unsigned flags,
 
   SetViewportIntersection(mojom::blink::ViewportIntersectionState(
       viewport_intersection, mainframe_intersection, gfx::Rect(),
-      occlusion_state, frame.GetMainFrameViewportSize(),
-      frame.GetMainFrameScrollOffset(), main_frame_gfx_transform));
+      occlusion_state, frame.GetOutermostMainFrameSize(),
+      frame.GetOutermostMainFrameScrollPosition(), main_frame_gfx_transform));
 
   UpdateFrameVisibility(!viewport_intersection.IsEmpty());
 

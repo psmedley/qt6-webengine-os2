@@ -1,15 +1,8 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/containers/span.h"
-
-// span.h is a widely included header and its size has significant impact on
-// build time. Try not to raise this limit unless absolutely necessary. See
-// https://chromium.googlesource.com/chromium/src/+/HEAD/docs/wmax_tokens.md
-#ifndef NACL_TC_REV
-#pragma clang max_tokens_here 272000
-#endif
 
 #include <stdint.h>
 
@@ -1029,6 +1022,13 @@ TEST(SpanTest, Empty) {
     int array[] = {1, 2, 3};
     span<int> span(array);
     EXPECT_FALSE(span.empty());
+  }
+
+  {
+    std::vector<int> vector = {1, 2, 3};
+    span<int> s = vector;
+    span<int> span_of_checked_iterators = {s.end(), s.end()};
+    EXPECT_TRUE(span_of_checked_iterators.empty());
   }
 }
 

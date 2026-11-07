@@ -1,4 +1,4 @@
-// Copyright 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,6 +61,7 @@ SingleThreadProxy::SingleThreadProxy(LayerTreeHost* layer_tree_host,
 #endif
       inside_draw_(false),
       defer_main_frame_update_(false),
+      pause_rendering_(false),
       animate_requested_(false),
       update_layers_requested_(false),
       commit_requested_(false),
@@ -230,39 +231,35 @@ void SingleThreadProxy::DoCommit(const viz::BeginFrameArgs& commit_args) {
       layer_tree_host_->GetId(), commit_args.frame_id.sequence_number);
 
   // Commit immediately.
+  DebugScopedSetMainThreadBlocked main_thread_blocked(task_runner_provider_);
+  DebugScopedSetImplThread impl(task_runner_provider_);
+
+  host_impl_->BeginCommit(commit_state->source_frame_number,
+                          commit_state->trace_id);
+
+  host_impl_->FinishCommit(*commit_state, unsafe_state);
+  commit_state.reset();
+  completion_event->Signal();
+
   {
-    DebugScopedSetMainThreadBlocked main_thread_blocked(task_runner_provider_);
-    DebugScopedSetImplThread impl(task_runner_provider_);
-
-    host_impl_->BeginCommit(commit_state->source_frame_number);
-
-    host_impl_->FinishCommit(*commit_state, unsafe_state);
-    commit_state.reset();
-    completion_event->Signal();
-
-    if (scheduler_on_impl_thread_)
-      scheduler_on_impl_thread_->DidCommit();
-
-    {
-      DebugScopedSetMainThread main(task_runner_provider_);
-      IssueImageDecodeFinishedCallbacks();
-    }
-    host_impl_->CommitComplete();
-
-    std::vector<uint32_t> ids =
-        host_impl_->TakeFinishedTransitionRequestSequenceIds();
-    {
-      DebugScopedSetMainThread main(task_runner_provider_);
-      layer_tree_host_->NotifyTransitionRequestsFinished(ids);
-    }
-
-    // Commit goes directly to the active tree, but we need to synchronously
-    // "activate" the tree still during commit to satisfy any potential
-    // SetNextCommitWaitsForActivation calls.  Unfortunately, the tree
-    // might not be ready to draw, so DidActivateSyncTree must set
-    // the flag to force the tree to not draw until textures are ready.
-    NotifyReadyToActivate();
+    DebugScopedSetMainThread main(task_runner_provider_);
+    IssueImageDecodeFinishedCallbacks();
   }
+}
+
+void SingleThreadProxy::DoPostCommit() {
+  TRACE_EVENT0("cc", "SingleThreadProxy::DoPostCommit");
+  DCHECK(task_runner_provider_->IsMainThread());
+
+  DebugScopedSetImplThread impl(task_runner_provider_);
+  host_impl_->CommitComplete();
+
+  // Commit goes directly to the active tree, but we need to synchronously
+  // "activate" the tree still during commit to satisfy any potential
+  // SetNextCommitWaitsForActivation calls.  Unfortunately, the tree
+  // might not be ready to draw, so DidActivateSyncTree must set
+  // the flag to force the tree to not draw until textures are ready.
+  NotifyReadyToActivate();
 }
 
 void SingleThreadProxy::IssueImageDecodeFinishedCallbacks() {
@@ -347,6 +344,31 @@ void SingleThreadProxy::SetDeferMainFrameUpdate(bool defer_main_frame_update) {
   scheduler_on_impl_thread_->SetDeferBeginMainFrame(defer_main_frame_update_);
 }
 
+void SingleThreadProxy::SetPauseRendering(bool pause_rendering) {
+  DCHECK(task_runner_provider_->IsMainThread());
+  // Pause updates only makes sense if there's a scheduler. In synchronous mode,
+  // the client controls when a frame is produced.
+  if (!scheduler_on_impl_thread_)
+    return;
+  if (pause_rendering_ == pause_rendering)
+    return;
+
+  pause_rendering_ = pause_rendering;
+  if (pause_rendering_) {
+    TRACE_EVENT_NESTABLE_ASYNC_BEGIN0(
+        "cc", "SingleThreadProxy::SetPauseRendering", TRACE_ID_LOCAL(this));
+  } else {
+    TRACE_EVENT_NESTABLE_ASYNC_END0(
+        "cc", "SingleThreadProxy::SetPauseRendering", TRACE_ID_LOCAL(this));
+  }
+
+  layer_tree_host_->OnPauseRenderingChanged(pause_rendering_);
+
+  // The scheduler needs to know that it should not issue BeginFrame.
+  DebugScopedSetImplThread impl(task_runner_provider_);
+  scheduler_on_impl_thread_->SetPauseRendering(pause_rendering_);
+}
+
 bool SingleThreadProxy::StartDeferringCommits(base::TimeDelta timeout,
                                               PaintHoldingReason reason) {
   DCHECK(task_runner_provider_->IsMainThread());
@@ -363,7 +385,7 @@ bool SingleThreadProxy::StartDeferringCommits(base::TimeDelta timeout,
   commits_restart_time_ = base::TimeTicks::Now() + timeout;
 
   // Notify dependent systems that the deferral status has changed.
-  layer_tree_host_->OnDeferCommitsChanged(true, reason);
+  layer_tree_host_->OnDeferCommitsChanged(true, reason, absl::nullopt);
   return true;
 }
 
@@ -380,7 +402,7 @@ void SingleThreadProxy::StopDeferringCommits(
                                   TRACE_ID_LOCAL(this));
 
   // Notify dependent systems that the deferral status has changed.
-  layer_tree_host_->OnDeferCommitsChanged(false, reason);
+  layer_tree_host_->OnDeferCommitsChanged(false, reason, trigger);
 }
 
 bool SingleThreadProxy::IsDeferringCommits() const {
@@ -442,6 +464,13 @@ void SingleThreadProxy::NotifyReadyToActivate() {
   TRACE_EVENT0("cc", "SingleThreadProxy::NotifyReadyToActivate");
   if (scheduler_on_impl_thread_)
     scheduler_on_impl_thread_->NotifyReadyToActivate();
+}
+
+bool SingleThreadProxy::IsReadyToActivate() {
+  DCHECK(!task_runner_provider_->HasImplThread() ||
+         task_runner_provider_->IsImplThread());
+  return scheduler_on_impl_thread_ &&
+         scheduler_on_impl_thread_->IsReadyToActivate();
 }
 
 void SingleThreadProxy::NotifyReadyToDraw() {
@@ -618,13 +647,19 @@ void SingleThreadProxy::NotifyImageDecodeRequestFinished() {
   // If we don't have a scheduler, then just issue the callbacks here.
   // Otherwise, schedule a commit.
   if (!scheduler_on_impl_thread_) {
-    auto sequence_ids = host_impl_->TakeFinishedTransitionRequestSequenceIds();
     DebugScopedSetMainThread main_thread(task_runner_provider_);
     IssueImageDecodeFinishedCallbacks();
-    layer_tree_host_->NotifyTransitionRequestsFinished(sequence_ids);
   } else {
     SetNeedsCommitOnImplThread();
   }
+}
+
+void SingleThreadProxy::NotifyTransitionRequestFinished(uint32_t sequence_id) {
+  DCHECK(!task_runner_provider_->HasImplThread() ||
+         task_runner_provider_->IsImplThread());
+
+  DebugScopedSetMainThread main_thread(task_runner_provider_);
+  layer_tree_host_->NotifyTransitionRequestsFinished({sequence_id});
 }
 
 void SingleThreadProxy::DidPresentCompositorFrameOnImplThread(
@@ -707,6 +742,7 @@ void SingleThreadProxy::CompositeImmediatelyForTest(
   base::AutoReset<bool> inside_composite(&inside_synchronous_composite_, true);
 
   if (layer_tree_frame_sink_lost_) {
+    auto sync = layer_tree_host_->ForceSyncCompositeForTest();  // IN-TEST
     RequestNewLayerTreeFrameSink();
     // RequestNewLayerTreeFrameSink could have synchronously created an output
     // surface, so check again before returning.
@@ -741,6 +777,7 @@ void SingleThreadProxy::CompositeImmediatelyForTest(
     commit_requested_ = false;
     DoPainting(begin_frame_args);
     DoCommit(begin_frame_args);
+    DoPostCommit();
 
     DCHECK_EQ(
         0u,
@@ -882,6 +919,14 @@ size_t SingleThreadProxy::CommitDurationSampleCountForTesting() const {
       ->CommitDurationSampleCountForTesting();  // IN-TEST
 }
 
+void SingleThreadProxy::ReportEventLatency(
+    std::vector<EventLatencyTracker::LatencyData> latencies) {
+  DCHECK(!task_runner_provider_->HasImplThread() ||
+         task_runner_provider_->IsImplThread());
+  DebugScopedSetMainThread main(task_runner_provider_);
+  layer_tree_host_->ReportEventLatency(std::move(latencies));
+}
+
 void SingleThreadProxy::SetRenderFrameObserver(
     std::unique_ptr<RenderFrameMetadataObserver> observer) {
   DCHECK(task_runner_provider_->IsMainThread());
@@ -889,14 +934,10 @@ void SingleThreadProxy::SetRenderFrameObserver(
   host_impl_->SetRenderFrameObserver(std::move(observer));
 }
 
-void SingleThreadProxy::SetEnableFrameRateThrottling(
-    bool enable_frame_rate_throttling) {
-  DCHECK(task_runner_provider_->IsMainThread());
-}
-
-uint32_t SingleThreadProxy::GetAverageThroughput() const {
+double SingleThreadProxy::GetPercentDroppedFrames() const {
   DebugScopedSetImplThread impl(task_runner_provider_);
-  return host_impl_->dropped_frame_counter()->GetAverageThroughput();
+  return host_impl_->dropped_frame_counter()
+      ->sliding_window_current_percent_dropped();
 }
 
 void SingleThreadProxy::UpdateBrowserControlsState(
@@ -1038,7 +1079,8 @@ void SingleThreadProxy::DoBeginMainFrame(
     std::unique_ptr<CompositorCommitData> commit_data;
     {
       DebugScopedSetImplThread impl(task_runner_provider_);
-      commit_data = host_impl_->ProcessCompositorDeltas();
+      commit_data = host_impl_->ProcessCompositorDeltas(
+          /* main_thread_mutator_host */ nullptr);
     }
     layer_tree_host_->ApplyCompositorChanges(commit_data.get());
     did_apply_compositor_deltas_ = true;
@@ -1048,7 +1090,7 @@ void SingleThreadProxy::DoBeginMainFrame(
   layer_tree_host_->BeginMainFrame(begin_frame_args);
   layer_tree_host_->AnimateLayers(begin_frame_args.frame_time);
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   const bool record_metrics =
       layer_tree_host_->GetSettings().is_layer_tree_for_ui;
 #else
@@ -1066,7 +1108,7 @@ void SingleThreadProxy::DoPainting(const viz::BeginFrameArgs& commit_args) {
 
   std::unique_ptr<BeginMainFrameMetrics> begin_main_frame_metrics =
       layer_tree_host_->TakeBeginMainFrameMetrics();
-  host_impl_->ReadyToCommit(commit_args, begin_main_frame_metrics.get());
+  host_impl_->ReadyToCommit(commit_args, true, begin_main_frame_metrics.get());
 
   // TODO(enne): SingleThreadProxy does not support cancelling commits yet,
   // search for CommitEarlyOutReason::FINISHED_NO_UPDATES inside
@@ -1087,7 +1129,7 @@ void SingleThreadProxy::BeginMainFrameAbortedOnImplThread(
   host_impl_->BeginMainFrameAborted(
       reason, std::move(empty_swap_promises),
       scheduler_on_impl_thread_->last_dispatched_begin_main_frame_args(),
-      did_apply_compositor_deltas_);
+      /* next_bmf */ false, did_apply_compositor_deltas_);
   scheduler_on_impl_thread_->BeginMainFrameAborted(reason);
 }
 
@@ -1114,6 +1156,14 @@ void SingleThreadProxy::ScheduledActionCommit() {
   DoCommit(scheduler_on_impl_thread_->last_dispatched_begin_main_frame_args());
 }
 
+void SingleThreadProxy::ScheduledActionPostCommit() {
+  // DebugScopedSetImplThread here is just a formality; all SchedulerClient
+  // methods should have it.
+  DebugScopedSetImplThread impl(task_runner_provider_);
+  DebugScopedSetMainThread main(task_runner_provider_);
+  DoPostCommit();
+}
+
 void SingleThreadProxy::ScheduledActionActivateSyncTree() {
   DebugScopedSetImplThread impl(task_runner_provider_);
   host_impl_->ActivateSyncTree();
@@ -1130,6 +1180,7 @@ void SingleThreadProxy::ScheduledActionBeginLayerTreeFrameSinkCreation() {
     ScheduleRequestNewLayerTreeFrameSink();
   } else {
     DebugScopedSetMainThread main(task_runner_provider_);
+    auto sync = layer_tree_host_->ForceSyncCompositeForTest();  // IN-TEST
     RequestNewLayerTreeFrameSink();
   }
 }
