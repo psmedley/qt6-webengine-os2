@@ -23,6 +23,8 @@ if (is_chromeos) {
   component_os = "mac"
 } else if (is_fuchsia) {
   component_os = "fuchsia"
+} else if (is_os2) {
+  component_os = "os2"
 } else {
   assert(false, "unsupported_platform")
 }
