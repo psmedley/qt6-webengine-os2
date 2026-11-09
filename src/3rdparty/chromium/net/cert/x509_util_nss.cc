@@ -21,6 +21,7 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
+#include "build/build_config.h"
 #include "crypto/nss_util.h"
 #include "crypto/scoped_nss_types.h"
 #include "third_party/boringssl/src/include/openssl/pool.h"
@@ -439,6 +440,17 @@ SHA256HashValue CalculateFingerprint256(CERTCertificate* cert) {
   return sha256;
 }
 
+#if BUILDFLAG(IS_OS2)
+// kLIBC has no RTLD_DEFAULT; NSS is linked directly, so decide at compile time.
+SECStatus GetCertIsPerm(const CERTCertificate* cert, PRBool* isperm) {
+#if NSS_VMAJOR > 3 || (NSS_VMAJOR == 3 && NSS_VMINOR >= 31)
+  return CERT_GetCertIsPerm(cert, isperm);
+#else
+  *isperm = cert->isperm;
+  return SECSuccess;
+#endif
+}
+#else
 DISABLE_CFI_DLSYM
 SECStatus GetCertIsPerm(const CERTCertificate* cert, PRBool* isperm) {
   // TODO(https://crbug.com/1365414): When the minimum NSS version is raised to
@@ -453,5 +465,6 @@ SECStatus GetCertIsPerm(const CERTCertificate* cert, PRBool* isperm) {
   *isperm = cert->isperm;
   return SECSuccess;
 }
+#endif  // BUILDFLAG(IS_OS2)
 
 }  // namespace net::x509_util
