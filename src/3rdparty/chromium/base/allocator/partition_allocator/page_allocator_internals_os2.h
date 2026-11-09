@@ -72,10 +72,12 @@ int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
   }
 }
 
-uintptr_t SystemAllocPagesInternal(uintptr_t hint,
-                               size_t length,
-                               PageAccessibilityConfiguration accessibility,
-                               PageTag page_tag) {
+uintptr_t SystemAllocPagesInternal(
+    uintptr_t hint,
+    size_t length,
+    PageAccessibilityConfiguration accessibility,
+    PageTag page_tag,
+    [[maybe_unused]] int file_descriptor_for_shared_alloc) {
   ULONG flags = GetAccessFlags(accessibility);
   if (flags == 0)
     flags = PAG_READ; // OS/2 requires at least one permission bit.
