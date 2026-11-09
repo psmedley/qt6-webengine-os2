@@ -27,6 +27,7 @@ struct DisplayExtensionsEGL;
 template <typename GLDisplayPlatform>
 class GLDisplayManager;
 
+#if defined(USE_EGL)
 class EGLDisplayPlatform {
  public:
   constexpr EGLDisplayPlatform()
@@ -45,6 +46,7 @@ class EGLDisplayPlatform {
   int platform_;
   bool valid_;
 };
+#endif  // defined(USE_EGL)
 
 // If adding a new type, also add it to EGLDisplayType in
 // tools/metrics/histograms/enums.xml. Don't remove or reorder entries.
@@ -78,6 +80,7 @@ enum DisplayPlatform {
   WGL = 3,
 };
 
+#if defined(USE_EGL)
 GL_EXPORT void GetEGLInitDisplaysForTesting(
     bool supports_angle_d3d,
     bool supports_angle_opengl,
@@ -88,6 +91,7 @@ GL_EXPORT void GetEGLInitDisplaysForTesting(
     bool supports_angle_metal,
     const base::CommandLine* command_line,
     std::vector<DisplayType>* init_displays);
+#endif  // defined(USE_EGL)
 
 class GL_EXPORT GLDisplay {
  public:

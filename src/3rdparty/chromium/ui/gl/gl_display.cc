@@ -19,11 +19,15 @@
 #include "base/strings/string_split.h"
 #include "base/system/sys_info.h"
 #include "build/build_config.h"
+#if defined(USE_EGL)
 #include "ui/gl/angle_platform_impl.h"
 #include "ui/gl/egl_util.h"
+#endif  // defined(USE_EGL)
 #include "ui/gl/gl_bindings.h"
+#if defined(USE_EGL)
 #include "ui/gl/gl_context_egl.h"
 #include "ui/gl/gl_display_egl_util.h"
+#endif  // defined(USE_EGL)
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
 
@@ -40,6 +44,7 @@
 #include "base/android/build_info.h"
 #endif
 
+#if defined(USE_EGL)
 // From ANGLE's egl/eglext.h.
 
 #ifndef EGL_ANGLE_platform_angle
@@ -142,9 +147,11 @@
 #endif /* EGL_ANGLE_feature_control */
 
 using ui::GetLastEGLErrorString;
+#endif  // defined(USE_EGL)
 
 namespace gl {
 
+#if defined(USE_EGL)
 namespace {
 
 std::vector<const char*> GetAttribArrayFromStringVector(
@@ -661,6 +668,7 @@ void GetEGLInitDisplaysForTesting(bool supports_angle_d3d,
                      supports_angle_swiftshader, supports_angle_egl,
                      supports_angle_metal, command_line, init_displays);
 }
+#endif  // defined(USE_EGL)
 
 GLDisplay::GLDisplay(uint64_t system_device_id, DisplayPlatform type)
     : system_device_id_(system_device_id), type_(type) {}
