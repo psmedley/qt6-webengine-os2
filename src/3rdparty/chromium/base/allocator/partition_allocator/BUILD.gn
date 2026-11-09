@@ -229,6 +229,11 @@ component("partition_alloc") {
     } else {
       sources += [ "partition_alloc_base/time/time_now_posix.cc" ]
     }
+    if (is_os2) {
+      # OS/2 has no /dev/urandom.
+      sources -= [ "partition_alloc_base/rand_util_posix.cc" ]
+      sources += [ "partition_alloc_base/rand_util_os2.cc" ]
+    }
   } else if (is_fuchsia) {
     sources += [
       "page_allocator_internals_fuchsia.h",
