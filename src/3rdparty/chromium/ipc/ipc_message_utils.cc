@@ -1538,7 +1538,7 @@ bool ParamTraits<QMSG>::Read(const base::Pickle* m,
                             base::PickleIterator* iter,
                             param_type* r) {
   const char *data;
-  int data_size = 0;
+  size_t data_size = 0;
   bool result = iter->ReadData(&data, &data_size);
   if (result && data_size == sizeof(QMSG)) {
     memcpy(r, data, sizeof(QMSG));
