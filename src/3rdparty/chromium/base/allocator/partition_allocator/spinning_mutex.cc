@@ -179,7 +179,7 @@ void SpinningMutex::LockSlowSpinLock() {
       // progress.
       base::PlatformThread::Sleep(base::Milliseconds(1));
     }
-  } while (!TrySpinLock());
+  } while (!Try());
 }
 
 #endif  // defined(PA_HAS_FAST_MUTEX)
