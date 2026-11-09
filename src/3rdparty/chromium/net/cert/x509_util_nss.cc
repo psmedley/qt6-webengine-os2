@@ -21,7 +21,6 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
-#include "build/build_config.h"
 #include "crypto/nss_util.h"
 #include "crypto/scoped_nss_types.h"
 #include "third_party/boringssl/src/include/openssl/pool.h"
@@ -440,17 +439,19 @@ SHA256HashValue CalculateFingerprint256(CERTCertificate* cert) {
   return sha256;
 }
 
-#if BUILDFLAG(IS_OS2)
-// kLIBC has no RTLD_DEFAULT; NSS is linked directly, so decide at compile time.
-SECStatus GetCertIsPerm(const CERTCertificate* cert, PRBool* isperm) {
-#if NSS_VMAJOR > 3 || (NSS_VMAJOR == 3 && NSS_VMINOR >= 31)
-  return CERT_GetCertIsPerm(cert, isperm);
-#else
-  *isperm = cert->isperm;
-  return SECSuccess;
-#endif
+#if defined(OS_OS2)
+namespace {
+// TODO: Remove once https://github.com/bitwiseworks/libc/issues/86 is done.
+// Same helper as in known_roots_nss.cc.
+void* dlsym2(const char* sym) {
+  // NOTE: NSS3.DLL is statically linked and loaded at startup so there is
+  // no need to dlclose it - dlopen is just to get its handle.
+  void* handle = dlopen("nss3.dll", 0);
+  return handle ? dlsym(handle, sym) : nullptr;
 }
-#else
+}  // namespace
+#endif
+
 DISABLE_CFI_DLSYM
 SECStatus GetCertIsPerm(const CERTCertificate* cert, PRBool* isperm) {
   // TODO(https://crbug.com/1365414): When the minimum NSS version is raised to
@@ -458,13 +459,19 @@ SECStatus GetCertIsPerm(const CERTCertificate* cert, PRBool* isperm) {
   using GetCertIsPermFunction = SECStatus (*)(const CERTCertificate*, PRBool*);
   static GetCertIsPermFunction get_cert_is_perm =
       reinterpret_cast<GetCertIsPermFunction>(
+#if defined(OS_OS2)
+          // TODO: We need to use dlopen + dlsym (and underscore) since
+          // RTLD_DEFAULT is not yet implemented in LIBCn (check
+          // https://github.com/bitwiseworks/libc/issues/86 for details).
+          dlsym2("_CERT_GetCertIsPerm"));
+#else
           dlsym(RTLD_DEFAULT, "CERT_GetCertIsPerm"));
+#endif
   if (get_cert_is_perm) {
     return get_cert_is_perm(cert, isperm);
   }
   *isperm = cert->isperm;
   return SECSuccess;
 }
-#endif  // BUILDFLAG(IS_OS2)
 
 }  // namespace net::x509_util
