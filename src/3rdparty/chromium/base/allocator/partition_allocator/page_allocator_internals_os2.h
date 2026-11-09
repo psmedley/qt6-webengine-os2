@@ -7,7 +7,6 @@
 
 #include "base/allocator/partition_allocator/oom.h"
 #include "base/allocator/partition_allocator/page_allocator_internal.h"
-#include "base/logging.h"
 #include "base/allocator/partition_allocator/partition_alloc_check.h"
 #include "base/allocator/partition_allocator/partition_alloc_notreached.h"
 
@@ -54,7 +53,7 @@ constexpr bool kHintIsAdvisory = false;
 std::atomic<int32_t> s_allocPageErrorCode{NO_ERROR};
 
 int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
-  switch (accessibility) {
+  switch (accessibility.permissions) {
     case PageAccessibilityConfiguration::kRead:
       return PAG_READ;
     case PageAccessibilityConfiguration::kReadWrite:
@@ -80,7 +79,8 @@ uintptr_t SystemAllocPagesInternal(uintptr_t hint,
   ULONG flags = GetAccessFlags(accessibility);
   if (flags == 0)
     flags = PAG_READ; // OS/2 requires at least one permission bit.
-  if (accessibility != PageAccessibilityConfiguration::kInaccessible)
+  if (accessibility.permissions !=
+      PageAccessibilityConfiguration::kInaccessible)
     flags |= PAG_COMMIT;
   if (hint)
     flags |= OBJ_LOCATION;
@@ -122,7 +122,8 @@ bool TrySetSystemPagesAccessInternal(
     size_t length,
     PageAccessibilityConfiguration accessibility) {
   void* ptr = reinterpret_cast<void*>(address);
-  if (accessibility == PageAccessibilityConfiguration::kInaccessible)
+  if (accessibility.permissions ==
+      PageAccessibilityConfiguration::kInaccessible)
     return MyDosSetMem(ptr, length, PAG_DECOMMIT) == NO_ERROR;
   return MyDosSetMem(ptr, length, PAG_COMMIT |
                      GetAccessFlags(accessibility)) == NO_ERROR;
@@ -133,7 +134,8 @@ void SetSystemPagesAccessInternal(
     size_t length,
     PageAccessibilityConfiguration accessibility) {
   void* ptr = reinterpret_cast<void*>(address);
-  if (accessibility == PageAccessibilityConfiguration::kInaccessible) {
+  if (accessibility.permissions ==
+      PageAccessibilityConfiguration::kInaccessible) {
     APIRET arc = MyDosSetMem(ptr, length, PAG_DECOMMIT);
     if (arc != NO_ERROR) {
       // We check `arc` for `NO_ERROR` here so that in a crash
