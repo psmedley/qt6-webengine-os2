@@ -971,11 +971,14 @@ bool AllocateFileRegion(File* file, int64_t offset, size_t size) {
 #endif
 
   // Manually realize the extended file by writing bytes to it at intervals.
-  blksize_t block_size = 512;  // Start with something safe.
   stat_wrapper_t statbuf;
+  // Use the type of st_blksize rather than blksize_t, which OS/2 (kLIBC)
+  // doesn't define.
+  using BlockSize = decltype(statbuf.st_blksize);
+  BlockSize block_size = 512;  // Start with something safe.
   if (File::Fstat(file->GetPlatformFile(), &statbuf) == 0 &&
       statbuf.st_blksize > 0 && base::bits::IsPowerOfTwo(statbuf.st_blksize)) {
-    block_size = static_cast<blksize_t>(statbuf.st_blksize);
+    block_size = static_cast<BlockSize>(statbuf.st_blksize);
   }
 
   // Write starting at the next block boundary after the old file length.
