@@ -22,6 +22,15 @@ base::LazyInstance<BSDRandom>::Leaky g_bsd_random = LAZY_INSTANCE_INITIALIZER;
 
 namespace base {
 
+namespace internal {
+
+void ConfigureBoringSSLBackedRandBytesFieldTrial() {
+  // OS/2 always uses BSD random() above; there is no BoringSSL-backed
+  // variant to configure.
+}
+
+}  // namespace internal
+
 void RandBytes(void* output, size_t output_length) {
   // trigger a thread-safe one-time srandomdev() call.
   g_bsd_random.Pointer();

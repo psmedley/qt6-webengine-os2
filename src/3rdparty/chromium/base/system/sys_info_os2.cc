@@ -27,6 +27,13 @@ uint64_t SysInfo::AmountOfAvailablePhysicalMemoryImpl() {
 }
 
 // static
+SysInfo::HardwareInfo SysInfo::GetHardwareInfoSync() {
+  // No portable way to query the machine manufacturer/model on OS/2; empty
+  // strings mean "unknown" per sys_info.h.
+  return HardwareInfo();
+}
+
+// static
 std::string SysInfo::CPUModelName() {
   return "i386";
 }
