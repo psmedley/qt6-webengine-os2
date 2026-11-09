@@ -9,8 +9,26 @@ const {pipeline, Readable} = require('stream');
 
 const {promises: pfs} = fs;
 
+// The hash is only used to detect unchanged inputs, so it need not be
+// cryptographic. Some Node builds (e.g. on OS/2) lack OpenSSL digests and
+// throw "Digest method not supported"; fall back to FNV-1a in that case.
+function fnv1a(data) {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < data.length; i++) {
+    h1 = Math.imul(h1 ^ data[i], 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ data[i], 0x811c9dc5) >>> 0;
+  }
+  return 'fnv-' + h1.toString(16).padStart(8, '0') +
+      h2.toString(16).padStart(8, '0') + '-' + data.length.toString(16);
+}
+
 function sha1(data) {
-  return crypto.createHash('sha1').update(data, 'binary').digest('hex');
+  try {
+    return crypto.createHash('sha1').update(data, 'binary').digest('hex');
+  } catch (e) {
+    return fnv1a(data);
+  }
 }
 
 async function readTextFile(filename) {
