@@ -23,7 +23,7 @@ APIRET MyDosSetMem(PVOID base, ULONG length, ULONG flags) {
   // Query the current state of each range to avoid committing/decommitting
   // already commited/decommitted pages.
   PVOID addr = base;
-  APIRET arc;
+  APIRET arc = NO_ERROR;
   while (length) {
     ULONG act_len = length, act_flags, new_flags = flags;
     arc = DosQueryMem(addr, &act_len, &act_flags);
@@ -43,7 +43,7 @@ APIRET MyDosSetMem(PVOID base, ULONG length, ULONG flags) {
     length -= act_len;
   }
 
-  return NO_ERROR;
+  return arc;
 }
 
 } // namespace
@@ -172,7 +172,9 @@ void DecommitSystemPagesInternal(
 }
 
 void DecommitAndZeroSystemPagesInternal(uintptr_t address, size_t length) {
-  PA_CHECK(MyDosSetMem(reinterpret_cast<void*>(address), length, PAG_DECOMMIT));
+  PA_CHECK(static_cast<ULONG>(NO_ERROR) ==
+           MyDosSetMem(reinterpret_cast<void*>(address), length,
+                       PAG_DECOMMIT));
 }
 
 void RecommitSystemPagesInternal(
