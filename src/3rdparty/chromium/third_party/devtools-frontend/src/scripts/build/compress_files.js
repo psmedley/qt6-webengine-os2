@@ -82,9 +82,12 @@ async function compressFile(filename) {
   const prevHash = fileExists(hashFilename) ? await readTextFile(hashFilename) : '';
   const sourceData = await readBinaryFile(filename);
   const currHash = sha1(sourceData);
-  if (prevHash !== currHash) {
-    await writeTextFile(hashFilename, currHash);
+  // Also recompress if the output is missing, and only record the hash once
+  // compression has finished, so an interrupted run can't leave a matching
+  // .hash next to a missing or truncated .compressed file.
+  if (prevHash !== currHash || !fileExists(compressedFilename)) {
     await brotli(sourceData, compressedFilename);
+    await writeTextFile(hashFilename, currHash);
   }
 }
 
