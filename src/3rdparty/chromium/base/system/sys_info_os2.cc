@@ -11,7 +11,7 @@
 namespace base {
 
 // static
-int64_t SysInfo::AmountOfPhysicalMemoryImpl() {
+uint64_t SysInfo::AmountOfPhysicalMemoryImpl() {
   ULONG data;
   if (DosQuerySysInfo(QSV_TOTPHYSMEM, QSV_TOTPHYSMEM, &data, sizeof(data)))
     return 0;
@@ -19,7 +19,7 @@ int64_t SysInfo::AmountOfPhysicalMemoryImpl() {
 }
 
 // static
-int64_t SysInfo::AmountOfAvailablePhysicalMemoryImpl() {
+uint64_t SysInfo::AmountOfAvailablePhysicalMemoryImpl() {
   ULONG data;
   if (DosQuerySysInfo(QSV_TOTAVAILMEM, QSV_TOTAVAILMEM, &data, sizeof(data)))
     return 0;
