@@ -112,6 +112,8 @@ PlatformThreadId PlatformThread::CurrentId() {
   // - gettid() is fast, since its return value is cached in pthread (in the
   //   thread control block of pthread). See gettid.c in bionic.
   return gettid();
+#elif BUILDFLAG(IS_OS2)
+  return _gettid();
 #elif BUILDFLAG(IS_FUCHSIA)
   return zx_thread_self();
 #elif BUILDFLAG(IS_SOLARIS) || BUILDFLAG(IS_QNX)

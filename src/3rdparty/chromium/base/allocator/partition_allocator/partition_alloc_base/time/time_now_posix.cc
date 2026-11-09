@@ -50,7 +50,7 @@ int64_t ConvertTimespecToMicros(const struct timespec& ts) {
 // _POSIX_MONOTONIC_CLOCK to -1.
 #if (BUILDFLAG(IS_POSIX) && defined(_POSIX_MONOTONIC_CLOCK) && \
      _POSIX_MONOTONIC_CLOCK >= 0) ||                           \
-    BUILDFLAG(IS_BSD) || BUILDFLAG(IS_ANDROID)
+    BUILDFLAG(IS_BSD) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_OS2)
 int64_t ClockNow(clockid_t clk_id) {
   struct timespec ts;
   PA_CHECK(clock_gettime(clk_id, &ts) == 0);
