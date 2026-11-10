@@ -50,7 +50,8 @@ scoped_refptr<GLContext> CreateGLContext(GLShareGroup* share_group,
   return nullptr;
 }
 
-scoped_refptr<GLSurface> CreateViewGLSurface(gfx::AcceleratedWidget window) {
+scoped_refptr<GLSurface> CreateViewGLSurface(GLDisplay* display,
+                                             gfx::AcceleratedWidget window) {
   TRACE_EVENT0("gpu", "gl::init::CreateViewGLSurface");
 
   // TODO: Implement it on OS/2.
@@ -66,17 +67,10 @@ scoped_refptr<GLSurface> CreateViewGLSurface(gfx::AcceleratedWidget window) {
   return nullptr;
 }
 
-scoped_refptr<GLSurface> CreateSurfacelessViewGLSurface(
-    gfx::AcceleratedWidget window) {
-  TRACE_EVENT0("gpu", "gl::init::CreateSurfacelessViewGLSurface");
-
-  // TODO: Implement it on OS/2.
-
-  return nullptr;
-}
-
 scoped_refptr<GLSurface> CreateOffscreenGLSurfaceWithFormat(
-    const gfx::Size& size, GLSurfaceFormat format) {
+    GLDisplay* display,
+    const gfx::Size& size,
+    GLSurfaceFormat format) {
   TRACE_EVENT0("gpu", "gl::init::CreateOffscreenGLSurface");
 
   // TODO: Implement it on OS/2.
@@ -104,7 +98,7 @@ void SetDisabledExtensionsPlatform(const std::string& disabled_extensions) {
   }
 }
 
-bool InitializeExtensionSettingsOneOffPlatform() {
+bool InitializeExtensionSettingsOneOffPlatform(GLDisplay* display) {
   // TODO: Implement it on OS/2.
 
   switch (GetGLImplementation()) {

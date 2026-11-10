@@ -1209,4 +1209,21 @@ void GLDisplayWGL::Shutdown()
 }
 #endif  // BUILDFLAG(IS_WIN)
 
+#if BUILDFLAG(IS_OS2)
+GLDisplayOS2::GLDisplayOS2(uint64_t system_device_id)
+    : GLDisplay(system_device_id, NONE) {}
+
+GLDisplayOS2::~GLDisplayOS2() = default;
+
+void* GLDisplayOS2::GetDisplay() const {
+  return nullptr;
+}
+
+bool GLDisplayOS2::IsInitialized() const {
+  return true;
+}
+
+void GLDisplayOS2::Shutdown() {}
+#endif  // BUILDFLAG(IS_OS2)
+
 }  // namespace gl

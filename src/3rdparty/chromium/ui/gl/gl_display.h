@@ -10,6 +10,7 @@
 #include <memory>
 #include <vector>
 
+#include "build/build_config.h"
 #include "ui/gl/gl_export.h"
 
 #if defined(USE_EGL)
@@ -219,6 +220,21 @@ class GLDisplayWGL : public GLDisplay {
   int pixel_format_;
 };
 #endif  // BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(IS_OS2)
+// OS/2 has no EGL/GLX/WGL; only the stub and mock GL implementations are
+// supported. This display stands in for a platform display so that code
+// expecting a non-null GLDisplay* (e.g. InitializeGLOneOffPlatform()) works.
+class GL_EXPORT GLDisplayOS2 : public GLDisplay {
+ public:
+  explicit GLDisplayOS2(uint64_t system_device_id);
+  ~GLDisplayOS2() override;
+
+  void* GetDisplay() const override;
+  bool IsInitialized() const override;
+  void Shutdown() override;
+};
+#endif  // BUILDFLAG(IS_OS2)
 
 }  // namespace gl
 
