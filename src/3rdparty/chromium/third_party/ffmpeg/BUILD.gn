@@ -213,6 +213,14 @@ target(link_target_type, "ffmpeg_internal") {
               "$platform_config_root/config.h",
               "$platform_config_root/libavutil/avconfig.h",
             ]
+  if (is_os2 && !has_nasm_deps) {
+    # The x86 source lists assume NASM. Leave out the C files that FFmpeg's
+    # own build only compiles with HAVE_X86ASM (OBJS-$(HAVE_X86ASM) in
+    # lib*/x86/Makefile) because they reference assembly functions from
+    # static tables, which the compiler can't drop. Not every FFmpeg version
+    # has them, hence filter_exclude() rather than "-=".
+    sources = filter_exclude(sources, [ "*/x86/tx_float_init.c" ])
+  }
   include_dirs = [
     platform_config_root,
     ".",
