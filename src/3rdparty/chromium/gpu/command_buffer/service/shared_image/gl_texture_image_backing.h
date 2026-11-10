@@ -8,9 +8,11 @@
 #include "components/viz/common/resources/resource_format.h"
 #include "gpu/command_buffer/service/shared_image/gl_texture_image_backing_helper.h"
 
+#if defined(USE_EGL)
 namespace gl {
 class GLImageEGL;
 }
+#endif
 
 namespace gpu {
 
@@ -78,7 +80,9 @@ class GLTextureImageBacking : public ClearTrackingSharedImageBacking {
   GLTextureImageBackingHelper::InitializeGLTextureParams texture_params_;
 
   sk_sp<SkPromiseImageTexture> cached_promise_texture_;
+#if defined(USE_EGL)
   scoped_refptr<gl::GLImageEGL> image_egl_;
+#endif
 };
 
 }  // namespace gpu
