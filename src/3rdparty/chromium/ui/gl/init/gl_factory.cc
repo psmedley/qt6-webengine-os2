@@ -154,7 +154,11 @@ GLDisplay* InitializeGLOneOff(uint64_t system_device_id) {
   if (!InitializeStaticGLBindingsOneOff())
     return nullptr;
   if (GetGLImplementation() == kGLImplementationDisabled) {
+#if defined(USE_EGL)
     return GetDefaultDisplayEGL();
+#else
+    return GetDefaultDisplay();
+#endif
   }
 
   return InitializeGLOneOffPlatformHelper(true, system_device_id);
@@ -168,7 +172,11 @@ GLDisplay* InitializeGLNoExtensionsOneOff(bool init_bindings,
     if (!InitializeStaticGLBindingsOneOff())
       return nullptr;
     if (GetGLImplementation() == kGLImplementationDisabled) {
+#if defined(USE_EGL)
       return GetDefaultDisplayEGL();
+#else
+      return GetDefaultDisplay();
+#endif
     }
   }
 
