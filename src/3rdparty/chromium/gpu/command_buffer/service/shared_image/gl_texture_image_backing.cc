@@ -41,13 +41,17 @@
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_fence.h"
 #include "ui/gl/gl_gl_api_implementation.h"
+#if defined(USE_EGL)
 #include "ui/gl/gl_image_native_pixmap.h"
+#endif
 #include "ui/gl/gl_image_shared_memory.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_version_info.h"
 #include "ui/gl/scoped_binders.h"
 #include "ui/gl/scoped_make_current.h"
+#if defined(USE_EGL)
 #include "ui/gl/shared_gl_fence_egl.h"
+#endif
 #include "ui/gl/trace_util.h"
 
 #if BUILDFLAG(IS_ANDROID)

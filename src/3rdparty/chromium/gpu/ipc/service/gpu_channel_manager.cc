@@ -56,7 +56,9 @@
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_enums.h"
 #include "ui/gl/gl_share_group.h"
+#if defined(USE_EGL)
 #include "ui/gl/gl_surface_egl.h"
+#endif
 #include "ui/gl/gl_version_info.h"
 #include "ui/gl/init/gl_factory.h"
 
