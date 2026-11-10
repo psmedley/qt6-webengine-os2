@@ -5,6 +5,7 @@
 #ifndef V8_TORQUE_CFG_H_
 #define V8_TORQUE_CFG_H_
 
+#include <algorithm>
 #include <list>
 #include <memory>
 #include <unordered_map>

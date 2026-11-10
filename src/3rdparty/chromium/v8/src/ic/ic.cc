@@ -4,6 +4,8 @@
 
 #include "src/ic/ic.h"
 
+#include <algorithm>
+
 #include "src/api/api-arguments-inl.h"
 #include "src/ast/ast.h"
 #include "src/base/logging.h"
