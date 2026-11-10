@@ -57,7 +57,7 @@ AudioParameters AudioManagerOS2::GetInputStreamParameters(
   // Assume that the system-provided AudioConsumer supports echo cancellation,
   // noise suppression and automatic gain control.
   AudioParameters params(AudioParameters::AUDIO_PCM_LOW_LATENCY,
-                         CHANNEL_LAYOUT_MONO, 16000, 160);
+                         ChannelLayoutConfig::Mono(), 16000, 160);
   params.set_effects(AudioParameters::ECHO_CANCELLER |
                      AudioParameters::NOISE_SUPPRESSION |
                      AudioParameters::AUTOMATIC_GAIN_CONTROL);
@@ -116,7 +116,8 @@ AudioParameters AudioManagerOS2::GetPreferredOutputStreamParameters(
 
   return AudioParameters(AudioParameters::AUDIO_PCM_LOW_LATENCY,
                          obtained.ulChannels == 2 ?
-                             CHANNEL_LAYOUT_STEREO : CHANNEL_LAYOUT_MONO,
+                             ChannelLayoutConfig::Stereo() :
+                             ChannelLayoutConfig::Mono(),
                          obtained.ulSamplingRate, frames_per_buffer);
 }
 
