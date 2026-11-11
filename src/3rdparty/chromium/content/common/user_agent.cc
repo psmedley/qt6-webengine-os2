@@ -46,8 +46,10 @@ std::string GetUserAgentPlatform() {
 #elif BUILDFLAG(IS_ANDROID)
   return "Linux; ";
 #elif BUILDFLAG(IS_FUCHSIA)
-  return "OS/2";
+  return "";
 #elif BUILDFLAG(IS_OS2)
+  // The OS part ("OS/2 i686") comes from uname() in
+  // BuildOSCpuInfoFromOSVersionAndCpuType().
   return "";
 #else
 #error Unsupported platform
@@ -67,6 +69,9 @@ std::string GetUnifiedPlatform() {
   return "Fuchsia";
 #elif BUILDFLAG(IS_LINUX)
   return "X11; Linux x86_64";
+#elif BUILDFLAG(IS_OS2)
+  // Matches the non-reduced OS/2 user agent ("OS/2 i686").
+  return "OS/2 i686";
 #else
 #error Unsupported platform
 #endif
