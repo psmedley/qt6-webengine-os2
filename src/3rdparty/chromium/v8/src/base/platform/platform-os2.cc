@@ -18,7 +18,7 @@ namespace base {
 
 namespace {
 
-ULONG GetProtectionFromMemoryPermission(OS::MemoryPermission access) {
+ULONG GetOS2FlagsFromMemoryPermission(OS::MemoryPermission access) {
   switch (access) {
     case OS::MemoryPermission::kNoAccess:
     case OS::MemoryPermission::kNoAccessWillJitLater:
@@ -66,7 +66,7 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
   DCHECK_EQ(0, alignment % page_size);
   address = AlignedAddress(address, alignment);
 
-  ULONG flags = GetProtectionFromMemoryPermission(access);
+  ULONG flags = GetOS2FlagsFromMemoryPermission(access);
   if (flags == 0) // kNoAccess
     flags = PAG_READ; // OS/2 requires at least one permission bit.
   else
@@ -175,7 +175,7 @@ void OS::Release(void* address, size_t size) {
 bool OS::SetPermissions(void* address, size_t size, MemoryPermission access) {
   DCHECK_EQ(0, reinterpret_cast<uintptr_t>(address) % CommitPageSize());
   DCHECK_EQ(0, size % CommitPageSize());
-  ULONG flags = GetProtectionFromMemoryPermission(access);
+  ULONG flags = GetOS2FlagsFromMemoryPermission(access);
   // Query real page flags as OS/2 doesn't let committing committed pages
   // and decommitting decommitted ones.
   ULONG realSize = size, realFlags = 0;
@@ -191,6 +191,22 @@ bool OS::SetPermissions(void* address, size_t size, MemoryPermission access) {
     }
   }
   return arc == NO_ERROR;
+}
+
+// static
+void OS::SetDataReadOnly(void* address, size_t size) {
+  DCHECK_EQ(0, reinterpret_cast<uintptr_t>(address) % CommitPageSize());
+  DCHECK_EQ(0, size % CommitPageSize());
+
+  CHECK_EQ(static_cast<APIRET>(NO_ERROR),
+           DosSetMem(address, size, PAG_READ));
+}
+
+// static
+bool OS::RecommitPages(void* address, size_t size, MemoryPermission access) {
+  DCHECK_EQ(0, reinterpret_cast<uintptr_t>(address) % CommitPageSize());
+  DCHECK_EQ(0, size % CommitPageSize());
+  return SetPermissions(address, size, access);
 }
 
 bool OS::DiscardSystemPages(void* address, size_t size) {

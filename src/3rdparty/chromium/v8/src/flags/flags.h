@@ -56,7 +56,13 @@ class FlagValue {
 };
 
 // Declare a struct to hold all of our flags.
+#if V8_OS_OS2
+// OS/2 OMF objects only support up to 32-byte alignment, so {v8_flags} can't
+// be page-aligned there and is not memory-protected by FreezeFlags().
+struct FlagValues {
+#else
 struct alignas(kMinimumOSPageSize) FlagValues {
+#endif
   FlagValues() = default;
   // No copying, moving, or assigning. This is a singleton struct.
   FlagValues(const FlagValues&) = delete;
