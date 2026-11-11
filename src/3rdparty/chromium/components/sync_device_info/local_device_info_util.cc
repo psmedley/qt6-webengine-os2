@@ -110,6 +110,9 @@ DeviceInfo::OsType GetLocalDeviceOSType() {
   return DeviceInfo::OsType::kWindows;
 #elif BUILDFLAG(IS_FUCHSIA)
   return DeviceInfo::OsType::kFuchsia;
+#elif BUILDFLAG(IS_OS2)
+  // There is no OS/2 value in the DeviceInfo::OsType enum.
+  return DeviceInfo::OsType::kUnknown;
 #else
 #error Please handle your new device OS here.
 #endif
@@ -125,6 +128,8 @@ DeviceInfo::FormFactor GetLocalDeviceFormFactor() {
              : DeviceInfo::FormFactor::kPhone;
 #elif BUILDFLAG(IS_FUCHSIA)
   return DeviceInfo::FormFactor::kUnknown;
+#elif BUILDFLAG(IS_OS2)
+  return DeviceInfo::FormFactor::kDesktop;
 #else
 #error Please handle your new device OS here.
 #endif
