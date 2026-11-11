@@ -33,6 +33,9 @@ String GetReducedNavigatorPlatform() {
   return "";
 #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   return "Linux x86_64";
+#elif BUILDFLAG(IS_OS2)
+  // Matches the reduced user agent platform in content/common/user_agent.cc.
+  return "OS/2 i686";
 #else
 #error Unsupported platform
 #endif
