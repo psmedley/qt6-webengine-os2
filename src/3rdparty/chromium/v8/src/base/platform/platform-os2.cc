@@ -133,6 +133,9 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
     // arc will be set to some error.
     if (arc == NO_ERROR) break;
   }
+  // If every attempt failed, |base| still holds the unallocated aligned
+  // address; don't hand that out as a successful allocation.
+  if (arc != NO_ERROR) return nullptr;
   DCHECK_IMPLIES(base, base == aligned_base);
   return base;
 }

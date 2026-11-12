@@ -102,6 +102,11 @@ uintptr_t SystemAllocPagesInternal(
   }
   if (arc != NO_ERROR) {
     s_allocPageErrorCode = arc;
+    // On failure |base| may still hold |hint|; callers (e.g.
+    // AllocPagesWithAlignOffset(), which tries random hinted addresses
+    // first) treat any non-zero return as success, so return 0 like
+    // VirtualAlloc() does on Windows.
+    return 0;
   }
   return reinterpret_cast<uintptr_t>(base);
 }
