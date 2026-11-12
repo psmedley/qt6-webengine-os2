@@ -151,10 +151,6 @@ void OS2DiagSignalHandler(int sig, siginfo_t* info, void*) {
              << " (parent pid " << getppid() << ") on thread "
              << base::PlatformThread::CurrentId() << "\n"
              << base::debug::StackTrace().ToString();
-  // base::debug::StackTrace doesn't produce anything on OS/2, so trap into
-  // exceptq instead: its report for this thread shows the kLIBC signal and
-  // exception dispatch frames that led here.
-  __asm__ volatile("int3");
   signal(sig, SIG_DFL);
   raise(sig);
 }
