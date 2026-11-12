@@ -30,6 +30,7 @@
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
+#include "base/debug/stack_trace.h"
 #include "base/logging.h"
 #include "base/memory/memory_pressure_monitor.h"
 #include "base/memory/ptr_util.h"
@@ -2849,6 +2850,9 @@ void RenderProcessHostImpl::RemoveInternalObserver(
 
 void RenderProcessHostImpl::ShutdownForBadMessage(
     CrashReportMode crash_report_mode) {
+  // TODO(os2): temporary diagnostics.
+  LOG(ERROR) << "[os2-diag] ShutdownForBadMessage for renderer id " << GetID()
+             << "\n" << base::debug::StackTrace().ToString();
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kDisableKillAfterBadIPC))
     return;
@@ -3548,6 +3552,10 @@ bool RenderProcessHostImpl::IsReady() {
 }
 
 bool RenderProcessHostImpl::Shutdown(int exit_code) {
+  // TODO(os2): temporary diagnostics.
+  LOG(ERROR) << "[os2-diag] RenderProcessHostImpl::Shutdown(" << exit_code
+             << ") for renderer id " << GetID() << "\n"
+             << base::debug::StackTrace().ToString();
   if (run_renderer_in_process())
     return false;  // Single process mode never shuts down the renderer.
 
@@ -4716,6 +4724,13 @@ ChildProcessTerminationInfo RenderProcessHostImpl::GetChildTerminationInfo(
 
 void RenderProcessHostImpl::ProcessDied(
     const ChildProcessTerminationInfo& termination_info) {
+  // TODO(os2): temporary diagnostics.
+  LOG(ERROR) << "[os2-diag] ProcessDied: renderer id " << GetID()
+             << " status " << termination_info.status << " exit_code "
+             << termination_info.exit_code << " (0x" << std::hex
+             << termination_info.exit_code << std::dec << ")"
+             << " shutdown_requested " << shutdown_requested_
+             << " shutdown_exit_code " << shutdown_exit_code_;
   TRACE_EVENT0("content", "RenderProcessHostImpl::ProcessDied");
   // Our child process has died.  If we didn't expect it, it's a crash.
   // In any case, we need to let everyone know it's gone.
