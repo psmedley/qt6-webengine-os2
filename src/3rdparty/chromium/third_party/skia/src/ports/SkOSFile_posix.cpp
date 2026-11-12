@@ -82,6 +82,17 @@ void sk_fmunmap(const void* addr, size_t length) {
 }
 
 void* sk_fdmmap(int fd, size_t* size) {
+#if defined(__OS2__)
+    // LIBCx's mmap() emulation pages file contents in from its exception
+    // handler. Skia closes the file right after mapping it, and touching some
+    // pages of large font files (e.g. CJK fonts via fontconfig) made that
+    // page-in fail and the renderer get killed (XCPT_SIGNAL_KILLPROC ->
+    // SIGTERM). Return nullptr so callers fall back to SkFILEStream / plain
+    // reads instead of mapping.
+    (void)fd;
+    (void)size;
+    return nullptr;
+#endif
     struct stat status;
     if (0 != fstat(fd, &status)) {
         return nullptr;
