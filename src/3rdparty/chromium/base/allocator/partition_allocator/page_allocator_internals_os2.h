@@ -168,7 +168,10 @@ void SetSystemPagesAccessInternal(
 
 void FreePagesInternal(uintptr_t address, size_t length) {
   APIRET arc = DosFreeMemEx(reinterpret_cast<void*>(address));
-  if (arc != ERROR_INVALID_ADDRESS) PA_CHECK(static_cast<ULONG>(NO_ERROR) == arc);
+  // As in the 6.2.6 port: freeing must succeed. ERROR_INVALID_ADDRESS used
+  // to be ignored here, which hid callers freeing never-allocated hint
+  // addresses returned by a failed SystemAllocPagesInternal().
+  PA_CHECK(static_cast<ULONG>(NO_ERROR) == arc);
 }
 
 void DecommitSystemPagesInternal(
