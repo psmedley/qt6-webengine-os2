@@ -33,8 +33,12 @@ APIRET MyDosSetMem(PVOID base, ULONG length, ULONG flags) {
       new_flags &= ~PAG_COMMIT;
     if ((new_flags & PAG_DECOMMIT) && !(act_flags & (PAG_COMMIT | PAG_FREE)))
       new_flags &= ~PAG_DECOMMIT;
-    if ((new_flags & (PAG_COMMIT | PAG_DECOMMIT)) ||
-        (new_flags & fPERM) != (act_flags & fPERM)) {
+    // Only change permissions if some were requested: a pure PAG_DECOMMIT
+    // request on already-decommitted pages leaves new_flags == 0, and
+    // DosSetMem(..., 0) fails with ERROR_INVALID_PARAMETER.
+    const bool perm_change = (new_flags & fPERM) &&
+                             (new_flags & fPERM) != (act_flags & fPERM);
+    if ((new_flags & (PAG_COMMIT | PAG_DECOMMIT)) || perm_change) {
       arc = DosSetMem(addr, act_len, new_flags);
       if (arc != NO_ERROR)
         break;
