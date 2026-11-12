@@ -43,6 +43,14 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
+
+#if BUILDFLAG(IS_OS2)
+#include <signal.h>
+#include <unistd.h>
+
+#include "base/debug/stack_trace.h"
+#include "base/logging.h"
+#endif
 #include "third_party/icu/source/common/unicode/unistr.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
 #include "ui/base/ui_base_switches.h"
@@ -131,7 +139,38 @@ void LogTimeToStartRunLoop(const base::CommandLine& command_line,
 }  // namespace
 
 // mainline routine for running as the Renderer process
+#if BUILDFLAG(IS_OS2)
+namespace {
+
+// TODO(os2): temporary diagnostics for renderers dying with SIGTERM while
+// loading some pages. Not async-signal-safe; for debugging only.
+void OS2DiagSignalHandler(int sig, siginfo_t* info, void*) {
+  LOG(ERROR) << "[os2-diag] renderer pid " << getpid() << " got signal "
+             << sig << " si_code " << (info ? info->si_code : -1)
+             << " si_pid " << (info ? static_cast<long>(info->si_pid) : -1L)
+             << " (parent pid " << getppid() << ") on thread "
+             << base::PlatformThread::CurrentId() << "\n"
+             << base::debug::StackTrace().ToString();
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
+
+void InstallOS2DiagSignalHandlers() {
+  struct sigaction action = {};
+  action.sa_sigaction = OS2DiagSignalHandler;
+  action.sa_flags = SA_SIGINFO;
+  sigemptyset(&action.sa_mask);
+  for (int sig : {SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGABRT})
+    sigaction(sig, &action, nullptr);
+}
+
+}  // namespace
+#endif  // BUILDFLAG(IS_OS2)
+
 int RendererMain(MainFunctionParams parameters) {
+#if BUILDFLAG(IS_OS2)
+  InstallOS2DiagSignalHandlers();
+#endif
   // Don't use the TRACE_EVENT0 macro because the tracing infrastructure doesn't
   // expect synchronous events around the main loop of a thread.
   TRACE_EVENT_INSTANT0("startup", "RendererMain", TRACE_EVENT_SCOPE_THREAD);

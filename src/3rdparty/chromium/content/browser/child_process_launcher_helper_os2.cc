@@ -6,6 +6,8 @@
 #include "content/browser/child_process_launcher_helper_posix.h"
 
 #include "base/command_line.h"
+#include "base/debug/stack_trace.h"
+#include "base/logging.h"
 #include "base/notreached.h"
 #include "base/posix/global_descriptors.h"
 #include "base/process/launch.h"
@@ -43,6 +45,10 @@ ChildProcessTerminationInfo ChildProcessLauncherHelper::GetTerminationInfo(
 // static
 bool ChildProcessLauncherHelper::TerminateProcess(const base::Process& process,
                                                   int exit_code) {
+  // TODO(os2): temporary diagnostics.
+  LOG(ERROR) << "[os2-diag] TerminateProcess pid " << process.Pid()
+             << " exit_code " << exit_code << "\n"
+             << base::debug::StackTrace().ToString();
   return process.Terminate(exit_code, false);
 }
 
@@ -97,6 +103,10 @@ void ChildProcessLauncherHelper::AfterLaunchOnLauncherThread(
 void ChildProcessLauncherHelper::ForceNormalProcessTerminationSync(
     ChildProcessLauncherHelper::Process process) {
   DCHECK(CurrentlyOnProcessLauncherTaskRunner());
+  // TODO(os2): temporary diagnostics.
+  LOG(ERROR) << "[os2-diag] ForceNormalProcessTerminationSync pid "
+             << process.process.Pid() << "\n"
+             << base::debug::StackTrace().ToString();
   process.process.Terminate(RESULT_CODE_NORMAL_EXIT, false);
 }
 
