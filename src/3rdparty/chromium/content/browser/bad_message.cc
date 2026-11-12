@@ -47,17 +47,12 @@ void ReceivedBadMessageOnUIThread(int render_process_id,
 }  // namespace
 
 void ReceivedBadMessage(RenderProcessHost* host, BadMessageReason reason) {
-  // TODO(os2): temporary diagnostics.
-  LOG(ERROR) << "[os2-diag] ReceivedBadMessage reason " << reason;
   LogBadMessage(reason);
   host->ShutdownForBadMessage(
       RenderProcessHost::CrashReportMode::GENERATE_CRASH_DUMP);
 }
 
 void ReceivedBadMessage(int render_process_id, BadMessageReason reason) {
-  // TODO(os2): temporary diagnostics.
-  LOG(ERROR) << "[os2-diag] ReceivedBadMessage reason " << reason
-             << " for renderer id " << render_process_id;
   // We generate a crash dump here since generating one after posting to the UI
   // thread is less useful.
   LogBadMessage(reason);

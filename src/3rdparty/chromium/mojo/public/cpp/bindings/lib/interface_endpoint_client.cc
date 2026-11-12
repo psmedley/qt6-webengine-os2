@@ -922,11 +922,6 @@ bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
     // for the same interface. Close the pipe because this shouldn't happen.
     DVLOG(1) << "A message is received for an interface after it has been "
              << "disconnected. Closing the pipe.";
-    // TODO(os2): temporary diagnostics, remove once the renderer exit is
-    // understood.
-    LOG(ERROR) << "[os2-diag] message " << message->name() << " for "
-               << interface_name_ << " received after the endpoint "
-               << "encountered an error (disconnected)";
     return false;
   }
 
@@ -990,12 +985,6 @@ bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
       return control_message_handler_.Accept(message);
 
     accepted_interface_message = incoming_receiver_->Accept(message);
-    // TODO(os2): temporary diagnostics.
-    if (!accepted_interface_message) {
-      LOG(ERROR) << "[os2-diag] message " << message->name() << " for "
-                 << interface_name_ << " rejected by the stub (impl "
-                 << "unbound or unknown method)";
-    }
   }
 
   if (weak_self && accepted_interface_message &&
