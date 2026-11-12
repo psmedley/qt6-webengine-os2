@@ -29,6 +29,15 @@ void ConfigureBoringSSLBackedRandBytesFieldTrial() {
   // variant to configure.
 }
 
+double RandDoubleAvoidAllocation() {
+  // RandBytes() below doesn't allocate (LazyInstance uses static storage and
+  // random() doesn't allocate), so it's safe to call from the allocator shim.
+  uint64_t number;
+  RandBytes(&number, sizeof(number));
+  // This transformation is explained in rand_util.cc.
+  return (number >> 11) * 0x1.0p-53;
+}
+
 }  // namespace internal
 
 void RandBytes(void* output, size_t output_length) {
