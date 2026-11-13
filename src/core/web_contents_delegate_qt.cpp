@@ -126,6 +126,10 @@ content::WebContents *WebContentsDelegateQt::OpenURLFromTab(content::WebContents
     load_url_params.href_translate = params.href_translate;
     load_url_params.reload_type = params.reload_type;
     load_url_params.impression = params.impression;
+    // Needed so pdf::PdfNavigationThrottle's navigation of the PDF content
+    // frame gets a dedicated PDF renderer (switches::kPdfRenderer); otherwise
+    // pdf::CreateInternalPlugin() hits CHECK(IsPdfRenderer()).
+    load_url_params.is_pdf = params.is_pdf;
     if (params.post_data) {
         load_url_params.load_type = content::NavigationController::LOAD_TYPE_HTTP_POST;
         load_url_params.post_data = params.post_data;
