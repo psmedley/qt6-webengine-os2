@@ -28,7 +28,12 @@
 #if !defined(_WIN32)
 #include <unistd.h>
 #include <utime.h>
+#ifndef __OS2__
 #define MAKE_BINARY(FILENO) (FILENO)
+#else
+#include <io.h>
+#define MAKE_BINARY(FILENO) (setmode((FILENO), O_BINARY), (FILENO))
+#endif
 #else
 #include <io.h>
 #include <share.h>
@@ -630,8 +635,13 @@ static BROTLI_BOOL OpenOutputFile(const char* output_path, FILE** f,
     *f = fdopen(MAKE_BINARY(STDOUT_FILENO), "wb");
     return BROTLI_TRUE;
   }
+#ifndef __OS2__
   fd = open(output_path, O_CREAT | (force ? 0 : O_EXCL) | O_WRONLY | O_TRUNC,
             S_IRUSR | S_IWUSR);
+#else
+  fd = open(output_path, O_CREAT | (force ? 0 : O_EXCL) | O_WRONLY | O_TRUNC | O_BINARY,
+            S_IRUSR | S_IWUSR);
+#endif
   if (fd < 0) {
     fprintf(stderr, "failed to open output file [%s]: %s\n",
             PrintablePath(output_path), strerror(errno));

@@ -12,6 +12,8 @@
 
 #if BUILDFLAG(IS_WIN)
 #include "base/message_loop/message_pump_win.h"
+#elif BUILDFLAG(IS_OS2)
+#include "base/message_loop/message_pump_os2.h"
 #elif BUILDFLAG(IS_ANDROID)
 #include "base/message_loop/message_pump_android.h"
 #elif BUILDFLAG(IS_APPLE)
@@ -30,6 +32,9 @@ namespace base {
 
 #if BUILDFLAG(IS_WIN)
 // Windows defines it as-is.
+using MessagePumpForUI = MessagePumpForUI;
+#elif BUILDFLAG(IS_OS2)
+// OS/2 defines it as-is.
 using MessagePumpForUI = MessagePumpForUI;
 #elif BUILDFLAG(IS_ANDROID)
 // Android defines it as-is.

@@ -25,6 +25,10 @@ component("cursor") {
     "//ui/gfx:gfx_skia",
     "//ui/gfx/geometry:geometry_skia",
   ]
+
+  if (is_os2) {
+    sources += [ "cursor_os2.cc" ]
+  }
 }
 
 source_set("unittests") {

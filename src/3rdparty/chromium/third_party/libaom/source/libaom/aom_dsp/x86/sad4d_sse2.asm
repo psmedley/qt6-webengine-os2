@@ -13,7 +13,7 @@
 
 %include "third_party/x86inc/x86inc.asm"
 
-SECTION .text
+SECTION_TEXT
 
 ; 'spill_src_stride' affect a lot how the code works.
 ;

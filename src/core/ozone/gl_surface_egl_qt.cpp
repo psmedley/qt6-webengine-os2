@@ -9,6 +9,7 @@
 #include "gl_context_qt.h"
 #include "ozone/gl_surface_egl_qt.h"
 
+#if !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_OS2)
 #include "ui/gl/egl_util.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_display.h"
@@ -214,3 +215,4 @@ void* GLSurfacelessQtEGL::GetShareHandle()
 
 } // namespace gl
 #endif // defined(USE_OZONE)
+#endif // !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_OS2)

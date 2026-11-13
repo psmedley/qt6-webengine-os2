@@ -60,6 +60,7 @@ bool HaveOnlyLoopbackAddressesUsingGetifaddrs() {
     if (!addr) {
       continue;
     }
+#if !BUILDFLAG(IS_OS2)
     if (addr->sa_family == AF_INET6) {
       // Safe cast since this is AF_INET6.
       const struct sockaddr_in6* addr_in6 =
@@ -69,6 +70,7 @@ bool HaveOnlyLoopbackAddressesUsingGetifaddrs() {
         continue;
       }
     }
+#endif  // !BUILDFLAG(IS_OS2)
     if (addr->sa_family != AF_INET6 && addr->sa_family != AF_INET) {
       continue;
     }

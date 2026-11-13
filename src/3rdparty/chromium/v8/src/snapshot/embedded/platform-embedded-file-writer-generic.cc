@@ -12,8 +12,6 @@
 namespace v8 {
 namespace internal {
 
-#define SYMBOL_PREFIX ""
-
 namespace {
 
 const char* DirectiveAsString(DataDirective directive) {
@@ -35,13 +33,22 @@ const char* DirectiveAsString(DataDirective directive) {
 void PlatformEmbeddedFileWriterGeneric::SectionText() {
   if (target_os_ == EmbeddedTargetOs::kChromeOS) {
     fprintf(fp_, ".section .text.hot.embedded\n");
+  } else if (target_os_ == EmbeddedTargetOs::kOS2) {
+    // a.out doesn't support .section
+    fprintf(fp_, ".text\n");
   } else {
     fprintf(fp_, ".section .text\n");
   }
 }
 
 void PlatformEmbeddedFileWriterGeneric::SectionRoData() {
-  fprintf(fp_, ".section .rodata\n");
+  if (target_os_ == EmbeddedTargetOs::kOS2) {
+    // a.out doesn't support .section and has no .rodata,
+    // use .text segment explicitly
+    fprintf(fp_, ".text\n");
+  } else {
+    fprintf(fp_, ".section .rodata\n");
+  }
 }
 
 void PlatformEmbeddedFileWriterGeneric::DeclareUint32(const char* name,
@@ -54,10 +61,12 @@ void PlatformEmbeddedFileWriterGeneric::DeclareUint32(const char* name,
 }
 
 void PlatformEmbeddedFileWriterGeneric::DeclareSymbolGlobal(const char* name) {
-  fprintf(fp_, ".global %s%s\n", SYMBOL_PREFIX, name);
+  fprintf(fp_, ".global %s%s\n", symbol_prefix_, name);
+#ifndef __OS2__
   // These symbols are not visible outside of the final binary, this allows for
   // reduced binary size, and less work for the dynamic linker.
   fprintf(fp_, ".hidden %s\n", name);
+#endif
 }
 
 void PlatformEmbeddedFileWriterGeneric::AlignToCodeAlignment() {
@@ -103,13 +112,18 @@ void PlatformEmbeddedFileWriterGeneric::Comment(const char* string) {
 }
 
 void PlatformEmbeddedFileWriterGeneric::DeclareLabel(const char* name) {
-  fprintf(fp_, "%s%s:\n", SYMBOL_PREFIX, name);
+  fprintf(fp_, "%s%s:\n", symbol_prefix_, name);
 }
 
 void PlatformEmbeddedFileWriterGeneric::SourceInfo(int fileid,
                                                    const char* filename,
                                                    int line) {
-  fprintf(fp_, ".loc %d %d\n", fileid, line);
+  if (target_os_ == EmbeddedTargetOs::kOS2) {
+    // a.out doesn't support .debug_line/.debug_info sections.
+    // TODO: use .stabs/.stabd instead.
+  } else {
+    fprintf(fp_, ".loc %d %d\n", fileid, line);
+  }
 }
 
 void PlatformEmbeddedFileWriterGeneric::DeclareFunctionBegin(const char* name,
@@ -124,13 +138,13 @@ void PlatformEmbeddedFileWriterGeneric::DeclareFunctionBegin(const char* name,
       target_arch_ == EmbeddedTargetArch::kArm64) {
     // ELF format binaries on ARM use ".type <function name>, %function"
     // to create a DWARF subprogram entry.
-    fprintf(fp_, ".type %s, %%function\n", name);
+    fprintf(fp_, ".type %s%s, %%function\n", symbol_prefix_, name);
   } else {
     // Other ELF Format binaries use ".type <function name>, @function"
     // to create a DWARF subprogram entry.
-    fprintf(fp_, ".type %s, @function\n", name);
+    fprintf(fp_, ".type %s%s, @function\n", symbol_prefix_, name);
   }
-  fprintf(fp_, ".size %s, %u\n", name, size);
+  fprintf(fp_, ".size %s%s, %u\n", symbol_prefix_, name, size);
 }
 
 void PlatformEmbeddedFileWriterGeneric::DeclareFunctionEnd(const char* name) {}
@@ -147,13 +161,15 @@ void PlatformEmbeddedFileWriterGeneric::DeclareExternalFilename(
 }
 
 void PlatformEmbeddedFileWriterGeneric::FileEpilogue() {
-  // Omitting this section can imply an executable stack, which is usually
-  // a linker warning/error. C++ compilers add these automatically, but
-  // compiling assembly requires the .note.GNU-stack section to be inserted
-  // manually.
-  // Additional documentation:
-  // https://wiki.gentoo.org/wiki/Hardened/GNU_stack_quickstart
-  fprintf(fp_, ".section .note.GNU-stack,\"\",%%progbits\n");
+  if (target_os_ != EmbeddedTargetOs::kOS2) {
+    // Omitting this section can imply an executable stack, which is usually
+    // a linker warning/error. C++ compilers add these automatically, but
+    // compiling assembly requires the .note.GNU-stack section to be inserted
+    // manually.
+    // Additional documentation:
+    // https://wiki.gentoo.org/wiki/Hardened/GNU_stack_quickstart
+    fprintf(fp_, ".section .note.GNU-stack,\"\",%%progbits\n");
+  }
 }
 
 int PlatformEmbeddedFileWriterGeneric::IndentedDataDirective(
@@ -172,8 +188,6 @@ DataDirective PlatformEmbeddedFileWriterGeneric::ByteChunkDataDirective()
   return PlatformEmbeddedFileWriterBase::ByteChunkDataDirective();
 #endif
 }
-
-#undef SYMBOL_PREFIX
 
 }  // namespace internal
 }  // namespace v8

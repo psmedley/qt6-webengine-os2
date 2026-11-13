@@ -20,11 +20,15 @@
 #include "base/system/sys_info.h"
 #include "build/build_config.h"
 #include "ui/base/ozone_buildflags.h"
+#if defined(USE_EGL)
 #include "ui/gl/angle_platform_impl.h"
 #include "ui/gl/egl_util.h"
+#endif  // defined(USE_EGL)
 #include "ui/gl/gl_bindings.h"
+#if defined(USE_EGL)
 #include "ui/gl/gl_context_egl.h"
 #include "ui/gl/gl_display_egl_util.h"
+#endif  // defined(USE_EGL)
 #include "ui/gl/gl_features.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
@@ -37,6 +41,7 @@
 #include "ui/gfx/x/connection.h"
 #endif
 
+#if defined(USE_EGL)
 // From ANGLE's egl/eglext.h.
 
 #ifndef EGL_ANGLE_platform_angle
@@ -140,9 +145,11 @@
 #endif /* EGL_ANGLE_feature_control */
 
 using ui::GetLastEGLErrorString;
+#endif  // defined(USE_EGL)
 
 namespace gl {
 
+#if defined(USE_EGL)
 namespace {
 
 void AdjustAngleFeaturesFromChromeFeatures(
@@ -543,6 +550,8 @@ void SetEglDebugMessageControl() {
 }
 
 }  // namespace
+
+#endif  // defined(USE_EGL)
 
 GLDisplay::GLDisplay(uint64_t system_device_id,
                      DisplayKey display_key,
@@ -1105,5 +1114,26 @@ bool GLDisplayWGL::Initialize(gl::GLDisplay*) {
   return false;
 }
 #endif  // BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(IS_OS2)
+GLDisplayOS2::GLDisplayOS2(uint64_t system_device_id)
+    : GLDisplay(system_device_id, DisplayKey::kDefault, NONE) {}
+
+GLDisplayOS2::~GLDisplayOS2() = default;
+
+void* GLDisplayOS2::GetDisplay() const {
+  return nullptr;
+}
+
+bool GLDisplayOS2::IsInitialized() const {
+  return true;
+}
+
+void GLDisplayOS2::Shutdown() {}
+
+bool GLDisplayOS2::Initialize(GLDisplay* display) {
+  return true;
+}
+#endif  // BUILDFLAG(IS_OS2)
 
 }  // namespace gl

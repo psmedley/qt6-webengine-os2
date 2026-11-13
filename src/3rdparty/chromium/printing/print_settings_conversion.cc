@@ -287,7 +287,8 @@ std::unique_ptr<PrintSettings> PrintSettingsFromJobSettings(
     settings->set_is_modifiable(is_modifiable.value());
   }
 
-#if BUILDFLAG(IS_CHROMEOS) || (BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_CUPS))
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2) || \
+    (BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_CUPS))
   const base::Value::Dict* advanced_settings =
       job_settings.FindDict(kSettingAdvancedSettings);
   if (advanced_settings) {
@@ -300,10 +301,10 @@ std::unique_ptr<PrintSettings> PrintSettingsFromJobSettings(
       }
     }
   }
-#endif  // BUILDFLAG(IS_CHROMEOS) || (BUILDFLAG(IS_LINUX) &&
-        // BUILDFLAG(USE_CUPS))
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2) ||
+        // (BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_CUPS))
 
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
   bool send_user_info =
       job_settings.FindBool(kSettingSendUserInfo).value_or(false);
   settings->set_send_user_info(send_user_info);
@@ -324,7 +325,9 @@ std::unique_ptr<PrintSettings> PrintSettingsFromJobSettings(
   if (pin_value) {
     settings->set_pin_value(*pin_value);
   }
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
+#if BUILDFLAG(IS_CHROMEOS)
   const base::Value::List* client_info_list =
       job_settings.FindList(kSettingIppClientInfo);
   if (client_info_list) {

@@ -777,7 +777,8 @@ void FieldTrialList::PopulateLaunchOptionsWithFieldTrialState(
 }
 #endif  // BUILDFLAG(USE_BLINK)
 
-#if BUILDFLAG(USE_BLINK) && BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE)
+#if BUILDFLAG(USE_BLINK) && BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE) && \
+    !BUILDFLAG(IS_OS2)
 // static
 int FieldTrialList::GetFieldTrialDescriptor() {
   InstantiateFieldTrialAllocatorIfNeeded();
@@ -1092,6 +1093,12 @@ std::string FieldTrialList::SerializeSharedMemoryRegionMetadata(
   ss << kFieldTrialRendezvousKey << ",";
   // Tell the child that the handle is looked up.
   ss << "r,";
+#elif BUILDFLAG(IS_OS2)
+  // Tell the child process the address of the shared memory object.
+  uintptr_t uintptr_handle = static_cast<uintptr_t>(shm.GetPlatformHandle());
+  ss << uintptr_handle << ",";
+  // Tell the child that the handle is looked up.
+  ss << "r,";
 #elif BUILDFLAG(IS_FUCHSIA)
   zx::vmo transfer_vmo;
   zx_status_t status = shm.GetPlatformHandle()->duplicate(
@@ -1159,6 +1166,9 @@ FieldTrialList::DeserializeSharedMemoryRegionMetadata(
     return base::unexpected(SharedMemError::kUnexpectedHandleType);
   }
   win::ScopedHandle scoped_handle(handle);
+#elif BUILDFLAG(IS_OS2)
+  SHMEM handle = static_cast<SHMEM>(field_trial_handle);
+  os2::ScopedShmemHandle scoped_handle(handle);
 #elif BUILDFLAG(IS_APPLE) && BUILDFLAG(USE_BLINK)
   auto* rendezvous = MachPortRendezvousClient::GetInstance();
   if (!rendezvous) {

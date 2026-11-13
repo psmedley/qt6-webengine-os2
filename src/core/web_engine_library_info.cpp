@@ -122,7 +122,7 @@ QString subProcessPath()
 {
     static QString processPath;
     if (processPath.isEmpty()) {
-#if defined(Q_OS_WIN)
+#if defined(Q_OS_WIN) || defined(Q_OS_OS2)
         const QString processBinary = QLatin1StringView(qWebEngineProcessName()) % ".exe"_L1;
 #else
         const auto processBinary = QLatin1StringView(qWebEngineProcessName());

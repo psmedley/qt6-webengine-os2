@@ -242,6 +242,8 @@ void FakeVideoCaptureDeviceFactory::GetDevicesInfo(
         VideoCaptureApi::ANDROID_API2_LEGACY;
 #elif BUILDFLAG(IS_FUCHSIA)
         VideoCaptureApi::FUCHSIA_CAMERA3;
+#elif defined(OS_OS2)
+        VideoCaptureApi::UNKNOWN;
 #else
 #error Unsupported platform
 #endif

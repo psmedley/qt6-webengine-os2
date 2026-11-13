@@ -84,6 +84,19 @@ base::apple::ScopedMachSendRight CloneMachPort(
   }
   return base::apple::ScopedMachSendRight(mach_port.get());
 }
+#elif BUILDFLAG(IS_OS2)
+base::os2::ScopedShmemHandle CloneShmemHandle(const
+  base::os2::ScopedShmemHandle& handle) {
+  DCHECK(handle.is_valid());
+
+  SHMEM dupe = shmem_duplicate(handle.get(), 0);
+  if (dupe == SHMEM_INVALID) {
+    DPLOG(ERROR) << "shmem_duplicate";
+    return base::os2::ScopedShmemHandle();
+  }
+
+  return base::os2::ScopedShmemHandle(dupe);
+}
 #endif
 
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
@@ -112,6 +125,9 @@ PlatformHandle::PlatformHandle(base::apple::ScopedMachSendRight mach_port)
     : type_(Type::kMachSend), mach_send_(std::move(mach_port)) {}
 PlatformHandle::PlatformHandle(base::apple::ScopedMachReceiveRight mach_port)
     : type_(Type::kMachReceive), mach_receive_(std::move(mach_port)) {}
+#elif BUILDFLAG(IS_OS2)
+PlatformHandle::PlatformHandle(base::os2::ScopedShmemHandle handle)
+    : type_(Type::kShmemHandle), handle_(std::move(handle)) {}
 #endif
 
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
@@ -136,6 +152,8 @@ PlatformHandle& PlatformHandle::operator=(PlatformHandle&& other) {
 #elif BUILDFLAG(IS_APPLE)
   mach_send_ = std::move(other.mach_send_);
   mach_receive_ = std::move(other.mach_receive_);
+#elif BUILDFLAG(IS_OS2)
+  handle_ = std::move(other.handle_);
 #endif
 
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
@@ -179,6 +197,13 @@ void PlatformHandle::ToMojoPlatformHandle(PlatformHandle handle,
           static_cast<uint64_t>(handle.ReleaseMachReceiveRight());
       break;
     }
+#elif BUILDFLAG(IS_OS2)
+    if (handle.is_shmem_handle()) {
+      out_handle->type = MOJO_PLATFORM_HANDLE_TYPE_OS2_SHMEM_HANDLE;
+      out_handle->value =
+          static_cast<uint64_t>(handle.TakeShmemHandle().release());
+      break;
+    }
 #endif
 
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
@@ -216,6 +241,11 @@ PlatformHandle PlatformHandle::FromMojoPlatformHandle(
     return PlatformHandle(base::apple::ScopedMachReceiveRight(
         static_cast<mach_port_t>(handle->value)));
   }
+#elif BUILDFLAG(IS_OS2)
+  if (handle->type == MOJO_PLATFORM_HANDLE_TYPE_OS2_SHMEM_HANDLE) {
+    return PlatformHandle(base::os2::ScopedShmemHandle(
+        static_cast<SHMEM>(handle->value)));
+  }
 #endif
 
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
@@ -235,6 +265,8 @@ void PlatformHandle::reset() {
 #elif BUILDFLAG(IS_APPLE)
   mach_send_.reset();
   mach_receive_.reset();
+#elif BUILDFLAG(IS_OS2)
+  handle_.reset();
 #endif
 
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
@@ -252,6 +284,8 @@ void PlatformHandle::release() {
 #elif BUILDFLAG(IS_APPLE)
   std::ignore = mach_send_.release();
   std::ignore = mach_receive_.release();
+#elif BUILDFLAG(IS_OS2)
+  std::ignore = handle_.release();
 #endif
 
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
@@ -270,6 +304,10 @@ PlatformHandle PlatformHandle::Clone() const {
   if (is_valid_mach_send())
     return PlatformHandle(CloneMachPort(mach_send_));
   CHECK(!is_valid_mach_receive()) << "Cannot clone Mach receive rights";
+  return PlatformHandle(CloneFD(fd_));
+#elif BUILDFLAG(IS_OS2)
+  if (is_valid_shmem_handle())
+    return PlatformHandle(CloneShmemHandle(handle_));
   return PlatformHandle(CloneFD(fd_));
 #elif BUILDFLAG(IS_POSIX)
   return PlatformHandle(CloneFD(fd_));

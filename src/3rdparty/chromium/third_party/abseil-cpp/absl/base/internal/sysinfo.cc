@@ -194,6 +194,11 @@ static double GetNominalCPUFrequency() {
 
 #else
 
+#if defined(__OS2__) && !defined(O_CLOEXEC)
+// OS/2 (kLIBC) has no O_CLOEXEC.
+#define O_CLOEXEC 0
+#endif
+
 // Helper function for reading a long from a file. Returns true if successful
 // and the memory location pointed to by value is set to the value read.
 static bool ReadLongFromFile(const char *file, long *value) {

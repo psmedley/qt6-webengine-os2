@@ -1,0 +1,339 @@
+diff --git a/src/3rdparty/ninja/bootstrap.py b/src/3rdparty/ninja/bootstrap.py
+old mode 100755
+new mode 100644
+diff --git a/src/3rdparty/ninja/configure.py b/src/3rdparty/ninja/configure.py
+old mode 100755
+new mode 100644
+index a443748942..5b3075fd6b
+--- a/src/3rdparty/ninja/configure.py
++++ b/src/3rdparty/ninja/configure.py
+@@ -62,12 +62,14 @@ class Platform(object):
+             self._platform = 'aix'
+         elif self._platform.startswith('dragonfly'):
+             self._platform = 'dragonfly'
++        elif self._platform.startswith('os2'):
++            self._platform = 'os2'
+ 
+     @staticmethod
+     def known_platforms():
+       return ['linux', 'darwin', 'freebsd', 'openbsd', 'solaris', 'sunos5',
+               'mingw', 'msvc', 'gnukfreebsd', 'bitrig', 'netbsd', 'aix',
+-              'dragonfly']
++              'dragonfly', 'os2']
+ 
+     def platform(self):
+         return self._platform
+@@ -81,6 +83,9 @@ class Platform(object):
+     def is_msvc(self):
+         return self._platform == 'msvc'
+ 
++    def is_os2(self):
++        return self._platform == 'os2'
++
+     def msvc_needs_fs(self):
+         popen = subprocess.Popen(['cl', '/nologo', '/?'],
+                                  stdout=subprocess.PIPE,
+@@ -110,7 +115,7 @@ class Platform(object):
+                 and not self.is_aix())
+ 
+     def can_rebuild_in_place(self):
+-        return not (self.is_windows() or self.is_aix())
++        return not (self.is_windows() or self.is_aix() or self.is_os2())
+ 
+ class Bootstrap:
+     """API shim for ninja_syntax.Writer that instead runs the commands.
+@@ -281,7 +286,7 @@ def cc(name, **kwargs):
+ def cxx(name, **kwargs):
+     return n.build(built(name + objext), 'cxx', src(name + '.cc'), **kwargs)
+ def binary(name):
+-    if platform.is_windows():
++    if platform.is_windows() or platform.is_os2():
+         exe = name + '.exe'
+         n.build(name, 'phony', exe)
+         return exe
+@@ -298,7 +303,10 @@ n.variable('cxx', CXX)
+ if platform.is_msvc():
+     n.variable('ar', 'link')
+ else:
+-    n.variable('ar', configure_env.get('AR', 'ar'))
++    if platform.is_os2():
++        n.variable('ar', configure_env.get('AR', 'emxomfar'))
++    else:
++        n.variable('ar', configure_env.get('AR', 'ar'))
+ 
+ if platform.is_msvc():
+     cflags = ['/showIncludes',
+@@ -334,8 +342,12 @@ else:
+               '-Wno-unused-parameter',
+               '-fno-rtti',
+               '-fno-exceptions',
+-              '-fvisibility=hidden', '-pipe',
++              '-pipe',
+               '-DNINJA_PYTHON="%s"' % options.with_python]
++    if platform.is_os2():
++        cflags += ['-Zomf']
++    else:
++        cflags += ['-fvisibility=hidden']
+     if options.debug:
+         cflags += ['-D_GLIBCXX_DEBUG', '-D_GLIBCXX_DEBUG_PEDANTIC']
+         cflags.remove('-fno-rtti')  # Needed for above pedanticness.
+@@ -356,6 +368,9 @@ else:
+     if platform.uses_usr_local():
+         cflags.append('-I/usr/local/include')
+         ldflags.append('-L/usr/local/lib')
++    if platform.is_os2():
++        # Use LIBCx to get .TRP on crashes.
++        ldflags += ['-Zomf', '-Zhigh-mem', '-lcx']
+ 
+ libs = []
+ 
+@@ -665,7 +680,7 @@ if options.bootstrap:
+     if platform.can_rebuild_in_place():
+         rebuild_args.append('./ninja')
+     else:
+-        if platform.is_windows():
++        if platform.is_windows() or platform.is_os2():
+             bootstrap_exe = 'ninja.bootstrap.exe'
+             final_exe = 'ninja.exe'
+         else:
+diff --git a/src/3rdparty/ninja/misc/measure.py b/src/3rdparty/ninja/misc/measure.py
+old mode 100755
+new mode 100644
+diff --git a/src/3rdparty/ninja/misc/ninja_syntax_test.py b/src/3rdparty/ninja/misc/ninja_syntax_test.py
+old mode 100755
+new mode 100644
+diff --git a/src/3rdparty/ninja/misc/output_test.py b/src/3rdparty/ninja/misc/output_test.py
+old mode 100755
+new mode 100644
+diff --git a/src/3rdparty/ninja/misc/packaging/rpmbuild.sh b/src/3rdparty/ninja/misc/packaging/rpmbuild.sh
+old mode 100755
+new mode 100644
+diff --git a/src/3rdparty/ninja/src/browse.py b/src/3rdparty/ninja/src/browse.py
+old mode 100755
+new mode 100644
+diff --git a/src/3rdparty/ninja/src/build.cc b/src/3rdparty/ninja/src/build.cc
+index 61ef0e849a..b328a7d2c9 100644
+--- a/src/3rdparty/ninja/src/build.cc
++++ b/src/3rdparty/ninja/src/build.cc
+@@ -20,11 +20,18 @@
+ #include <stdlib.h>
+ #include <functional>
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) || defined(__OS2__)
+ #include <fcntl.h>
+ #include <io.h>
+ #endif
+ 
++#ifdef __OS2__
++#define _fileno fileno
++#define _setmode setmode
++#define _O_BINARY O_BINARY
++#define _O_TEXT O_TEXT
++#endif
++
+ #if defined(__SVR4) && defined(__sun)
+ #include <sys/termios.h>
+ #endif
+diff --git a/src/3rdparty/ninja/src/disk_interface.cc b/src/3rdparty/ninja/src/disk_interface.cc
+index 28530b19d0..1206b84104 100644
+--- a/src/3rdparty/ninja/src/disk_interface.cc
++++ b/src/3rdparty/ninja/src/disk_interface.cc
+@@ -28,13 +28,18 @@
+ #include <direct.h>  // _mkdir
+ #endif
+ 
++#if defined(__OS2__)
++// Until https://github.com/bitwiseworks/libc/issues/45 is done.
++#define st_mtim st_mtimespec
++#endif
++
+ #include "metrics.h"
+ #include "util.h"
+ 
+ namespace {
+ 
+ string DirName(const string& path) {
+-#ifdef _WIN32
++#if defined(_WIN32) || defined(__OS2__)
+   const char kPathSeparators[] = "\\/";
+ #else
+   const char kPathSeparators[] = "/";
+diff --git a/src/3rdparty/ninja/src/gen_doxygen_mainpage.sh b/src/3rdparty/ninja/src/gen_doxygen_mainpage.sh
+old mode 100755
+new mode 100644
+diff --git a/src/3rdparty/ninja/src/inline.sh b/src/3rdparty/ninja/src/inline.sh
+old mode 100755
+new mode 100644
+diff --git a/src/3rdparty/ninja/src/line_printer.cc b/src/3rdparty/ninja/src/line_printer.cc
+index 2cd3e174c4..7ba5c40f28 100644
+--- a/src/3rdparty/ninja/src/line_printer.cc
++++ b/src/3rdparty/ninja/src/line_printer.cc
+@@ -81,10 +81,16 @@ void LinePrinter::Print(string to_print, LineType type) {
+ #else
+     // Limit output to width of the terminal if provided so we don't cause
+     // line-wrapping.
++#ifdef __OS2__
++    int size[2];
++    _scrsize(size);
++    to_print = ElideMiddle(to_print, size[0]);
++#else
+     winsize size;
+     if ((ioctl(0, TIOCGWINSZ, &size) == 0) && size.ws_col) {
+       to_print = ElideMiddle(to_print, size.ws_col);
+     }
++#endif
+     printf("%s", to_print.c_str());
+     printf("\x1B[K");  // Clear to end of line.
+     fflush(stdout);
+diff --git a/src/3rdparty/ninja/src/ninja.cc b/src/3rdparty/ninja/src/ninja.cc
+index ed004ac8f1..ac6a39cf4d 100644
+--- a/src/3rdparty/ninja/src/ninja.cc
++++ b/src/3rdparty/ninja/src/ninja.cc
+@@ -26,8 +26,9 @@
+ #include "getopt.h"
+ #include <unistd.h>
+ #else
+-#include <getopt.h>
++// must come before getopt.h on OS/2, see https://github.com/bitwiseworks/libc/issues/44
+ #include <unistd.h>
++#include <getopt.h>
+ #endif
+ 
+ #include "browse.h"
+@@ -225,10 +226,20 @@ int GuessParallelism() {
+   case 0:
+   case 1:
+     return 2;
++#ifdef __OS2__
++  // Running more than 3 G++ instances with heavy C++ may easily eat up
++  // all available memory on a 32 bit system and cause a kernel panic.
++  // See https://github.com/bitwiseworks/qtwebengine-chromium-os2/issues/10
++  // for details.
++  default:
++    (void) processors;
++    return 3;
++#else
+   case 2:
+     return 3;
+   default:
+     return processors + 2;
++#endif
+   }
+ }
+ 
+diff --git a/src/3rdparty/ninja/src/subprocess-posix.cc b/src/3rdparty/ninja/src/subprocess-posix.cc
+index 1de22c38f7..4016f731b0 100644
+--- a/src/3rdparty/ninja/src/subprocess-posix.cc
++++ b/src/3rdparty/ninja/src/subprocess-posix.cc
+@@ -23,6 +23,15 @@
+ #include <string.h>
+ #include <sys/wait.h>
+ #include <spawn.h>
++#ifdef __OS2__
++#include <sys/socket.h>
++#endif
++
++#ifdef __OS2__
++#define BIN_SH "/@unixroot/usr/bin/sh"
++#else
++#define BIN_SH "/bin/sh"
++#endif
+ 
+ extern char** environ;
+ 
+@@ -42,8 +51,16 @@ Subprocess::~Subprocess() {
+ 
+ bool Subprocess::Start(SubprocessSet* set, const string& command) {
+   int output_pipe[2];
++#ifdef __OS2__
++  // Note that using socketpair instead of pipe breaks grabbing output from
++  // non-kLIBC processes but we need https://github.com/bitwiseworks/libcx/issues/34
++  // to make select work with native pipes.
++  if (socketpair(AF_LOCAL, SOCK_STREAM, 0, output_pipe) < 0)
++    Fatal("socketpair: %s", strerror(errno));
++#else
+   if (pipe(output_pipe) < 0)
+     Fatal("pipe: %s", strerror(errno));
++#endif
+   fd_ = output_pipe[0];
+ #if !defined(USE_PPOLL)
+   // If available, we use ppoll in DoWork(); otherwise we use pselect
+@@ -100,8 +117,8 @@ bool Subprocess::Start(SubprocessSet* set, const string& command) {
+   if (posix_spawnattr_setflags(&attr, flags) != 0)
+     Fatal("posix_spawnattr_setflags: %s", strerror(errno));
+ 
+-  const char* spawned_args[] = { "/bin/sh", "-c", command.c_str(), NULL };
+-  if (posix_spawn(&pid_, "/bin/sh", &action, &attr,
++  const char* spawned_args[] = { BIN_SH, "-c", command.c_str(), NULL };
++  if (posix_spawn(&pid_, BIN_SH, &action, &attr,
+                   const_cast<char**>(spawned_args), environ) != 0)
+     Fatal("posix_spawn: %s", strerror(errno));
+ 
+@@ -285,7 +302,13 @@ bool SubprocessSet::DoWork() {
+   }
+ 
+   interrupted_ = 0;
++#ifdef __OS2__
++  // TODO we might need to emulate pselect by calling setmask in an atomic manner,
++  // see e.g. https://linux.die.net/man/2/pselect
++  int ret = select(nfds, &set, 0, 0, 0);
++#else
+   int ret = pselect(nfds, &set, 0, 0, 0, &old_mask_);
++#endif
+   if (ret == -1) {
+     if (errno != EINTR) {
+       perror("ninja: pselect");
+diff --git a/src/3rdparty/ninja/src/util.cc b/src/3rdparty/ninja/src/util.cc
+index ae94d346bc..7af754aef7 100644
+--- a/src/3rdparty/ninja/src/util.cc
++++ b/src/3rdparty/ninja/src/util.cc
+@@ -103,7 +103,7 @@ bool CanonicalizePath(string* path, uint64_t* slash_bits, string* err) {
+ }
+ 
+ static bool IsPathSeparator(char c) {
+-#ifdef _WIN32
++#if defined(_WIN32) || defined(__OS2__)
+   return c == '/' || c == '\\';
+ #else
+   return c == '/';
+@@ -130,7 +130,7 @@ bool CanonicalizePath(char* path, size_t* len, uint64_t* slash_bits,
+   const char* end = start + *len;
+ 
+   if (IsPathSeparator(*src)) {
+-#ifdef _WIN32
++#if defined(_WIN32) || defined(__OS2__)
+ 
+     // network path starts with //
+     if (*len > 1 && IsPathSeparator(*(src + 1))) {
+@@ -188,7 +188,7 @@ bool CanonicalizePath(char* path, size_t* len, uint64_t* slash_bits,
+   }
+ 
+   *len = dst - start - 1;
+-#ifdef _WIN32
++#if defined(_WIN32) || defined(__OS2__)
+   uint64_t bits = 0;
+   uint64_t bits_mask = 1;
+ 
+diff --git a/src/3rdparty/ninja/src/util_test.cc b/src/3rdparty/ninja/src/util_test.cc
+index b4b75169d6..df4fe9de90 100644
+--- a/src/3rdparty/ninja/src/util_test.cc
++++ b/src/3rdparty/ninja/src/util_test.cc
+@@ -82,7 +82,7 @@ TEST(CanonicalizePath, PathSamples) {
+ 
+   path = "//foo";
+   EXPECT_TRUE(CanonicalizePath(&path, &err));
+-#ifdef _WIN32
++#if defined(_WIN32) || defined(__OS2__)
+   EXPECT_EQ("//foo", path);
+ #else
+   EXPECT_EQ("/foo", path);
+@@ -109,7 +109,7 @@ TEST(CanonicalizePath, PathSamples) {
+   EXPECT_EQ(".", path);
+ }
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) || defined(__OS2__)
+ TEST(CanonicalizePath, PathSamplesWindows) {
+   string path;
+   string err;

@@ -514,6 +514,19 @@ WebMouseWheelEvent* BuildMouseWheelEvent(const InputEventData& event) {
 }
 
 #if !BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_OS2)
+// os2.h defines these, undefine.
+#undef VK_END
+#undef VK_HOME
+#undef VK_LEFT
+#undef VK_UP
+#undef VK_RIGHT
+#undef VK_DOWN
+#undef VK_INSERT
+#undef VK_DELETE
+#undef VK_F1
+#endif // BUILDFLAG(IS_OS2)
+
 #define VK_RETURN 0x0D
 
 #define VK_PRIOR 0x21

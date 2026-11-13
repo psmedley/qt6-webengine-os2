@@ -21,6 +21,8 @@ IPC::MessageAttachment::Type TypeConverter<
       return IPC::MessageAttachment::Type::MACH_PORT;
     case native::SerializedHandleType::FUCHSIA_HANDLE:
       return IPC::MessageAttachment::Type::FUCHSIA_HANDLE;
+    case native::SerializedHandleType::OS2_SHMEM_HANDLE:
+      return IPC::MessageAttachment::Type::OS2_SHMEM_HANDLE;
   }
   NOTREACHED();
   return IPC::MessageAttachment::Type::MOJO_HANDLE;
@@ -41,6 +43,8 @@ native::SerializedHandleType TypeConverter<
       return native::SerializedHandleType::MACH_PORT;
     case IPC::MessageAttachment::Type::FUCHSIA_HANDLE:
       return native::SerializedHandleType::FUCHSIA_HANDLE;
+    case IPC::MessageAttachment::Type::OS2_SHMEM_HANDLE:
+      return native::SerializedHandleType::OS2_SHMEM_HANDLE;
   }
   NOTREACHED();
   return native::SerializedHandleType::MOJO_HANDLE;

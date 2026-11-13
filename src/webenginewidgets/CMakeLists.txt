@@ -33,6 +33,7 @@ qt_internal_add_module(WebEngineWidgets
         Qt::Widgets
         Qt::WebEngineCore
     NO_GENERATE_CPP_EXPORTS
+    OS2_SHORT_NAME Qt6WebEW
 )
 
 qt_internal_extend_target(WebEngineWidgets CONDITION QT_FEATURE_accessibility

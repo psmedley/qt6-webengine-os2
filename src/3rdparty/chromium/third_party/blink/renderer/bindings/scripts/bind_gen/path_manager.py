@@ -4,6 +4,7 @@
 
 import os.path
 import posixpath
+import sys
 
 import web_idl
 
@@ -147,7 +148,10 @@ class PathManager(object):
             # "int_32_array".
             filename = "v8_union_{}".format("_".join(
                 idl_definition.member_tokens)).lower()
-            if self._enable_shorter_filenames:
+            # Shorten names on OS/2
+            if sys.platform == "os2knix":
+                filename = filename[:75]
+            elif self._enable_shorter_filenames:
                 filename = self._make_shorter(filename, len(idl_definition.member_tokens) + 2)
             self._api_basename = filename
             self._impl_basename = filename
@@ -207,6 +211,8 @@ class PathManager(object):
 
     @staticmethod
     def _join(dirpath, filename, ext=None):
+        if sys.platform == "os2knix":
+            filename = filename[:75]
         if ext is not None:
             filename = posixpath.extsep.join([filename, ext])
         return posixpath.join(dirpath, filename)

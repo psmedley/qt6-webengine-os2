@@ -113,13 +113,13 @@ DiscardableMemoryBacking GetDiscardableMemoryBacking() {
     return DiscardableMemoryBacking::kSharedMemory;
 #endif  // BUILDFLAG(IS_ANDROID)
 
-#if BUILDFLAG(IS_POSIX)
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)
   if (base::FeatureList::IsEnabled(
           base::features::kMadvFreeDiscardableMemory) &&
       base::GetMadvFreeSupport() == base::MadvFreeSupport::kSupported) {
     return DiscardableMemoryBacking::kMadvFree;
   }
-#endif  // BUILDFLAG(IS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)
 
   return DiscardableMemoryBacking::kSharedMemory;
 }

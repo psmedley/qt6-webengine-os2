@@ -200,6 +200,7 @@ crypto_sources = [
   "src/crypto/rand_extra/forkunsafe.c",
   "src/crypto/rand_extra/getentropy.c",
   "src/crypto/rand_extra/ios.c",
+  "src/crypto/rand_extra/os2.c",
   "src/crypto/rand_extra/passive.c",
   "src/crypto/rand_extra/rand_extra.c",
   "src/crypto/rand_extra/trusty.c",

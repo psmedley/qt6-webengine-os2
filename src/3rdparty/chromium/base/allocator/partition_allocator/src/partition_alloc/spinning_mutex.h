@@ -113,8 +113,6 @@ class PA_LOCKABLE PA_COMPONENT_EXPORT(PARTITION_ALLOC) SpinningMutex {
   std::atomic<bool> lock_{false};
 
   // Spinlock-like, fallback.
-  PA_ALWAYS_INLINE bool TrySpinLock();
-  PA_ALWAYS_INLINE void ReleaseSpinLock();
   void LockSlowSpinLock();
 #endif  // PA_CONFIG(HAS_FAST_MUTEX)
 };

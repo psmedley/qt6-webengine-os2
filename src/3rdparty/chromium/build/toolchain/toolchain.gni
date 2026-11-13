@@ -70,7 +70,7 @@ if (is_apple) {
 # platforms.
 if (host_os == "mac") {
   host_shlib_extension = ".dylib"
-} else if (host_os == "win") {
+} else if (host_os == "win" || host_os == "os2") {
   host_shlib_extension = ".dll"
 } else if (host_os == "linux" || host_os == "aix") {
   host_shlib_extension = ".so"

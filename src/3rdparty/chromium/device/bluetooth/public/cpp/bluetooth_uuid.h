@@ -12,6 +12,7 @@
 
 #include "base/containers/span.h"
 #include "build/build_config.h"
+#include <cstdint>
 
 #if BUILDFLAG(IS_WIN)
 #include <string_view>

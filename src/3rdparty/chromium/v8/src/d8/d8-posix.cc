@@ -4,6 +4,11 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#ifdef __OS2__
+#include <sys/types.h>
+typedef u_long	n_long;
+#include <netinet/in.h>
+#endif
 #include <netinet/ip.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -19,6 +24,7 @@
 #include "include/v8-container.h"
 #include "include/v8-template.h"
 #include "src/d8/d8.h"
+#define pipe(A) socketpair(AF_UNIX, SOCK_STREAM, 0, A)
 
 namespace v8 {
 

@@ -43,6 +43,14 @@ static const base::FilePath::CharType kReadOnlyCertDB[] =
 
 #else
 
+#if defined(OS_OS2)
+const char kRootCertsModuleName[] = "Root Certs (OS/2)";
+const char kRootCertsPath[] = "nssckbi.dll";
+#else
+const char kRootCertsModuleName[] = "Root Certs";
+const char kRootCertsPath[] = "libnssckbi.so";
+#endif
+
 base::FilePath GetDefaultConfigDirectory() {
   base::FilePath dir;
   base::PathService::Get(base::DIR_HOME, &dir);
@@ -269,7 +277,7 @@ class NSSInitSingleton {
     //
     // TODO(mattm): DCHECK this succeeded when crbug.com/310972 is fixed.
     // Failing to load root certs will it hard to talk to anybody via https.
-    LoadNSSModule("Root Certs", "libnssckbi.so", nullptr);
+    LoadNSSModule(kRootCertsModuleName, kRootCertsPath, nullptr);
 
     // Disable MD5 certificate signatures. (They are disabled by default in
     // NSS 3.14.)

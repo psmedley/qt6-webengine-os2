@@ -33,7 +33,7 @@
 
 namespace {
 
-#if defined(OS_WIN)
+#if defined(OS_DOSLIKE)
 const char kPrettyPrintLineEnding[] = "\r\n";
 #else
 const char kPrettyPrintLineEnding[] = "\n";

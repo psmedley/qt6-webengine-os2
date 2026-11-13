@@ -320,15 +320,17 @@ PrintSettings& PrintSettings::operator=(const PrintSettings& settings) {
 #endif
   is_modifiable_ = settings.is_modifiable_;
   pages_per_sheet_ = settings.pages_per_sheet_;
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
   for (const auto& item : settings.advanced_settings_)
     advanced_settings_.emplace(item.first, item.second.Clone());
-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-#if BUILDFLAG(IS_CHROMEOS)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
   send_user_info_ = settings.send_user_info_;
   username_ = settings.username_;
   oauth_token_ = settings.oauth_token_;
   pin_value_ = settings.pin_value_;
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
+#if BUILDFLAG(IS_CHROMEOS)
   client_infos_ = settings.client_infos_;
 #endif  // BUILDFLAG(IS_CHROMEOS)
 #if BUILDFLAG(ENABLE_OOP_PRINTING_NO_OOP_BASIC_PRINT_DIALOG)
@@ -350,13 +352,16 @@ bool PrintSettings::operator==(const PrintSettings& other) const {
 #endif
                   is_modifiable_, requested_custom_margins_in_points_,
                   pages_per_sheet_
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
                   ,
                   advanced_settings_
 #endif
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
+                  ,
+                  send_user_info_, username_, oauth_token_, pin_value_
+#endif
 #if BUILDFLAG(IS_CHROMEOS)
                   ,
-                  send_user_info_, username_, oauth_token_, pin_value_,
                   client_infos_, printer_manually_selected_,
                   printer_status_reason_
 #endif
@@ -374,15 +379,19 @@ bool PrintSettings::operator==(const PrintSettings& other) const {
                   other.is_modifiable_,
                   other.requested_custom_margins_in_points_,
                   other.pages_per_sheet_
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
                   ,
                   other.advanced_settings_
 #endif
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
                   ,
                   other.send_user_info_, other.username_, other.oauth_token_,
-                  other.pin_value_, other.client_infos_,
-                  other.printer_manually_selected_, other.printer_status_reason_
+                  other.pin_value_
+#endif
+#if BUILDFLAG(IS_CHROMEOS)
+                  ,
+                  other.client_infos_, other.printer_manually_selected_,
+                  other.printer_status_reason_
 #endif
          );
 }
@@ -414,14 +423,16 @@ void PrintSettings::Clear() {
 #endif
   is_modifiable_ = true;
   pages_per_sheet_ = 1;
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
   advanced_settings_.clear();
-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-#if BUILDFLAG(IS_CHROMEOS)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
   send_user_info_ = false;
   username_.clear();
   oauth_token_.clear();
   pin_value_.clear();
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
+#if BUILDFLAG(IS_CHROMEOS)
   client_infos_.clear();
 #endif  // BUILDFLAG(IS_CHROMEOS)
 #if BUILDFLAG(ENABLE_OOP_PRINTING_NO_OOP_BASIC_PRINT_DIALOG)

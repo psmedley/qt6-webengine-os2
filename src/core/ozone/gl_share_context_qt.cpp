@@ -6,7 +6,10 @@
 #include <QtGui/qtgui-config.h>
 #include <qpa/qplatformnativeinterface.h>
 
+#include "build/build_config.h"
+#if !BUILDFLAG(IS_OS2)
 #include "ui/gl/gl_context_egl.h"
+#endif
 #include "ui/gl/gl_implementation.h"
 
 #if QT_CONFIG(opengl)
@@ -59,10 +62,12 @@ unsigned int QtShareGLContext::CheckStickyGraphicsResetStatusImpl()
 
 void ShareGroupQt::AboutToAddFirstContext()
 {
+#if !BUILDFLAG(IS_OS2)
     if (gl::GetGLImplementation() == gl::kGLImplementationEGLANGLE) {
         m_shareContextQt = new gl::GLContextEGL(nullptr);
         return;
     }
+#endif
 
 #if QT_CONFIG(opengl)
     // This currently has to be setup by ::main in all applications using QQuickWebEngineView with

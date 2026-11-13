@@ -135,6 +135,13 @@ if (is_apple) {
   }
 }
 
+if (is_os2) {
+  libangle_common_sources += [
+    "src/common/system_utils_os2.cpp",
+    "src/common/system_utils_posix.cpp",
+  ]
+}
+
 if (is_win) {
   libangle_common_sources += [ "src/common/system_utils_win.cpp" ]
   if (target_os == "winuwp") {

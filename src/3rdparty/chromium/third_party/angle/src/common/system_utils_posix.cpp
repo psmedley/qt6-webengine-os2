@@ -9,6 +9,13 @@
 #include "common/debug.h"
 #include "system_utils.h"
 
+#include "common/platform.h"
+
+#if defined(ANGLE_PLATFORM_OS2)
+#    define INCL_BASE
+#    include <os2.h>
+#endif
+
 #include <array>
 #include <iostream>
 
@@ -40,6 +47,22 @@ namespace
 {
 std::string GetModulePath(void *moduleOrSymbol)
 {
+#if defined(ANGLE_PLATFORM_OS2)
+    std::string directory;
+    static int placeholderSymbol = 0;
+    // TODO implement dladdr in LIBCn, see https://github.com/bitwiseworks/libc/issues/104
+    HMODULE hmod;
+    if (!DosQueryModFromEIP(&hmod, NULL, 0, NULL, NULL, (ULONG)&placeholderSymbol))
+    {
+        char path[CCHMAXPATH];
+        if (!DosQueryModuleName(hmod, CCHMAXPATH, path))
+        {
+            std::string moduleName = path;
+            directory              = moduleName.substr(0, moduleName.find_last_of('\\') + 1);
+        }
+    }
+    return directory;
+#else
     Dl_info dlInfo;
     if (dladdr(moduleOrSymbol, &dlInfo) == 0)
     {
@@ -58,6 +81,7 @@ std::string GetModulePath(void *moduleOrSymbol)
 #endif
 
     return dlInfo.dli_fname;
+#endif
 }
 
 void *OpenPosixLibrary(const std::string &fullPath, int extraFlags, std::string *errorOut)
@@ -144,7 +168,11 @@ std::string GetEnvironmentVar(const char *variableName)
 
 const char *GetPathSeparatorForEnvironmentVar()
 {
+#if defined(ANGLE_PLATFORM_OS2)
+    return ";";
+#else
     return ":";
+#endif
 }
 
 std::string GetModuleDirectoryAndGetError(std::string *errorOut)
@@ -210,10 +238,12 @@ void *OpenSystemLibraryWithExtensionAndGetError(const char *libraryName,
     }
 
     int extraFlags = 0;
+#ifndef ANGLE_PLATFORM_OS2
     if (searchType == SearchType::AlreadyLoaded)
     {
         extraFlags = RTLD_NOLOAD;
     }
+#endif
 
     std::string fullPath = directory + libraryName;
     return OpenPosixLibrary(fullPath, extraFlags, errorOut);

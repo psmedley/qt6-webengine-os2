@@ -50,7 +50,7 @@ component("printing_base") {
 
   configs += [ ":strict" ]
 
-  if (use_cups_ipp || is_chromeos) {
+  if (use_cups_ipp || is_chromeos || is_os2) {
     sources += [
       "printer_query_result.h",
       "printer_status.cc",
@@ -224,7 +224,7 @@ component("printing") {
     ]
   }
 
-  if (!enable_basic_print_dialog) {
+  if (!enable_basic_print_dialog || is_os2) {
     sources += [
       "printing_context_no_system_dialog.cc",
       "printing_context_no_system_dialog.h",
@@ -292,7 +292,7 @@ component("printing") {
   }
 
   if (use_cups) {
-    if (is_chromeos) {
+    if (is_chromeos || is_os2) {
       sources += [
         "printing_context_chromeos.cc",
         "printing_context_chromeos.h",
@@ -421,7 +421,7 @@ test("printing_unittests") {
   }
 
   if (use_cups) {
-    if (use_cups_ipp) {
+    if (use_cups_ipp || is_os2) {
       sources += [ "backend/cups_ipp_helper_unittest.cc" ]
     }
 

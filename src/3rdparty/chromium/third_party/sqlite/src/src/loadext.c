@@ -563,6 +563,8 @@ static int sqlite3LoadExtension(
      "dll"   
 #elif defined(__APPLE__)
      "dylib"
+#elif SQLITE_OS_OS2
+     "dll"
 #else
      "so"
 #endif
@@ -602,7 +604,7 @@ static int sqlite3LoadExtension(
   if( nMsg==0 ) goto extension_not_found;
     
   handle = sqlite3OsDlOpen(pVfs, zFile);
-#if SQLITE_OS_UNIX || SQLITE_OS_WIN
+#if SQLITE_OS_UNIX || SQLITE_OS_WIN || SQLITE_OS_OS2
   for(ii=0; ii<ArraySize(azEndings) && handle==0; ii++){
     char *zAltFile = sqlite3_mprintf("%s.%s", zFile, azEndings[ii]);
     if( zAltFile==0 ) return SQLITE_NOMEM_BKPT;

@@ -163,7 +163,7 @@ bool WindowTreeHostPlatform::IsKeyLocked(ui::DomCode dom_code) {
 
 base::flat_map<std::string, std::string>
 WindowTreeHostPlatform::GetKeyboardLayoutMap() {
-#if BUILDFLAG(IS_OZONE)
+#if BUILDFLAG(IS_OZONE) && !BUILDFLAG(IS_OS2)
   return ui::GenerateDomKeyboardLayoutMap();
 #else
   NOTIMPLEMENTED();

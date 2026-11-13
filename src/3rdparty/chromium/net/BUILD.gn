@@ -1429,6 +1429,9 @@ component("net") {
     ]
   }
 
+  if (is_os2) {
+    sources += [ "base/platform_mime_util_os2.cc" ]
+  }
   if (enable_unix_sockets) {
     sources += [
       "socket/unix_domain_client_socket_posix.cc",

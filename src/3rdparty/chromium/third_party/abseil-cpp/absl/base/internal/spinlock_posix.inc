@@ -14,7 +14,11 @@
 //
 // This file is a Posix-specific part of spinlock_wait.cc
 
+#ifdef __OS2__
+#include <unistd.h>
+#else
 #include <sched.h>
+#endif
 
 #include <atomic>
 #include <ctime>
@@ -31,7 +35,12 @@ ABSL_ATTRIBUTE_WEAK void ABSL_INTERNAL_C_SYMBOL(AbslInternalSpinLockDelay)(
   absl::base_internal::ErrnoSaver errno_saver;
   if (loop == 0) {
   } else if (loop == 1) {
+#ifdef __OS2__
+    // This will end up in DosSleep(0) which does yielding.
+    sleep(0);
+#else
     sched_yield();
+#endif
   } else {
     struct timespec tm;
     tm.tv_sec = 0;

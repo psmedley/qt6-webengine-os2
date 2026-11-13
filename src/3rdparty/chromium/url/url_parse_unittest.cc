@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/third_party/mozilla/url_parse.h"
 
@@ -378,7 +379,7 @@ TEST(URLParser, PathURL) {
 // Various incarnations of file URLs.
 // clang-format off
 static URLParseCase file_cases[] = {
-#ifdef WIN32
+#ifdef OS_DOSLIKE
 {"file:server",              "file", nullptr, nullptr, "server", -1, nullptr,       nullptr, nullptr},
 {"  file: server  \t",       "file", nullptr, nullptr, " server",-1, nullptr,       nullptr, nullptr},
 {"FiLe:c|",                  "FiLe", nullptr, nullptr, nullptr,  -1, "c|",          nullptr, nullptr},
@@ -406,7 +407,7 @@ static URLParseCase file_cases[] = {
   // Queries and refs are valid for file URLs as well.
 {"file:///C:/foo.html?#",   "file", nullptr, nullptr,  nullptr,  -1, "/C:/foo.html",  "",   ""},
 {"file:///C:/foo.html?query=yes#ref", "file", nullptr, nullptr, nullptr, -1, "/C:/foo.html", "query=yes", "ref"},
-#else  // WIN32
+#else  // OS_DOSLIKE
   // No slashes.
   {"file:",                    "file", nullptr, nullptr, nullptr,   -1, nullptr,          nullptr, nullptr},
   {"file:path",                "file", nullptr, nullptr, nullptr,   -1, "path",           nullptr, nullptr},
@@ -451,7 +452,7 @@ static URLParseCase file_cases[] = {
   // Queries and refs are valid for file URLs as well.
   {"file:///foo.html?#",       "file", nullptr, nullptr, nullptr,    -1, "/foo.html",     "",   ""},
   {"file:///foo.html?q=y#ref", "file", nullptr, nullptr, nullptr,    -1, "/foo.html",    "q=y", "ref"},
-#endif  // WIN32
+#endif  // OS_DOSLIKE
 };
 // clang-format on
 

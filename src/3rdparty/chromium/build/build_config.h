@@ -103,6 +103,8 @@
 #define OS_QNX 1
 #elif defined(_AIX)
 #define OS_AIX 1
+#elif defined(__OS2__)
+#define OS_OS2 1
 #elif defined(__asmjs__) || defined(__wasm__)
 #define OS_ASMJS 1
 #elif defined(__MVS__)
@@ -129,8 +131,12 @@
     defined(OS_FREEBSD) || defined(OS_IOS) || defined(OS_LINUX) ||  \
     defined(OS_CHROMEOS) || defined(OS_MAC) || defined(OS_NACL) ||  \
     defined(OS_NETBSD) || defined(OS_OPENBSD) || defined(OS_QNX) || \
-    defined(OS_SOLARIS) || defined(OS_ZOS)
+    defined(OS_SOLARIS) || defined(OS_ZOS) || defined(OS_OS2)
 #define OS_POSIX 1
+#endif
+
+#if defined(OS_WIN) || defined(OS_OS2)
+#define OS_DOSLIKE 1
 #endif
 
 // OS build flags
@@ -266,6 +272,12 @@
 #define BUILDFLAG_INTERNAL_IS_MAC_13() (0)
 #endif
 
+#if defined(OS_OS2)
+#define BUILDFLAG_INTERNAL_IS_OS2() (1)
+#else
+#define BUILDFLAG_INTERNAL_IS_OS2() (0)
+#endif
+
 // Compiler detection. Note: clang masquerades as GCC on POSIX and as MSVC on
 // Windows.
 #if defined(__GNUC__)
@@ -367,7 +379,7 @@
 #endif
 
 // Type detection for wchar_t.
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_OS2)
 #define WCHAR_T_IS_16_BIT
 #elif defined(OS_FUCHSIA)
 #define WCHAR_T_IS_32_BIT

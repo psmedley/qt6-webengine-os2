@@ -61,6 +61,7 @@ void MatchedFilterCore_SSE2(size_t x_start_index,
                             rtc::ArrayView<float> scratch_memory);
 
 // Filter core for the matched filter that is optimized for AVX2.
+#ifndef __OS2__
 void MatchedFilterCore_AVX2(size_t x_start_index,
                             float x2_sum_threshold,
                             float smoothing,
@@ -72,7 +73,7 @@ void MatchedFilterCore_AVX2(size_t x_start_index,
                             bool compute_accumulated_error,
                             rtc::ArrayView<float> accumulated_error,
                             rtc::ArrayView<float> scratch_memory);
-
+#endif  // !__OS2__
 #endif
 
 // Filter core for the matched filter.

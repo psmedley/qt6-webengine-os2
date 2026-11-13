@@ -320,6 +320,8 @@ config("compiler") {
     configs += [ "//build/config/ios:compiler" ]
   } else if (is_fuchsia) {
     configs += [ "//build/config/fuchsia:compiler" ]
+  } else if (is_os2) {
+    configs += [ "//build/config/os2:compiler" ]
   } else if (current_os == "aix") {
     configs += [ "//build/config/aix:compiler" ]
   } else if (current_os == "zos") {
@@ -396,6 +398,12 @@ config("compiler") {
           cflags += [ "-fstack-protector" ]
         }
       }
+
+      if (is_os2) {
+        # On OS/2, stack protection helpers are in a separate library.
+        # See https://github.com/bitwiseworks/gcc-os2/issues/13
+        ldflags += [ "-fstack-protector" ]
+      }
     }
 
     if (use_lld) {
@@ -406,7 +414,7 @@ config("compiler") {
     }
 
     # Linker warnings.
-    if (fatal_linker_warnings && !is_apple && current_os != "aix" &&
+    if (fatal_linker_warnings && !is_apple && !is_os2 && current_os != "aix" &&
         current_os != "zos") {
       ldflags += [ "-Wl,--fatal-warnings" ]
     }
@@ -487,12 +495,12 @@ config("compiler") {
     # Explicitly pass --build-id to ld. Compilers used to always pass this
     # implicitly but don't any more (in particular clang when built without
     # ENABLE_LINKER_BUILD_ID=ON).
-    if (is_official_build) {
+    if (is_official_build && !is_os2) {
       # The sha1 build id has lower risk of collision but is more expensive to
       # compute, so only use it in the official build to avoid slowing down
       # links.
       ldflags += [ "-Wl,--build-id=sha1" ]
-    } else if (current_os != "aix" && current_os != "zos") {
+    } else if (current_os != "aix"  && !is_os2 && current_os != "zos") {
       ldflags += [ "-Wl,--build-id" ]
     }
 
@@ -695,7 +703,7 @@ config("compiler") {
   # C11/C++11 compiler flags setup.
   # ---------------------------
   if (is_linux || is_chromeos || is_android || (is_nacl && is_clang) ||
-      current_os == "aix") {
+      current_os == "aix" || is_os2) {
     if (is_clang) {
       standard_prefix = "c"
 
@@ -2388,7 +2396,7 @@ config("thin_archive") {
   # archives.
   # TODO(crbug.com/1221615): Enable on is_apple if use_lld once that no longer
   # confuses lldb.
-  if ((is_posix && !is_nacl && !is_apple) || is_fuchsia) {
+  if ((is_posix && !is_nacl && !is_os2 && !is_apple) || is_fuchsia) {
     arflags = [ "-T" ]
   } else if (is_win && use_lld) {
     arflags = [ "/llvmlibthin" ]
@@ -2537,7 +2545,7 @@ if (is_win && !is_mingw) {
         "-Wl,-no_function_starts",
       ]
     }
-  } else if (current_os != "aix" && current_os != "zos") {
+  } else if (!is_os2 && current_os != "aix" && current_os != "zos") {
     # Non-Mac Posix flags.
     # Aix does not support these.
 
@@ -2779,7 +2787,16 @@ config("default_optimization") {
     # It gets optimized the same way regardless of the type of build.
     configs = [ "//build/config/nacl:irt_optimize" ]
   } else if (is_debug) {
-    configs = [ ":no_optimize" ]
+    if (is_os2) {
+      # OS/2 EMX toolchain has general problems with handling extremely large
+      # amounts of debug info, see
+      # https://github.com/bitwiseworks/libc/issues/82 and
+      # https://github.com/bitwiseworks/libc/issues/84 for more details. Stick
+      # with always optimized builds for now (as they reduce the # of symbols).
+      configs = [ ":optimize" ]
+    } else {
+      configs = [ ":no_optimize" ]
+    }
   } else if (optimize_for_fuzzing) {
     assert(!is_win, "Fuzzing optimize level not supported on Windows")
 
@@ -2960,7 +2977,14 @@ config("symbols") {
     # build-directory-independent output.
     # Keeping -g2 for saigo as it's the only toolchain whose artifacts that are
     # part of chromium release (other nacl toolchains are used only for tests).
-    if ((!is_nacl || is_nacl_saigo) && current_os != "zos") {
+    if (is_os2) {
+      # -g2 isn't supported by the OS/2 EMX toolchain yet; also it has general
+      # problems with handling extremely large amounts of debug info, see
+      # https://github.com/bitwiseworks/libc/issues/82 and
+      # https://github.com/bitwiseworks/libc/issues/84 for more details.
+      # Stick with no debug info at all for now.
+      cflags += [ "-s" ]
+    } else if ((!is_nacl || is_nacl_saigo) && current_os != "zos") {
       cflags += [ "-g2" ]
     }
 
@@ -3103,7 +3127,14 @@ config("minimal_symbols") {
     # build-directory-independent output.
     # Keeping -g1 for saigo as it's the only toolchain whose artifacts that are
     # part of chromium release (other nacl toolchains are used only for tests).
-    if (!is_nacl || is_nacl_saigo) {
+    if (is_os2) {
+      # -g1 isn't supported by the OS/2 EMX toolchain yet; also it has general
+      # problems with handling extremely large amounts of debug info, see
+      # https://github.com/bitwiseworks/libc/issues/82 and
+      # https://github.com/bitwiseworks/libc/issues/84 for more details.
+      # Stick with no debug info at all for now.
+      cflags += [ "-s" ]
+    } else if (!is_nacl || is_nacl_saigo) {
       cflags += [ "-g1" ]
     }
 

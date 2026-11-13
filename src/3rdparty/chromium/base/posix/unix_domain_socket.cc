@@ -51,13 +51,13 @@ bool CreateSocketPair(ScopedFD* one, ScopedFD* two) {
 
 // static
 bool UnixDomainSocket::EnableReceiveProcessId(int fd) {
-#if !BUILDFLAG(IS_APPLE)
+#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
   const int enable = 1;
   return setsockopt(fd, SOL_SOCKET, SO_PASSCRED, &enable, sizeof(enable)) == 0;
 #else
-  // SO_PASSCRED is not supported on macOS.
+  // SO_PASSCRED is not supported on macOS or OS/2.
   return true;
-#endif  // BUILDFLAG(IS_APPLE)
+#endif  // !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
 }
 
 // static
@@ -107,6 +107,9 @@ bool UnixDomainSocket::SendMsg(int fd,
                      &no_sigpipe_len) == 0)
       << "Failed ot get socket option.";
   DCHECK(no_sigpipe) << "SO_NOSIGPIPE not set on the socket.";
+#elif defined(OS_OS2)
+  // No SO_NOSIGPIPE or MSG_NOSIGNAL on OS/2
+  const int flags = 0;
 #else
   const int flags = MSG_NOSIGNAL;
 #endif  // BUILDFLAG(IS_APPLE)
@@ -149,11 +152,11 @@ ssize_t UnixDomainSocket::RecvMsgWithFlags(int fd,
 
   const size_t kControlBufferSize =
       CMSG_SPACE(sizeof(int) * kMaxFileDescriptors)
-#if !BUILDFLAG(IS_APPLE)
+#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
       // macOS does not support ucred.
       // macOS supports xucred, but this structure is insufficient.
       + CMSG_SPACE(sizeof(struct ucred))
-#endif  // !BUILDFLAG(IS_APPLE)
+#endif  // !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
       ;
   char control_buffer[kControlBufferSize];
   msg.msg_control = control_buffer;
@@ -177,7 +180,7 @@ ssize_t UnixDomainSocket::RecvMsgWithFlags(int fd,
         wire_fds = reinterpret_cast<int*>(CMSG_DATA(cmsg));
         wire_fds_len = payload_len / sizeof(int);
       }
-#if !BUILDFLAG(IS_APPLE)
+#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
       // macOS does not support SCM_CREDENTIALS.
       if (cmsg->cmsg_level == SOL_SOCKET &&
           cmsg->cmsg_type == SCM_CREDENTIALS) {
@@ -185,7 +188,7 @@ ssize_t UnixDomainSocket::RecvMsgWithFlags(int fd,
         DCHECK_EQ(pid, -1);
         pid = reinterpret_cast<struct ucred*>(CMSG_DATA(cmsg))->pid;
       }
-#endif  // !BUILDFLAG(IS_APPLE)
+#endif  // !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
     }
   }
 

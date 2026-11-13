@@ -18,7 +18,7 @@
 #include "third_party/base/check.h"
 
 #if !BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS) && !defined(OS_FUCHSIA) && \
-    !defined(OS_ASMJS)
+    !defined(OS_ASMJS) && !defined(OS_OS2)
 #error "Included on the wrong platform"
 #endif
 

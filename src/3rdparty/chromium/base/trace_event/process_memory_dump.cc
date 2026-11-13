@@ -140,6 +140,11 @@ absl::optional<size_t> ProcessMemoryDump::CountResidentBytes(
     NOTIMPLEMENTED_LOG_ONCE();
     std::ignore = chunk_start;
     std::ignore = page_count;
+#elif BUILDFLAG(IS_OS2)
+    // TODO(os2): Port
+    NOTIMPLEMENTED_LOG_ONCE();
+    std::ignore = chunk_start;
+    std::ignore = page_count;
 #elif BUILDFLAG(IS_APPLE)
     // mincore in MAC does not fail with EAGAIN.
     failure =

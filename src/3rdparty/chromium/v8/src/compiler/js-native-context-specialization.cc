@@ -4,6 +4,8 @@
 
 #include "src/compiler/js-native-context-specialization.h"
 
+#include <algorithm>
+
 #include "src/base/logging.h"
 #include "src/base/optional.h"
 #include "src/builtins/accessors.h"

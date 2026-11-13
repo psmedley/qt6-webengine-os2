@@ -14,6 +14,7 @@ namespace base {
 
 namespace internal {
 
+#if !BUILDFLAG(IS_OS2)
 struct ThreadTypeToNiceValuePair {
   ThreadType thread_type;
   int nice_value;
@@ -42,6 +43,7 @@ int ThreadTypeToNiceValue(ThreadType thread_type);
 // Returns whether SetCurrentThreadTypeForPlatform can set a thread as
 // kRealtimeAudio.
 bool CanSetThreadTypeToRealtimeAudio();
+#endif
 
 // Allows platform specific tweaks to the generic POSIX solution for
 // SetCurrentThreadType(). Returns true if the platform-specific

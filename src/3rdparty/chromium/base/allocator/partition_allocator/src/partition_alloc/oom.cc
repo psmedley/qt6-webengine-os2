@@ -17,6 +17,14 @@
 #include <cstdlib>
 #endif  // BUILDFLAG(IS_WIN)
 
+#if BUILDFLAG(IS_OS2)
+#define INCL_DOSMISC
+#include <os2.h>
+#include <umalloc.h>
+
+#include "partition_alloc/partition_alloc_base/logging.h"
+#endif  // BUILDFLAG(IS_OS2)
+
 namespace partition_alloc {
 
 size_t g_oom_size = 0U;
@@ -42,6 +50,24 @@ PA_NOINLINE void OnNoMemoryInternal(size_t size) {
 #else
   size_t tmp_size = size;
   internal::base::debug::Alias(&tmp_size);
+
+#if BUILDFLAG(IS_OS2)
+  PA_LOG(ERROR) << "Out of memory. size=" << tmp_size;
+  // Log some numbers from LIBC and system before crashing.
+  _HEAPSTATS hst;
+  if (!_ustats(_udefault(nullptr), &hst))
+    PA_LOG(ERROR) << "LIBC heap: provided " << hst._provided << ", used "
+                  << hst._used << ", maxfree " << hst._max_free;
+  else
+    PA_PLOG(ERROR) << "_ustats failed";
+  ULONG buf[2];
+  if (!DosQuerySysInfo(QSV_MAXPRMEM, QSV_MAXSHMEM, buf, sizeof(buf)))
+    PA_LOG(ERROR) << "System low mem: max private " << buf[0]
+                  << ", max shared " << buf[1];
+  if (!DosQuerySysInfo(QSV_MAXHPRMEM, QSV_MAXHSHMEM, buf, sizeof(buf)))
+    PA_LOG(ERROR) << "System high mem: max private " << buf[0]
+                  << ", max shared " << buf[1];
+#endif  // BUILDFLAG(IS_OS2)
 
   // Note: Don't add anything that may allocate here. Depending on the
   // allocator, this may be called from within the allocator (e.g. with

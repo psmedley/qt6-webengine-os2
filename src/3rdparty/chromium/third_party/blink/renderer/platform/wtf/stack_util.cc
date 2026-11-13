@@ -14,6 +14,9 @@
 #include <stddef.h>
 #include <windows.h>
 #include <winnt.h>
+#elif defined(OS_OS2)
+#define INCL_DOS
+#include <os2.h>
 #elif defined(__GLIBC__)
 extern "C" void* __libc_stack_end;  // NOLINT
 #endif
@@ -90,6 +93,16 @@ size_t GetUnderestimatedStackSize() {
   return pthread_get_stacksize_np(pthread_self());
 #elif BUILDFLAG(IS_WIN) && defined(COMPILER_MSVC)
   return Threading::ThreadStackSize();
+#elif BUILDFLAG(IS_OS2)
+  PTIB ptib;
+  DosGetInfoBlocks(&ptib, NULL);
+  // Reduce the stack size by two pages to avoid hitting a stack overflow
+  // exception when the second last page (protected by the guard flag) is
+  // accessed.
+  return
+    reinterpret_cast<ULONG>(ptib->tib_pstacklimit) -
+    reinterpret_cast<ULONG>(ptib->tib_pstack) -
+    0x1000 * 2;
 #else
 #error "Stack frame size estimation not supported on this platform."
   return 0;
@@ -148,6 +161,11 @@ void* GetStackStart() {
   ::GetCurrentThreadStackLimits(&lowLimit, &highLimit);
   return reinterpret_cast<void*>(highLimit);
 #endif
+#elif defined(OS_OS2)
+  PTIB ptib;
+  DosGetInfoBlocks(&ptib, NULL);
+  // tib_pstacklimit is the high stack address - just what we need.
+  return ptib->tib_pstacklimit;
 #else
 #error Unsupported getStackStart on this platform.
 #endif

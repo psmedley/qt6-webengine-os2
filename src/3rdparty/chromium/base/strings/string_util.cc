@@ -234,7 +234,7 @@ bool IsStringASCII(StringPiece16 str) {
   return internal::DoIsStringASCII(str.data(), str.length());
 }
 
-#if defined(WCHAR_T_IS_32_BIT)
+#if defined(WCHAR_T_IS_32_BIT) || defined(__OS2__)
 bool IsStringASCII(std::wstring_view str) {
   return internal::DoIsStringASCII(str.data(), str.length());
 }

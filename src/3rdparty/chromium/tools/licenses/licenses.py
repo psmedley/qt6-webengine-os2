@@ -821,7 +821,10 @@ def _GnBinary():
   elif sys.platform == 'win32':
     subdir, exe = 'win', 'gn.exe'
   else:
-    raise RuntimeError("Unsupported platform '%s'." % sys.platform)
+    # Other platforms (e.g. OS/2, sys.platform 'os2knix') have no prebuilt
+    # GN in //buildtools; rely on 'gn' being in PATH. The binary is only
+    # invoked when a GN target is passed.
+    return exe
 
   return os.path.join(_REPOSITORY_ROOT, 'buildtools', subdir, exe)
 

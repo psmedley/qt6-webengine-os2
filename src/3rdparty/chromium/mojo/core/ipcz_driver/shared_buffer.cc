@@ -64,6 +64,8 @@ CreateRegionHandleFromPlatformHandles(
   return handles[0].TakeMachSendRight();
 #elif BUILDFLAG(IS_ANDROID)
   return handles[0].TakeFD();
+#elif BUILDFLAG(IS_OS2)
+  return handles[0].TakeShmemHandle();
 #else
   base::ScopedFD readonly_fd;
   if (mode == base::subtle::PlatformSharedMemoryRegion::Mode::kWritable) {
@@ -172,7 +174,7 @@ bool SharedBuffer::GetSerializedDimensions(Transport& transmitter,
                                            size_t& num_handles) {
   num_bytes = sizeof(BufferHeader);
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_FUCHSIA) || \
-    BUILDFLAG(IS_ANDROID)
+    BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_OS2)
   num_handles = 1;
 #else
   if (region_.GetMode() ==
@@ -214,7 +216,7 @@ bool SharedBuffer::Serialize(Transport& transmitter,
 
   auto handle = region_.PassPlatformHandle();
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_FUCHSIA) || \
-    BUILDFLAG(IS_ANDROID)
+    BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_OS2)
   DCHECK_EQ(handles.size(), 1u);
   handles[0] = PlatformHandle(std::move(handle));
 #else

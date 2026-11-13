@@ -37,6 +37,9 @@ extern "C" {
 #elif defined(OPENSSL_APPLE) && !defined(OPENSSL_MACOS)
 // Unlike macOS, iOS and similar hide away getentropy().
 #define OPENSSL_RAND_IOS
+#elif defined(OPENSSL_OS2)
+// OS/2 (kLIBC) has no getentropy(); use arc4random() instead.
+#define OPENSSL_RAND_OS2
 #else
 // By default if you are integrating BoringSSL we expect you to
 // provide getentropy from the <unistd.h> header file.

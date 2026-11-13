@@ -29,7 +29,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${WEBENGINE_ROOT_SOURCE_DIR}/cmake")
 find_package(Python3 REQUIRED)
 find_package(Ninja 1.7.2 REQUIRED)
 
-if(WIN32)
+if(WIN32 OR OS2)
     set(GN_EXECUTABLE gn.exe)
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND NOT MINGW)
         # Use lld-link instead of clang-cl.

@@ -112,10 +112,16 @@
         fakegot:
     %elifidn __OUTPUT_FORMAT__,aout
         SECTION .text
+    %elifidn __OUTPUT_FORMAT__,obj
+        SECTION CONST32 public align=%1 use32 class=CONST flat
     %else
         SECTION .rodata align=%1
     %endif
 %endmacro
+
+%ifidn __OUTPUT_FORMAT__,obj
+    %define .text TEXT32 public align=16 use32 class=CODE flat
+%endif
 
 ; PIC macros from aom_ports/x86_abi_support.asm.
 %ifidn __OUTPUT_FORMAT__,elf32
@@ -125,6 +131,8 @@
 %elifidn __OUTPUT_FORMAT__,win32
 %define ABI_IS_32BIT 1
 %elifidn __OUTPUT_FORMAT__,aout
+%define ABI_IS_32BIT 1
+%elifidn __OUTPUT_FORMAT__,obj
 %define ABI_IS_32BIT 1
 %else
 %define ABI_IS_32BIT 0

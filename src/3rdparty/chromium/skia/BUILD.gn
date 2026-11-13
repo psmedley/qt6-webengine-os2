@@ -466,7 +466,7 @@ component("skia") {
     ]
   }
 
-  if (is_linux || is_chromeos) {
+  if (is_linux || is_chromeos || is_os2) {
     sources += [
       "//third_party/skia/src/ports/SkFontConfigInterface.cpp",
       "//third_party/skia/src/ports/SkFontConfigInterface_direct.cpp",
@@ -501,6 +501,12 @@ component("skia") {
     ]
   }
 
+  if (is_os2) {
+    sources += [
+      "//third_party/skia/src/ports/SkFontMgr_fontconfig.cpp",
+      "ext/fontmgr_default_os2.cc",
+    ]
+  }
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [
     ":skia_config",
@@ -531,7 +537,7 @@ component("skia") {
     ]
   }
 
-  if (is_linux || is_chromeos) {
+  if (is_linux || is_chromeos || is_os2) {
     deps += [
       "//third_party/expat",
       "//third_party/fontconfig",

@@ -31,6 +31,7 @@ enum class EmbeddedTargetOs {
   kMac,
   kWin,
   kStarboard,
+  kOS2,
   kGeneric,  // Everything not covered above falls in here.
 };
 

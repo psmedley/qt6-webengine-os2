@@ -39,7 +39,7 @@ class X509Certificate;
 
 namespace QtWebEngineCore {
 
-#if defined(Q_OS_WIN)
+#if defined(Q_OS_WIN) || defined(Q_OS_OS2)
 inline QString toQt(const std::wstring &string)
 {
     return QString::fromStdWString(string);
@@ -232,6 +232,8 @@ inline base::FilePath::StringType toFilePathString(const QString &str)
 {
 #if defined(Q_OS_WIN)
     return QDir::toNativeSeparators(str).toStdWString();
+#elif defined(OS_OS2)
+    return QDir::toNativeSeparators(str).toStdString();
 #else
     return str.toStdString();
 #endif

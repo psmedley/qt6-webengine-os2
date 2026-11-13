@@ -53,6 +53,11 @@
 #include "mojo/public/cpp/system/scope_to_message_pipe.h"
 #endif
 
+#if defined(OS_OS2)
+#include "ipc/shmem_handle_os2.h"
+#include "base/os2/scoped_shmem_handle.h"
+#endif
+
 namespace IPC {
 
 namespace {
@@ -953,6 +958,10 @@ void ParamTraits<base::subtle::PlatformSharedMemoryRegion>::Write(
   base::win::ScopedHandle h = const_cast<param_type&>(p).PassPlatformHandle();
   HandleWin handle_win(h.Get());
   WriteParam(m, handle_win);
+#elif BUILDFLAG(IS_OS2)
+  base::os2::ScopedShmemHandle h = const_cast<param_type&>(p).PassPlatformHandle();
+  ShmemHandleOS2 handle_os2(h.get());
+  WriteParam(m, handle_os2);
 #elif BUILDFLAG(IS_FUCHSIA)
   zx::vmo vmo = const_cast<param_type&>(p).PassPlatformHandle();
   WriteParam(m, vmo);
@@ -1004,6 +1013,12 @@ bool ParamTraits<base::subtle::PlatformSharedMemoryRegion>::Read(
     return false;
   *r = base::subtle::PlatformSharedMemoryRegion::Take(
       base::win::ScopedHandle(handle_win.get_handle()), mode, size, guid);
+#elif BUILDFLAG(IS_OS2)
+  ShmemHandleOS2 handle_os2;
+  if (!ReadParam(m, iter, &handle_os2))
+    return false;
+  *r = base::subtle::PlatformSharedMemoryRegion::Take(
+      base::os2::ScopedShmemHandle(handle_os2.get_handle()), mode, size, guid);
 #elif BUILDFLAG(IS_FUCHSIA)
   zx::vmo vmo;
   if (!ReadParam(m, iter, &vmo))
@@ -1069,6 +1084,9 @@ void ParamTraits<base::subtle::PlatformSharedMemoryRegion>::Log(
   LogParam(p.GetPlatformHandle()->get(), l);
 #elif BUILDFLAG(IS_WIN)
   l->append("Handle: ");
+  LogParam(p.GetPlatformHandle(), l);
+#elif BUILDFLAG(IS_OS2)
+  l->append("SHMEM handle: ");
   LogParam(p.GetPlatformHandle(), l);
 #elif BUILDFLAG(IS_APPLE)
   l->append("Mach port: ");
@@ -1491,5 +1509,55 @@ void ParamTraits<MSG>::Log(const param_type& p, std::string* l) {
 }
 
 #endif  // BUILDFLAG(IS_WIN)
+
+#if defined(OS_OS2)
+// Note that HWNDs/HANDLE/HCURSOR/HACCEL etc are always unsigned long (32 bits).
+void ParamTraits<LHANDLE>::Write(base::Pickle* m, const param_type& p) {
+  m->WriteUInt32(p);
+}
+
+bool ParamTraits<LHANDLE>::Read(const base::Pickle* m,
+                               base::PickleIterator* iter,
+                               param_type* r) {
+  uint32_t temp;
+  if (!iter->ReadUInt32(&temp))
+    return false;
+  *r = (param_type)temp;
+  return true;
+}
+
+void ParamTraits<LHANDLE>::Log(const param_type& p, std::string* l) {
+  l->append(base::StringPrintf("0x%lu", p));
+}
+
+void ParamTraits<QMSG>::Write(base::Pickle* m, const param_type& p) {
+  m->WriteData(reinterpret_cast<const char*>(&p), sizeof(QMSG));
+}
+
+bool ParamTraits<QMSG>::Read(const base::Pickle* m,
+                            base::PickleIterator* iter,
+                            param_type* r) {
+  const char *data;
+  size_t data_size = 0;
+  bool result = iter->ReadData(&data, &data_size);
+  if (result && data_size == sizeof(QMSG)) {
+    memcpy(r, data, sizeof(QMSG));
+  } else {
+    result = false;
+    NOTREACHED();
+  }
+
+  return result;
+}
+
+void ParamTraits<QMSG>::Log(const param_type& p, std::string* l) {
+  l->append("<QMSG>");
+}
+
+void ParamTraits<void*>::Log(const param_type& p, std::string* l) {
+  l->append(base::StringPrintf("0x%p", p));
+}
+
+#endif  // OS_OS2
 
 }  // namespace IPC

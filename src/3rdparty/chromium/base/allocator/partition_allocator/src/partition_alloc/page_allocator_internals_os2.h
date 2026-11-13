@@ -1,0 +1,218 @@
+// Copyright (c) 2020 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#ifndef BASE_ALLOCATOR_PARTITION_ALLOCATOR_SRC_PARTITION_ALLOC_PAGE_ALLOCATOR_INTERNALS_OS2_H_
+#define BASE_ALLOCATOR_PARTITION_ALLOCATOR_SRC_PARTITION_ALLOC_PAGE_ALLOCATOR_INTERNALS_OS2_H_
+
+#include "partition_alloc/oom.h"
+#include "partition_alloc/page_allocator_internal.h"
+#include "partition_alloc/partition_alloc_check.h"
+#include "partition_alloc/partition_alloc_base/notreached.h"
+
+namespace partition_alloc::internal {
+
+namespace {
+
+// Emulates semantics of Windows |VirtualAlloc|/|VirtualFree| that allow to
+// commit and decommit already committed or decommitted pages.
+APIRET MyDosSetMem(PVOID base, ULONG length, ULONG flags) {
+  if (!(flags & (PAG_COMMIT | PAG_DECOMMIT)))
+    return DosSetMem(base, length, flags);
+
+  // Query the current state of each range to avoid committing/decommitting
+  // already commited/decommitted pages.
+  PVOID addr = base;
+  APIRET arc = NO_ERROR;
+  while (length) {
+    ULONG act_len = length, act_flags, new_flags = flags;
+    arc = DosQueryMem(addr, &act_len, &act_flags);
+    if (arc != NO_ERROR)
+      break;
+    if ((new_flags & PAG_COMMIT) && (act_flags & PAG_COMMIT))
+      new_flags &= ~PAG_COMMIT;
+    if ((new_flags & PAG_DECOMMIT) && !(act_flags & (PAG_COMMIT | PAG_FREE)))
+      new_flags &= ~PAG_DECOMMIT;
+    // Only change permissions if some were requested: a pure PAG_DECOMMIT
+    // request on already-decommitted pages leaves new_flags == 0, and
+    // DosSetMem(..., 0) fails with ERROR_INVALID_PARAMETER.
+    const bool perm_change = (new_flags & fPERM) &&
+                             (new_flags & fPERM) != (act_flags & fPERM);
+    if ((new_flags & (PAG_COMMIT | PAG_DECOMMIT)) || perm_change) {
+      arc = DosSetMem(addr, act_len, new_flags);
+      if (arc != NO_ERROR)
+        break;
+    }
+    addr = static_cast<PVOID>(static_cast<char *>(addr) + act_len);
+    length -= act_len;
+  }
+
+  return arc;
+}
+
+} // namespace
+
+// |DosAllocMemEx| will fail if allocation at the hint address is blocked.
+constexpr bool kHintIsAdvisory = false;
+std::atomic<int32_t> s_allocPageErrorCode{NO_ERROR};
+
+int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
+  switch (accessibility.permissions) {
+    case PageAccessibilityConfiguration::kRead:
+      return PAG_READ;
+    case PageAccessibilityConfiguration::kReadWrite:
+    case PageAccessibilityConfiguration::kReadWriteTagged:
+      return PAG_READ | PAG_WRITE;
+    case PageAccessibilityConfiguration::kReadExecute:
+    case PageAccessibilityConfiguration::kReadExecuteProtected:
+      return PAG_READ | PAG_EXECUTE;
+    case PageAccessibilityConfiguration::kReadWriteExecute:
+      return PAG_READ | PAG_WRITE | PAG_EXECUTE;
+    default:
+      PA_NOTREACHED();
+      [[fallthrough]];
+    case PageAccessibilityConfiguration::kInaccessible:
+      return 0;
+  }
+}
+
+uintptr_t SystemAllocPagesInternal(
+    uintptr_t hint,
+    size_t length,
+    PageAccessibilityConfiguration accessibility,
+    PageTag page_tag,
+    [[maybe_unused]] int file_descriptor_for_shared_alloc) {
+  ULONG flags = GetAccessFlags(accessibility);
+  if (flags == 0)
+    flags = PAG_READ; // OS/2 requires at least one permission bit.
+  if (accessibility.permissions !=
+      PageAccessibilityConfiguration::kInaccessible)
+    flags |= PAG_COMMIT;
+  if (hint)
+    flags |= OBJ_LOCATION;
+  else
+    flags |= OBJ_ANY; // Request high memory.
+
+  void *base = reinterpret_cast<void*>(hint);
+  APIRET arc = DosAllocMemEx(&base, length, flags);
+  if (arc != NO_ERROR && (flags & OBJ_ANY)) {
+    // Try low memory.
+    flags &= ~OBJ_ANY;
+    arc = DosAllocMemEx(&base, length, flags);
+  }
+  if (arc != NO_ERROR) {
+    s_allocPageErrorCode = arc;
+    // On failure |base| may still hold |hint|; callers (e.g.
+    // AllocPagesWithAlignOffset(), which tries random hinted addresses
+    // first) treat any non-zero return as success, so return 0 like
+    // VirtualAlloc() does on Windows.
+    return 0;
+  }
+  return reinterpret_cast<uintptr_t>(base);
+}
+
+uintptr_t TrimMappingInternal(uintptr_t base_address,
+                              size_t base_length,
+                              size_t trim_length,
+                              PageAccessibilityConfiguration accessibility,
+                              size_t pre_slack,
+                              size_t post_slack) {
+  uintptr_t ret = base_address;
+  if (pre_slack || post_slack) {
+    // We cannot resize the allocation run. Free it and retry at the aligned
+    // address within the freed range.
+    ret = base_address + pre_slack;
+    FreePages(base_address, base_length);
+    ret = SystemAllocPages(ret, trim_length, accessibility, PageTag::kChromium);
+  }
+  return ret;
+}
+
+bool TrySetSystemPagesAccessInternal(
+    uintptr_t address,
+    size_t length,
+    PageAccessibilityConfiguration accessibility) {
+  void* ptr = reinterpret_cast<void*>(address);
+  if (accessibility.permissions ==
+      PageAccessibilityConfiguration::kInaccessible)
+    return MyDosSetMem(ptr, length, PAG_DECOMMIT) == NO_ERROR;
+  return MyDosSetMem(ptr, length, PAG_COMMIT |
+                     GetAccessFlags(accessibility)) == NO_ERROR;
+}
+
+void SetSystemPagesAccessInternal(
+    uintptr_t address,
+    size_t length,
+    PageAccessibilityConfiguration accessibility) {
+  void* ptr = reinterpret_cast<void*>(address);
+  if (accessibility.permissions ==
+      PageAccessibilityConfiguration::kInaccessible) {
+    APIRET arc = MyDosSetMem(ptr, length, PAG_DECOMMIT);
+    if (arc != NO_ERROR) {
+      // We check `arc` for `NO_ERROR` here so that in a crash
+      // report we get the error number.
+      PA_CHECK(static_cast<ULONG>(NO_ERROR) == arc);
+    }
+  } else {
+    APIRET arc = MyDosSetMem(ptr, length, PAG_COMMIT |
+                             GetAccessFlags(accessibility));
+    if (arc != NO_ERROR) {
+      if (arc == ERROR_NOT_ENOUGH_MEMORY)
+        OOM_CRASH(length);
+      // We check `arc` for `NO_ERROR` here so that in a crash
+      // report we get the arc number.
+      PA_CHECK(static_cast<ULONG>(NO_ERROR) == arc);
+    }
+  }
+}
+
+void FreePagesInternal(uintptr_t address, size_t length) {
+  APIRET arc = DosFreeMemEx(reinterpret_cast<void*>(address));
+  // As in the 6.2.6 port: freeing must succeed. ERROR_INVALID_ADDRESS used
+  // to be ignored here, which hid callers freeing never-allocated hint
+  // addresses returned by a failed SystemAllocPagesInternal().
+  PA_CHECK(static_cast<ULONG>(NO_ERROR) == arc);
+}
+
+void DecommitSystemPagesInternal(
+    uintptr_t address,
+    size_t length,
+    PageAccessibilityDisposition accessibility_disposition) {
+  // Ignore accessibility_disposition, because decommitting is equivalent to
+  // making pages inaccessible.
+  SetSystemPagesAccess(address, length, PageAccessibilityConfiguration::kInaccessible);
+}
+
+void DecommitAndZeroSystemPagesInternal(uintptr_t address, size_t length) {
+  PA_CHECK(static_cast<ULONG>(NO_ERROR) ==
+           MyDosSetMem(reinterpret_cast<void*>(address), length,
+                       PAG_DECOMMIT));
+}
+
+void RecommitSystemPagesInternal(
+    uintptr_t address,
+    size_t length,
+    PageAccessibilityConfiguration accessibility,
+    PageAccessibilityDisposition accessibility_disposition) {
+  // Ignore accessibility_disposition, because decommitting is equivalent to
+  // making pages inaccessible.
+  SetSystemPagesAccess(address, length, accessibility);
+}
+
+bool TryRecommitSystemPagesInternal(
+    uintptr_t address,
+    size_t length,
+    PageAccessibilityConfiguration accessibility,
+    PageAccessibilityDisposition accessibility_disposition) {
+  // Ignore accessibility_disposition, because decommitting is equivalent to
+  // making pages inaccessible.
+  return TrySetSystemPagesAccess(address, length, accessibility);
+}
+
+void DiscardSystemPagesInternal(uintptr_t address, size_t length) {
+  // TODO: OS/2 doen't seem to have madvise(MADV_DONTNEED)/MEM_RESET semantics.
+}
+
+}  // namespace namespace partition_alloc::internal
+
+#endif  // BASE_ALLOCATOR_PARTITION_ALLOCATOR_SRC_PARTITION_ALLOC_PAGE_ALLOCATOR_INTERNALS_OS2_H_

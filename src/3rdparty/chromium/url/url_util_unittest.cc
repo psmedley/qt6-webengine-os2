@@ -216,7 +216,7 @@ TEST_F(URLUtilTest, ReplaceScheme) {
             CheckReplaceScheme("about:google.com", "http"));
   EXPECT_EQ("http:", CheckReplaceScheme("", "http"));
 
-#ifdef WIN32
+#ifdef OS_DOSLIKE
   // Magic Windows drive letter behavior when converting to a file URL.
   EXPECT_EQ("file:///E:/foo/",
             CheckReplaceScheme("http://localhost/e:foo/", "file"));

@@ -94,6 +94,12 @@ if(GCC)
     )
 endif()
 
+qt_internal_extend_target(WebEngineCore CONDITION OS2
+    LINK_OPTIONS
+        @src/core/Release/2.45/QtWebEngineCore_objects.rsp @src/core/Release/2.45/QtWebEngineCore_archives.rsp @src/core/Release/2.45/QtWebEngineCore_libs.rsp
+    PUBLIC_LIBRARIES
+        "-lssp -lavcodec -lavdevice -lavfilter -lavformat -lavresample -lavutil"
+)
 qt_internal_extend_target(WebEngineCore CONDITION QT_FEATURE_webengine_webchannel
     PUBLIC_LIBRARIES
         Qt::WebChannel

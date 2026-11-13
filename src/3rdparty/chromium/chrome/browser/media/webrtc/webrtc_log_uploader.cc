@@ -114,6 +114,8 @@ std::string GetLogUploadProduct() {
   const char product[] = "Chrome_ChromeOS";
 #elif BUILDFLAG(IS_FUCHSIA)
   const char product[] = "Chrome_Fuchsia";
+#elif BUILDFLAG(IS_OS2)
+  const char product[] = "Chrome_OS2";
 #else
 #error Platform not supported.
 #endif

@@ -424,8 +424,15 @@ template("single_gcc_toolchain") {
         command = "$ar -X64 {{arflags}} -r -c -s {{output}} {{inputs}}"
       } else {
         rspfile = "{{output}}.rsp"
-        rspfile_content = "{{inputs}}"
-        command = "\"$ar\" {{arflags}} -r -c -s -D {{output}} @\"$rspfile\""
+        if (current_os == "os2") {
+          # OS/2 EMX ar does not support -s and -D flags and expects
+          # new line separators in response files.
+          rspfile_content = "{{inputs_newline}}"
+          command = "\"$ar\" {{arflags}} -r -c {{output}} @\"$rspfile\""
+        } else {
+          rspfile_content = "{{inputs}}"
+          command = "\"$ar\" {{arflags}} -r -c -s -D {{output}} @\"$rspfile\""
+        }
       }
 
       # Remove the output file first so that ar doesn't try to modify the
@@ -644,7 +651,7 @@ template("single_gcc_toolchain") {
 
       start_group_flag = ""
       end_group_flag = ""
-      if (current_os != "aix") {
+      if (!is_os2 && current_os != "aix") {
         # the "--start-group .. --end-group" feature isn't available on the aix
         # ld.
         start_group_flag = "-Wl,--start-group"
@@ -672,7 +679,12 @@ template("single_gcc_toolchain") {
 
       description = "LINK $outfile"
 
-      rspfile_content = "{{inputs}}"
+      if (is_os2) {
+        # OS/2 EMX ld expects new line separators in response files.
+        rspfile_content = "{{inputs_newline}}"
+      } else {
+        rspfile_content = "{{inputs}}"
+      }
       outputs = [ outfile ]
       if (outfile != unstripped_outfile) {
         outputs += [ unstripped_outfile ]

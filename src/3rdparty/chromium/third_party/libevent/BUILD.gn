@@ -57,6 +57,12 @@ static_library("bundled_libevent") {
       "epoll.c",
     ]
     include_dirs += [ "android" ]
+  } else if (is_os2) {
+    sources += [
+      "os2/config.h",
+      "os2/event-config.h",
+    ]
+    include_dirs += [ "os2" ]
   }
 
   if (!is_debug) {
@@ -87,7 +93,7 @@ if (use_system_libevent) {
 }
 
 group("libevent") {
-  if (host_toolchain != current_toolchain) {
+  if (is_os2 || host_toolchain != current_toolchain) {
     if (use_system_libevent) {
        public_deps = [ ":system_libevent" ]
     } else {

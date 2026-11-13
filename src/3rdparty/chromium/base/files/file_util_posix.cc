@@ -70,10 +70,19 @@
 #include <grp.h>
 #endif
 
+#if BUILDFLAG(IS_OS2)
+#include <sys/socket.h>
+#define pipe(A) socketpair(AF_UNIX, SOCK_STREAM, 0, A)
+#endif
+
 // We need to do this on AIX due to some inconsistencies in how AIX
 // handles XOPEN_SOURCE and ALL_SOURCE.
 #if BUILDFLAG(IS_AIX)
 extern "C" char* mkdtemp(char* path);
+#endif
+
+#if !defined(O_BINARY)
+#define O_BINARY 0
 #endif
 
 namespace base {
@@ -237,7 +246,7 @@ bool DoCopyDirectory(const FilePath& from_path,
       continue;
     }
 
-    int open_flags = O_WRONLY | O_CREAT;
+    int open_flags = O_WRONLY | O_CREAT | O_BINARY;
     // If |open_exclusive| is set then we should always create the destination
     // file, so O_NONBLOCK is not necessary to ensure we don't block on the
     // open call for the target file below, and since the destination will
@@ -319,8 +328,7 @@ bool DoDeleteFile(const FilePath& path, bool recursive) {
   }
   return success;
 }
-
-#if !BUILDFLAG(IS_APPLE)
+#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
 // Appends |mode_char| to |mode| before the optional character set encoding; see
 // https://www.gnu.org/software/libc/manual/html_node/Opening-Streams.html for
 // details.
@@ -823,7 +831,11 @@ bool ReadFileToStringNonBlocking(const base::FilePath& file, std::string* ret) {
   ret->clear();
 
   base::ScopedFD fd(HANDLE_EINTR(
+#ifndef __OS2__
       open(file.MaybeAsASCII().c_str(), O_CLOEXEC | O_NONBLOCK | O_RDONLY)));
+#else
+      open(file.MaybeAsASCII().c_str(), O_NONBLOCK | O_RDONLY)));
+#endif
   if (!fd.is_valid()) {
     return false;
   }
@@ -894,9 +906,10 @@ FILE* OpenFile(const FilePath& filename, const char* mode) {
       (strchr(mode, ',') != nullptr && strchr(mode, 'e') > strchr(mode, ',')));
   ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   FILE* result = nullptr;
-#if BUILDFLAG(IS_APPLE)
+#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_OS2)
   // macOS does not provide a mode character to set O_CLOEXEC; see
   // https://developer.apple.com/legacy/library/documentation/Darwin/Reference/ManPages/man3/fopen.3.html.
+  // OS/2 doesn't provide it either.
   const char* the_mode = mode;
 #else
   std::string mode_with_e(AppendModeCharacter(mode, 'e'));
@@ -905,7 +918,7 @@ FILE* OpenFile(const FilePath& filename, const char* mode) {
   do {
     result = fopen(filename.value().c_str(), the_mode);
   } while (!result && errno == EINTR);
-#if BUILDFLAG(IS_APPLE)
+#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_OS2)
   // Mark the descriptor as close-on-exec.
   if (result)
     SetCloseOnExec(fileno(result));
@@ -1047,12 +1060,15 @@ bool AllocateFileRegion(File* file, int64_t offset, size_t size) {
 #endif
 
   // Manually realize the extended file by writing bytes to it at intervals.
-  blksize_t block_size = 512;  // Start with something safe.
   stat_wrapper_t statbuf;
+  // Use the type of st_blksize rather than blksize_t, which OS/2 (kLIBC)
+  // doesn't define.
+  using BlockSize = decltype(statbuf.st_blksize);
+  BlockSize block_size = 512;  // Start with something safe.
   if (File::Fstat(file->GetPlatformFile(), &statbuf) == 0 &&
       statbuf.st_blksize > 0 &&
       std::has_single_bit(base::checked_cast<uint64_t>(statbuf.st_blksize))) {
-    block_size = static_cast<blksize_t>(statbuf.st_blksize);
+    block_size = static_cast<BlockSize>(statbuf.st_blksize);
   }
 
   // Write starting at the next block boundary after the old file length.

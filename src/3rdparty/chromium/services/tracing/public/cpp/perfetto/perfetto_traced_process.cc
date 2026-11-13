@@ -26,7 +26,7 @@
 #include "services/tracing/public/mojom/tracing_service.mojom.h"
 #include "third_party/perfetto/include/perfetto/tracing/tracing.h"
 
-#if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
+#if (BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)) || BUILDFLAG(IS_FUCHSIA)
 // As per 'gn help check':
 /*
   If you have conditional includes, make sure the build conditions and the
@@ -37,7 +37,7 @@
 // non-android builds.
 #include "services/tracing/public/cpp/perfetto/posix_system_producer.h"  // nogncheck
 #include "third_party/perfetto/include/perfetto/tracing/default_socket.h"  // nogncheck
-#endif  // BUILDFLAG(IS_POSIX)
+#endif  // (BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)) || BUILDFLAG(IS_FUCHSIA)
 
 namespace tracing {
 namespace {
@@ -50,16 +50,16 @@ static bool g_system_producer_enabled = true;
 std::unique_ptr<SystemProducer> NewSystemProducer(
     base::tracing::PerfettoTaskRunner* runner,
     const char* socket_name) {
-#if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
+#if (BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)) || BUILDFLAG(IS_FUCHSIA)
   DCHECK(socket_name);
   if (g_system_producer_enabled)
     return std::make_unique<PosixSystemProducer>(socket_name, runner);
-#endif  // BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
+#endif  // (BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)) || BUILDFLAG(IS_FUCHSIA)
   return std::make_unique<DummyProducer>(runner);
 }
 
 const char* MaybeSocket() {
-#if BUILDFLAG(IS_POSIX)
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)
   return perfetto::GetProducerSocket();
 #elif BUILDFLAG(IS_FUCHSIA)
   // The socket is connected via a socket pair passed over IPC, which is not
@@ -67,7 +67,7 @@ const char* MaybeSocket() {
   return "";
 #else
   return nullptr;
-#endif  // BUILDFLAG(IS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)
 }
 
 void OnPerfettoLogMessage(perfetto::base::LogMessageCallbackArgs args) {
@@ -358,7 +358,7 @@ void PerfettoTracedProcess::SetupClientLibrary(bool enable_consumer) {
   init_args.shmem_direct_patching_enabled = true;
   init_args.use_monotonic_clock = true;
   init_args.disallow_merging_with_system_tracks = true;
-#if BUILDFLAG(IS_POSIX)
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)
   // In non-SDK build we only use the client library system backend for the
   // consumer side, which is only allowed in the browser process.
   // In SDK build we use system backend for producers too, but note that

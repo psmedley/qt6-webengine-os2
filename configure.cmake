@@ -310,7 +310,7 @@ qt_feature("webengine-system-icu" PRIVATE
 )
 qt_feature("webengine-system-libwebp" PRIVATE
     LABEL "libwebp, libwebpmux and libwebpdemux"
-    CONDITION UNIX AND WEBP_FOUND
+    CONDITION (UNIX OR OS2) AND WEBP_FOUND
 )
 qt_feature("webengine-system-libopenjpeg2" PRIVATE
     LABEL "libopenjpeg2"
@@ -318,7 +318,7 @@ qt_feature("webengine-system-libopenjpeg2" PRIVATE
 )
 qt_feature("webengine-system-opus" PRIVATE
     LABEL "opus"
-    CONDITION UNIX AND OPUS_FOUND
+    CONDITION (UNIX OR OS2) AND OPUS_FOUND
 )
 qt_feature("webengine-system-ffmpeg" PRIVATE
     LABEL "ffmpeg"
@@ -328,7 +328,7 @@ qt_feature("webengine-system-ffmpeg" PRIVATE
 qt_feature("webengine-system-libvpx" PRIVATE
     LABEL "libvpx"
     AUTODETECT FALSE
-    CONDITION UNIX AND TEST_vpx
+    CONDITION (UNIX OR OS2) AND TEST_vpx
 )
 qt_feature("webengine-system-snappy" PRIVATE
     LABEL "snappy"
@@ -336,11 +336,11 @@ qt_feature("webengine-system-snappy" PRIVATE
 )
 qt_feature("webengine-system-glib" PRIVATE
     LABEL "glib"
-    CONDITION UNIX AND GLIB_FOUND
+    CONDITION (UNIX OR OS2) AND GLIB_FOUND
 )
 qt_feature("webengine-system-zlib" PRIVATE
     LABEL "zlib"
-    CONDITION UNIX AND QT_FEATURE_system_zlib AND ZLIB_FOUND
+    CONDITION (UNIX OR OS2) AND QT_FEATURE_system_zlib AND ZLIB_FOUND
 )
 qt_feature("webengine-qt-zlib" PRIVATE
     LABEL "qtzlib"
@@ -350,23 +350,23 @@ qt_feature("webengine-qt-zlib" PRIVATE
 )
 qt_feature("webengine-system-minizip" PRIVATE
     LABEL "minizip"
-    CONDITION UNIX AND MINIZIP_FOUND
+    CONDITION (UNIX OR OS2) AND MINIZIP_FOUND
 )
 qt_feature("webengine-system-libevent" PRIVATE
     LABEL "libevent"
-    CONDITION UNIX AND LIBEVENT_FOUND
+    CONDITION (UNIX OR OS2) AND LIBEVENT_FOUND
 )
 qt_feature("webengine-system-libxml" PRIVATE
     LABEL "libxml2 and libxslt"
-    CONDITION UNIX AND LIBXML2_FOUND
+    CONDITION (UNIX OR OS2) AND LIBXML2_FOUND
 )
 qt_feature("webengine-system-lcms2" PRIVATE
     LABEL "lcms2"
-    CONDITION UNIX AND LCMS2_FOUND
+    CONDITION (UNIX OR OS2) AND LCMS2_FOUND
 )
 qt_feature("webengine-system-libpng" PRIVATE
     LABEL "png"
-    CONDITION UNIX AND TARGET Qt::Gui AND PNG_FOUND AND QT_FEATURE_system_png
+    CONDITION (UNIX OR OS2) AND TARGET Qt::Gui AND PNG_FOUND AND QT_FEATURE_system_png
 )
 qt_feature("webengine-system-libtiff" PRIVATE
     LABEL "tiff"
@@ -381,7 +381,7 @@ qt_feature("webengine-qt-libpng" PRIVATE
 )
 qt_feature("webengine-system-libjpeg" PRIVATE
     LABEL "jpeg"
-    CONDITION UNIX AND TARGET Qt::Gui AND TEST_jpeg AND QT_FEATURE_system_jpeg
+    CONDITION (UNIX OR OS2) AND TARGET Qt::Gui AND TEST_jpeg AND QT_FEATURE_system_jpeg
 )
 qt_feature("webengine-qt-libjpeg" PRIVATE
     LABEL "qtjpeg"
@@ -392,7 +392,7 @@ qt_feature("webengine-qt-libjpeg" PRIVATE
 )
 qt_feature("webengine-system-harfbuzz" PRIVATE
     LABEL "harfbuzz"
-    CONDITION UNIX AND TARGET Qt::Gui AND HARFBUZZ_FOUND AND QT_FEATURE_system_harfbuzz
+    CONDITION (UNIX OR OS2) AND TARGET Qt::Gui AND HARFBUZZ_FOUND AND QT_FEATURE_system_harfbuzz
 )
 qt_feature("webengine-qt-harfbuzz" PRIVATE
     LABEL "qtharfbuzz"
@@ -403,7 +403,7 @@ qt_feature("webengine-qt-harfbuzz" PRIVATE
 )
 qt_feature("webengine-system-freetype" PRIVATE
     LABEL "freetype"
-    CONDITION UNIX AND TARGET Qt::Gui AND TEST_freetype AND QT_FEATURE_system_freetype
+    CONDITION (UNIX OR OS2) AND TARGET Qt::Gui AND TEST_freetype AND QT_FEATURE_system_freetype
 )
 qt_feature("webengine-qt-freetype" PRIVATE
     LABEL "qtfreetype"
@@ -459,8 +459,8 @@ assertTargets(
 )
 add_check_for_support(
    MODULES QtWebEngine
-   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR MACOS
-   MESSAGE "Build can be done only on Linux, Windows or macOS."
+   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR MACOS OR OS2
+   MESSAGE "Build can be done only on Linux, Windows, OS/2 or macOS."
 )
 add_check_for_support(
    MODULES QtPdf
@@ -559,6 +559,7 @@ add_check_for_support(
    CONDITION MSVC OR
        (LINUX AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR
        (LINUX AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang") OR
+       (OS2 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR
        (MACOS AND CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
    MESSAGE
        "${CMAKE_CXX_COMPILER_ID} compiler is not supported."

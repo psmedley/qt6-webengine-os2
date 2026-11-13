@@ -117,10 +117,12 @@ group("resources") {
   if (!is_android && !is_chromeos_ash) {
     public_deps += [
       "inline_login:resources",
-      "intro:resources",
       "signin/profile_picker:resources",
       "welcome:resources",
     ]
+    if (is_chromeos_lacros || enable_dice_support) {
+      public_deps += [ "intro:resources" ]
+    }
   }
 
   if (enable_webui_tab_strip) {

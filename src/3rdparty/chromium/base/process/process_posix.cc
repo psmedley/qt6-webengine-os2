@@ -33,6 +33,11 @@
 
 namespace {
 
+#if defined(OS_OS2)
+const int kForegroundPriority = 0;
+const int kBackgroundPriority = 5;
+#endif
+
 bool WaitpidWithTimeout(base::ProcessHandle handle,
                         int* status,
                         base::TimeDelta wait) {
@@ -310,6 +315,15 @@ bool Process::is_current() const {
   return process_ == GetCurrentProcessHandle();
 }
 
+#if defined(OS_OS2)
+Time Process::CreationTime() const {
+  // There doesn't seem to be a way to get this information from the system.
+  // TODO: Implement it in LIBC/LIBCx by recording process creation time.
+  NOTIMPLEMENTED_LOG_ONCE();
+  return Time();
+}
+#endif
+
 void Process::Close() {
   process_ = kNullProcessHandle;
   // if the process wasn't terminated (so we waited) or the state
@@ -390,4 +404,25 @@ int Process::GetOSPriority() const {
   return getpriority(PRIO_PROCESS, static_cast<id_t>(process_));
 }
 
+#ifdef OS_OS2
+bool Process::CanBackgroundProcesses() {
+  return true;
+}
+
+bool Process::IsProcessBackgrounded() const {
+   // See SetProcessBackgrounded().
+   DCHECK(IsValid());
+  return GetPriority() == kBackgroundPriority;
+ }
+
+bool Process::SetProcessBackgrounded(bool background) {
+  if (!CanBackgroundProcesses())
+    return false;
+
+  int priority = background ? kBackgroundPriority : kForegroundPriority;
+  int result = setpriority(PRIO_PROCESS, process_, priority);
+  DPCHECK(result == 0);
+  return result == 0;
+ }
+#endif //OS_OS2
 }  // namespace base

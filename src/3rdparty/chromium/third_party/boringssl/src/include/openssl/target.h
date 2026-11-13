@@ -82,6 +82,10 @@
 #define OPENSSL_WINDOWS
 #endif
 
+#if defined(__OS2__)
+#define OPENSSL_OS2
+#endif
+
 // Trusty and Android baremetal aren't Linux but currently define __linux__.
 // As a workaround, we exclude them here.
 // We also exclude nanolibc/CrOS EC/Zephyr. nanolibc/CrOS EC/Zephyr

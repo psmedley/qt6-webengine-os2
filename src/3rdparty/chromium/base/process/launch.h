@@ -63,7 +63,7 @@ typedef std::vector<std::pair<int, int>> FileHandleMappingVector;
 // Options for launching a subprocess that are passed to LaunchProcess().
 // The default constructor constructs the object with default options.
 struct BASE_EXPORT LaunchOptions {
-#if (BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)) && !BUILDFLAG(IS_APPLE)
+#if (BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)) && !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
   // Delegate to be run in between fork and exec in the subprocess (see
   // pre_exec_delegate below)
   class BASE_EXPORT PreExecDelegate {
@@ -298,6 +298,7 @@ struct BASE_EXPORT LaunchOptions {
   // argv[0].
   base::FilePath real_path;
 
+#if !BUILDFLAG(IS_OS2)
 #if !BUILDFLAG(IS_APPLE)
   // If non-null, a delegate to be run immediately prior to executing the new
   // program in the child process.
@@ -324,6 +325,7 @@ struct BASE_EXPORT LaunchOptions {
   // process' controlling terminal.
   int ctrl_terminal_fd = -1;
 #endif  // BUILDFLAG(IS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_OS2)
 };
 
 // Launch a process via the command line |cmdline|.
@@ -366,12 +368,12 @@ BASE_EXPORT Process LaunchProcess(const CommandLine::StringType& cmdline,
 BASE_EXPORT Process LaunchProcess(const std::vector<std::string>& argv,
                                   const LaunchOptions& options);
 
-#if !BUILDFLAG(IS_APPLE)
+#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
 // Close all file descriptors, except those which are a destination in the
 // given multimap. Only call this function in a child process where you know
 // that there aren't any other threads.
 BASE_EXPORT void CloseSuperfluousFds(const InjectiveMultimap& saved_map);
-#endif  // BUILDFLAG(IS_APPLE)
+#endif  // !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
 #endif  // BUILDFLAG(IS_WIN)
 
 #if BUILDFLAG(IS_WIN)

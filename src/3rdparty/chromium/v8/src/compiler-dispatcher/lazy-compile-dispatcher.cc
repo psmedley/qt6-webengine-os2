@@ -4,6 +4,7 @@
 
 #include "src/compiler-dispatcher/lazy-compile-dispatcher.h"
 
+#include <algorithm>
 #include <atomic>
 
 #include "include/v8-platform.h"

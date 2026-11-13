@@ -44,7 +44,7 @@
 **      plus implementations of sqlite3_os_init() and sqlite3_os_end().
 */
 #include "sqliteInt.h"
-#if SQLITE_OS_UNIX              /* This file is used on unix only */
+#if SQLITE_OS_UNIX || SQLITE_OS_OS2   /* This file is used on unix only */
 
 /*
 ** There are various methods for file locking used for concurrency
@@ -98,6 +98,9 @@
 #if (!defined(SQLITE_OMIT_WAL) || SQLITE_MAX_MMAP_SIZE>0) \
   && !defined(SQLITE_WASI)
 # include <sys/mman.h>
+#endif
+#if defined(SQLITE_OS_OS2)
+# include <ctype.h>
 #endif
 
 #if SQLITE_ENABLE_LOCKING_STYLE
@@ -5842,9 +5845,13 @@ static int fillInUnixFile(
 static const char *azTempDirs[] = {
   0,
   0,
+#ifdef SQLITE_OS_OS2
+  "/@unixroot/var/tmp",
+#else
   "/var/tmp",
   "/usr/tmp",
   "/tmp",
+#endif
   "."
 };
 
@@ -6375,6 +6382,9 @@ static int unixOpen(
 #endif
 
   assert( zPath==0 || zPath[0]=='/'
+#if defined(SQLITE_OS_OS2)
+      || (isalpha(zPath[0]) && zPath[1]==':')
+#endif
       || eType==SQLITE_OPEN_SUPER_JOURNAL || eType==SQLITE_OPEN_MAIN_JOURNAL
   );
   rc = fillInUnixFile(pVfs, fd, pFile, zPath, ctrlFlags);
@@ -6479,8 +6489,20 @@ struct DbPath {
 static void appendAllPathElements(DbPath*,const char*);
 
 /*
-** Append a single path element to the DbPath under construction
+** Convert a relative pathname into a full pathname.  Also
+** simplify the pathname as follows:
+**
+**    Remove all instances of /./
+**    Remove all isntances of /X/../ for any X
 */
+#if 0
+#ifdef SQLITE_OS_OS2
+  if( !IS_ABSOLUTE_PATH(zPath) ){
+#else
+  if( zPath[0]!='/' ){
+#endif
+#endif
+
 static void appendOnePathElement(
   DbPath *pPath,       /* Path under construction, to which to append zName */
   const char *zName,   /* Name to append to pPath.  Not zero-terminated */
@@ -6579,7 +6601,11 @@ static int unixFullPathname(
   path.nSymlink = 0;
   path.nOut = nOut;
   path.zOut = zOut;
+#ifdef SQLITE_OS_OS2
+  if( !IS_ABSOLUTE_PATH(zPath) ){
+#else
   if( zPath[0]!='/' ){
+#endif
     char zPwd[SQLITE_MAX_PATHLEN+2];
     if( osGetcwd(zPwd, sizeof(zPwd)-2)==0 ){
       return unixLogError(SQLITE_CANTOPEN_BKPT, "getcwd", zPath);
@@ -6639,10 +6665,22 @@ static void (*unixDlSym(sqlite3_vfs *NotUsed, void *p, const char*zSym))(void){
   ** other hand, dlsym() will not work on such a system either, so we have
   ** not really lost anything.
   */
+#ifdef SQLITE_OS_OS2
+  UNUSED_PARAMETER(NotUsed);
+  void *func;
+  func = dlsym(p, zSym);
+  if (func == NULL) {
+    char *zSymbolU = sqlite3_mprintf("_%s", zSym);
+    func = dlsym(p, zSymbolU);
+    sqlite3_free(zSymbolU);
+  }
+  return func;
+#else
   void (*(*x)(void*,const char*))(void);
   UNUSED_PARAMETER(NotUsed);
   x = (void(*(*)(void*,const char*))(void))dlsym;
   return (*x)(p, zSym);
+#endif
 }
 static void unixDlClose(sqlite3_vfs *NotUsed, void *pHandle){
   UNUSED_PARAMETER(NotUsed);
@@ -7008,7 +7046,11 @@ static int proxyGetLockPath(const char *dbPath, char *lPath, size_t maxLen){
     len = strlcat(lPath, "sqliteplocks", maxLen);  
   }
 # else
+# ifdef SQLITE_OS_OS2
+  len = strlcpy(lPath, "/@unixroot/var/tmp/", maxLen);
+# else
   len = strlcpy(lPath, "/tmp/", maxLen);
+# endif
 # endif
 #endif
 

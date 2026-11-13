@@ -35,6 +35,10 @@ def _InitBeautifulSoup():
   _AddToPathIfNeeded(bs_path)
 
   html5lib_path = os.path.join(catapult_path, 'third_party', 'html5lib-1.1')
+  if not os.path.isdir(html5lib_path):
+    # html5lib-1.1 isn't shipped in the Qt WebEngine source tree; the older
+    # bundled html5lib-python also works with Python 3.
+    html5lib_path = os.path.join(catapult_path, 'third_party', 'html5lib-python')
   _AddToPathIfNeeded(html5lib_path)
 
   webencodings_path = os.path.join(

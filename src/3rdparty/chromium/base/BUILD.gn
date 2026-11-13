@@ -2259,7 +2259,7 @@ jumbo_component("base") {
 
   # Android and MacOS have their own custom shared memory handle
   # implementations. e.g. due to supporting both POSIX and native handles.
-  if (is_posix && !is_android && !is_apple) {
+  if (is_posix && !is_android && !is_apple && !is_os2) {
     sources += [
       "memory/platform_shared_memory_mapper_posix.cc",
       "memory/platform_shared_memory_region_posix.cc",
@@ -2297,6 +2297,50 @@ jumbo_component("base") {
 
   if ((is_posix && !is_apple && !is_android) || is_fuchsia) {
     sources += [ "profiler/stack_sampler_posix.cc" ]
+  }
+
+  # OS/2.
+  if (is_os2) {
+    sources += [
+      "base_paths_posix.cc",
+      "files/file_path_watcher_os2.cc",
+      "memory/platform_shared_memory_mapper_os2.cc",
+      "memory/platform_shared_memory_region_os2.cc",
+      "message_loop/message_pump_os2.cc",
+      "message_loop/message_pump_os2.h",
+      "nix/xdg_util.cc",
+      "nix/xdg_util.h",
+      "os2/os2_toolkit.h",
+      "os2/scoped_shmem_handle.h",
+      "process/memory_os2.cc",
+      "process/process_handle_os2.cc",
+      "process/process_iterator_os2.cc",
+      "process/process_metrics_os2.cc",
+      "rand_util_os2.cc",
+      "system/sys_info_os2.cc",
+      "threading/platform_thread_os2.cc",
+    ]
+    sources -= [
+      "memory/madv_free_discardable_memory_allocator_posix.cc",
+      "memory/madv_free_discardable_memory_allocator_posix.h",
+      "memory/madv_free_discardable_memory_posix.cc",
+      "memory/madv_free_discardable_memory_posix.h",
+      "posix/can_lower_nice_to.cc",
+      "posix/can_lower_nice_to.h",
+      "profiler/module_cache_posix.cc",
+      "profiler/stack_base_address_posix.cc",
+      "profiler/stack_base_address_posix.h",
+      "profiler/stack_copier_signal.cc",
+      "profiler/stack_copier_signal.h",
+      "profiler/thread_delegate_posix.cc",
+      "profiler/thread_delegate_posix.h",
+      "rand_util_posix.cc",
+      "threading/platform_thread_internal_posix.cc",
+    ]
+
+    defines += [ "_EMX_SOURCE" ]  # Use EMX extensions.
+
+    deps += [ "//base/third_party/xdg_user_dirs" ]
   }
 
   if ((is_posix && !is_apple && !is_android && !is_chromeos) || is_fuchsia) {
@@ -3664,7 +3708,7 @@ test("base_unittests") {
       "posix/file_descriptor_shuffle_unittest.cc",
       "posix/unix_domain_socket_unittest.cc",
     ]
-    if (!is_nacl && !is_apple) {
+    if (!is_nacl && !is_apple && !is_os2) {
       sources += [
         "profiler/stack_base_address_posix_unittest.cc",
         "profiler/stack_copier_signal_unittest.cc",

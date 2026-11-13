@@ -47,10 +47,10 @@ declare_args() {
   skia_use_expat = !is_wasm
   skia_use_ffmpeg = false
   skia_use_fixed_gamma_text = is_android
-  skia_use_fontconfig = is_linux
+  skia_use_fontconfig = is_linux || is_os2
   skia_use_fontations = false
   skia_use_fonthost_mac = is_mac || is_ios
-  skia_use_freetype = is_android || is_fuchsia || is_linux || is_wasm
+  skia_use_freetype = is_android || is_fuchsia || is_linux || is_wasm || is_os2
   skia_use_harfbuzz = true
   skia_use_gl = !is_fuchsia
   skia_use_icu = !is_fuchsia

@@ -174,7 +174,7 @@ void CurrentUIThread::Abort() {
 }
 #endif  // BUILDFLAG(IS_ANDROID)
 
-#if BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_WIN) ||BUILDFLAG(IS_OS2)
 void CurrentUIThread::AddMessagePumpObserver(
     MessagePumpForUI::Observer* observer) {
   GetMessagePumpForUI()->AddObserver(observer);
@@ -184,7 +184,7 @@ void CurrentUIThread::RemoveMessagePumpObserver(
     MessagePumpForUI::Observer* observer) {
   GetMessagePumpForUI()->RemoveObserver(observer);
 }
-#endif  // BUILDFLAG(IS_WIN)
+#endif  // BUILDFLAG(IS_WIN) ||BUILDFLAG(IS_OS2)
 
 #endif  // !BUILDFLAG(IS_NACL)
 

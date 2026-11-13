@@ -49,7 +49,9 @@
 #include "ui/gl/gl_enums.h"
 #include "ui/gl/gl_features.h"
 #include "ui/gl/gl_share_group.h"
+#if defined(USE_EGL)
 #include "ui/gl/gl_surface_egl.h"
+#endif
 #include "ui/gl/gl_version_info.h"
 #include "ui/gl/init/gl_factory.h"
 
@@ -942,6 +944,7 @@ scoped_refptr<SharedContextState> GpuChannelManager::GetSharedContextState(
     gl::GLContextAttribs attribs =
         gles2::GenerateGLContextAttribsForCompositor(use_passthrough_decoder);
 
+#if !BUILDFLAG(IS_OS2)
     // Disable robust resource initialization for raster decoder and compositor.
     // TODO(crbug.com/1192632): disable robust_resource_initialization for
     // SwANGLE.
@@ -949,6 +952,7 @@ scoped_refptr<SharedContextState> GpuChannelManager::GetSharedContextState(
         gl::ANGLE_SWIFTSHADER) {
       attribs.robust_resource_initialization = false;
     }
+#endif
 
     attribs.can_skip_validation = !enable_angle_validation;
 

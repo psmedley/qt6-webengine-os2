@@ -37,6 +37,9 @@ def init(root_src_dir, enable_style_format=True):
     elif sys.platform.startswith(("cygwin", "win")):
         platform = "win"
         exe_suffix = ".exe"
+    elif sys.platform.startswith(("os2")):
+        platform = "os2"
+        exe_suffix = ".exe"
     else:
         assert False, "Unknown platform: {}".format(sys.platform)
     buildtools_platform_dir = os.path.join(root_src_dir, "buildtools",

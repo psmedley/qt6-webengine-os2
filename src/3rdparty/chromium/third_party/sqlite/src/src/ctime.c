@@ -489,11 +489,17 @@ static const char * const sqlite3azCompileOpt[] = {
 #ifdef SQLITE_MUTEX_PTHREADS
   "MUTEX_PTHREADS",
 #endif
+#ifdef SQLITE_MUTEX_OS2
+  "MUTEX_OS2",
+#endif
 #ifdef SQLITE_MUTEX_W32
   "MUTEX_W32",
 #endif
 #ifdef SQLITE_NEED_ERR_NAME
   "NEED_ERR_NAME",
+#endif
+#ifdef SQLITE_NOINLINE
+  "NOINLINE",
 #endif
 #ifdef SQLITE_NO_SYNC
   "NO_SYNC",
@@ -549,7 +555,7 @@ static const char * const sqlite3azCompileOpt[] = {
 #ifdef SQLITE_OMIT_CTE
   "OMIT_CTE",
 #endif
-#if defined(SQLITE_OMIT_DATETIME_FUNCS) || defined(SQLITE_OMIT_FLOATING_POINT)
+#ifdef defined(SQLITE_OMIT_DATETIME_FUNCS) || defined(SQLITE_OMIT_FLOATING_POINT)
   "OMIT_DATETIME_FUNCS",
 #endif
 #ifdef SQLITE_OMIT_DECLTYPE

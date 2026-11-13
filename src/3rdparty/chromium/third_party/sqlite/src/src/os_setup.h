@@ -41,6 +41,11 @@
           defined(__MINGW32__) || defined(__BORLANDC__)
 #    define SQLITE_OS_WIN 1
 #    define SQLITE_OS_UNIX 0
+#  elif defined(__OS2__)
+     /* OS/2 uses the unix VFS with a few OS/2 specific tweaks. */
+#    define SQLITE_OS_WIN 0
+#    define SQLITE_OS_UNIX 0
+#    define SQLITE_OS_OS2 1
 #  else
 #    define SQLITE_OS_WIN 0
 #    define SQLITE_OS_UNIX 1
@@ -87,5 +92,12 @@
 #  define SQLITE_OS_UNIX 0
 #endif
 
+#ifdef SQLITE_OS_OS2
+# define ISSLASH(C) ((C) == '/' || (C) == '\\')
+# define HAS_DEVICE(P) \
+    ((((P)[0] >= 'A' && (P)[0] <= 'Z') || ((P)[0] >= 'a' && (P)[0] <= 'z')) \
+     && (P)[1] == ':')
+# define IS_ABSOLUTE_PATH(P) (ISSLASH ((P)[0]) || HAS_DEVICE (P))
+#endif /* SQLITE_OS_OS2 */
 
 #endif /* SQLITE_OS_SETUP_H */

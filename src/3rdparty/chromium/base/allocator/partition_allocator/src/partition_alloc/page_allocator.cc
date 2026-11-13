@@ -19,8 +19,14 @@
 #include <windows.h>
 #endif
 
+#if BUILDFLAG(IS_OS2)
+#include "base/os2/os2_toolkit.h"
+#endif
+
 #if BUILDFLAG(IS_WIN)
 #include "partition_alloc/page_allocator_internals_win.h"
+#elif BUILDFLAG(IS_OS2)
+#include "partition_alloc/page_allocator_internals_os2.h"
 #elif BUILDFLAG(IS_POSIX)
 #include "partition_alloc/page_allocator_internals_posix.h"
 #elif BUILDFLAG(IS_FUCHSIA)

@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <memory>
 
-#if !defined(WEBRTC_WIN)
+#if !defined(WEBRTC_WIN) && !defined(WEBRTC_OS2)
 #include <sched.h>
 #endif
 
@@ -44,7 +44,7 @@ bool SetPriority(ThreadPriority priority) {
 #elif defined(__native_client__) || defined(WEBRTC_FUCHSIA)
   // Setting thread priorities is not supported in NaCl or Fuchsia.
   return true;
-#elif defined(WEBRTC_CHROMIUM_BUILD) && defined(WEBRTC_LINUX)
+#elif defined(WEBRTC_CHROMIUM_BUILD) && (defined(WEBRTC_LINUX) || defined(WEBRTC_OS2))
   // TODO(tommi): Switch to the same mechanism as Chromium uses for changing
   // thread priorities.
   return true;

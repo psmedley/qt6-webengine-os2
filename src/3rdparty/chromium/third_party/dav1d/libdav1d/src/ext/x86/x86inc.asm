@@ -89,10 +89,18 @@
         SECTION .rdata align=%1
     %elif WIN64
         SECTION .rdata align=%1
+    %elifidn __OUTPUT_FORMAT__,aout
+        SECTION .text
+    %elifidn __OUTPUT_FORMAT__,obj
+        SECTION CONST32 public align=%1 use32 class=CONST flat
     %else
         SECTION .rodata align=%1
     %endif
 %endmacro
+
+%ifidn __OUTPUT_FORMAT__,obj
+    %define .text TEXT32 public align=16 use32 class=CODE flat
+%endif
 
 %if ARCH_X86_64
     %define PIC 1 ; always use PIC on x86-64

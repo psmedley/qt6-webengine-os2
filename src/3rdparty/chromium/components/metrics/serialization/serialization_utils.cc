@@ -24,6 +24,14 @@
 #define READ_WRITE_ALL_FILE_FLAGS \
   (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)
 
+#if !defined(O_BINARY)
+#define O_BINARY 0
+#endif
+
+#if !defined(O_CLOEXEC)
+#define O_CLOEXEC 0
+#endif
+
 namespace metrics {
 namespace {
 // Reads the next message from |file_descriptor| into |message|.
@@ -146,7 +154,7 @@ void SerializationUtils::ReadAndTruncateMetricsFromFile(
     // Also nothing to collect.
     return;
   }
-  base::ScopedFD fd(open(filename.c_str(), O_RDWR));
+  base::ScopedFD fd(open(filename.c_str(), O_RDWR | O_BINARY));
   if (fd.get() < 0) {
     DPLOG(ERROR) << "cannot open: " << filename;
     return;
@@ -193,7 +201,8 @@ bool SerializationUtils::WriteMetricToFile(const MetricSample& sample,
     return false;
 
   base::ScopedFD file_descriptor(open(filename.c_str(),
-                                      O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC,
+                                      O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC |
+                                          O_BINARY,
                                       READ_WRITE_ALL_FILE_FLAGS));
 
   if (file_descriptor.get() < 0) {

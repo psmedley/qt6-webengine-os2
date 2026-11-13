@@ -8509,6 +8509,7 @@ SQLITE_API int sqlite3_vfs_unregister(sqlite3_vfs*);
 ** implementations are available in the SQLite core:
 **
 ** <ul>
+** <li>   SQLITE_MUTEX_OS2
 ** <li>   SQLITE_MUTEX_PTHREADS
 ** <li>   SQLITE_MUTEX_W32
 ** <li>   SQLITE_MUTEX_NOOP
@@ -8516,9 +8517,9 @@ SQLITE_API int sqlite3_vfs_unregister(sqlite3_vfs*);
 **
 ** The SQLITE_MUTEX_NOOP implementation is a set of routines
 ** that does no real locking and is appropriate for use in
-** a single-threaded application.  The SQLITE_MUTEX_PTHREADS and
-** SQLITE_MUTEX_W32 implementations are appropriate for use on Unix
-** and Windows.
+** a single-threaded application.  The The SQLITE_MUTEX_OS2,
+** SQLITE_MUTEX_PTHREADS and SQLITE_MUTEX_W32 implementations
+** are appropriate for use on OS/2, Unix and Windows.
 **
 ** If SQLite is compiled with the SQLITE_MUTEX_APPDEF preprocessor
 ** macro defined (with "-DSQLITE_MUTEX_APPDEF=1"), then no mutex
@@ -15896,6 +15897,11 @@ typedef int VList;
           defined(__MINGW32__) || defined(__BORLANDC__)
 #    define SQLITE_OS_WIN 1
 #    define SQLITE_OS_UNIX 0
+#  elif defined(__OS2__)
+     /* OS/2 uses the unix VFS with a few OS/2 specific tweaks. */
+#    define SQLITE_OS_WIN 0
+#    define SQLITE_OS_UNIX 0
+#    define SQLITE_OS_OS2 1
 #  else
 #    define SQLITE_OS_WIN 0
 #    define SQLITE_OS_UNIX 1
@@ -15942,6 +15948,13 @@ typedef int VList;
 #  define SQLITE_OS_UNIX 0
 #endif
 
+#ifdef SQLITE_OS_OS2
+# define ISSLASH(C) ((C) == '/' || (C) == '\\')
+# define HAS_DEVICE(P) \
+    ((((P)[0] >= 'A' && (P)[0] <= 'Z') || ((P)[0] >= 'a' && (P)[0] <= 'z')) \
+     && (P)[1] == ':')
+# define IS_ABSOLUTE_PATH(P) (ISSLASH ((P)[0]) || HAS_DEVICE (P))
+#endif /* SQLITE_OS_OS2 */
 
 #endif /* SQLITE_OS_SETUP_H */
 
@@ -17756,6 +17769,8 @@ SQLITE_PRIVATE int sqlite3PCacheIsDirty(PCache *pCache);
 **   SQLITE_MUTEX_PTHREADS     For multi-threaded applications on Unix.
 **
 **   SQLITE_MUTEX_W32          For multi-threaded applications on Win32.
+**
+**   SQLITE_MUTEX_OS2          For multi-threaded applications on OS/2.
 */
 #if !SQLITE_THREADSAFE
 # define SQLITE_MUTEX_OMIT
@@ -17765,6 +17780,8 @@ SQLITE_PRIVATE int sqlite3PCacheIsDirty(PCache *pCache);
 #    define SQLITE_MUTEX_PTHREADS
 #  elif SQLITE_OS_WIN
 #    define SQLITE_MUTEX_W32
+#  elif SQLITE_OS_OS2
+#    define SQLITE_MUTEX_OS2
 #  else
 #    define SQLITE_MUTEX_NOOP
 #  endif
@@ -22841,6 +22858,9 @@ static const char * const sqlite3azCompileOpt[] = {
 #endif
 #ifdef SQLITE_MUTEX_PTHREADS
   "MUTEX_PTHREADS",
+#endif
+#ifdef SQLITE_MUTEX_OS2
+  "MUTEX_OS2",
 #endif
 #ifdef SQLITE_MUTEX_W32
   "MUTEX_W32",
@@ -29843,7 +29863,7 @@ SQLITE_PRIVATE sqlite3_mutex_methods const *sqlite3DefaultMutex(void){
 ** Note that this implementation requires a version of pthreads that
 ** supports recursive mutexes.
 */
-#ifdef SQLITE_MUTEX_PTHREADS
+#if defined(SQLITE_MUTEX_PTHREADS) || defined(SQLITE_MUTEX_OS2)
 
 #include <pthread.h>
 
@@ -34654,7 +34674,8 @@ SQLITE_PRIVATE void sqlite3PrngRestoreState(void){
 #if SQLITE_MAX_WORKER_THREADS>0
 
 /********************************* Unix Pthreads ****************************/
-#if SQLITE_OS_UNIX && defined(SQLITE_MUTEX_PTHREADS) && SQLITE_THREADSAFE>0
+#if SQLITE_OS_UNIX && defined(SQLITE_MUTEX_PTHREADS) && SQLITE_THREADSAFE>0 || \
+    SQLITE_OS_OS2 && defined(SQLITE_MUTEX_OS2) && SQLITE_THREADSAFE>0
 
 #define SQLITE_THREADS_IMPLEMENTED 1  /* Prevent the single-thread code below */
 /* #include <pthread.h> */
@@ -38874,7 +38895,7 @@ SQLITE_PRIVATE int sqlite3KvvfsInit(void){
 **      plus implementations of sqlite3_os_init() and sqlite3_os_end().
 */
 /* #include "sqliteInt.h" */
-#if SQLITE_OS_UNIX              /* This file is used on unix only */
+#if SQLITE_OS_UNIX || SQLITE_OS_OS2   /* This file is used on unix only */
 
 /*
 ** There are various methods for file locking used for concurrency
@@ -38928,6 +38949,9 @@ SQLITE_PRIVATE int sqlite3KvvfsInit(void){
 #if (!defined(SQLITE_OMIT_WAL) || SQLITE_MAX_MMAP_SIZE>0) \
   && !defined(SQLITE_WASI)
 # include <sys/mman.h>
+#endif
+#if defined(SQLITE_OS_OS2)
+/* # include <ctype.h> */
 #endif
 
 #if SQLITE_ENABLE_LOCKING_STYLE
@@ -44805,9 +44829,13 @@ static int fillInUnixFile(
 static const char *azTempDirs[] = {
   0,
   0,
+#ifdef SQLITE_OS_OS2
+  "/@unixroot/var/tmp",
+#else
   "/var/tmp",
   "/usr/tmp",
   "/tmp",
+#endif
   "."
 };
 
@@ -45345,6 +45373,9 @@ static int unixOpen(
 #endif
 
   assert( zPath==0 || zPath[0]=='/'
+#if defined(SQLITE_OS_OS2)
+      || (isalpha(zPath[0]) && zPath[1]==':')
+#endif
       || eType==SQLITE_OPEN_SUPER_JOURNAL || eType==SQLITE_OPEN_MAIN_JOURNAL
   );
   rc = fillInUnixFile(pVfs, fd, pFile, zPath, ctrlFlags);
@@ -45449,8 +45480,20 @@ struct DbPath {
 static void appendAllPathElements(DbPath*,const char*);
 
 /*
-** Append a single path element to the DbPath under construction
+** Convert a relative pathname into a full pathname.  Also
+** simplify the pathname as follows:
+**
+**    Remove all instances of /./
+**    Remove all isntances of /X/../ for any X
 */
+#if 0
+#ifdef SQLITE_OS_OS2
+  if( !IS_ABSOLUTE_PATH(zPath) ){
+#else
+  if( zPath[0]!='/' ){
+#endif
+#endif
+
 static void appendOnePathElement(
   DbPath *pPath,       /* Path under construction, to which to append zName */
   const char *zName,   /* Name to append to pPath.  Not zero-terminated */
@@ -45549,7 +45592,11 @@ static int unixFullPathname(
   path.nSymlink = 0;
   path.nOut = nOut;
   path.zOut = zOut;
+#ifdef SQLITE_OS_OS2
+  if( !IS_ABSOLUTE_PATH(zPath) ){
+#else
   if( zPath[0]!='/' ){
+#endif
     char zPwd[SQLITE_MAX_PATHLEN+2];
     if( osGetcwd(zPwd, sizeof(zPwd)-2)==0 ){
       return unixLogError(SQLITE_CANTOPEN_BKPT, "getcwd", zPath);
@@ -45609,10 +45656,22 @@ static void (*unixDlSym(sqlite3_vfs *NotUsed, void *p, const char*zSym))(void){
   ** other hand, dlsym() will not work on such a system either, so we have
   ** not really lost anything.
   */
+#ifdef SQLITE_OS_OS2
+  UNUSED_PARAMETER(NotUsed);
+  void *func;
+  func = dlsym(p, zSym);
+  if (func == NULL) {
+    char *zSymbolU = sqlite3_mprintf("_%s", zSym);
+    func = dlsym(p, zSymbolU);
+    sqlite3_free(zSymbolU);
+  }
+  return func;
+#else
   void (*(*x)(void*,const char*))(void);
   UNUSED_PARAMETER(NotUsed);
   x = (void(*(*)(void*,const char*))(void))dlsym;
   return (*x)(p, zSym);
+#endif
 }
 static void unixDlClose(sqlite3_vfs *NotUsed, void *pHandle){
   UNUSED_PARAMETER(NotUsed);
@@ -45978,7 +46037,11 @@ static int proxyGetLockPath(const char *dbPath, char *lPath, size_t maxLen){
     len = strlcat(lPath, "sqliteplocks", maxLen);
   }
 # else
+# ifdef SQLITE_OS_OS2
+  len = strlcpy(lPath, "/@unixroot/var/tmp/", maxLen);
+# else
   len = strlcpy(lPath, "/tmp/", maxLen);
+# endif
 # endif
 #endif
 
@@ -139630,6 +139693,8 @@ static int sqlite3LoadExtension(
      "dll"
 #elif defined(__APPLE__)
      "dylib"
+#elif SQLITE_OS_OS2
+     "dll"
 #else
      "so"
 #endif
@@ -139669,7 +139734,7 @@ static int sqlite3LoadExtension(
   if( nMsg==0 ) goto extension_not_found;
 
   handle = sqlite3OsDlOpen(pVfs, zFile);
-#if SQLITE_OS_UNIX || SQLITE_OS_WIN
+#if SQLITE_OS_UNIX || SQLITE_OS_WIN || SQLITE_OS_OS2
   for(ii=0; ii<ArraySize(azEndings) && handle==0; ii++){
     char *zAltFile = sqlite3_mprintf("%s.%s", zFile, azEndings[ii]);
     if( zAltFile==0 ) return SQLITE_NOMEM_BKPT;

@@ -143,7 +143,7 @@
 #include "content/browser/posix_file_descriptor_info_impl.h"
 #include "content/public/common/content_descriptors.h"
 
-#if !BUILDFLAG(IS_MAC)
+#if !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_OS2)
 #include "content/public/common/zygote/zygote_fork_delegate_linux.h"
 #endif
 

@@ -363,7 +363,7 @@ bool is_inbounds(float_t v) {
          (kUpperBoundIsMax ? (v <= kUpperBound) : (v < kUpperBound));
 }
 
-#ifdef V8_OS_WIN
+#ifdef V8_OS_DOSLIKE
 
 // Setup for Windows shared library export.
 #define V8_EXPORT_ENUM

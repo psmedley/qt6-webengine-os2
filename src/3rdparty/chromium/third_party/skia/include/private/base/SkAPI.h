@@ -22,7 +22,7 @@
 // the linker to use the symbols from that DLL. This is the goal of the SK_API define.
 #if !defined(SK_API)
     #if defined(SKIA_DLL)
-        #if defined(_MSC_VER)
+        #if defined(_MSC_VER) || defined(__OS2__)
             #if SKIA_IMPLEMENTATION
                 #define SK_API __declspec(dllexport)
             #else

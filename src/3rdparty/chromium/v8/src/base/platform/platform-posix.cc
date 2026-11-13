@@ -15,8 +15,11 @@
 #include <pthread_np.h>  // for pthread_set_name_np
 #endif
 #include <fcntl.h>
+#if !defined(__OS2__)
 #include <sched.h>  // for sched_yield
+#endif
 #include <stdio.h>
+
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -68,7 +71,7 @@
 #include <sys/resource.h>
 #endif
 
-#if !defined(_AIX) && !defined(V8_OS_FUCHSIA)
+#if !defined(_AIX) && !defined(V8_OS_FUCHSIA) && !V8_OS_OS2
 #include <sys/syscall.h>
 #endif
 
@@ -106,7 +109,7 @@ DEFINE_LAZY_LEAKY_OBJECT_GETTER(RandomNumberGenerator,
                                 GetPlatformRandomNumberGenerator)
 static LazyMutex rng_mutex = LAZY_MUTEX_INITIALIZER;
 
-#if !V8_OS_FUCHSIA
+#if !V8_OS_FUCHSIA && !V8_OS_OS2
 #if V8_OS_DARWIN
 // kMmapFd is used to pass vm_alloc flags to tag the region with the user
 // defined tag 255 This helps identify V8-allocated regions in memory analysis
@@ -181,8 +184,7 @@ void* Allocate(void* hint, size_t size, OS::MemoryPermission access,
   return result;
 }
 
-#endif  // !V8_OS_FUCHSIA
-
+#endif  // !V8_OS_FUCHSIA && !V8_OS_OS2
 }  // namespace
 
 // TODO(v8:10026): Add the right permission flag to make executable pages
@@ -401,7 +403,7 @@ void* OS::GetRandomMmapAddr() {
 }
 
 // TODO(bbudge) Move Cygwin and Fuchsia stuff into platform-specific files.
-#if !V8_OS_CYGWIN && !V8_OS_FUCHSIA
+#if !V8_OS_CYGWIN && !V8_OS_FUCHSIA && !V8_OS_OS2
 // static
 void* OS::Allocate(void* hint, size_t size, size_t alignment,
                    MemoryPermission access) {
@@ -679,7 +681,7 @@ bool OS::HasLazyCommits() {
   return false;
 #endif
 }
-#endif  // !V8_OS_CYGWIN && !V8_OS_FUCHSIA
+#endif  // !V8_OS_CYGWIN && !V8_OS_FUCHSIA && !V8_OS_OS2
 
 const char* OS::GetGCFakeMMapFile() {
   return g_gc_fake_mmap;
@@ -1053,7 +1055,8 @@ bool AddressSpaceReservation::Free(void* address, size_t size) {
 }
 
 // Darwin specific implementation in platform-darwin.cc.
-#if !defined(V8_OS_DARWIN)
+// OS/2 specific implementation in platform-os2.cc.
+#if !defined(V8_OS_DARWIN) && !defined(V8_OS_OS2)
 bool AddressSpaceReservation::AllocateShared(void* address, size_t size,
                                              OS::MemoryPermission access,
                                              PlatformSharedMemoryHandle handle,
@@ -1064,7 +1067,7 @@ bool AddressSpaceReservation::AllocateShared(void* address, size_t size,
   return mmap(address, size, prot, MAP_SHARED | MAP_FIXED, fd, offset) !=
          MAP_FAILED;
 }
-#endif  // !defined(V8_OS_DARWIN)
+#endif  // !defined(V8_OS_DARWIN) && !defined(V8_OS_OS2)
 
 bool AddressSpaceReservation::FreeShared(void* address, size_t size) {
   DCHECK(Contains(address, size));
@@ -1303,7 +1306,7 @@ void Thread::SetThreadLocal(LocalStorageKey key, void* value) {
 // keep this version in POSIX as most Linux-compatible derivatives will
 // support it. MacOS and FreeBSD are different here.
 #if !defined(V8_OS_FREEBSD) && !defined(V8_OS_DARWIN) && !defined(_AIX) && \
-    !defined(V8_OS_SOLARIS)
+    !defined(V8_OS_SOLARIS) && !defined(V8_OS_OS2)
 
 namespace {
 #if DEBUG
@@ -1354,7 +1357,7 @@ Stack::StackSlot Stack::ObtainCurrentThreadStackStart() {
 }
 
 #endif  // !defined(V8_OS_FREEBSD) && !defined(V8_OS_DARWIN) &&
-        // !defined(_AIX) && !defined(V8_OS_SOLARIS)
+        // !defined(_AIX) && !defined(V8_OS_SOLARIS) && !defined(V8_OS_OS2)
 
 // static
 Stack::StackSlot Stack::GetCurrentStackPosition() {

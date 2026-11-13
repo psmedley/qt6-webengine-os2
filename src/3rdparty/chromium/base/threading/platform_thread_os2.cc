@@ -1,0 +1,80 @@
+// Copyright 2020 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#include "base/threading/platform_thread.h"
+
+#include "base/threading/platform_thread_internal_posix.h"
+#include "base/threading/thread_id_name_manager.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+
+#include "base/os2/os2_toolkit.h"
+
+namespace base {
+
+namespace internal {
+
+bool SetCurrentThreadTypeForPlatform(ThreadType thread_type,
+                                     MessagePumpType pump_type_hint) {
+  ULONG cls = PRTYC_REGULAR;
+  switch (thread_type) {
+    case ThreadType::kBackground:
+      cls = PRTYC_IDLETIME;
+      break;
+    case ThreadType::kResourceEfficient:
+    case ThreadType::kDefault:
+    case ThreadType::kCompositing:
+      cls = PRTYC_REGULAR;
+      break;
+    case ThreadType::kDisplayCritical:
+      cls = PRTYC_FOREGROUNDSERVER;
+      break;
+    case ThreadType::kRealtimeAudio:
+      cls = PRTYC_TIMECRITICAL;
+      break;
+  }
+  return DosSetPriority(PRTYS_THREAD, cls, 0, _gettid()) == NO_ERROR;
+}
+
+absl::optional<ThreadPriorityForTest>
+GetCurrentThreadPriorityForPlatformForTest() {
+  absl::optional<ThreadPriorityForTest> prio = absl::nullopt;
+  PTIB ptib;
+  APIRET arc = DosGetInfoBlocks(&ptib, NULL);
+  if (arc == NO_ERROR) {
+    // The priority class is packed into the high byte of the low word.
+    ULONG cls = (ptib->tib_ptib2->tib2_ulpri >> 8) & 0xFF;
+    switch (cls) {
+      case PRTYC_IDLETIME:
+        prio = absl::make_optional(ThreadPriorityForTest::kBackground);
+        break;
+      case PRTYC_REGULAR:
+        prio = absl::make_optional(ThreadPriorityForTest::kNormal);
+        break;
+      case PRTYC_FOREGROUNDSERVER:
+        prio = absl::make_optional(ThreadPriorityForTest::kDisplay);
+        break;
+      case PRTYC_TIMECRITICAL:
+        prio = absl::make_optional(ThreadPriorityForTest::kRealtimeAudio);
+        break;
+    }
+  }
+  return prio;
+}
+
+}  // namespace internal
+
+void InitThreading() {}
+
+void TerminateOnThread() {}
+
+size_t GetDefaultThreadStackSize(const pthread_attr_t& attributes) {
+  return 0;
+}
+
+// static
+void PlatformThread::SetName(const std::string& name) {
+  ThreadIdNameManager::GetInstance()->SetName(name);
+}
+
+}  // namespace base

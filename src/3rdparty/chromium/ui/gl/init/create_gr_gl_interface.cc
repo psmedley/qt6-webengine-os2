@@ -21,6 +21,7 @@
 
 namespace gl::init {
 
+#if defined(USE_EGL)
 // This code emulates GL fences (GL_APPLE_sync or GL_ARB_sync) via
 // EGL_KHR_fence_sync extension. It's used to provide Skia ways of
 // synchronization on platforms that does not have GL fences but support EGL
@@ -95,6 +96,7 @@ GLboolean glIsSyncEmulateEGL(GLsync sync) {
 }
 
 }  // namespace
+#endif  // USE_EGL
 
 namespace {
 

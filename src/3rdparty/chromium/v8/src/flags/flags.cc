@@ -39,8 +39,10 @@ FlagValues v8_flags;
 // holding the {v8_flags} struct.
 // Both is guaranteed by the {alignas(kMinimumOSPageSize)} annotation on
 // {FlagValues}.
+#if !V8_OS_OS2
 static_assert(alignof(FlagValues) == kMinimumOSPageSize);
 static_assert(sizeof(FlagValues) % kMinimumOSPageSize == 0);
+#endif
 
 // Define all of our flags default values.
 #define FLAG_MODE_DEFINE_DEFAULTS
@@ -911,7 +913,9 @@ void FlagList::FreezeFlags() {
   // first unprotect the memory again.
   // Note that for string flags we only protect the pointer itself, but not the
   // string storage. TODO(12887): Fix this.
+#if !V8_OS_OS2
   base::OS::SetDataReadOnly(&v8_flags, sizeof(v8_flags));
+#endif
 }
 
 // static

@@ -19,6 +19,7 @@
 
 #include "absl/strings/string_view.h"
 #include "rtc_base/system/rtc_export.h"
+#include <cstdint>
 
 namespace rtc {
 

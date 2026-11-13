@@ -49,7 +49,7 @@ constexpr char kIppMediaType[] = "media-type";
 constexpr char kIppXDimension[] = "x-dimension";
 constexpr char kIppYDimension[] = "y-dimension";
 
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 constexpr char kIppDocumentAttributes[] =
     "document-creation-attributes";                              // PWG 5100.5
@@ -68,6 +68,6 @@ constexpr char kIppClientStringVersion[] = "client-string-version";
 constexpr char kIppClientType[] = "client-type";
 constexpr char kIppClientVersion[] = "client-version";
 
-#endif  // BUILDFLAG(IS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 }  // namespace printing

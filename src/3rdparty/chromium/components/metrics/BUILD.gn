@@ -292,6 +292,10 @@ if (!is_cronet_build || is_ios) {
       sources += [ "drive_metrics_provider_fuchsia.cc" ]
     }
 
+    if (is_os2) {
+      sources += [ "drive_metrics_provider_os2.cc" ]
+    }
+
     if (is_win || is_linux) {
       sources += [
         "motherboard.cc",

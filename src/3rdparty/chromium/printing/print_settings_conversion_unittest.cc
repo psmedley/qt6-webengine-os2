@@ -140,7 +140,7 @@ TEST(PrintSettingsConversionTest, Conversion) {
   base::Value::Dict dict = base::test::ParseJsonDict(kPrinterSettings);
   std::unique_ptr<PrintSettings> settings = PrintSettingsFromJobSettings(dict);
   ASSERT_TRUE(settings);
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
   EXPECT_TRUE(settings->send_user_info());
   EXPECT_EQ("username@domain.net", settings->username());
   EXPECT_EQ("this is an OAuth access token", settings->oauth_token());
@@ -297,7 +297,7 @@ TEST(PrintSettingsConversionTest, MissingDeviceName) {
   EXPECT_FALSE(PrintSettingsFromJobSettings(dict));
 }
 
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 TEST(PrintSettingsConversionTest, DontSendUsername) {
   base::Value::Dict dict = base::test::ParseJsonDict(kPrinterSettings);
   dict.Set(kSettingSendUserInfo, false);
@@ -308,7 +308,8 @@ TEST(PrintSettingsConversionTest, DontSendUsername) {
 }
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS) || (BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_CUPS))
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2) || \
+    (BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_CUPS))
 TEST(PrintSettingsConversionTest, FilterNonJobSettings) {
   base::Value::Dict dict = base::test::ParseJsonDict(kPrinterSettings);
 

@@ -32,6 +32,10 @@
 #include "net/base/winsock_init.h"
 #endif
 
+#if BUILDFLAG(IS_OS2) && !defined(AI_ADDRCONFIG)
+#define AI_ADDRCONFIG 0
+#endif
+
 namespace net {
 
 namespace {

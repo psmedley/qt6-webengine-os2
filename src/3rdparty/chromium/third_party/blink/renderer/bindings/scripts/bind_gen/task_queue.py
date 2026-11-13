@@ -32,7 +32,9 @@ class TaskQueue(object):
                 This is useful for debugging.
         """
         assert isinstance(single_process, bool)
-        if single_process:
+        # OS/2: always run single-process; multiprocessing pools are not
+        # reliable there.
+        if single_process or sys.platform.startswith('os2'):
             self._single_process = True
             self._pool_size = 1
             self._pool = None

@@ -55,6 +55,10 @@ std::string GetUserAgentPlatform() {
   return ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET
              ? "iPad; "
              : "iPhone; ";
+#elif BUILDFLAG(IS_OS2)
+  // The OS part ("OS/2 i686") comes from uname() in
+  // BuildOSCpuInfoFromOSVersionAndCpuType().
+  return "";
 #else
 #error Unsupported platform
 #endif
@@ -78,6 +82,9 @@ std::string GetUnifiedPlatform() {
     return "iPad; CPU iPad OS 14_0 like Mac OS X";
   }
   return "iPhone; CPU iPhone OS 14_0 like Mac OS X";
+#elif BUILDFLAG(IS_OS2)
+  // Matches the non-reduced OS/2 user agent ("OS/2 i686").
+  return "OS/2 i686";
 #else
 #error Unsupported platform
 #endif

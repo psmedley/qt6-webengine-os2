@@ -895,3 +895,8 @@
 #  undef __has_builtin
 #  undef PROTOBUF_has_builtin_DEFINED_
 #endif
+
+#ifdef __OS2__
+#undef minor
+#undef major
+#endif

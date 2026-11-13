@@ -25,7 +25,7 @@ pw2_8:  times 8 dw 4
 pw2_16:  times 8 dw 8
 pw2_32:  times 8 dw 16
 
-SECTION .text
+SECTION_TEXT
 
 INIT_XMM sse2
 cglobal dc_predictor_4x4, 4, 5, 3, dst, stride, above, left, goffset

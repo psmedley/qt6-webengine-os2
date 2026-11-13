@@ -46,7 +46,7 @@ bool PrinterBasicInfo::operator==(const PrinterBasicInfo& other) const {
          is_default == other.is_default && options == other.options;
 }
 
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 AdvancedCapabilityValue::AdvancedCapabilityValue() = default;
 
@@ -94,7 +94,7 @@ bool AdvancedCapability::operator==(const AdvancedCapability& other) const {
          values == other.values;
 }
 
-#endif  // BUILDFLAG(IS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 #if BUILDFLAG(IS_WIN)
 

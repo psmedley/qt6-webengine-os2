@@ -154,7 +154,11 @@ GLDisplay* InitializeGLOneOff(gl::GpuPreference gpu_preference) {
   if (!InitializeStaticGLBindingsOneOff())
     return nullptr;
   if (GetGLImplementation() == kGLImplementationDisabled) {
+#if defined(USE_EGL)
     return GetDefaultDisplayEGL();
+#else
+    return GetDefaultDisplay();
+#endif
   }
 
   return InitializeGLOneOffPlatformHelper(true, gpu_preference);
@@ -168,7 +172,11 @@ GLDisplay* InitializeGLNoExtensionsOneOff(bool init_bindings,
     if (!InitializeStaticGLBindingsOneOff())
       return nullptr;
     if (GetGLImplementation() == kGLImplementationDisabled) {
+#if defined(USE_EGL)
       return GetDefaultDisplayEGL();
+#else
+      return GetDefaultDisplay();
+#endif
     }
   }
 

@@ -6474,6 +6474,11 @@ v8_component("v8_libbase") {
       "//third_party/fuchsia-sdk/sdk/pkg/component_incoming_cpp",
       "//third_party/fuchsia-sdk/sdk/pkg/zx",
     ]
+  } else if (is_os2) {
+    sources += [
+      "src/base/debug/stack_trace_posix.cc",
+      "src/base/platform/platform-os2.cc",
+    ]
   } else if (is_mac) {
     sources += [
       "src/base/debug/stack_trace_posix.cc",

@@ -3120,6 +3120,14 @@ jumbo_source_set("browser") {
       "date_time_chooser/date_time_chooser.h",
     ]
   }
+    if (is_os2) {
+      # OS/2 uses some Linux sources, put those back.
+      sources += [
+        "child_process_launcher_helper_os2.cc",
+        "memory/swap_metrics_driver_impl_os2.cc",
+        "speech/tts_os2.cc",
+      ]
+    }
 
   if (is_android) {
     sources += [

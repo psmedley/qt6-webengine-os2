@@ -56,7 +56,8 @@ static_library("dom_keyboard_layout") {
     "//base",
   ]
 
-  if (is_win || is_mac || use_ozone) {
+  if (is_win || is_mac || use_ozone || is_os2) {
+
     public += [ "keycodes/dom/dom_keyboard_layout_map.h" ]
 
     sources += [
@@ -70,6 +71,8 @@ static_library("dom_keyboard_layout") {
     sources += [ "keycodes/dom/dom_keyboard_layout_map_mac.mm" ]
   } else if (is_win) {
     sources += [ "keycodes/dom/dom_keyboard_layout_map_win.cc" ]
+  } else if (is_os2) {
+    sources += [ "keycodes/dom/dom_keyboard_layout_map_os2.cc" ]
   } else if (use_ozone) {
     sources += [ "keycodes/dom/dom_keyboard_layout_map_ozone.cc" ]
     deps += [ "//ui/events/ozone/layout" ]
@@ -140,6 +143,7 @@ jumbo_component("events_base") {
       "keycodes/keyboard_defines_win.h",
     ]
   }
+
 
   defines = [ "EVENTS_BASE_IMPLEMENTATION" ]
 
@@ -238,6 +242,7 @@ jumbo_component("events") {
     "gestures/gesture_recognizer.cc",
     "gestures/gesture_types.cc",
     "null_event_targeter.cc",
+    "os2/keyboard_hook_os2.cc",
     "scoped_target_handler.cc",
   ]
 
@@ -246,7 +251,6 @@ jumbo_component("events") {
       "win/events_win_utils.h",
       "win/system_event_state_lookup.h",
     ]
-
     sources += [
       "keycodes/platform_key_map_win.cc",
       "keycodes/platform_key_map_win.h",

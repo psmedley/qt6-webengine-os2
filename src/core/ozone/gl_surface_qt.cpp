@@ -8,7 +8,9 @@
 
 #include "qtwebenginecoreglobal_p.h"
 
+#if !defined(Q_OS_OS2)
 #include "gl_surface_qt.h"
+#include "qtwebenginecoreglobal_p.h"
 
 #include "base/logging.h"
 
@@ -73,3 +75,5 @@ void* GLSurfaceQt::GetConfig()
 }
 
 } // namespace gl
+
+#endif // !defined(Q_OS_OS2)

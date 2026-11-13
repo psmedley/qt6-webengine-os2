@@ -31,6 +31,10 @@ static_assert(sizeof(base::stat_wrapper_t::st_size) >= 8);
 #include "base/os_compat_android.h"
 #endif
 
+#if !defined(O_BINARY)
+#define O_BINARY 0
+#endif
+
 namespace base {
 
 // Make sure our Whence mappings match the system headers.
@@ -48,7 +52,8 @@ bool IsOpenAppend(PlatformFile file) {
 }
 
 int CallFtruncate(PlatformFile file, int64_t length) {
-#if BUILDFLAG(IS_BSD) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_FUCHSIA)
+#if BUILDFLAG(IS_BSD) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_FUCHSIA) || \
+    BUILDFLAG(IS_OS2)
   static_assert(sizeof(off_t) >= sizeof(int64_t),
                 "off_t is not a 64-bit integer");
   return HANDLE_EINTR(ftruncate(file, length));
@@ -525,6 +530,8 @@ void File::DoInitialize(const FilePath& path, uint32_t flags) {
     open_flags |= O_APPEND | O_WRONLY;
 
   static_assert(O_RDONLY == 0, "O_RDONLY must equal zero");
+
+  open_flags |= O_BINARY;
 
   mode_t mode = S_IRUSR | S_IWUSR;
 #if BUILDFLAG(IS_CHROMEOS)

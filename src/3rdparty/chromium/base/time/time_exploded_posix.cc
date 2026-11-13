@@ -55,9 +55,9 @@ void SysTimeToTimeStruct(SysTime t, struct tm* timestruct, bool is_local) {
     gmtime64_r(&t, timestruct);
 }
 
-#elif BUILDFLAG(IS_AIX)
+#elif BUILDFLAG(IS_AIX) || BUILDFLAG(IS_OS2)
 
-// The function timegm is not available on AIX.
+// The function timegm is not available on AIX and OS/2 LIBC (yet).
 time_t aix_timegm(struct tm* tm) {
   time_t ret;
   char* tz;
@@ -180,7 +180,7 @@ bool Time::FromExploded(bool is_local, const Exploded& exploded, Time* time) {
   timestruct.tm_wday = exploded.day_of_week;  // mktime/timegm ignore this
   timestruct.tm_yday = 0;                     // mktime/timegm ignore this
   timestruct.tm_isdst = -1;                   // attempt to figure it out
-#if !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_SOLARIS) && !BUILDFLAG(IS_AIX)
+#if !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_SOLARIS) && !BUILDFLAG(IS_AIX) && !BUILDFLAG(IS_OS2)
   timestruct.tm_gmtoff = 0;   // not a POSIX field, so mktime/timegm ignore
   timestruct.tm_zone = nullptr;  // not a POSIX field, so mktime/timegm ignore
 #endif

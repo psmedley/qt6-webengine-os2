@@ -119,6 +119,8 @@ EmbeddedTargetOs DefaultEmbeddedTargetOs() {
   return EmbeddedTargetOs::kMac;
 #elif defined(V8_OS_WIN)
   return EmbeddedTargetOs::kWin;
+#elif defined(V8_OS_OS2)
+  return EmbeddedTargetOs::kOS2;
 #else
   return EmbeddedTargetOs::kGeneric;
 #endif
@@ -143,6 +145,8 @@ EmbeddedTargetOs ToEmbeddedTargetOs(const char* s) {
     return EmbeddedTargetOs::kWin;
   } else if (string == "starboard") {
     return EmbeddedTargetOs::kStarboard;
+  } else if (string == "os2") {
+    return EmbeddedTargetOs::kOS2;
   } else {
     return EmbeddedTargetOs::kGeneric;
   }

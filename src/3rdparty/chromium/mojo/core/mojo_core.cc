@@ -200,7 +200,7 @@ MojoSystemThunks2 g_thunks = {0};
 
 }  // namespace
 
-#if defined(WIN32)
+#if defined(WIN32) || defined(__OS2__)
 #define EXPORT_FROM_MOJO_CORE __declspec(dllexport)
 #else
 #define EXPORT_FROM_MOJO_CORE __attribute__((visibility("default")))

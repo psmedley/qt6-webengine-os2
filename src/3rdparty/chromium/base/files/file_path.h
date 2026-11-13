@@ -117,10 +117,10 @@
 // enabled and disabled independently, to aid testing.  These #defines are
 // here so that the same setting can be used in both the implementation and
 // in the unit test.
-#if BUILDFLAG(IS_WIN)
+#if defined(OS_DOSLIKE)
 #define FILE_PATH_USES_DRIVE_LETTERS
 #define FILE_PATH_USES_WIN_SEPARATORS
-#endif  // BUILDFLAG(IS_WIN)
+#endif  // OS_WIN
 
 // To print path names portably use PRFilePath (based on PRIuS and friends from
 // C99 and format_macros.h) like this:
@@ -130,7 +130,7 @@
 #elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 #define PRFilePath "s"
 #endif  // BUILDFLAG(IS_WIN)
-
+ 
 // Macros for string literal initialization of FilePath::CharType[].
 #if BUILDFLAG(IS_WIN)
 

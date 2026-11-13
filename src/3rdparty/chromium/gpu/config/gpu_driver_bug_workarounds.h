@@ -6,6 +6,7 @@
 #define GPU_CONFIG_GPU_DRIVER_BUG_WORKAROUNDS_H_
 
 #include <vector>
+#include <cstdint>
 
 #include "build/build_config.h"
 #include "gpu/config/gpu_driver_bug_workaround_type.h"

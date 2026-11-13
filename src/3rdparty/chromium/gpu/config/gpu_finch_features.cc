@@ -10,7 +10,9 @@
 #include "build/chromeos_buildflags.h"
 #include "gpu/config/gpu_switches.h"
 #include "ui/gl/gl_features.h"
+#if defined(USE_EGL)
 #include "ui/gl/gl_surface_egl.h"
+#endif
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/gl_utils.h"
 

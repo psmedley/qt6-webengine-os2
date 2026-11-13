@@ -36,7 +36,7 @@
 #include "third_party/blink/renderer/platform/audio/cpu/arm/vector_math_neon.h"
 #elif defined(HAVE_MIPS_MSA_INTRINSICS)
 #include "third_party/blink/renderer/platform/audio/cpu/mips/vector_math_msa.h"
-#elif defined(ARCH_CPU_X86_FAMILY)
+#elif defined(ARCH_CPU_X86_FAMILY) && !defined(OS_OS2)
 #include "third_party/blink/renderer/platform/audio/cpu/x86/vector_math_x86.h"
 #else
 #include "third_party/blink/renderer/platform/audio/vector_math_scalar.h"
@@ -51,7 +51,7 @@ namespace impl = mac;
 namespace impl = neon;
 #elif defined(HAVE_MIPS_MSA_INTRINSICS)
 namespace impl = msa;
-#elif defined(ARCH_CPU_X86_FAMILY)
+#elif defined(ARCH_CPU_X86_FAMILY) && !defined(OS_OS2)
 namespace impl = x86;
 #else
 namespace impl = scalar;
@@ -67,7 +67,7 @@ void PrepareFilterForConv(const float* filter_p,
   // vectors are not implemented by all implementations.
   DCHECK_EQ(-1, filter_stride);
   DCHECK(prepared_filter);
-#if defined(ARCH_CPU_X86_FAMILY) && !BUILDFLAG(IS_MAC)
+#if defined(ARCH_CPU_X86_FAMILY) && !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_OS2)
   x86::PrepareFilterForConv(filter_p, filter_stride, filter_size,
                             prepared_filter);
 #endif

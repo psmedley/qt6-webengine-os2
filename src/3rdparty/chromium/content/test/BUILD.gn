@@ -2903,7 +2903,8 @@ test("content_unittests") {
     ]
   }
 
-  if (is_android || is_linux || is_chromeos || is_mac || is_win || is_fuchsia) {
+  if (is_android || is_linux || is_chromeos || is_mac || is_win || is_fuchsia ||
+      is_os2) {
     data = [
       "$root_out_dir/content_shell.pak",
       "data/",

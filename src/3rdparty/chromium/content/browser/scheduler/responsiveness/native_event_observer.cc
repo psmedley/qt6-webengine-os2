@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Needed for BUILDFLAG(IS_WIN)
+// Needed for BUILDFLAG(IS_WIN) || BUILDFLAG(IS_OS2)
 #include "build/build_config.h"
 
 // Windows headers must come first.
@@ -20,7 +20,7 @@
 #include "ui/events/event.h"
 #endif
 
-#if BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_OS2)
 #include "base/task/current_thread.h"
 #endif
 
@@ -63,19 +63,28 @@ void NativeEventObserver::OnWindowEventDispatcherFinishedProcessingEvent(
 }
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
-#if BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_OS2)
 void NativeEventObserver::RegisterObserver() {
   base::CurrentUIThread::Get()->AddMessagePumpObserver(this);
 }
 void NativeEventObserver::DeregisterObserver() {
   base::CurrentUIThread::Get()->RemoveMessagePumpObserver(this);
 }
+#if BUILDFLAG(IS_OS2)
+void NativeEventObserver::WillDispatchMSG(const QMSG& msg) {
+  will_run_event_callback_.Run(&msg);
+}
+void NativeEventObserver::DidDispatchMSG(const QMSG& msg) {
+  did_run_event_callback_.Run(&msg);
+}
+#else
 void NativeEventObserver::WillDispatchMSG(const MSG& msg) {
   will_run_event_callback_.Run(&msg);
 }
 void NativeEventObserver::DidDispatchMSG(const MSG& msg) {
   did_run_event_callback_.Run(&msg);
 }
+#endif  // BUILDFLAG(IS_OS2)
 #endif  // BUILDFLAG(IS_WIN)
 
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_IOS)

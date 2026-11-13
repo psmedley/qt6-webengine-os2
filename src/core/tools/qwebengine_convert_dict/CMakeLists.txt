@@ -27,6 +27,12 @@ if(QT_FEATURE_webengine_spellchecker AND NOT CMAKE_CROSSCOMPILING)
         COMPILE_OPTIONS -Wno-unused-parameter
     )
     set_target_properties(${dict_target_name} PROPERTIES CXX_STANDARD 20)
+    qt_internal_extend_target(${dict_target_name} CONDITION OS2
+        LINK_OPTIONS
+        @src/core/Release/2.45/convert_dict_archives.rsp @src/core/Release/2.45/convert_dict_objects.rsp
+        PUBLIC_LIBRARIES
+        "-lssp"
+    )
     if(NOT QT_FEATURE_webengine_system_icu AND QT_WILL_INSTALL)
         # tool can be called durig build so copy icu file
         get_target_property(icuFile WebEngineCore ICUDTL_FILE)

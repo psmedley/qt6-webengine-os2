@@ -7,6 +7,7 @@
 
 #include <map>
 #include <string>
+#include <cstdint>
 
 #include "base/memory/raw_ptr.h"
 

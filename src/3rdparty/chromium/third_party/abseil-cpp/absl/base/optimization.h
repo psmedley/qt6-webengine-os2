@@ -71,7 +71,7 @@
 //
 // See http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0154r1.html
 // for more information.
-#if defined(__GNUC__)
+#if defined(__GNUC__) && !defined(__OS2__)
 // Cache line alignment
 #if defined(__i386__) || defined(__x86_64__)
 #define ABSL_CACHELINE_SIZE 64
@@ -143,7 +143,11 @@
 //    the generated machine code.
 // 3) Prefer applying this attribute to individual variables. Avoid
 //    applying it to types. This tends to localize the effect.
-#if defined(__clang__) || defined(__GNUC__)
+#if defined(__OS2__)
+// OS/2 OMF objects only support alignment up to 32 bytes; keep the 6.2.8
+// behaviour of not cacheline-aligning anything.
+#define ABSL_CACHELINE_ALIGNED
+#elif defined(__clang__) || defined(__GNUC__)
 #define ABSL_CACHELINE_ALIGNED __attribute__((aligned(ABSL_CACHELINE_SIZE)))
 #elif defined(_MSC_VER)
 #define ABSL_CACHELINE_ALIGNED __declspec(align(ABSL_CACHELINE_SIZE))

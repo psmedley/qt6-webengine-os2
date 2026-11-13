@@ -27,11 +27,13 @@
 #if !PA_CONFIG(HAS_FAST_MUTEX)
 #include "partition_alloc/partition_alloc_base/threading/platform_thread.h"
 
-#if BUILDFLAG(IS_POSIX)
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)
 #include <sched.h>
 
 #define PA_YIELD_THREAD sched_yield()
 
+#elif BUILDFLAG(IS_OS2)
+#define PA_YIELD_THREAD pthread_yield()
 #else  // Other OS
 
 #warning "Thread yield not supported on this OS."
@@ -179,7 +181,7 @@ void SpinningMutex::LockSlowSpinLock() {
       // progress.
       base::PlatformThread::Sleep(base::Milliseconds(1));
     }
-  } while (!TrySpinLock());
+  } while (!Try());
 }
 
 #endif  // PA_CONFIG(HAS_FAST_MUTEX)

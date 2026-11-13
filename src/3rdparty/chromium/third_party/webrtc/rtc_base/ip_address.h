@@ -18,6 +18,9 @@
 #include <sys/socket.h>
 
 #include "absl/strings/string_view.h"
+#if defined(WEBRTC_OS2)
+#include <libcx/net.h>
+#endif
 #endif
 #if defined(WEBRTC_WIN)
 #include <winsock2.h>
@@ -58,7 +61,9 @@ class RTC_EXPORT IPAddress {
     u_.ip4 = ip4;
   }
 
+#ifndef WEBRTC_NO_INET6
   explicit IPAddress(const in6_addr& ip6) : family_(AF_INET6) { u_.ip6 = ip6; }
+#endif
 
   explicit IPAddress(uint32_t ip_in_host_byte_order) : family_(AF_INET) {
     memset(&u_, 0, sizeof(u_));
@@ -91,7 +96,9 @@ class RTC_EXPORT IPAddress {
 
   int family() const { return family_; }
   in_addr ipv4_address() const;
+#ifndef WEBRTC_NO_INET6
   in6_addr ipv6_address() const;
+#endif
 
   // Returns the number of bytes needed to store the raw address.
   size_t Size() const;
@@ -106,9 +113,11 @@ class RTC_EXPORT IPAddress {
   // Returns the same address if this isn't a mapped address.
   IPAddress Normalized() const;
 
+#ifndef WEBRTC_NO_INET6
   // Returns this address as an IPv6 address.
   // Maps v4 addresses (as ::ffff:a.b.c.d), returns v6 addresses unchanged.
   IPAddress AsIPv6Address() const;
+#endif
 
   // For socketaddress' benefit. Returns the IP in host byte order.
   uint32_t v4AddressAsHostOrderInteger() const;
@@ -123,7 +132,9 @@ class RTC_EXPORT IPAddress {
   int family_;
   union {
     in_addr ip4;
+#ifndef WEBRTC_NO_INET6
     in6_addr ip6;
+#endif
   } u_;
 };
 
@@ -139,8 +150,10 @@ class RTC_EXPORT InterfaceAddress : public IPAddress {
   InterfaceAddress(IPAddress addr, int ipv6_flags)
       : IPAddress(addr), ipv6_flags_(ipv6_flags) {}
 
+#ifndef WEBRTC_NO_INET6
   InterfaceAddress(const in6_addr& ip6, int ipv6_flags)
       : IPAddress(ip6), ipv6_flags_(ipv6_flags) {}
+#endif
 
   InterfaceAddress(const InterfaceAddress& other) = default;
   const InterfaceAddress& operator=(const InterfaceAddress& other);
@@ -178,6 +191,7 @@ RTC_EXPORT bool IPIsUnspec(const IPAddress& ip);
 size_t HashIP(const IPAddress& ip);
 
 // These are only really applicable for IPv6 addresses.
+#ifndef WEBRTC_NO_INET6
 bool IPIs6Bone(const IPAddress& ip);
 bool IPIs6To4(const IPAddress& ip);
 RTC_EXPORT bool IPIsMacBased(const IPAddress& ip);
@@ -186,6 +200,7 @@ bool IPIsTeredo(const IPAddress& ip);
 bool IPIsULA(const IPAddress& ip);
 bool IPIsV4Compatibility(const IPAddress& ip);
 bool IPIsV4Mapped(const IPAddress& ip);
+#endif
 
 // Returns the precedence value for this IP as given in RFC3484.
 int IPAddressPrecedence(const IPAddress& ip);

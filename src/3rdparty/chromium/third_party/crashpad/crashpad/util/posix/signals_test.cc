@@ -33,6 +33,11 @@
 #include "test/scoped_temp_dir.h"
 #include "util/posix/scoped_mmap.h"
 
+#if defined(OS_OS2)
+#include <sys/socket.h>
+#define pipe(A) socketpair(AF_UNIX, SOCK_STREAM, 0, A)
+#endif
+
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
 #include <sys/auxv.h>
 #include <sys/prctl.h>

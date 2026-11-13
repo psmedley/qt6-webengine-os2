@@ -105,9 +105,10 @@ bool IPEndPoint::ToSockAddr(struct sockaddr* address,
   // By definition, socklen_t is large enough to hold both sizes.
   constexpr socklen_t kSockaddrInSize =
       static_cast<socklen_t>(sizeof(struct sockaddr_in));
+#if !BUILDFLAG(IS_OS2)
   constexpr socklen_t kSockaddrIn6Size =
       static_cast<socklen_t>(sizeof(struct sockaddr_in6));
-
+#endif
   DCHECK(address);
   DCHECK(address_length);
 #if BUILDFLAG(IS_WIN)
@@ -126,6 +127,7 @@ bool IPEndPoint::ToSockAddr(struct sockaddr* address,
              IPAddress::kIPv4AddressSize);
       break;
     }
+#if !BUILDFLAG(IS_OS2)
     case IPAddress::kIPv6AddressSize: {
       if (*address_length < kSockaddrIn6Size)
         return false;
@@ -139,6 +141,7 @@ bool IPEndPoint::ToSockAddr(struct sockaddr* address,
              IPAddress::kIPv6AddressSize);
       break;
     }
+#endif
     default:
       return false;
   }
@@ -160,6 +163,7 @@ bool IPEndPoint::FromSockAddr(const struct sockaddr* sock_addr,
           base::NetToHost16(addr->sin_port));
       return true;
     }
+#if !BUILDFLAG(IS_OS2)
     case AF_INET6: {
       if (sock_addr_len < static_cast<socklen_t>(sizeof(struct sockaddr_in6)))
         return false;
@@ -171,6 +175,7 @@ bool IPEndPoint::FromSockAddr(const struct sockaddr* sock_addr,
           base::NetToHost16(addr->sin6_port));
       return true;
     }
+#endif
 #if BUILDFLAG(IS_WIN)
     case AF_BTH: {
       if (sock_addr_len < static_cast<socklen_t>(sizeof(SOCKADDR_BTH)))

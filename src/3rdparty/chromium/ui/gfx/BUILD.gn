@@ -368,14 +368,14 @@ jumbo_component("gfx") {
   }
 
   if (use_blink) {
-    if (is_android || is_fuchsia || is_ios) {
+    if (is_android || is_fuchsia || is_ios || is_os2) {
       sources += [
         "font_fallback_skia.cc",
         "font_render_params_skia.cc",
       ]
     }
 
-    if (is_android || is_fuchsia || is_win || is_apple) {
+    if (is_android || is_fuchsia || is_win || is_apple || is_os2) {
       sources += [
         "font_fallback_skia_impl.cc",
         "font_fallback_skia_impl.h",
@@ -887,7 +887,7 @@ test("gfx_unittests") {
     sources += [ "system_fonts_win_unittest.cc" ]
   }
 
-  if (is_linux || is_chromeos || is_android || is_fuchsia || is_win) {
+  if (is_linux || is_chromeos || is_android || is_fuchsia || is_win || is_os2) {
     sources += [ "platform_font_skia_unittest.cc" ]
   }
 
@@ -928,7 +928,7 @@ test("gfx_unittests") {
     deps += [ "//ui/gfx:codec_tests_bundle_data" ]
   }
 
-  if (is_android || is_fuchsia) {
+  if (is_android || is_fuchsia || is_os2) {
     sources += [ "font_fallback_skia_unittest.cc" ]
   }
 
@@ -992,6 +992,10 @@ test("gfx_unittests") {
     deps += [ "//skia:test_fonts" ]
     additional_manifest_fragments =
         [ "//build/config/fuchsia/test/test_fonts.shard.test-cml" ]
+  }
+
+  if (is_os2) {
+    deps += [ "//skia:test_fonts" ]
   }
 }
 

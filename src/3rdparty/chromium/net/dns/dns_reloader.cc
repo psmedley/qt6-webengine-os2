@@ -8,7 +8,8 @@
 
 // If we're not on a POSIX system, it's not even safe to try to include resolv.h
 // - there's not guarantee it exists at all. :(
-#if BUILDFLAG(IS_POSIX)
+// OS/2 (kLIBC) has no res_ninit(3) either.
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)
 
 #include <resolv.h>
 
@@ -36,7 +37,7 @@
 // below - it would be easy for the copies below to get out of sync.
 #define USE_RES_NINIT
 #endif  // defined(_RES) && ...
-#endif  // BUILDFLAG(IS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)
 
 #if defined(USE_RES_NINIT)
 

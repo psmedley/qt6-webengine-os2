@@ -1,0 +1,227 @@
+# OS/2 diagnostics for silent renderer exits ("render process exited with
+# code: 32527", no exceptq report).
+#
+# Apply from the repository root with:
+#   git apply os2-patches/os2-diag-renderer-exit.patch
+# Remove again with:
+#   git apply -R os2-patches/os2-diag-renderer-exit.patch
+#
+# All added log lines are tagged [os2-diag] and marked TODO(os2).
+#
+# What it adds:
+# - mojo InterfaceEndpointClient: logs messages dropped because the endpoint
+#   had already disconnected, or rejected by the generated stub.
+# - content RenderProcessHostImpl: logs Shutdown()/ShutdownForBadMessage()
+#   (with stack) and every ProcessDied() with termination status, raw exit
+#   code and whether the browser requested the shutdown.
+# - content bad_message::ReceivedBadMessage: logs the reason.
+# - content child_process_launcher_helper_os2.cc: logs (with stack) every
+#   TerminateProcess() and ForceNormalProcessTerminationSync().
+# - content renderer_main.cc (OS/2 only): SA_SIGINFO handler for SIGTERM,
+#   SIGINT, SIGHUP, SIGQUIT and SIGABRT that logs signal, si_code, si_pid,
+#   parent pid and thread, then executes INT 3 so exceptq writes a report
+#   for the thread the signal arrived on (base::debug::StackTrace prints
+#   nothing on OS/2), then re-raises the signal.
+#
+# Reading the results:
+# - ProcessDied "shutdown_requested 0" + renderer "got signal 15 ... si_pid 0"
+#   means the signal was generated inside the renderer (e.g. OS/2
+#   XCPT_SIGNAL_KILLPROC delivered by kLIBC as SIGTERM). The exceptq report's
+#   registration chain / stack dump shows the exception records involved.
+# - A TerminateProcess / ForceNormalProcessTerminationSync / Shutdown line
+#   with a stack means the browser terminated the renderer.
+diff --git a/src/3rdparty/chromium/content/browser/bad_message.cc b/src/3rdparty/chromium/content/browser/bad_message.cc
+index d1ecafe991..be0cb4943c 100644
+--- a/src/3rdparty/chromium/content/browser/bad_message.cc
++++ b/src/3rdparty/chromium/content/browser/bad_message.cc
+@@ -47,12 +47,17 @@ void ReceivedBadMessageOnUIThread(int render_process_id,
+ }  // namespace
+ 
+ void ReceivedBadMessage(RenderProcessHost* host, BadMessageReason reason) {
++  // TODO(os2): temporary diagnostics.
++  LOG(ERROR) << "[os2-diag] ReceivedBadMessage reason " << reason;
+   LogBadMessage(reason);
+   host->ShutdownForBadMessage(
+       RenderProcessHost::CrashReportMode::GENERATE_CRASH_DUMP);
+ }
+ 
+ void ReceivedBadMessage(int render_process_id, BadMessageReason reason) {
++  // TODO(os2): temporary diagnostics.
++  LOG(ERROR) << "[os2-diag] ReceivedBadMessage reason " << reason
++             << " for renderer id " << render_process_id;
+   // We generate a crash dump here since generating one after posting to the UI
+   // thread is less useful.
+   LogBadMessage(reason);
+diff --git a/src/3rdparty/chromium/content/browser/child_process_launcher_helper_os2.cc b/src/3rdparty/chromium/content/browser/child_process_launcher_helper_os2.cc
+index e11ca10d19..964b7275f3 100644
+--- a/src/3rdparty/chromium/content/browser/child_process_launcher_helper_os2.cc
++++ b/src/3rdparty/chromium/content/browser/child_process_launcher_helper_os2.cc
+@@ -6,6 +6,8 @@
+ #include "content/browser/child_process_launcher_helper_posix.h"
+ 
+ #include "base/command_line.h"
++#include "base/debug/stack_trace.h"
++#include "base/logging.h"
+ #include "base/notreached.h"
+ #include "base/posix/global_descriptors.h"
+ #include "base/process/launch.h"
+@@ -43,6 +45,10 @@ ChildProcessTerminationInfo ChildProcessLauncherHelper::GetTerminationInfo(
+ // static
+ bool ChildProcessLauncherHelper::TerminateProcess(const base::Process& process,
+                                                   int exit_code) {
++  // TODO(os2): temporary diagnostics.
++  LOG(ERROR) << "[os2-diag] TerminateProcess pid " << process.Pid()
++             << " exit_code " << exit_code << "\n"
++             << base::debug::StackTrace().ToString();
+   return process.Terminate(exit_code, false);
+ }
+ 
+@@ -97,6 +103,10 @@ void ChildProcessLauncherHelper::AfterLaunchOnLauncherThread(
+ void ChildProcessLauncherHelper::ForceNormalProcessTerminationSync(
+     ChildProcessLauncherHelper::Process process) {
+   DCHECK(CurrentlyOnProcessLauncherTaskRunner());
++  // TODO(os2): temporary diagnostics.
++  LOG(ERROR) << "[os2-diag] ForceNormalProcessTerminationSync pid "
++             << process.process.Pid() << "\n"
++             << base::debug::StackTrace().ToString();
+   process.process.Terminate(RESULT_CODE_NORMAL_EXIT, false);
+ }
+ 
+diff --git a/src/3rdparty/chromium/content/browser/renderer_host/render_process_host_impl.cc b/src/3rdparty/chromium/content/browser/renderer_host/render_process_host_impl.cc
+index 0fa7cdef44..e2d81c4511 100644
+--- a/src/3rdparty/chromium/content/browser/renderer_host/render_process_host_impl.cc
++++ b/src/3rdparty/chromium/content/browser/renderer_host/render_process_host_impl.cc
+@@ -30,6 +30,7 @@
+ #include "base/files/file.h"
+ #include "base/files/file_util.h"
+ #include "base/location.h"
++#include "base/debug/stack_trace.h"
+ #include "base/logging.h"
+ #include "base/memory/memory_pressure_monitor.h"
+ #include "base/memory/ptr_util.h"
+@@ -2849,6 +2850,9 @@ void RenderProcessHostImpl::RemoveInternalObserver(
+ 
+ void RenderProcessHostImpl::ShutdownForBadMessage(
+     CrashReportMode crash_report_mode) {
++  // TODO(os2): temporary diagnostics.
++  LOG(ERROR) << "[os2-diag] ShutdownForBadMessage for renderer id " << GetID()
++             << "\n" << base::debug::StackTrace().ToString();
+   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+   if (command_line->HasSwitch(switches::kDisableKillAfterBadIPC))
+     return;
+@@ -3548,6 +3552,10 @@ bool RenderProcessHostImpl::IsReady() {
+ }
+ 
+ bool RenderProcessHostImpl::Shutdown(int exit_code) {
++  // TODO(os2): temporary diagnostics.
++  LOG(ERROR) << "[os2-diag] RenderProcessHostImpl::Shutdown(" << exit_code
++             << ") for renderer id " << GetID() << "\n"
++             << base::debug::StackTrace().ToString();
+   if (run_renderer_in_process())
+     return false;  // Single process mode never shuts down the renderer.
+ 
+@@ -4716,6 +4724,13 @@ ChildProcessTerminationInfo RenderProcessHostImpl::GetChildTerminationInfo(
+ 
+ void RenderProcessHostImpl::ProcessDied(
+     const ChildProcessTerminationInfo& termination_info) {
++  // TODO(os2): temporary diagnostics.
++  LOG(ERROR) << "[os2-diag] ProcessDied: renderer id " << GetID()
++             << " status " << termination_info.status << " exit_code "
++             << termination_info.exit_code << " (0x" << std::hex
++             << termination_info.exit_code << std::dec << ")"
++             << " shutdown_requested " << shutdown_requested_
++             << " shutdown_exit_code " << shutdown_exit_code_;
+   TRACE_EVENT0("content", "RenderProcessHostImpl::ProcessDied");
+   // Our child process has died.  If we didn't expect it, it's a crash.
+   // In any case, we need to let everyone know it's gone.
+diff --git a/src/3rdparty/chromium/content/renderer/renderer_main.cc b/src/3rdparty/chromium/content/renderer/renderer_main.cc
+index 6e26ee08e7..d91b9eb0ad 100644
+--- a/src/3rdparty/chromium/content/renderer/renderer_main.cc
++++ b/src/3rdparty/chromium/content/renderer/renderer_main.cc
+@@ -43,6 +43,14 @@
+ #include "third_party/abseil-cpp/absl/types/optional.h"
+ #include "third_party/blink/public/platform/platform.h"
+ #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
++
++#if BUILDFLAG(IS_OS2)
++#include <signal.h>
++#include <unistd.h>
++
++#include "base/debug/stack_trace.h"
++#include "base/logging.h"
++#endif
+ #include "third_party/icu/source/common/unicode/unistr.h"
+ #include "third_party/icu/source/i18n/unicode/timezone.h"
+ #include "ui/base/ui_base_switches.h"
+@@ -131,7 +139,42 @@ void LogTimeToStartRunLoop(const base::CommandLine& command_line,
+ }  // namespace
+ 
+ // mainline routine for running as the Renderer process
++#if BUILDFLAG(IS_OS2)
++namespace {
++
++// TODO(os2): temporary diagnostics for renderers dying with SIGTERM while
++// loading some pages. Not async-signal-safe; for debugging only.
++void OS2DiagSignalHandler(int sig, siginfo_t* info, void*) {
++  LOG(ERROR) << "[os2-diag] renderer pid " << getpid() << " got signal "
++             << sig << " si_code " << (info ? info->si_code : -1)
++             << " si_pid " << (info ? static_cast<long>(info->si_pid) : -1L)
++             << " (parent pid " << getppid() << ") on thread "
++             << base::PlatformThread::CurrentId() << "\n"
++             << base::debug::StackTrace().ToString();
++  // base::debug::StackTrace doesn't produce anything on OS/2, so trap into
++  // exceptq instead: its report for this thread shows the kLIBC signal and
++  // exception dispatch frames that led here.
++  __asm__ volatile("int3");
++  signal(sig, SIG_DFL);
++  raise(sig);
++}
++
++void InstallOS2DiagSignalHandlers() {
++  struct sigaction action = {};
++  action.sa_sigaction = OS2DiagSignalHandler;
++  action.sa_flags = SA_SIGINFO;
++  sigemptyset(&action.sa_mask);
++  for (int sig : {SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGABRT})
++    sigaction(sig, &action, nullptr);
++}
++
++}  // namespace
++#endif  // BUILDFLAG(IS_OS2)
++
+ int RendererMain(MainFunctionParams parameters) {
++#if BUILDFLAG(IS_OS2)
++  InstallOS2DiagSignalHandlers();
++#endif
+   // Don't use the TRACE_EVENT0 macro because the tracing infrastructure doesn't
+   // expect synchronous events around the main loop of a thread.
+   TRACE_EVENT_INSTANT0("startup", "RendererMain", TRACE_EVENT_SCOPE_THREAD);
+diff --git a/src/3rdparty/chromium/mojo/public/cpp/bindings/lib/interface_endpoint_client.cc b/src/3rdparty/chromium/mojo/public/cpp/bindings/lib/interface_endpoint_client.cc
+index 3624a95b90..354cc2d9cf 100644
+--- a/src/3rdparty/chromium/mojo/public/cpp/bindings/lib/interface_endpoint_client.cc
++++ b/src/3rdparty/chromium/mojo/public/cpp/bindings/lib/interface_endpoint_client.cc
+@@ -922,6 +922,11 @@ bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
+     // for the same interface. Close the pipe because this shouldn't happen.
+     DVLOG(1) << "A message is received for an interface after it has been "
+              << "disconnected. Closing the pipe.";
++    // TODO(os2): temporary diagnostics, remove once the renderer exit is
++    // understood.
++    LOG(ERROR) << "[os2-diag] message " << message->name() << " for "
++               << interface_name_ << " received after the endpoint "
++               << "encountered an error (disconnected)";
+     return false;
+   }
+ 
+@@ -985,6 +990,12 @@ bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
+       return control_message_handler_.Accept(message);
+ 
+     accepted_interface_message = incoming_receiver_->Accept(message);
++    // TODO(os2): temporary diagnostics.
++    if (!accepted_interface_message) {
++      LOG(ERROR) << "[os2-diag] message " << message->name() << " for "
++                 << interface_name_ << " rejected by the stub (impl "
++                 << "unbound or unknown method)";
++    }
+   }
+ 
+   if (weak_self && accepted_interface_message &&

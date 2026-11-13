@@ -21,6 +21,10 @@
 #include "mojo/public/cpp/platform/platform_handle_security_util_win.h"
 #endif
 
+#if defined(OS_OS2)
+#include "base/notreached.h"
+#endif
+
 namespace mojo {
 namespace core {
 
@@ -175,6 +179,40 @@ PlatformHandle PlatformHandleInTransit::TakeIncomingRemoteHandle(
       TransferHandle(handle, owning_process, base::GetCurrentProcessHandle(),
                      kTrustedTarget)));
 }
+#endif
+
+#if defined(OS_OS2)
+// static
+PlatformHandle PlatformHandleInTransit::CreateFromLIBCxHandle(
+    const LIBCX_HANDLE &handle)
+{
+  switch(handle.type) {
+    case LIBCX_HANDLE_SHMEM:
+      return PlatformHandle(base::os2::ScopedShmemHandle(handle.value));
+    case LIBCX_HANDLE_FD:
+      return PlatformHandle(base::ScopedFD(handle.value));
+    default:
+      NOTREACHED();
+      return PlatformHandle();
+  }
+}
+
+void PlatformHandleInTransit::to_libcx_handle(LIBCX_HANDLE &handle)
+{
+  switch(handle_.type()) {
+    case PlatformHandle::Type::kShmemHandle:
+      handle.type = LIBCX_HANDLE_SHMEM;
+      handle.value = handle_.GetShmemHandle().get();
+      break;
+    case PlatformHandle::Type::kFd:
+      handle.type = LIBCX_HANDLE_FD;
+      handle.value = handle_.GetFD().get();
+      break;
+    default:
+      NOTREACHED();
+  }
+}
+
 #endif
 
 }  // namespace core

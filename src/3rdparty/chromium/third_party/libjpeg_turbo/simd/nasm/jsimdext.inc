@@ -61,11 +61,19 @@
 
 %elifdef OBJ32  ; ----(nasm -fobj -DOBJ32 ...)----------
 ; * Borland C++ (Win32)
+; * OS/2 using OMF format
 
 ; -- segment definition --
 ;
+%ifdef __OS2__
+%define .text TEXT32
+%define .data DATA32
+%define SEG_TEXT    .text align=4 public use32 FLAT class=CODE
+%define SEG_CONST   .data align=4 public use32 FLAT class=DATA
+%else
 %define SEG_TEXT   _text align=32 public use32 class=CODE
 %define SEG_CONST  _data align=32 public use32 class=DATA
+%endif
 
 %elifdef ELF    ; ----(nasm -felf[64] -DELF ...)------------
 ; * Linux

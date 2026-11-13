@@ -698,7 +698,7 @@ LogMessage::~LogMessage() {
 void LogMessage::Flush() {
   size_t stack_start = stream_.str().length();
 #if !defined(OFFICIAL_BUILD) && !BUILDFLAG(IS_NACL) && !defined(__UCLIBC__) && \
-    !BUILDFLAG(IS_AIX)
+    !BUILDFLAG(IS_AIX) && !BUILDFLAG(IS_OS2)
   // Include a stack trace on a fatal, unless running within a death test proc
   // or a debugger is attached.
   if (severity_ == LOGGING_FATAL && !::base::internal::InDeathTestChild() &&

@@ -23,6 +23,10 @@
 #include <dispatch/dispatch.h>
 #endif
 
+#ifdef WEBRTC_OS2
+#define AI_ADDRCONFIG 0
+#endif
+
 namespace webrtc {
 
 namespace {

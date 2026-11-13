@@ -24,6 +24,10 @@
 #include "mojo/public/cpp/platform/platform_channel_endpoint.h"
 #include "mojo/public/cpp/platform/platform_handle.h"
 
+#if BUILDFLAG(IS_OS2)
+#include <libcx/handles.h>
+#endif
+
 namespace mojo::core {
 
 const size_t kChannelMessageAlignment = 8;
@@ -177,6 +181,13 @@ class MOJO_SYSTEM_IMPL_EXPORT Channel
     };
     static_assert(sizeof(HandleEntry) == 4,
                   "sizeof(HandleEntry) must be 4 bytes");
+#elif defined(OS_OS2)
+    // OS/2 uses LIBCx transfer handle API.
+    typedef LIBCX_HANDLE HandleEntry;
+    struct OS2ExtraHeader {
+      pid_t pid;
+      HandleEntry handles[0];
+    };
 #endif
 #pragma pack(pop)
 
@@ -234,6 +245,11 @@ class MOJO_SYSTEM_IMPL_EXPORT Channel
 
     size_t num_handles() const;
     bool has_handles() const;
+#if defined(OS_OS2)
+    OS2ExtraHeader* mutable_os2_header() {
+        return reinterpret_cast<OS2ExtraHeader*>(mutable_extra_header());
+    }
+#endif
 
     bool is_legacy_message() const;
     LegacyHeader* legacy_header() const;

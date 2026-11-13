@@ -18,6 +18,8 @@
 #include <lib/zx/handle.h>
 #elif BUILDFLAG(IS_APPLE)
 #include "base/apple/scoped_mach_port.h"
+#elif BUILDFLAG(IS_OS2)
+#include "base/os2/scoped_shmem_handle.h"
 #endif
 
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
@@ -49,6 +51,8 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformHandle {
 #elif BUILDFLAG(IS_APPLE)
     kMachSend,
     kMachReceive,
+#elif BUILDFLAG(IS_OS2)
+    kShmemHandle,
 #endif
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
     kFd,
@@ -65,6 +69,8 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformHandle {
 #elif BUILDFLAG(IS_APPLE)
   explicit PlatformHandle(base::apple::ScopedMachSendRight mach_port);
   explicit PlatformHandle(base::apple::ScopedMachReceiveRight mach_port);
+#elif BUILDFLAG(IS_OS2)
+  explicit PlatformHandle(base::os2::ScopedShmemHandle handle);
 #endif
 
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
@@ -73,7 +79,6 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformHandle {
 
   PlatformHandle(const PlatformHandle&) = delete;
   PlatformHandle& operator=(const PlatformHandle&) = delete;
-
   ~PlatformHandle();
 
   PlatformHandle& operator=(PlatformHandle&& other);
@@ -169,6 +174,23 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformHandle {
   [[nodiscard]] mach_port_t ReleaseMachReceiveRight() {
     return TakeMachReceiveRight().release();
   }
+#elif BUILDFLAG(IS_OS2)
+  bool is_valid() const { return is_valid_fd() || is_valid_shmem_handle(); }
+  bool is_valid_shmem_handle() const { return handle_.is_valid(); }
+  bool is_shmem_handle() const { return type_ == Type::kShmemHandle; }
+  const base::os2::ScopedShmemHandle& GetShmemHandle() const {
+    return handle_;
+  }
+  base::os2::ScopedShmemHandle TakeShmemHandle() {
+    if (type_ == Type::kShmemHandle)
+      type_ = Type::kNone;
+    return std::move(handle_);
+  }
+  [[nodiscard]] SHMEM ReleaseShmemHandle() {
+    if (type_ == Type::kShmemHandle)
+      type_ = Type::kNone;
+    return handle_.release();
+  }
 #elif BUILDFLAG(IS_POSIX)
   bool is_valid() const { return is_valid_fd(); }
 #else
@@ -229,6 +251,8 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformHandle {
 #elif BUILDFLAG(IS_APPLE)
   base::apple::ScopedMachSendRight mach_send_;
   base::apple::ScopedMachReceiveRight mach_receive_;
+#elif BUILDFLAG(IS_OS2)
+  base::os2::ScopedShmemHandle handle_;
 #endif
 
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)

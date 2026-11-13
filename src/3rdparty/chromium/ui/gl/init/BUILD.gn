@@ -78,5 +78,10 @@ jumbo_component("init") {
       "gl_factory_ios.mm",
       "gl_initializer_ios.cc",
     ]
+  } else if (is_os2) {
+    sources += [
+      "gl_factory_os2.cc",
+      "gl_initializer_os2.cc",
+    ]
   }
 }

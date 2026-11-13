@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #include <string>
-
+#include <cstdint>
 
 namespace chrome_pdf {
 

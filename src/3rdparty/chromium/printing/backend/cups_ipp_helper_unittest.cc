@@ -1034,7 +1034,7 @@ TEST_F(PrintBackendCupsIppHelperTest,
            media_info{5800, 4000, 0, 0, 0, 0, {}, false, 0, true, 100000}}));
 }
 
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 TEST_F(PrintBackendCupsIppHelperTest, PinSupported) {
   printer_->SetSupportedOptions("job-password", MakeInteger(ipp_, 4));
   printer_->SetSupportedOptions("job-password-encryption",
@@ -1132,6 +1132,7 @@ TEST_F(PrintBackendCupsIppHelperTest, MediaSource) {
               Pointwise(AdvancedCapabilityName(),
                         {"top", "main", "auto", "tray-3", "tray-4"}));
 }
-#endif  // BUILDFLAG(IS_CHROMEOS)
+#endif  // #if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
+
 
 }  // namespace printing

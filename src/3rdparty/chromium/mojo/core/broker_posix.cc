@@ -32,11 +32,31 @@ Channel::MessagePtr WaitForBrokerMessage(
     std::vector<PlatformHandle>* incoming_handles) {
   Channel::MessagePtr message = Channel::Message::CreateMessage(
       sizeof(BrokerMessageHeader) + expected_data_size, expected_num_handles);
+  bool error;
+#if defined(OS_OS2)
+  ssize_t read_result =
+      SocketRecvmsg(socket_fd, const_cast<void*>(message->data()),
+                    message->data_num_bytes(), true /* block */);
+  if (read_result < 0) {
+    PLOG(ERROR) << "Recvmsg error";
+    error = true;
+  } else {
+    message = Channel::Message::Deserialize(
+        message->data(), static_cast<size_t>(read_result),
+                                    Channel::HandlePolicy::kAcceptHandles);
+    if (!message || message->payload_size() < sizeof(BrokerMessageHeader)) {
+      LOG(ERROR) << "Invalid broker message";
+      error = true;
+    } else if (message->num_handles() != expected_num_handles) {
+      LOG(ERROR) << "Received unexpected number of handles";
+      error = true;
+    }
+  }
+#else
   std::vector<base::ScopedFD> incoming_fds;
   ssize_t read_result =
       SocketRecvmsg(socket_fd, const_cast<void*>(message->data()),
                     message->data_num_bytes(), &incoming_fds, true /* block */);
-  bool error = false;
   if (read_result < 0) {
     PLOG(ERROR) << "Recvmsg error";
     error = true;
@@ -47,6 +67,7 @@ Channel::MessagePtr WaitForBrokerMessage(
     DLOG(ERROR) << "Received unexpected number of handles";
     error = true;
   }
+#endif
 
   if (error)
     return nullptr;
@@ -58,9 +79,18 @@ Channel::MessagePtr WaitForBrokerMessage(
     return nullptr;
   }
 
+#if defined(OS_OS2)
+  std::vector<PlatformHandleInTransit> handles = message->TakeHandles();
+  DCHECK_EQ(handles.size(), expected_num_handles);
+  DCHECK(incoming_handles);
+  incoming_handles->resize(handles.size());
+  for (size_t i = 0; i < handles.size(); ++i)
+    incoming_handles->at(i) = handles[i].TakeHandle();
+#else
   incoming_handles->reserve(incoming_fds.size());
   for (size_t i = 0; i < incoming_fds.size(); ++i)
     incoming_handles->emplace_back(std::move(incoming_fds[i]));
+#endif
 
   return message;
 }

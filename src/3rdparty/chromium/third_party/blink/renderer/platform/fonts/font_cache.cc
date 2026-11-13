@@ -73,7 +73,7 @@ extern const char kNotoColorEmojiCompat[] = "Noto Color Emoji Compat";
 
 SkFontMgr* FontCache::static_font_manager_ = nullptr;
 
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 float FontCache::device_scale_factor_ = 1.0;
 #endif
 

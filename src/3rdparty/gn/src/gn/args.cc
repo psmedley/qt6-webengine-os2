@@ -328,6 +328,8 @@ void Args::SetSystemVarsLocked(Scope* dest) const {
   os = "solaris";
 #elif defined(OS_NETBSD)
   os = "netbsd";
+#elif defined(OS_OS2)
+  os = "os2";
 #elif defined(OS_ZOS)
   os = "zos";
 #elif defined(OS_SERENITY)

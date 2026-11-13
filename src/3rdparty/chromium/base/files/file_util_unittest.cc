@@ -87,6 +87,11 @@
 #include "base/test/scoped_dev_zero_fuchsia.h"
 #endif
 
+#if BUILDFLAG(IS_OS2)
+#include <sys/socket.h>
+#define pipe(A) socketpair(AF_UNIX, SOCK_STREAM, 0, A)
+#endif
+
 // This macro helps avoid wrapped lines in the test structs.
 #define FPL(x) FILE_PATH_LITERAL(x)
 

@@ -19,11 +19,12 @@ export default commandLineArgs => ({
     sourcemap: Boolean(commandLineArgs.configSourcemaps),
   }],
   plugins: [
-    terser({
+    // terser compression creates 0 byte files on OS/2, so skip it there.
+    ...(process.platform === 'os2' ? [] : [terser({
       compress: {
         pure_funcs: commandLineArgs.configDCHECK ? ['Platform.DCHECK'] : [],
       },
-    }),
+    })]),
     {
       name: 'devtools-plugin',
       resolveId(source, importer) {

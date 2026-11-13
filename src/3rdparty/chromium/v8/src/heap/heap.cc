@@ -4,6 +4,7 @@
 
 #include "src/heap/heap.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cinttypes>
 #include <iomanip>

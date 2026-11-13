@@ -29,6 +29,9 @@ __declspec(dllimport) unsigned long __stdcall GetCurrentThreadId();
 }
 #elif PERFETTO_BUILDFLAG(PERFETTO_OS_FUCHSIA)
 #include <zircon/types.h>
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_OS2)
+extern "C" {int _gettid (void); }
+#include <stdlib.h>
 #elif PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 #include <sys/syscall.h>
@@ -71,6 +74,11 @@ inline PlatformThreadId GetThreadId() {
 using PlatformThreadId = pid_t;
 inline PlatformThreadId GetThreadId() {
   return reinterpret_cast<int32_t>(pthread_self());
+}
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_OS2)
+using PlatformThreadId = int;
+inline PlatformThreadId GetThreadId() {
+  return _gettid();
 }
 #else  // Default to pthreads in case no OS is set.
 using PlatformThreadId = pthread_t;

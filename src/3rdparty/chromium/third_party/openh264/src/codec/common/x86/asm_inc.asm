@@ -741,3 +741,7 @@ SECTION .note.GNU-stack noalloc noexec nowrite progbits ; Mark the stack as non-
   %endif
 %endif
 %endmacro
+
+%ifidn __OUTPUT_FORMAT__,obj
+    %define .text TEXT32 public align=16 use32 class=CODE flat
+%endif

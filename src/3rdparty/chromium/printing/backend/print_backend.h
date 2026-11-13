@@ -57,7 +57,7 @@ struct COMPONENT_EXPORT(PRINT_BACKEND) PrinterBasicInfo {
 
 using PrinterList = std::vector<PrinterBasicInfo>;
 
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 struct COMPONENT_EXPORT(PRINT_BACKEND) AdvancedCapabilityValue {
   AdvancedCapabilityValue();
@@ -108,7 +108,7 @@ struct COMPONENT_EXPORT(PRINT_BACKEND) AdvancedCapability {
 
 using AdvancedCapabilities = std::vector<AdvancedCapability>;
 
-#endif  // BUILDFLAG(IS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 #if BUILDFLAG(IS_WIN)
 
@@ -283,15 +283,15 @@ struct COMPONENT_EXPORT(PRINT_BACKEND) PrinterSemanticCapsAndDefaults {
   std::vector<gfx::Size> dpis;
   gfx::Size default_dpi;
 
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
   bool pin_supported = false;
   AdvancedCapabilities advanced_capabilities;
-#endif  // BUILDFLAG(IS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
+};
 
 #if BUILDFLAG(IS_WIN)
   std::optional<PageOutputQuality> page_output_quality;
 #endif  // BUILDFLAG(IS_WIN)
-};
 
 #if defined(UNIT_TEST)
 

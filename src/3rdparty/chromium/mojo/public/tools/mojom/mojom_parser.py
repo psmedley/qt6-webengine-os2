@@ -30,7 +30,8 @@ from mojom.parse import conditional_features
 
 
 # Disable this for easier debugging.
-_ENABLE_MULTIPROCESSING = True
+#_ENABLE_MULTIPROCESSING = True
+_ENABLE_MULTIPROCESSING =0
 
 # https://docs.python.org/3/library/multiprocessing.html#:~:text=bpo-33725
 if __name__ == '__main__' and sys.platform == 'darwin':

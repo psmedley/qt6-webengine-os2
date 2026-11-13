@@ -40,7 +40,11 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_timeline_range.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_timeline_range_offset.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_compositeoperationorauto_compositeoperationorautosequence.h"
+#if defined(__OS2__)
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_double_doubleorstringortimelinerangeoffsetornullsequence_string_ti.h"
+#else
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_double_doubleorstringortimelinerangeoffsetornullsequence_string_timelinerangeoffset_null.h"
+#endif
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_double_string_timelinerangeoffset.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_string_stringsequence.h"
 #include "third_party/blink/renderer/core/animation/animation_input_helpers.h"

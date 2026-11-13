@@ -18,6 +18,7 @@
 
 namespace partition_alloc::internal {
 
+#if !BUILDFLAG(IS_OS2)
 int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
   switch (accessibility.permissions) {
     case PageAccessibilityConfiguration::kRead:
@@ -43,5 +44,6 @@ int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
       return PROT_NONE;
   }
 }
-
+#endif // !BUILDFLAG(IS_OS2)
 }  // namespace partition_alloc::internal
+

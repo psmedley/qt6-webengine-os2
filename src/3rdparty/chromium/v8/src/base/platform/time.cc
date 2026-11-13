@@ -91,7 +91,7 @@ V8_INLINE int64_t GetFuchsiaThreadTicks() {
 // _POSIX_MONOTONIC_CLOCK to -1.
 V8_INLINE int64_t ClockNow(clockid_t clk_id) {
 #if (defined(_POSIX_MONOTONIC_CLOCK) && _POSIX_MONOTONIC_CLOCK >= 0) || \
-  defined(V8_OS_BSD) || defined(V8_OS_ANDROID)
+  defined(V8_OS_BSD) || defined(V8_OS_ANDROID) || defined(V8_OS_OS2)
 #if defined(V8_OS_AIX)
   // On AIX clock_gettime for CLOCK_THREAD_CPUTIME_ID outputs time with
   // resolution of 10ms. thread_cputime API provides the time in ns.

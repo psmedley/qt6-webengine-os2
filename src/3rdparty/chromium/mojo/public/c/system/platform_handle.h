@@ -50,6 +50,10 @@ typedef uint32_t MojoPlatformHandleType;
 // opaquely of type |mach_port_t|). Only usable on macOS hosts.
 #define MOJO_PLATFORM_HANDLE_TYPE_MACH_RECEIVE_RIGHT ((MojoPlatformHandleType)5)
 
+// The |MojoPlatformHandle| value represents an OS/2 shared memory handle. Only
+// usable on OS/2 hosts.
+#define MOJO_PLATFORM_HANDLE_TYPE_OS2_SHMEM_HANDLE ((MojoPlatformHandleType)6)
+
 // |MojoPlatformHandle|: A handle to a native platform object.
 //
 //     |uint32_t struct_size|: The size of this structure. Used for versioning

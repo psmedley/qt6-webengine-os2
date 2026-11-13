@@ -49,7 +49,7 @@ COMPONENT_EXPORT(PRINT_BACKEND) extern const char kIppMediaType[];
 COMPONENT_EXPORT(PRINT_BACKEND) extern const char kIppXDimension[];
 COMPONENT_EXPORT(PRINT_BACKEND) extern const char kIppYDimension[];
 
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 COMPONENT_EXPORT(PRINT_BACKEND) extern const char kIppDocumentAttributes[];
 COMPONENT_EXPORT(PRINT_BACKEND) extern const char kIppJobAttributes[];
@@ -67,7 +67,7 @@ COMPONENT_EXPORT(PRINT_BACKEND) extern const char kIppClientStringVersion[];
 COMPONENT_EXPORT(PRINT_BACKEND) extern const char kIppClientType[];
 COMPONENT_EXPORT(PRINT_BACKEND) extern const char kIppClientVersion[];
 
-#endif  // BUILDFLAG(IS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 }  // namespace printing
 

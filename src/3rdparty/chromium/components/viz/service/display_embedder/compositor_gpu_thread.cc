@@ -22,7 +22,9 @@
 #include "gpu/vulkan/buildflags.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
+#if defined(USE_EGL)
 #include "ui/gl/gl_surface_egl.h"
+#endif
 #include "ui/gl/init/gl_factory.h"
 
 #if BUILDFLAG(ENABLE_VULKAN)

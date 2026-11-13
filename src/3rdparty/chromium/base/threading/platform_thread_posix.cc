@@ -7,7 +7,9 @@
 
 #include <errno.h>
 #include <pthread.h>
+#if !defined(OS_OS2)
 #include <sched.h>
+#endif
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/time.h>
@@ -254,6 +256,8 @@ PlatformThreadId PlatformThreadBase::CurrentId() {
   // - gettid() is fast, since its return value is cached in pthread (in the
   //   thread control block of pthread). See gettid.c in bionic.
   return gettid();
+#elif BUILDFLAG(IS_OS2)
+  return _gettid();
 #elif BUILDFLAG(IS_FUCHSIA)
   thread_local static zx_koid_t id =
       GetKoid(*zx::thread::self()).value_or(ZX_KOID_INVALID);
@@ -285,7 +289,12 @@ PlatformThreadHandle PlatformThreadBase::CurrentHandle() {
 #if !BUILDFLAG(IS_APPLE)
 // static
 void PlatformThreadBase::YieldCurrentThread() {
+#if defined(OS_OS2)
+  // Under OS/2 this will end up in DosSleep(0) which does yielding.
+  pthread_yield();
+#else
   sched_yield();
+#endif
 }
 #endif  // !BUILDFLAG(IS_APPLE)
 
@@ -359,6 +368,8 @@ void PlatformThreadBase::Detach(PlatformThreadHandle thread_handle) {
 bool PlatformThreadBase::CanChangeThreadType(ThreadType from, ThreadType to) {
 #if BUILDFLAG(IS_NACL)
   return false;
+#elif BUILDFLAG(IS_OS2)
+  return true;
 #else
   if (from >= to) {
     // Decreasing thread priority on POSIX is always allowed.
@@ -382,6 +393,11 @@ void SetCurrentThreadTypeImpl(ThreadType thread_type,
   if (internal::SetCurrentThreadTypeForPlatform(thread_type, pump_type_hint))
     return;
 
+#if BUILDFLAG(IS_OS2)
+  // setpriority on OS/2 is useless as it only changes the default priority, not
+  // what Chromium expects. Just bail out if the above fails (it should not).
+  NOTREACHED();
+#else
   // setpriority(2) should change the whole thread group's (i.e. process)
   // priority. However, as stated in the bugs section of
   // http://man7.org/linux/man-pages/man2/getpriority.2.html: "under the current
@@ -393,6 +409,7 @@ void SetCurrentThreadTypeImpl(ThreadType thread_type,
     DVPLOG(1) << "Failed to set nice value of thread ("
               << PlatformThread::CurrentId() << ") to " << nice_setting;
   }
+#endif  // BUILDFLAG(IS_OS2)
 #endif  // BUILDFLAG(IS_NACL)
 }
 
@@ -410,9 +427,16 @@ ThreadPriorityForTest PlatformThreadBase::GetCurrentThreadPriorityForTest() {
   if (platform_specific_priority)
     return platform_specific_priority.value();
 
+#if BUILDFLAG(IS_OS2)
+  // getpriority on OS/2 is useless as it only returns the default priority, not
+  // what Chromium expects. Just bail out if the above fails (it should not).
+  NOTREACHED();
+  return ThreadPriorityForTest::kNormal;
+#else
   int nice_value = internal::GetCurrentThreadNiceValue();
 
   return internal::NiceValueToThreadPriorityForTest(nice_value);  // IN-TEST
+#endif  // BUILDFLAG(IS_OS2)
 #endif  // !BUILDFLAG(IS_NACL)
 }
 
@@ -420,9 +444,13 @@ ThreadPriorityForTest PlatformThreadBase::GetCurrentThreadPriorityForTest() {
 
 // static
 size_t PlatformThreadBase::GetDefaultThreadStackSize() {
+#if !BUILDFLAG(IS_OS2)
   pthread_attr_t attributes;
   pthread_attr_init(&attributes);
   return base::GetDefaultThreadStackSize(attributes);
+#else
+  return 0;
+#endif
 }
 
 }  // namespace base

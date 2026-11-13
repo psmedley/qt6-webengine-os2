@@ -7,6 +7,7 @@ import("//build/config/ui.gni")
 import("//chrome/common/features.gni")
 import("//chrome/test/include_js_tests.gni")
 import("//components/compose/features.gni")
+import("//components/signin/features.gni")
 import("//crypto/features.gni")
 import("//extensions/buildflags/buildflags.gni")
 import("//pdf/features.gni")
@@ -546,15 +547,17 @@ generate_grd("build_grd") {
     ]
   } else {
     deps += [
-      "intro:build_grdp",
       "signin:build_grdp",
       "welcome:build_grdp",
     ]
     grdp_files += [
-      "$target_gen_dir/intro/resources.grdp",
       "$target_gen_dir/welcome/resources.grdp",
       "$target_gen_dir/signin/resources.grdp",
     ]
+    if (is_chromeos_lacros || enable_dice_support) {
+      deps += [ "intro:build_grdp" ]
+      grdp_files += [ "$target_gen_dir/intro/resources.grdp" ]
+    }
   }
 
   if (is_win || is_mac) {

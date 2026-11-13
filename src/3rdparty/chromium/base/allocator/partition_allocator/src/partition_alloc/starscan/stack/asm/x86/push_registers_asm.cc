@@ -19,7 +19,7 @@ asm(
     ".globl _PAPushAllRegistersAndIterateStack            \n"
     ".private_extern _PAPushAllRegistersAndIterateStack   \n"
     "_PAPushAllRegistersAndIterateStack:                  \n"
-#elif defined(_WIN32)
+#elif defined(_WIN32) || defined(__OS2__)
     ".globl _PAPushAllRegistersAndIterateStack            \n"
     "_PAPushAllRegistersAndIterateStack:                  \n"
 #else  // !__APPLE__ && !_WIN32

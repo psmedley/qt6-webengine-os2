@@ -31,6 +31,9 @@
 #if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #endif
+#if BUILDFLAG(IS_OS2)
+#include <umalloc.h>
+#endif
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
 #include <features.h>
@@ -182,7 +185,7 @@ void ReportAppleAllocStats(size_t* total_virtual_size,
 
 #if (BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && BUILDFLAG(IS_ANDROID)) || \
     (!BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && !BUILDFLAG(IS_WIN) &&    \
-     !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_FUCHSIA))
+     !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_FUCHSIA) && !BUILDFLAG(IS_OS2))
 void ReportMallinfoStats(ProcessMemoryDump* pmd,
                          size_t* total_virtual_size,
                          size_t* resident_size,
@@ -353,6 +356,16 @@ bool MallocDumpProvider::OnMemoryDump(const MemoryDumpArgs& args,
                      &allocated_objects_count);
 #elif BUILDFLAG(IS_FUCHSIA)
 // TODO(fuchsia): Port, see https://crbug.com/706592.
+#elif BUILDFLAG(IS_OS2)
+  _HEAPSTATS hst;
+  Heap_t h = _udefault(nullptr);
+  if (h && _ustats(h, &hst) == 0) {
+    // _ustats doesn't provide any info on which parts of the heap are
+    // committed. For now we assume that all used heap is committed.
+    total_virtual_size = hst._provided;
+    resident_size = hst._used;
+    allocated_objects_size = hst._used;
+  }
 #else
   ReportMallinfoStats(/*pmd=*/nullptr, &total_virtual_size, &resident_size,
                       &allocated_objects_size, &allocated_objects_count);

@@ -689,6 +689,10 @@ if (is_fuchsia) {
   blink_core_sources_layout += [ "layout_theme_fuchsia.cc" ]
 }
 
+if (is_os2) {
+  blink_core_sources_layout += [ "layout_theme_os2.cc" ]
+}
+
 blink_core_tests_layout = [
   "absolute_utils_test.cc",
   "anchor_position_scroll_data_test.cc",

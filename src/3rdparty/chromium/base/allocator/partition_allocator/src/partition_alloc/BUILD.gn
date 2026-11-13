@@ -494,6 +494,9 @@ if (is_clang_or_gcc || is_msvc || is_mingw) {
         "page_allocator_internals_posix.cc",
         "page_allocator_internals_posix.h",
       ]
+      if (is_os2) {
+        sources += [ "page_allocator_internals_os2.h" ]
+      }
     } else if (is_fuchsia) {
       sources += [ "page_allocator_internals_fuchsia.h" ]
     }
@@ -681,6 +684,12 @@ if (is_clang_or_gcc || is_msvc || is_mingw) {
         "partition_alloc_base/threading/platform_thread_posix.cc",
         "partition_alloc_base/time/time_conversion_posix.cc",
       ]
+
+      if (is_os2) {
+        # OS/2 has no /dev/urandom.
+        sources -= [ "partition_alloc_base/rand_util_posix.cc" ]
+        sources += [ "partition_alloc_base/rand_util_os2.cc" ]
+      }
 
       if (is_linux || is_chromeos) {
         sources += [ "partition_alloc_base/debug/stack_trace_linux.cc" ]

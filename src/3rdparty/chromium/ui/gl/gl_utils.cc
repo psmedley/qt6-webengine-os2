@@ -9,6 +9,7 @@
 #include "base/command_line.h"
 #include "base/debug/alias.h"
 #include "base/logging.h"
+#include "base/no_destructor.h"
 #include "build/build_config.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_display_manager.h"
@@ -211,8 +212,14 @@ GL_EXPORT GLDisplay* GetDisplay(GpuPreference gpu_preference,
   return GLDisplayManagerEGL::GetInstance()->GetDisplay(gpu_preference,
                                                         display_key);
 #endif
+#if BUILDFLAG(IS_OS2)
+  // Only stub/mock GL on OS/2: hand out a single process-wide stub display.
+  static base::NoDestructor<GLDisplayOS2> os2_display(0);
+  return os2_display.get();
+#else
   NOTREACHED();
   return nullptr;
+#endif
 }
 
 GLDisplay* GetDefaultDisplay() {

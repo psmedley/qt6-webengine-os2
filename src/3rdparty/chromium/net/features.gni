@@ -50,7 +50,7 @@ declare_args() {
 
   # Platforms for which certificate verification can only be performed using
   # the builtin cert verifier with the Chrome Root Store.
-  chrome_root_store_only = is_win || is_mac || is_linux || is_chromeos
+  chrome_root_store_only = is_win || is_mac || is_linux || is_chromeos || is_os2
 }
 
 assert(!chrome_root_store_optional || !chrome_root_store_only,

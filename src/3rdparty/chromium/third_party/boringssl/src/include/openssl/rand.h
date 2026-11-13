@@ -32,7 +32,7 @@ OPENSSL_EXPORT int RAND_bytes(uint8_t *buf, size_t len);
 
 // Obscure functions.
 
-#if !defined(OPENSSL_WINDOWS)
+#if !defined(OPENSSL_WINDOWS) && !defined(OPENSSL_OS2)
 // RAND_enable_fork_unsafe_buffering enables efficient buffered reading of
 // /dev/urandom. It adds an overhead of a few KB of memory per thread. It must
 // be called before the first call to |RAND_bytes|.

@@ -89,6 +89,8 @@ GPUTestConfig::OS GetCurrentOS() {
   return GPUTestConfig::kOsFuchsia;
 #elif BUILDFLAG(IS_IOS)
   return GPUTestConfig::kOsIOS;
+#elif defined(OS_OS2)
+  return GPUTestConfig::kOsUnknown;
 #else
 #error "unknown os"
 #endif

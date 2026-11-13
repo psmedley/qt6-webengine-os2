@@ -27,6 +27,8 @@
 
 #if BUILDFLAG(IS_WIN)
 #include "base/win/windows_types.h"
+#elif defined(OS_OS2)
+#include "base/os2/os2_toolkit.h"
 #endif
 
 // This file provides cross platform typedefs for native widget types.
@@ -241,6 +243,9 @@ using NativeViewId = intptr_t;
 #if BUILDFLAG(IS_WIN)
 using AcceleratedWidget = HWND;
 constexpr AcceleratedWidget kNullAcceleratedWidget = nullptr;
+#elif BUILDFLAG(IS_OS2)
+typedef HWND AcceleratedWidget;
+constexpr AcceleratedWidget kNullAcceleratedWidget = NULLHANDLE;
 #elif BUILDFLAG(IS_IOS)
 using AcceleratedWidget = uint64_t;  // A UIView*.
 constexpr AcceleratedWidget kNullAcceleratedWidget = 0;

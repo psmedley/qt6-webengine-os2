@@ -84,6 +84,19 @@ GL_EXPORT void LabelSwapChainBuffers(IDXGISwapChain* swap_chain,
 // the two GLDisplayManager classes are singletons and in component build,
 // calling GetInstance() directly returns different instances in different
 // components.
+// Query the default GLDisplay. May return either a GLDisplayEGL or
+// GLDisplayX11 (or GLDisplayOS2 on OS/2).
+GL_EXPORT GLDisplay* GetDefaultDisplay();
+
+// Query the GLDisplay by |gpu_preference|. May return either a GLDisplayEGL or
+// GLDisplayX11 (or GLDisplayOS2 on OS/2).
+GL_EXPORT GLDisplay* GetDisplay(GpuPreference gpu_preference);
+
+// Query the GLDisplay by |gpu_preference| and |display_key|. May return either
+// a GLDisplayEGL or GLDisplayX11 (or GLDisplayOS2 on OS/2).
+GL_EXPORT GLDisplay* GetDisplay(GpuPreference gpu_preference,
+                                gl::DisplayKey display_key);
+
 #if defined(USE_EGL)
 // Add an entry <preference, system_device_id> to GLDisplayManagerEGL.
 GL_EXPORT void SetGpuPreferenceEGL(GpuPreference preference,
@@ -91,19 +104,6 @@ GL_EXPORT void SetGpuPreferenceEGL(GpuPreference preference,
 
 // Remove the entry at <preference> from GLDisplayManagerEGL.
 GL_EXPORT void RemoveGpuPreferenceEGL(GpuPreference preference);
-
-// Query the default GLDisplay. May return either a GLDisplayEGL or
-// GLDisplayX11.
-GL_EXPORT GLDisplay* GetDefaultDisplay();
-
-// Query the GLDisplay by |gpu_preference|. May return either a GLDisplayEGL or
-// GLDisplayX11.
-GL_EXPORT GLDisplay* GetDisplay(GpuPreference gpu_preference);
-
-// Query the GLDisplay by |gpu_preference| and |display_key|. May return either
-// a GLDisplayEGL or GLDisplayX11.
-GL_EXPORT GLDisplay* GetDisplay(GpuPreference gpu_preference,
-                                gl::DisplayKey display_key);
 
 // Query the default GLDisplayEGL.
 GL_EXPORT GLDisplayEGL* GetDefaultDisplayEGL();

@@ -24,6 +24,7 @@
 #include "components/web_cache/renderer/web_cache_impl.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/renderer/key_system_support.h"
 #include "content/public/renderer/render_thread.h"
 #include "extensions/buildflags/buildflags.h"
 #include "media/base/key_system_info.h"
@@ -665,12 +666,14 @@ void OnKeySystemSupportUpdated(media::GetSupportedKeySystemsCB cb,
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
         const auto &key_system = entry.first;
         const auto &capability = entry.second;
+#if !BUILDFLAG(IS_OS2)
 #if BUILDFLAG(ENABLE_WIDEVINE)
         if (key_system == kWidevineKeySystem) {
             AddWidevine(capability, &key_systems);
             continue;
         }
 #endif // BUILDFLAG(ENABLE_WIDEVINE)
+#endif // !BUILDFLAG(IS_OS2)
 
         if (key_system == media::kExternalClearKeyKeySystem) {
             AddExternalClearKey(capability, &key_systems);
@@ -686,8 +689,10 @@ void OnKeySystemSupportUpdated(media::GetSupportedKeySystemsCB cb,
 
 void ContentRendererClientQt::GetSupportedKeySystems(media::GetSupportedKeySystemsCB cb)
 {
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
     content::ObserveKeySystemSupportUpdate(
         base::BindRepeating(&OnKeySystemSupportUpdated, std::move(cb)));
+#endif // BUILDFLAG(ENABLE_LIBRARY_CDMS)
 }
 
 #if QT_CONFIG(webengine_spellchecker)

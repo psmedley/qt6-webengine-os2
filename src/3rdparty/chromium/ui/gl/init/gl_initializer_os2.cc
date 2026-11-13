@@ -1,0 +1,58 @@
+// Copyright 2020 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#include "ui/gl/init/gl_initializer.h"
+
+#include "base/logging.h"
+#include "base/notreached.h"
+#include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_gl_api_implementation.h"
+#include "ui/gl/gl_surface.h"
+#include "ui/gl/gl_utils.h"
+
+namespace gl {
+namespace init {
+
+GLDisplay* InitializeGLOneOffPlatform(uint64_t) {
+  // TODO: Implement it on OS/2.
+
+  switch (GetGLImplementation()) {
+    case kGLImplementationMockGL:
+    case kGLImplementationStubGL:
+      return GetDefaultDisplay();
+    default:
+      NOTREACHED();
+  }
+  return nullptr;
+}
+
+bool InitializeStaticGLBindings(GLImplementationParts implementation) {
+  // Prevent reinitialization with a different implementation. Once the gpu
+  // unit tests have initialized with kGLImplementationMock, we don't want to
+  // later switch to another GL implementation.
+  DCHECK_EQ(kGLImplementationNone, GetGLImplementation());
+
+  // TODO: Implement it on OS/2.
+
+  switch (implementation.gl) {
+    case kGLImplementationMockGL:
+    case kGLImplementationStubGL:
+      SetGLImplementationParts(implementation);
+      InitializeStaticGLBindingsGL();
+      return true;
+    default:
+      NOTREACHED();
+  }
+
+  return false;
+}
+
+void ShutdownGLPlatform(GLDisplay* display) {
+  // TODO: Implement it on OS/2.
+
+  ClearBindingsGL();
+}
+
+}  // namespace init
+}  // namespace gl

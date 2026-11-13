@@ -211,6 +211,9 @@ typedef unsigned char u8;
 #  define pclose _pclose
 # endif
 #else
+# ifdef __OS2__
+# include <fcntl.h>
+# endif
  /* Make sure isatty() has a prototype. */
  extern int isatty(int);
 

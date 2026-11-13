@@ -21,7 +21,9 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#ifndef __OS2__
 #include <sched.h>
+#endif
 #include <unistd.h>
 #endif
 

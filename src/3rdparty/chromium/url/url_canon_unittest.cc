@@ -2207,7 +2207,7 @@ TEST(URLCanonTest, CanonicalizeFileURL) {
     Component expected_host;
     Component expected_path;
   } cases[] = {
-#ifdef _WIN32
+#ifdef OS_DOSLIKE
       // Windows-style paths
       {"file:c:\\foo\\bar.html", "file:///C:/foo/bar.html", true, Component(),
        Component(7, 16)},
@@ -2282,7 +2282,7 @@ TEST(URLCanonTest, CanonicalizeFileURL) {
        Component(16, 1)},
       {"file://localhost/test", "file://localhost/test", true, Component(7, 9),
        Component(16, 5)},
-#endif  // _WIN32
+#endif  // OS_DOSLIKE
   };
 
   for (const auto& i : cases) {
@@ -2535,7 +2535,7 @@ TEST(URLCanonTest, CanonicalizeMailtoURL) {
   }
 }
 
-#ifndef WIN32
+#ifndef OS_DOSLIKE
 
 TEST(URLCanonTest, _itoa_s) {
   // We fill the buffer with 0xff to ensure that it's getting properly
@@ -2610,7 +2610,7 @@ TEST(URLCanonTest, _itow_s) {
   EXPECT_EQ(EINVAL, _itow_s(123456, buf, 10));
 }
 
-#endif  // !WIN32
+#endif  // !OS_DOSLIKE
 
 // Returns true if the given two structures are the same.
 static bool ParsedIsEqual(const Parsed& a, const Parsed& b) {

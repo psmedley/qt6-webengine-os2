@@ -19,7 +19,9 @@
 #include <sys/resource.h>
 #endif
 
-#if BUILDFLAG(IS_APPLE)
+#if BUILDFLAG(IS_OS2)
+#include <umalloc.h>
+#elif BUILDFLAG(IS_APPLE)
 #include <malloc/malloc.h>
 #else
 #include <malloc.h>
@@ -58,6 +60,8 @@ static const rlim_t kSystemDefaultMaxFds = 256;
 static const rlim_t kSystemDefaultMaxFds = 1024;
 #elif BUILDFLAG(IS_AIX)
 static const rlim_t kSystemDefaultMaxFds = 8192;
+#elif defined(OS_OS2)
+static const rlim_t kSystemDefaultMaxFds = 128;
 #endif
 
 size_t GetMaxFds() {
@@ -136,6 +140,12 @@ size_t ProcessMetrics::GetMallocUsage() {
   return GetMallocUsageMallinfo();
 #elif BUILDFLAG(IS_FUCHSIA)
   // TODO(fuchsia): Not currently exposed. https://crbug.com/735087.
+  return 0;
+#elif defined(OS_OS2)
+  _HEAPSTATS hst;
+  Heap_t h = _udefault(nullptr);
+  if (h && _ustats(h, &hst) == 0)
+    return hst._used;
   return 0;
 #endif
 }
